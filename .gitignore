@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.build/
+.swiftpm/
+# (Package.resolved는 앱이므로 커밋 권장 — 무시하지 않음)
+
+# Xcode
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# 로컬 모델 캐시 (Hugging Face 다운로드 등, 실수 커밋 방지)
+*.safetensors
+*.gguf
+models/

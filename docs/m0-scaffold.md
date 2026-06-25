@@ -30,7 +30,7 @@
 
 ## 🔧 작업 순서
 1. ✅ `feat/m0-scaffold` 브랜치 생성
-2. ⏳ 위 4개 파일 작성 *(이 계획 검토·승인 후)*
+2. ✅ 위 4개 파일 작성 완료
 3. 커밋: `feat: M0 스캐폴드 — SwiftUI 앱 셸 + mlx-swift-lm SPM`
 4. push → **Mac에서 빌드 검증**
 5. 통과 시 `main` 머지 + 브랜치 삭제, PLAN.md 로드맵 M0 체크
