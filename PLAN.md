@@ -120,7 +120,41 @@ flowchart LR
 - **M4 — 다듬기**: Settings(모델·디바운스·길이), 지연 튜닝(토큰 상한~8–16, sentence
   boundary stop, 이후 KV/프롬프트 캐시 재사용), 스타일링, 빈 상태 UI.
 
-## 7. 생성할 핵심 파일 (greenfield, 대표 경로)
+## 7. 개발 워크플로우 (1인 트렁크 기반)
+
+**관심사 분리는 브랜치가 아니라 디렉터리/모듈로**, **버전 관리 흐름은 트렁크 기반**으로 간다.
+혼자 개발하므로 장기 병렬 브랜치는 통합 비용만 키운다 → `main`을 항상 빌드되는 단일
+트렁크로 두고, 마일스톤마다 단기 브랜치를 만들어 머지 후 삭제한다.
+
+```mermaid
+gitGraph
+    commit id: "init"
+    commit id: "PLAN"
+    branch scaffold
+    commit id: "M0"
+    checkout main
+    merge scaffold
+    branch editor
+    commit id: "M1"
+    checkout main
+    merge editor
+```
+
+- **`main`** = 항상 빌드되는 단일 트렁크. 여기서 분기하고 여기로 합친다.
+- 마일스톤(세로 슬라이스) 하나당 **단기 브랜치 하나** → Mac에서 빌드 검증 후 main에 머지 → **삭제**.
+- 관심사 분리는 `Sources/MINT/Editor · Inference · Storage` **폴더/모듈**로 한다 (브랜치 ❌).
+- 장기 계층 브랜치(`frontend`/`backend`/`design`)는 **쓰지 않는다** — 단일 바이너리라
+  한 기능이 여러 계층을 동시에 가로질러 통합 비용만 커진다.
+
+**브랜치 명명 규칙**
+
+| 접두사 | 용도 | 예 |
+|--------|------|-----|
+| `feat/` | 기능 마일스톤 | `feat/m0-scaffold`, `feat/m3-ghost-text` |
+| `spike/` | 실험·리스크 선검증 | `spike/m2-inference` |
+| `fix/` | 버그 수정 | `fix/ime-marked-text` |
+
+## 8. 생성할 핵심 파일 (greenfield, 대표 경로)
 | 파일 | 역할 |
 |------|------|
 | `Package.swift` | SPM 설정 (mlx-swift-lm 의존) |
@@ -132,7 +166,7 @@ flowchart LR
 | `Sources/MINT/Storage/DocumentStore.swift` | `.md` load/save (디바운스 autosave) |
 | `Sources/MINT/Settings.swift` | 설정 모델 |
 
-## 8. 핵심 기술 리스크 & 대응
+## 9. 핵심 기술 리스크 & 대응
 1. **한글 IME + 고스트 텍스트**: `hasMarkedText()`로 게이트, 조합 커밋 + 멈춤일 때만
    트리거. 고스트는 커밋 안 된 임시 회색 attributed 텍스트로 렌더, Tab 전엔 본문 미반영.
 2. **지연시간**: 4-bit 소형 모델, 토큰 상한(~8–16), sentence boundary에서 stop, 모델
@@ -142,13 +176,13 @@ flowchart LR
 4. **이어쓰기 vs instruct 프롬프트**: instruct 모델 + 간결 시스템 프롬프트("이어질 내용을
    자연스럽게 짧게 이어써") vs 순수 continuation — M2/M3에서 실험해 결정.
 
-## 9. 검증 (Verification)
+## 10. 검증 (Verification)
 - **빌드·실행**: Apple Silicon Mac에서 Xcode 빌드/실행.
 - **M2**: 콘솔에 한국어 이어쓰기 출력 + 지연시간이 목표 이내인지 확인. 모델 크기별 비교.
 - **M3 End-to-End**: 한국어 입력 후 멈춤 → 회색 제안 ~500ms 내 등장, **조합 중엔 미등장**;
   Tab → 삽입; Esc → 폐기; 계속 입력 → in-flight 취소; 종료/재실행 → `.md` 보존.
 
-## 10. 향후 확장 여지 (현재 MVP 결정 밖, 메모)
+## 11. 향후 확장 여지 (현재 MVP 결정 밖, 메모)
 - 과거 기록 RAG(개인 메모리) · 소설 모드(캐릭터·플롯·세계관 컨텍스트)
 - 개인 문체 LoRA 적응 · iCloud 동기화 · 노트 관리/검색 UI
 
