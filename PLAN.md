@@ -112,7 +112,7 @@ flowchart LR
   빌드·실행(Apple Silicon). `.gitignore`. README/PLAN 커밋.
 - **M1 — 에디터 + 저장**: `MintTextView` 기본 타이핑; `DocumentStore`로
   `~/Documents/MINT/journal.md`에 디바운스 autosave/load. 텍스트 왕복 검증.
-- **M2 — 추론 리스크 선검증 (최우선 위험)**: Qwen2.5-1.5B-4bit 로드, 하드코딩 한국어
+- **M2 — 추론 리스크 선검증 (최우선 위험)**: Qwen3.6-35B-A3B 4bit 로드, 하드코딩 한국어
   이어쓰기 프롬프트 1회 생성 → 출력·지연 로그. 한국어 품질·속도 확인 후 기본 모델 확정.
   *가장 불확실한 가정을 가장 먼저 깬다.*
 - **M3 — 고스트 텍스트 자동완성**: 디바운스 + IME 게이트 + 컨텍스트 추출 + 취소 가능
