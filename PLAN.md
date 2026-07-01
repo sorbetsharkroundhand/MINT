@@ -35,8 +35,8 @@ MINT는 그 빈틈을 메운다 — **Copilot 스타일 고스트 텍스트 자�
 - **MLX**: Swift Package **[`mlx-swift-lm`](https://github.com/ml-explore/mlx-swift-lm)**
   의존 (주의: `MLXLLM`/`MLXLMCommon`이 `mlx-swift-examples`에서 `mlx-swift-lm`로 **이전됨**,
   최신 태그 3.31.3). 사용 라이브러리: `MLXLLM`, `MLXLMCommon`.
-- **기본 모델**: `mlx-community/Qwen2.5-1.5B-Instruct-4bit` (한국어 지원 + 속도 균형).
-  실험 대안: `Qwen2.5-0.5B-Instruct-4bit`(더 빠름), `Qwen2.5-3B-Instruct-4bit`(한국어 품질↑).
+- **기본 모델**: `Qwen3.6-35B-A3B 4bit` (MoE·활성 ~3B → 한국어 품질↑, Apple Silicon 상주).
+  실험 대안: `Qwen2.5-3B-Instruct-4bit`(더 가벼움), `Qwen2.5-1.5B-Instruct-4bit`(더 빠름).
 
 ---
 
