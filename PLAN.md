@@ -108,9 +108,9 @@ flowchart LR
     M0["M0<br/>스캐폴드"] --> M1["M1<br/>에디터 + 저장"] --> M2["M2<br/>추론 선검증<br/>(최우선 위험)"] --> M3["M3<br/>고스트 텍스트"] --> M4["M4<br/>다듬기"]
 ```
 
-- **M0 — 스캐폴드**: Xcode/SPM macOS 앱, `mlx-swift-lm` SPM 의존 추가, 빈 SwiftUI 창
-  빌드·실행(Apple Silicon). `.gitignore`. README/PLAN 커밋.
-- **M1 — 에디터 + 저장**: `MintTextView` 기본 타이핑; `DocumentStore`로
+- **M0 — 스캐폴드** ✅: Xcode/SPM macOS 앱, `mlx-swift-lm` SPM 의존 추가, 빈 SwiftUI 창
+  빌드·실행(Apple Silicon). `.gitignore`. README/PLAN 커밋. (`MINTCore`/`MINT` 2-타깃 분리)
+- **M1 — 에디터 + 저장** 🔨: `MintTextView` 기본 타이핑; `DocumentStore`로
   `~/Documents/MINT/journal.md`에 디바운스 autosave/load. 텍스트 왕복 검증.
 - **M2 — 추론 리스크 선검증 (최우선 위험)**: Qwen3.6-35B-A3B 4bit 로드, 하드코딩 한국어
   이어쓰기 프롬프트 1회 생성 → 출력·지연 로그. 한국어 품질·속도 확인 후 기본 모델 확정.
