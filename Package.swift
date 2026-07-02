@@ -10,7 +10,15 @@ let package = Package(
     dependencies: [
         // 온디바이스 LLM 추론. MLXLLM/MLXLMCommon은 mlx-swift-examples에서
         // mlx-swift-lm 저장소로 이전됨.
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.31.3")
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.31.3"),
+        // MLXArray 등 코어 타입 직접 사용 — 이어쓰기(continuation) 프롬프트는
+        // 챗 템플릿 없이 수동 토크나이즈로 LMInput을 만든다.
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.4"),
+        // Hugging Face 허브 다운로드 + 토크나이저.
+        // mlx-swift-lm 3.x의 #huggingFaceLoadModelContainer 매크로(MLXHuggingFace)가
+        // HubClient(swift-huggingface)와 AutoTokenizer(swift-transformers)로 확장된다.
+        .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.9.0"),
+        .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
     ],
     targets: [
         // 앱의 화면·로직은 라이브러리 타깃에 둔다.
@@ -20,10 +28,12 @@ let package = Package(
         .target(
             name: "MINTCore",
             dependencies: [
-                // M0에서는 의존성 해석·컴파일만 검증(앱 코드에서 아직 import 안 함).
-                // 실제 사용은 M2(추론 엔진)부터.
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
-                .product(name: "MLXLMCommon", package: "mlx-swift-lm")
+                .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
+                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
+                .product(name: "MLX", package: "mlx-swift"),
+                .product(name: "HuggingFace", package: "swift-huggingface"),
+                .product(name: "Tokenizers", package: "swift-transformers"),
             ],
             path: "Sources/MINTCore"
         ),
@@ -32,6 +42,13 @@ let package = Package(
             name: "MINT",
             dependencies: ["MINTCore"],
             path: "Sources/MINT"
-        )
+        ),
+        // M2 추론 리스크 선검증 CLI (PLAN §6 M2).
+        // Mac에서: swift run -c release MINTBench [--model <hf-id>] …
+        .executableTarget(
+            name: "MINTBench",
+            dependencies: ["MINTCore"],
+            path: "Sources/MINTBench"
+        ),
     ]
 )
