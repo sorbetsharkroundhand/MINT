@@ -34,7 +34,9 @@ MINT는 그 빈틈을 메운다 — **Copilot 스타일 고스트 텍스트 자�
   `TextEditor`로는 커서/레이아웃 제어가 부족 → 커스텀 NSTextView 필요).
 - **MLX**: Swift Package **[`mlx-swift-lm`](https://github.com/ml-explore/mlx-swift-lm)**
   의존 (주의: `MLXLLM`/`MLXLMCommon`이 `mlx-swift-examples`에서 `mlx-swift-lm`로 **이전됨**,
-  최신 태그 3.31.3). 사용 라이브러리: `MLXLLM`, `MLXLMCommon`.
+  최신 태그 3.31.3). 사용 라이브러리: `MLXLLM`, `MLXLMCommon`, `MLXHuggingFace`.
+  3.x는 허브 다운로드가 매크로 통합으로 분리되어 **`swift-huggingface`(HubClient)와
+  `swift-transformers`(Tokenizers) 의존이 추가로 필요**하다.
 - **기본 모델**: `Qwen3.6-35B-A3B 4bit` (MoE·활성 ~3B → 한국어 품질↑, Apple Silicon 상주).
   실험 대안: `Qwen2.5-3B-Instruct-4bit`(더 가벼움), `Qwen2.5-1.5B-Instruct-4bit`(더 빠름).
 
@@ -110,15 +112,18 @@ flowchart LR
 
 - **M0 — 스캐폴드** ✅: Xcode/SPM macOS 앱, `mlx-swift-lm` SPM 의존 추가, 빈 SwiftUI 창
   빌드·실행(Apple Silicon). `.gitignore`. README/PLAN 커밋. (`MINTCore`/`MINT` 2-타깃 분리)
-- **M1 — 에디터 + 저장** 🔨: `MintTextView` 기본 타이핑; `DocumentStore`로
+- **M1 — 에디터 + 저장** ✅: `MintTextView` 기본 타이핑; `DocumentStore`로
   `~/Documents/MINT/journal.md`에 디바운스 autosave/load. 텍스트 왕복 검증.
-- **M2 — 추론 리스크 선검증 (최우선 위험)**: Qwen3.6-35B-A3B 4bit 로드, 하드코딩 한국어
-  이어쓰기 프롬프트 1회 생성 → 출력·지연 로그. 한국어 품질·속도 확인 후 기본 모델 확정.
-  *가장 불확실한 가정을 가장 먼저 깬다.*
-- **M3 — 고스트 텍스트 자동완성**: 디바운스 + IME 게이트 + 컨텍스트 추출 + 취소 가능
-  생성 + 회색 고스트 렌더 + Tab 수락 / Esc 거부 / 입력 시 취소 통합.
-- **M4 — 다듬기**: Settings(모델·디바운스·길이), 지연 튜닝(토큰 상한~8–16, sentence
-  boundary stop, 이후 KV/프롬프트 캐시 재사용), 스타일링, 빈 상태 UI.
+- **M2 — 추론 리스크 선검증 (최우선 위험)** 🧪 *코드 완료 — Mac 측정 대기*:
+  Qwen3.6-35B-A3B 4bit 로드, 하드코딩 한국어 이어쓰기 프롬프트 생성 → 출력·지연 로그.
+  한국어 품질·속도 확인 후 기본 모델 확정. *가장 불확실한 가정을 가장 먼저 깬다.*
+  → `CompletionEngine` + `MINTBench` CLI 구현, 측정 절차는 [docs/m2-inference.md](docs/m2-inference.md).
+- **M3 — 고스트 텍스트 자동완성** 🔨 *코드 완료 — Mac E2E 검증 대기*:
+  디바운스 + IME 게이트 + 컨텍스트 추출 + 취소 가능 생성 + 회색 고스트 렌더 +
+  Tab 수락 / Esc 거부 / 입력 시 취소 통합. 검증 절차는 [docs/m3-ghost-text.md](docs/m3-ghost-text.md).
+- **M4 — 다듬기** 🔨 *부분 구현*: Settings UI(모델·프롬프트 방식·디바운스·토큰·온도, ⌘,)와
+  엔진 상태 바(다운로드 진행률·지연 표시)는 구현됨. 남은 것: M2 측정 반영 지연 튜닝,
+  KV/프롬프트 캐시 재사용, 스타일링 다듬기.
 
 ## 7. 개발 워크플로우 (1인 트렁크 기반)
 
@@ -154,17 +159,19 @@ gitGraph
 | `spike/` | 실험·리스크 선검증 | `spike/m2-inference` |
 | `fix/` | 버그 수정 | `fix/ime-marked-text` |
 
-## 8. 생성할 핵심 파일 (greenfield, 대표 경로)
+## 8. 핵심 파일 (실제 경로 — `MINTCore` 라이브러리 + 얇은 실행 셸)
 | 파일 | 역할 |
 |------|------|
-| `Package.swift` | SPM 설정 (mlx-swift-lm 의존) |
-| `Sources/MINT/MINTApp.swift` | `@main` SwiftUI 앱 |
-| `Sources/MINT/ContentView.swift` | 에디터 화면 |
-| `Sources/MINT/Editor/MintTextView.swift` | NSViewRepresentable + NSTextView 서브클래스 |
-| `Sources/MINT/Editor/CompletionController.swift` | 디바운스·IME 게이트·accept/dismiss·취소 |
-| `Sources/MINT/Inference/CompletionEngine.swift` | MLX 로드 + 취소 가능 생성 + 프롬프트 |
-| `Sources/MINT/Storage/DocumentStore.swift` | `.md` load/save (디바운스 autosave) |
-| `Sources/MINT/Settings.swift` | 설정 모델 |
+| `Package.swift` | SPM 설정 (mlx-swift-lm·swift-huggingface·swift-transformers 의존) |
+| `Sources/MINT/MINTApp.swift` | `@main` SwiftUI 앱 + Settings 씬 |
+| `Sources/MINTCore/ContentView.swift` | 에디터 화면 + 엔진 상태 바 |
+| `Sources/MINTCore/Editor/MintTextView.swift` | NSViewRepresentable + `GhostTextView`(고스트 렌더·Tab/Esc) |
+| `Sources/MINTCore/Editor/CompletionController.swift` | 디바운스·IME 게이트·accept/dismiss·취소 |
+| `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 로드 + 취소 가능 생성 + 프롬프트 (actor) |
+| `Sources/MINTCore/Storage/DocumentStore.swift` | `.md` load/save (디바운스 autosave) |
+| `Sources/MINTCore/Settings.swift` | 설정 모델 (`CompletionSettings`/`CompletionParameters`/프리셋) |
+| `Sources/MINTCore/SettingsView.swift` | 설정 화면 (M4) |
+| `Sources/MINTBench/main.swift` | M2 추론 선검증 CLI |
 
 ## 9. 핵심 기술 리스크 & 대응
 1. **한글 IME + 고스트 텍스트**: `hasMarkedText()`로 게이트, 조합 커밋 + 멈춤일 때만

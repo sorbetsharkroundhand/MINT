@@ -13,6 +13,11 @@ struct MINTApp: App {
             ContentView()
         }
         .defaultSize(width: 760, height: 580)
+
+        // ⌘, — 자동완성 설정 (M4): 모델 · 프롬프트 방식 · 디바운스 · 토큰.
+        Settings {
+            SettingsView()
+        }
     }
 }
 
@@ -27,4 +32,3 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 }
-
