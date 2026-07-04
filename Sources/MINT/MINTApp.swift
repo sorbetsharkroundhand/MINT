@@ -12,7 +12,9 @@ struct MINTApp: App {
         WindowGroup("MINT") {
             ContentView()
         }
-        .defaultSize(width: 760, height: 580)
+        // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
+        .windowStyle(.hiddenTitleBar)
+        .defaultSize(width: 1180, height: 760)
 
         // ⌘, — 자동완성 설정 (M4): 모델 · 프롬프트 방식 · 디바운스 · 토큰.
         Settings {

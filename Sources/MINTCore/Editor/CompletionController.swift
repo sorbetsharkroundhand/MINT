@@ -30,6 +30,8 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var engineState: EngineState = .idle
     /// 최근 제안의 생성 지연(디바운스 제외) — 상태 바 표시용.
     @Published public private(set) var lastLatency: TimeInterval?
+    /// 제안 요청이 예약·진행 중인가 — 툴바 칩의 "예측 중" 표시용 (에디터 v3).
+    @Published public private(set) var isPredicting = false
 
     /// 고스트 렌더 뷰로의 직통 알림 — `MintTextView.Coordinator`가 연결한다.
     public var suggestionDidChange: ((String?) -> Void)?
@@ -46,6 +48,8 @@ public final class CompletionController: ObservableObject {
     /// 로드에 실패한 모델 id — 같은 모델로의 재시도 폭주만 막고,
     /// 사용자가 Settings에서 모델을 바꾸면 다시 트리거를 허용한다.
     private var failedModelID: String?
+    /// `→` 한 단어 수락 직후의 편집 이벤트에서 남은 고스트를 지우지 않기 위한 플래그.
+    private var retainSuggestionOnNextEdit = false
 
     public init(
         settings: CompletionSettings = .shared,
@@ -89,6 +93,14 @@ public final class CompletionController: ObservableObject {
         preloadEngine()
     }
 
+    /// 모델 스위처에서 모델을 바꿨다 — 고스트 폐기 후 새 모델을 즉시 로드.
+    public func modelDidChange() {
+        invalidate()
+        engineState = .idle
+        failedModelID = nil
+        preloadEngine()
+    }
+
     private func noteLoadProgress(_ fraction: Double) {
         switch engineState {
         case .ready: return
@@ -117,6 +129,16 @@ public final class CompletionController: ObservableObject {
         isComposing: Bool,
         caretAtParagraphEnd: Bool
     ) {
+        // `→` 한 단어 수락이 만든 편집 — 남은 고스트를 유지하고 새 요청도 걸지 않는다.
+        if retainSuggestionOnNextEdit {
+            retainSuggestionOnNextEdit = false
+            if suggestion != nil {
+                suggestionAnchor = caretLocation
+                return
+            }
+            // 제안을 다 소진했다 — 아래 일반 경로로 다음 제안을 예약한다.
+        }
+
         invalidate()  // 편집 즉시 고스트 제거 + in-flight 취소 (PLAN §5)
 
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
@@ -130,6 +152,7 @@ public final class CompletionController: ObservableObject {
         let parameters = settings.parameters
         let debounce = Duration.milliseconds(settings.debounceMilliseconds)
 
+        isPredicting = true
         pendingCaret = caretLocation
         pendingTask = Task { [weak self] in
             // 입력이 멈출 때까지 대기 — 그 사이 새 입력이 오면 이 태스크가 취소된다.
@@ -167,6 +190,33 @@ public final class CompletionController: ObservableObject {
         return text
     }
 
+    /// `→` 한 단어 수락 (에디터 v3) — 제안의 선행 공백+첫 어절만 반환하고,
+    /// 나머지는 고스트로 남긴다. 뷰는 반환값을 본문에 삽입한다.
+    ///
+    /// `insertionLocation`은 삽입 직전 커서(UTF-16). 삽입이 만들 편집·커서
+    /// 이벤트에서 남은 고스트가 폐기되지 않도록 앵커를 미리 옮겨 둔다.
+    public func acceptWord(insertionLocation: Int) -> String? {
+        guard let text = suggestion, !text.isEmpty else { return nil }
+        var rest = Substring(text)
+        var word = ""
+        while let first = rest.first, first.isWhitespace {
+            word.append(first)
+            rest = rest.dropFirst()
+        }
+        while let first = rest.first, !first.isWhitespace {
+            word.append(first)
+            rest = rest.dropFirst()
+        }
+        guard !word.isEmpty else { return nil }
+
+        let remainder = String(rest)
+        retainSuggestionOnNextEdit = true
+        suggestionAnchor = insertionLocation + (word as NSString).length
+        suggestion = remainder.isEmpty ? nil : remainder
+        suggestionDidChange?(suggestion)
+        return word
+    }
+
     /// `Esc`·포커스 이탈·외부 텍스트 교체 — 고스트 폐기 + in-flight 취소.
     public func dismissSuggestion() {
         invalidate()
@@ -180,6 +230,7 @@ public final class CompletionController: ObservableObject {
         pendingTask = nil
         pendingCaret = nil
         suggestionAnchor = nil
+        isPredicting = false
         if suggestion != nil {
             suggestion = nil
             suggestionDidChange?(nil)
@@ -192,6 +243,8 @@ public final class CompletionController: ObservableObject {
         parameters: CompletionParameters,
         expected: Int
     ) async {
+        // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
+        defer { if expected == generation { isPredicting = false } }
         do {
             let completion = try await engine.complete(prefix: prefix, parameters: parameters) {
                 fraction in

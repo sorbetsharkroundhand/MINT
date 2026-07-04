@@ -35,6 +35,36 @@ public enum ModelPresets {
     ]
 }
 
+/// 툴바 모델 스위처에 보여줄 MINT 이름의 프리셋 (에디터 v3).
+///
+/// 실제 가중치는 `ModelPresets`의 Hugging Face 저장소를 쓰고,
+/// UI에는 nano/air/pro 라는 제품 이름으로 노출한다.
+public struct ModelChoice: Identifiable, Sendable {
+    /// Hugging Face 저장소 id — `CompletionSettings.modelID`와 일치.
+    public let id: String
+    public let name: String
+    public let sizeLabel: String
+    public let detail: String
+    /// 드롭다운 우측의 대략적 지연 표기 (디자인 v3).
+    public let latencyLabel: String
+
+    public static let nano = ModelChoice(
+        id: ModelPresets.qwen2_5_1_5B, name: "MINT nano", sizeLabel: "1.5B",
+        detail: "가장 빠른 응답", latencyLabel: "~60ms")
+    public static let air = ModelChoice(
+        id: ModelPresets.qwen2_5_3B, name: "MINT air", sizeLabel: "3B",
+        detail: "속도와 품질의 균형", latencyLabel: "~180ms")
+    public static let pro = ModelChoice(
+        id: ModelPresets.qwen3_6_35B_A3B, name: "MINT pro", sizeLabel: "35B·A3B",
+        detail: "가장 자연스러운 문장", latencyLabel: "~420ms")
+
+    public static let all: [ModelChoice] = [nano, air, pro]
+
+    public static func matching(_ modelID: String) -> ModelChoice? {
+        all.first(where: { $0.id == modelID })
+    }
+}
+
 /// 추론 엔진(actor)에 넘기는 값 스냅샷.
 /// MainActor의 `CompletionSettings`에서 복사해 격리 경계를 넘긴다.
 /// 기본값 = PLAN 확정치(§1·§9): Qwen3.6-35B-A3B 4bit · 이어쓰기 · 토큰 상한 12 · 온도 0.3.
