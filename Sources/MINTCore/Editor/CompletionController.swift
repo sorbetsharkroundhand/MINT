@@ -62,7 +62,9 @@ public final class CompletionController: ObservableObject {
     // MARK: - 엔진 로드
 
     /// 앱 시작 시 모델을 미리 로드해 모델 상주(PLAN §9-2)로 첫 제안 지연을 지킨다.
+    /// 자동완성이 꺼져 있으면 로드하지 않는다 — 켜는 순간 로드한다.
     public func preloadEngine() {
+        guard settings.autocompleteEnabled else { return }
         switch engineState {
         case .idle, .failed: break
         default: return
@@ -99,6 +101,18 @@ public final class CompletionController: ObservableObject {
         engineState = .idle
         failedModelID = nil
         preloadEngine()
+    }
+
+    /// 자동완성 마스터 스위치 토글 (모델 드롭다운의 스위치).
+    /// 끄면 진행 중인 제안까지 즉시 폐기하고, 켜면 모델을 로드한다.
+    public func setAutocompleteEnabled(_ enabled: Bool) {
+        guard settings.autocompleteEnabled != enabled else { return }
+        settings.autocompleteEnabled = enabled
+        if enabled {
+            preloadEngine()
+        } else {
+            invalidate()
+        }
     }
 
     private func noteLoadProgress(_ fraction: Double) {
@@ -141,6 +155,7 @@ public final class CompletionController: ObservableObject {
 
         invalidate()  // 편집 즉시 고스트 제거 + in-flight 취소 (PLAN §5)
 
+        guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
         guard caretAtParagraphEnd else { return }
         // 같은 모델로 실패했으면 재시도 폭주 방지. 모델을 바꿨으면 다시 허용.

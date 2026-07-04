@@ -19,6 +19,8 @@ let package = Package(
         // HubClient(swift-huggingface)와 AutoTokenizer(swift-transformers)로 확장된다.
         .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.9.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
+        // 수식 블록 LaTeX 렌더링 (iosMath의 Swift 포트, CoreText 기반 네이티브).
+        .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.5.0"),
     ],
     targets: [
         // 앱의 화면·로직은 라이브러리 타깃에 둔다.
@@ -34,6 +36,7 @@ let package = Package(
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),
+                .product(name: "SwiftMath", package: "SwiftMath"),
             ],
             path: "Sources/MINTCore"
         ),

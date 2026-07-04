@@ -1,4 +1,5 @@
 import AppKit
+import SwiftMath
 import SwiftUI
 
 /// Notion식 블록 에디터 (에디터 v3 — 디자인 완전 이식).
@@ -153,6 +154,8 @@ public struct MintBlockEditor: NSViewRepresentable {
             guard let textView = notification.object as? BlockTextView else { return }
             textView.syncTypingAttributes()
             textView.emitCaretPosition()
+            // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
+            textView.refreshMathPresentation()
             guard let controller = parent.controller else { return }
             let range = textView.selectedRange()
             if range.length > 0 {
@@ -283,6 +286,13 @@ final class BlockTextView: NSTextView {
     /// 마커 소비/스타일 적용 중 재진입 방지.
     private var isTransforming = false
 
+    /// 수식 렌더 폰트 크기 — 본문(serif 20)과 맞춘다.
+    let mathFontSize: CGFloat = 20
+
+    /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
+    /// `refreshMathPresentation()`이 갱신하고 레이아웃 매니저가 그린다.
+    nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
+
     /// 커서 이동 알림 (창 좌표 top-left 원점). MintBlockEditor가 연결한다.
     var onCaretMove: ((CGPoint?) -> Void)?
 
@@ -378,6 +388,7 @@ final class BlockTextView: NSTextView {
         setSelectedRange(NSRange(location: storage.length, length: 0))
         syncTypingAttributes()
         isTransforming = false
+        refreshMathPresentation()
         needsDisplay = true
     }
 
@@ -497,6 +508,8 @@ final class BlockTextView: NSTextView {
             location = para.upperBound
         }
         syncTypingAttributes()
+        // 테마가 바뀌면 잉크 색으로 수식을 다시 렌더한다.
+        refreshMathPresentation()
         needsDisplay = true
     }
 
@@ -590,8 +603,10 @@ final class BlockTextView: NSTextView {
 
     override func didChangeText() {
         super.didChangeText()
-        guard !isTransforming, !hasMarkedText() else { return }
-        transformMarkerIfNeeded()
+        guard !isTransforming else { return }
+        if !hasMarkedText() { transformMarkerIfNeeded() }
+        // IME 조합 중에도 갱신 — 문단 위치가 밀리면 렌더 range를 다시 잡아야 한다.
+        refreshMathPresentation()
     }
 
     private func transformMarkerIfNeeded() {
@@ -757,6 +772,45 @@ final class BlockTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
+    // MARK: 수식 LaTeX 렌더
+
+    /// 수식 문단 표시 갱신 — 커서가 밖에 있고 LaTeX가 파싱되면 소스 글자를
+    /// 투명 처리(temporary attribute — storage·undo·저장에 무해)하고, 레이아웃
+    /// 매니저가 그 자리에 렌더된 수식을 그린다. 커서가 들어오면 소스로 돌아온다.
+    func refreshMathPresentation() {
+        guard let layoutManager, let storage = textStorage else { return }
+        layoutManager.removeTemporaryAttribute(
+            .foregroundColor,
+            forCharacterRange: NSRange(location: 0, length: storage.length))
+        var renders: [(range: NSRange, image: NSImage)] = []
+        let ns = string as NSString
+        let sel = selectedRange()
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            defer { location = para.upperBound }
+            guard blockInfo(in: para).block == .math else { continue }
+
+            let content = paragraphContent(para)
+            let contentEnd = para.location + (content as NSString).length
+            // 커서/선택이 문단에 닿아 있으면 편집 모드 — 소스를 보여준다.
+            let editing =
+                (sel.length == 0 && sel.location >= para.location && sel.location <= contentEnd)
+                || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0)
+            let latex = content.trimmingCharacters(in: .whitespaces)
+            guard !latex.isEmpty, !editing,
+                let image = MathRenderer.image(
+                    latex: latex, color: palette.ink, fontSize: mathFontSize)
+            else { continue }
+
+            renders.append((para, image))
+            layoutManager.addTemporaryAttribute(
+                .foregroundColor, value: NSColor.clear, forCharacterRange: para)
+        }
+        mathRenders = renders
+        needsDisplay = true
+    }
+
     // MARK: 고스트 렌더 (M3 그대로)
 
     override func draw(_ dirtyRect: NSRect) {
@@ -767,12 +821,18 @@ final class BlockTextView: NSTextView {
             let caretRect = caretRectInView()
         else { return }
 
+        // 커서 문단의 실제 폰트로 그린다 — 제목 줄에서도 크기가 맞는다.
+        let font = (typingAttributes[.font] as? NSFont) ?? bodyFont
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: bodyFont,
+            .font: font,
             .foregroundColor: palette.ghost,
         ]
+        // lineHeightMultiple(1.5)의 여백은 라인 프래그먼트 위쪽에 붙는다 —
+        // 프래그먼트 top(caretRect.minY)이 아니라 본문 글리프와 같은
+        // 베이스라인에 맞춰야 실제 글자 높이와 일치한다.
+        let y = caretBaselineY().map { $0 - font.ascender } ?? caretRect.minY
         NSAttributedString(string: ghost, attributes: attributes)
-            .draw(at: NSPoint(x: caretRect.maxX, y: caretRect.minY))
+            .draw(at: NSPoint(x: caretRect.maxX, y: y))
     }
 
     private func caretRectInView() -> NSRect? {
@@ -784,6 +844,34 @@ final class BlockTextView: NSTextView {
         guard screenRect.height > 0 else { return nil }
         let windowRect = window.convertFromScreen(screenRect)
         return convert(windowRect, from: nil)
+    }
+
+    /// 커서 라인의 텍스트 베이스라인 y (뷰 좌표).
+    private func caretBaselineY() -> CGFloat? {
+        guard let layoutManager, let textContainer else { return nil }
+        let ns = string as NSString
+        guard ns.length > 0 else { return nil }
+        let caret = min(selectedRange().location, ns.length)
+        layoutManager.ensureLayout(for: textContainer)
+
+        // caret == length면 마지막 글리프의 라인을 기준으로 삼는다.
+        let charIndex = min(caret, ns.length - 1)
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
+        let fragment = layoutManager.lineFragmentRect(
+            forGlyphAt: glyphIndex, effectiveRange: nil)
+        guard fragment.height > 0 else { return nil }
+        var lineTop = fragment.minY
+        var baselineOffset = layoutManager.location(forGlyphAt: glyphIndex).y
+
+        // 문서 끝 개행 뒤(extra line fragment)에 커서가 있으면 그 라인 기준.
+        // 앞 라인과 스타일이 다를 수 있어 높이 비율로 베이스라인을 보정한다.
+        if caret == ns.length, ns.hasSuffix("\n") {
+            let extra = layoutManager.extraLineFragmentRect
+            guard extra.height > 0 else { return nil }
+            baselineOffset *= extra.height / fragment.height
+            lineTop = extra.minY
+        }
+        return textContainerOrigin.y + lineTop + baselineOffset
     }
 }
 
@@ -872,25 +960,37 @@ final class MintLayoutManager: NSLayoutManager {
                     .fill()
             case .bullet:
                 draw(marker: "•", color: theme.ink2, size: 20,
-                     at: NSPoint(x: leftEdge(origin) + 8, y: firstLine.minY), line: firstLine)
+                     x: leftEdge(origin) + 8, line: firstLine,
+                     baseline: firstBaseline(charRange: para, line: firstLine))
             case .number:
-                draw(marker: info.marker ?? "1.", color: theme.ink2, size: 17,
-                     at: NSPoint(x: leftEdge(origin) + 6, y: firstLine.minY), line: firstLine)
+                // 본문(bodyFont serif 20)과 같은 크기·베이스라인으로 정렬.
+                draw(marker: info.marker ?? "1.", color: theme.ink2, size: 20,
+                     x: leftEdge(origin) + 6, line: firstLine,
+                     baseline: firstBaseline(charRange: para, line: firstLine))
             case .todo:
+                // 체크박스는 글자 캡하이트의 세로 중앙에 맞춘다.
+                let centerY = firstBaseline(charRange: para, line: firstLine)
+                    .map { $0 - MintFonts.serif(20).capHeight / 2 } ?? firstLine.midY
                 drawCheckbox(
                     checked: info.checked, theme: theme,
-                    at: NSPoint(x: leftEdge(origin) + 4, y: firstLine.midY - 8))
+                    at: NSPoint(x: leftEdge(origin) + 4, y: centerY - 8))
             case .divider:
                 theme.sepStrong.setFill()
                 NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: 1).fill()
             case .math:
-                let tag = NSAttributedString(
-                    string: "수식",
-                    attributes: [
-                        .font: MintFonts.ui(10), .foregroundColor: theme.ink3,
-                        .kern: 0.6,
-                    ])
-                tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
+                if let render = view.mathRenders.first(
+                    where: { $0.range.location == para.location }) {
+                    drawMath(render.image, in: rect)
+                } else {
+                    // 편집 중이거나 아직 파싱 안 되는 소스 — "수식" 태그만.
+                    let tag = NSAttributedString(
+                        string: "수식",
+                        attributes: [
+                            .font: MintFonts.ui(10), .foregroundColor: theme.ink3,
+                            .kern: 0.6,
+                        ])
+                    tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
+                }
             default:
                 break
             }
@@ -941,12 +1041,44 @@ final class MintLayoutManager: NSLayoutManager {
         return rect
     }
 
-    private func draw(marker: String, color: NSColor, size: CGFloat, at point: NSPoint, line: NSRect) {
+    /// 첫 라인의 텍스트 베이스라인 y — lineHeightMultiple(1.5)의 여백이 라인
+    /// 위쪽에 붙으므로, 프래그먼트 중앙이 아니라 글리프 베이스라인 기준으로
+    /// 마커를 놓아야 본문 글자와 높이가 맞는다.
+    private func firstBaseline(charRange: NSRange, line: NSRect) -> CGFloat? {
+        guard charRange.length > 0 else { return nil }
+        let glyphs = glyphRange(forCharacterRange: charRange, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return nil }
+        return line.minY + location(forGlyphAt: glyphs.location).y
+    }
+
+    private func draw(
+        marker: String, color: NSColor, size: CGFloat,
+        x: CGFloat, line: NSRect, baseline: CGFloat?
+    ) {
+        let font = MintFonts.serif(size)
         let attr = NSAttributedString(
             string: marker,
-            attributes: [.font: MintFonts.serif(size), .foregroundColor: color])
-        let markerSize = attr.size()
-        attr.draw(at: NSPoint(x: point.x, y: line.minY + (line.height - markerSize.height) / 2))
+            attributes: [.font: font, .foregroundColor: color])
+        let y = baseline.map { $0 - font.ascender }
+            ?? line.minY + (line.height - attr.size().height) / 2
+        attr.draw(at: NSPoint(x: x, y: y))
+    }
+
+    /// 렌더된 LaTeX 이미지를 수식 문단 중앙에 그린다 (폭 초과 시 축소).
+    private func drawMath(_ image: NSImage, in rect: NSRect) {
+        var size = image.size
+        guard size.width > 0, size.height > 0 else { return }
+        let maxWidth = max(40, rect.width - 32)
+        if size.width > maxWidth {
+            let scale = maxWidth / size.width
+            size = NSSize(width: size.width * scale, height: size.height * scale)
+        }
+        let target = NSRect(
+            x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+            width: size.width, height: size.height)
+        image.draw(
+            in: target, from: .zero, operation: .sourceOver, fraction: 1,
+            respectFlipped: true, hints: nil)
     }
 
     private func drawCheckbox(checked: Bool, theme: MintTheme, at point: NSPoint) {
@@ -983,4 +1115,25 @@ final class MintLayoutManager: NSLayoutManager {
         NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
     }
 
+}
+
+// MARK: - LaTeX 렌더러 (SwiftMath)
+
+/// 수식 블록의 LaTeX → NSImage 렌더 캐시. 메인 스레드에서만 접근한다
+/// (편집 갱신·드로잉 모두 메인).
+enum MathRenderer {
+    nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
+
+    /// LaTeX가 파싱되지 않으면 nil — 뷰는 소스 텍스트를 그대로 보여준다.
+    static func image(latex: String, color: NSColor, fontSize: CGFloat) -> NSImage? {
+        let key = "\(fontSize)|\(color.description)|\(latex)"
+        if let hit = cache[key] { return hit }
+        let renderer = MTMathImage(
+            latex: latex, fontSize: fontSize, textColor: color, labelMode: .display)
+        let (error, image) = renderer.asImage()
+        guard error == nil, let image, image.size.width > 0 else { return nil }
+        if cache.count > 256 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
+        cache[key] = image
+        return image
+    }
 }

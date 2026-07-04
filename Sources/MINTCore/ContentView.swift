@@ -142,8 +142,10 @@ struct EditorPane: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
-                    .padding(.bottom, 20)
+                if settings.autocompleteEnabled {
+                    ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
+                        .padding(.bottom, 20)
+                }
             }
     }
 
@@ -179,7 +181,7 @@ struct EditorToolbar: View {
         .background(theme.toolbarC)
     }
 
-    /// 디자인의 커스텀 스위치 (42×25, ☾).
+    /// 디자인의 커스텀 스위치 (42×25, ☾) — 리퀴드 글래스 토글.
     private var themeSwitch: some View {
         Button {
             appearance = isDark ? "light" : "dark"
@@ -188,18 +190,7 @@ struct EditorToolbar: View {
                 Text("☾")
                     .font(.system(size: 13))
                     .foregroundStyle(theme.ink3C)
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(isDark ? theme.blueC : Color.black.opacity(0.16))
-                        .frame(width: 42, height: 25)
-                        .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
-                    Circle()
-                        .fill(.white)
-                        .frame(width: 21, height: 21)
-                        .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
-                        .offset(x: isDark ? 19 : 2)
-                }
-                .animation(.spring(duration: 0.25), value: isDark)
+                GlassSwitch(isOn: isDark, theme: theme)
             }
         }
         .buttonStyle(.plain)
@@ -285,8 +276,37 @@ struct ModelChip: View {
                 }
             }
             .padding(6)
+            theme.sepC.frame(height: 1)
+            autocompleteToggle
         }
         .frame(width: 264)
+    }
+
+    /// 드롭다운 하단의 자동완성 마스터 스위치 — 끄면 제안·모델 로드 중단.
+    private var autocompleteToggle: some View {
+        Button {
+            completion.setAutocompleteEnabled(!settings.autocompleteEnabled)
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("자동완성")
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                    Text(settings.autocompleteEnabled
+                        ? "글을 멈추면 이어질 내용을 제안해요"
+                        : "꺼짐 — 제안하지 않아요")
+                        .font(MintFonts.uiFont(11.5))
+                        .foregroundStyle(theme.ink2C)
+                }
+                Spacer(minLength: 0)
+                GlassSwitch(isOn: settings.autocompleteEnabled, theme: theme)
+            }
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("자동완성 켜기/끄기")
     }
 
     private func row(_ choice: ModelChoice) -> some View {
@@ -364,6 +384,7 @@ struct ModelChip: View {
     }
 
     private var stateText: String {
+        if !settings.autocompleteEnabled { return "꺼짐" }
         if completion.isPredicting { return "예측 중" }
         switch completion.engineState {
         case .idle: return "대기"
@@ -375,7 +396,8 @@ struct ModelChip: View {
     }
 
     private var dotColor: Color {
-        switch completion.engineState {
+        if !settings.autocompleteEnabled { return theme.ink3C }
+        return switch completion.engineState {
         case .idle: theme.ink3C
         case .downloading, .loading: .orange
         case .ready: completion.suggestion != nil ? theme.inkC : theme.ink3C
@@ -389,6 +411,32 @@ struct ModelChip: View {
 
     static func shortID(_ modelID: String) -> String {
         modelID.components(separatedBy: "/").last ?? modelID
+    }
+}
+
+/// 리퀴드 글래스 토글 스위치 (42×25) — 창 유리 톤과 통일된 디테일.
+///
+/// 트랙은 ultraThinMaterial 위에 유리 틴트 + 헤어라인 보더, 노브는 흰 원.
+/// 다크 모드 스위치·자동완성 스위치 등 모든 토글이 이 컴포넌트를 공유한다.
+struct GlassSwitch: View {
+    let isOn: Bool
+    let theme: MintTheme
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            Capsule()
+                .fill(isOn ? theme.blueC.opacity(0.85) : theme.chipC)
+                .background(.ultraThinMaterial, in: Capsule())
+                .overlay(Capsule().strokeBorder(theme.chipBorderC))
+                .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
+            Circle()
+                .fill(.white)
+                .frame(width: 21, height: 21)
+                .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+                .offset(x: isOn ? 19 : 2)
+        }
+        .frame(width: 42, height: 25)
+        .animation(.spring(duration: 0.25), value: isOn)
     }
 }
 
@@ -431,6 +479,7 @@ struct ShortcutHintPill: View {
             divider
             item(key: "esc", label: "무시")
         }
+        .fixedSize()  // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
         .padding(.vertical, 9)
         .padding(.horizontal, 14)
         .background(
@@ -539,6 +588,7 @@ struct EditorStatusBar: View {
     }
 
     private var ghostLabel: String {
+        if !settings.autocompleteEnabled { return "자동완성 꺼짐" }
         if let suggestion = completion.suggestion {
             let length = suggestion.trimmingCharacters(in: .whitespaces).count
             return "\(max(1, length / 2)) tokens · 예측"

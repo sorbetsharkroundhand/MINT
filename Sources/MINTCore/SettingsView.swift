@@ -28,6 +28,8 @@ public struct SettingsView: View {
             }
 
             Section("제안") {
+                Toggle("자동완성 사용", isOn: $settings.autocompleteEnabled)
+
                 Picker("프롬프트 방식", selection: $settings.promptStyle) {
                     ForEach(PromptStyle.allCases, id: \.self) { style in
                         Text(style.label).tag(style)

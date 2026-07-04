@@ -103,6 +103,7 @@ public final class CompletionSettings: ObservableObject {
     public static let shared = CompletionSettings()
 
     private enum Keys {
+        static let enabled = "completion.enabled"
         static let modelID = "completion.modelID"
         static let promptStyle = "completion.promptStyle"
         static let debounceMilliseconds = "completion.debounceMilliseconds"
@@ -113,6 +114,10 @@ public final class CompletionSettings: ObservableObject {
 
     private let defaults: UserDefaults
 
+    /// 자동완성 마스터 스위치 — 끄면 제안 트리거·모델 로드를 모두 멈춘다.
+    @Published public var autocompleteEnabled: Bool {
+        didSet { defaults.set(autocompleteEnabled, forKey: Keys.enabled) }
+    }
     @Published public var modelID: String {
         didSet { defaults.set(modelID, forKey: Keys.modelID) }
     }
@@ -135,6 +140,7 @@ public final class CompletionSettings: ObservableObject {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = CompletionParameters()
+        self.autocompleteEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
         self.modelID = defaults.string(forKey: Keys.modelID) ?? base.modelID
         self.promptStyle =
             defaults.string(forKey: Keys.promptStyle)

@@ -13,6 +13,8 @@ struct SidebarView: View {
     @State private var draftTitle = ""
     @State private var hoveredID: UUID?
     @State private var plusHovered = false
+    /// 내용이 있어 삭제 전 확인이 필요한 저널 — alert 표시 중.
+    @State private var deleteCandidate: JournalEntry?
     @FocusState private var renameFieldFocused: Bool
 
     var body: some View {
@@ -37,6 +39,28 @@ struct SidebarView: View {
             // Enter(onSubmit) 외에 포커스를 잃어도 커밋 — Esc는 editingID를
             // 먼저 비우므로 여기 걸리지 않는다.
             if !focused, let id = editingID { commitRename(id) }
+        }
+        .alert(
+            "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
+            isPresented: Binding(
+                get: { deleteCandidate != nil },
+                set: { if !$0 { deleteCandidate = nil } }
+            ),
+            presenting: deleteCandidate
+        ) { entry in
+            Button("삭제", role: .destructive) { store.delete(entry.id) }
+            Button("취소", role: .cancel) {}
+        } message: { _ in
+            Text("작성한 내용이 함께 삭제되며 되돌릴 수 없어요.")
+        }
+    }
+
+    /// 삭제 요청 — 비어 있으면 바로 지우고, 내용이 있으면 한 번 더 묻는다.
+    private func requestDelete(_ entry: JournalEntry) {
+        if entry.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            store.delete(entry.id)
+        } else {
+            deleteCandidate = entry
         }
     }
 
@@ -105,7 +129,7 @@ struct SidebarView: View {
             Spacer(minLength: 6)
 
             if active && !editing {
-                DeleteButton(theme: theme) { store.delete(entry.id) }
+                DeleteButton(theme: theme) { requestDelete(entry) }
             } else if !editing {
                 Text(store.dayLabel(for: entry))
                     .font(MintFonts.uiFont(11))
@@ -124,7 +148,7 @@ struct SidebarView: View {
         .onTapGesture { store.select(entry.id) }
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
-            Button("삭제", role: .destructive) { store.delete(entry.id) }
+            Button("삭제", role: .destructive) { requestDelete(entry) }
         }
     }
 

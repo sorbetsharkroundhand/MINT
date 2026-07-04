@@ -56,7 +56,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         ink: NSColor(hex: 0xF2F2F0),
         ink2: NSColor(hex: 0x9A9A9F),
         ink3: NSColor(hex: 0x6E6E74),
-        ghost: NSColor(hex: 0x5C5C62),
+        // 본문(0xF2F2F0)보다는 확실히 흐리되, 어두운 유리 배경 위에서 읽히는 밝기.
+        ghost: NSColor(hex: 0x8E8E96),
         blue: NSColor(hex: 0x0A84FF),
         sep: NSColor(white: 1, alpha: 0.09),
         sepStrong: NSColor(white: 1, alpha: 0.16),
