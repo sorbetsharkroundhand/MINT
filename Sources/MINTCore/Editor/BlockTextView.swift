@@ -9,8 +9,10 @@ import SwiftUI
 ///   문단에 블록 속성(`.mintBlock`)을 부여한다. 화면에 마커는 남지 않는다.
 /// - `serialize`/`buildDOM` → 저장은 항상 순수 마크다운. 로드 시 마커를 파싱해
 ///   블록으로 복원한다. 파일 포맷은 이전과 완전 호환.
-/// - 블록 장식(불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·커서 글로우)은
+/// - 블록 장식(불릿·번호·체크박스·인용 바·코드/수식 배경·구분선)은
 ///   `MintLayoutManager`가 그린다 — text storage 밖이라 undo·IME에 무해.
+/// - 커서 효과(펄스 blink·이동 리플·커서 줄 하이라이트)는 뷰의 `draw`/
+///   `drawInsertionPoint`에서 그린다 (에디터 v3.1 — 창 글로우 대체).
 ///
 /// 고스트 텍스트(M3)는 기존 방식 그대로: storage 밖에서 `draw(_:)`로만 그린다.
 public struct MintBlockEditor: NSViewRepresentable {
@@ -18,20 +20,15 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     private let controller: CompletionController?
     private let theme: MintTheme
-    /// 커서 이동 알림 — 창 좌표(top-left 원점)의 커서 중심점. 포커스를 잃으면 nil.
-    /// ContentView가 창 전체 글로우 레이어를 이 점으로 움직인다 (디자인 caret glow).
-    private let onCaretMove: ((CGPoint?) -> Void)?
 
     public init(
         text: Binding<String>,
         controller: CompletionController? = nil,
-        theme: MintTheme = .light,
-        onCaretMove: ((CGPoint?) -> Void)? = nil
+        theme: MintTheme = .light
     ) {
         self._text = text
         self.controller = controller
         self.theme = theme
-        self.onCaretMove = onCaretMove
     }
 
     public func makeNSView(context: Context) -> NSScrollView {
@@ -59,7 +56,11 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.drawsBackground = false
         // 디자인: padding 46px 60px — inset은 좌우 동일 적용이라 56으로 근사.
         textView.textContainerInset = NSSize(width: 56, height: 44)
-        textView.insertionPointColor = theme.blue
+        // 커서는 잉크색(라이트=검정/다크=하양) — 높이는 커서 위치의 글자 크기를 따른다.
+        textView.insertionPointColor = theme.ink
+        // ⌘F 문서 내 검색 — 스크롤 뷰 상단의 표준 find bar.
+        textView.usesFindBar = true
+        textView.isIncrementalSearchingEnabled = true
 
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -75,19 +76,6 @@ public struct MintBlockEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
 
-        // 최신 onCaretMove 클로저는 coordinator.parent를 통해 전달된다.
-        textView.onCaretMove = { [weak coordinator = context.coordinator] point in
-            coordinator?.parent.onCaretMove?(point)
-        }
-        // 스크롤 시에도 글로우가 커서를 따라가도록.
-        scrollView.contentView.postsBoundsChangedNotifications = true
-        context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: scrollView.contentView, queue: .main
-        ) { [weak textView] _ in
-            MainActor.assumeIsolated { textView?.emitCaretPosition() }
-        }
-
         context.coordinator.attach(to: textView)
         return scrollView
     }
@@ -98,7 +86,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
         if textView.palette.ink != theme.ink {
             textView.palette = theme
-            textView.insertionPointColor = theme.blue
+            textView.insertionPointColor = theme.ink
             textView.restyleAll()
         }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
@@ -122,18 +110,11 @@ public struct MintBlockEditor: NSViewRepresentable {
     @MainActor
     public final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MintBlockEditor
-        nonisolated(unsafe) var scrollObserver: NSObjectProtocol?
         /// 마지막으로 바인딩과 동기화된 마크다운 — updateNSView의 reload 기준.
         var lastSyncedText = ""
 
         init(_ parent: MintBlockEditor) {
             self.parent = parent
-        }
-
-        deinit {
-            if let scrollObserver {
-                NotificationCenter.default.removeObserver(scrollObserver)
-            }
         }
 
         func attach(to textView: BlockTextView) {
@@ -153,7 +134,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         public func textViewDidChangeSelection(_ notification: Notification) {
             guard let textView = notification.object as? BlockTextView else { return }
             textView.syncTypingAttributes()
-            textView.emitCaretPosition()
+            // 커서 줄 하이라이트를 새 커서 위치로 옮긴다 (이전 줄 무효화 포함).
+            textView.refreshActiveLineHighlight()
             // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
             textView.refreshMathPresentation()
             // 드래그 선택 위 서식 툴바 표시/숨김.
@@ -295,42 +277,103 @@ final class BlockTextView: NSTextView {
     /// `refreshMathPresentation()`이 갱신하고 레이아웃 매니저가 그린다.
     nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
 
-    /// 커서 이동 알림 (창 좌표 top-left 원점). MintBlockEditor가 연결한다.
-    var onCaretMove: ((CGPoint?) -> Void)?
+    // MARK: 커서 효과 (에디터 v3.1 — 글로우 대체)
 
-    /// 현재 커서 중심점을 창 좌표(top-left 원점)로 발행한다. 포커스 밖이면 nil.
-    func emitCaretPosition() {
+    /// 커서 이동 리플의 중심(뷰 좌표)·시작 시각. nil이면 리플 없음.
+    private var rippleCenter: NSPoint?
+    private var rippleStart: TimeInterval = 0
+    private var rippleTimer: Timer?
+    /// 리플 지속 시간 — 요구사항 150ms.
+    private let rippleDuration: TimeInterval = 0.15
+    /// 마지막으로 그린 커서 줄 하이라이트 rect — 이동 시 이전 줄 무효화용.
+    private var lastActiveLineRect: NSRect?
+    /// 키 입력 처리 중이면 리플을 억제한다 — 타이핑마다 번지면 소음이다.
+    private var isHandlingKeyDown = false
+
+    override func keyDown(with event: NSEvent) {
+        isHandlingKeyDown = true
+        defer { isHandlingKeyDown = false }
+        super.keyDown(with: event)
+    }
+
+    /// 마우스 클릭·프로그램적 점프 등 "이동"에만 150ms 리플을 일으킨다.
+    override func setSelectedRanges(
+        _ ranges: [NSValue], affinity: NSSelectionAffinity, stillSelecting: Bool
+    ) {
+        let oldCaret = selectedRange().location
+        super.setSelectedRanges(ranges, affinity: affinity, stillSelecting: stillSelecting)
+        let sel = selectedRange()
+        guard !stillSelecting, sel.length == 0, sel.location != oldCaret,
+            !isHandlingKeyDown, !isTransforming, !hasMarkedText(), window != nil
+        else { return }
+        startCaretRipple()
+    }
+
+    private func startCaretRipple() {
+        guard let rect = caretRectInView() else { return }
+        rippleCenter = NSPoint(x: rect.midX, y: rect.midY)
+        rippleStart = ProcessInfo.processInfo.systemUptime
+        rippleTimer?.invalidate()
+        rippleTimer = Timer.scheduledTimer(withTimeInterval: 1.0 / 60, repeats: true) {
+            [weak self] timer in
+            MainActor.assumeIsolated {
+                guard let self, let center = self.rippleCenter else {
+                    timer.invalidate()
+                    return
+                }
+                let elapsed = ProcessInfo.processInfo.systemUptime - self.rippleStart
+                if elapsed >= self.rippleDuration {
+                    self.rippleCenter = nil
+                    timer.invalidate()
+                }
+                // 리플 최대 반경(22pt)만큼 여유를 두고 무효화한다.
+                self.setNeedsDisplay(
+                    NSRect(x: center.x - 24, y: center.y - 24, width: 48, height: 48))
+            }
+        }
+    }
+
+    /// 커서 줄 하이라이트를 다시 그린다 — 이전 줄과 새 줄만 무효화.
+    func refreshActiveLineHighlight() {
+        if let old = lastActiveLineRect { setNeedsDisplay(old) }
+        if let new = activeLineRect() { setNeedsDisplay(new) }
+    }
+
+    /// 커서가 놓인 라인 프래그먼트의 전체 폭 rect (뷰 좌표). 포커스 밖이면 nil.
+    private func activeLineRect() -> NSRect? {
         guard let window, window.firstResponder === self,
             selectedRange().length == 0,
-            let contentView = window.contentView
-        else {
-            onCaretMove?(nil)
-            return
-        }
+            let layoutManager, let textContainer
+        else { return nil }
+        let ns = string as NSString
         let caret = selectedRange().location
-        guard caret != NSNotFound else {
-            onCaretMove?(nil)
-            return
+        guard caret != NSNotFound else { return nil }
+        var fragment: NSRect
+        if ns.length == 0 || (caret == ns.length && ns.hasSuffix("\n")) {
+            fragment = layoutManager.extraLineFragmentRect
+            guard fragment.height > 0 else { return nil }
+        } else {
+            let glyphIndex = layoutManager.glyphIndexForCharacter(
+                at: min(caret, ns.length - 1))
+            fragment = layoutManager.lineFragmentRect(
+                forGlyphAt: glyphIndex, effectiveRange: nil)
+            guard fragment.height > 0 else { return nil }
         }
-        let screenRect = firstRect(
-            forCharacterRange: NSRange(location: caret, length: 0), actualRange: nil)
-        guard screenRect.height > 0 else {
-            onCaretMove?(nil)
-            return
-        }
-        let baseRect = window.convertFromScreen(screenRect)
-        // AppKit 창 좌표는 좌하단 원점 — SwiftUI(.global)의 좌상단 원점으로 뒤집는다.
-        onCaretMove?(
-            CGPoint(x: baseRect.midX, y: contentView.bounds.height - baseRect.midY))
+        fragment.origin.x = textContainerOrigin.x + textContainer.lineFragmentPadding
+        fragment.origin.y += textContainerOrigin.y
+        fragment.size.width =
+            textContainer.size.width - textContainer.lineFragmentPadding * 2
+        // 좌우로 살짝 넓혀 텍스트에 딱 붙지 않게 (디자인 여백).
+        return fragment.insetBy(dx: -8, dy: 0)
     }
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok {
             DispatchQueue.main.async { [weak self] in
-                self?.emitCaretPosition()
                 // 포커스가 돌아오면 커서 문단의 수식을 소스 모드로 되돌린다.
                 self?.refreshMathPresentation()
+                self?.refreshActiveLineHighlight()
             }
         }
         return ok
@@ -339,9 +382,12 @@ final class BlockTextView: NSTextView {
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
         if ok {
-            onCaretMove?(nil)
-            // 포커스를 잃으면 커서가 수식 문단에 남아 있어도 렌더로 전환.
-            DispatchQueue.main.async { [weak self] in self?.refreshMathPresentation() }
+            // 포커스를 잃으면 커서가 수식 문단에 남아 있어도 렌더로 전환하고,
+            // 커서 줄 하이라이트도 지운다.
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshMathPresentation()
+                self?.refreshActiveLineHighlight()
+            }
         }
         return ok
     }
@@ -430,7 +476,10 @@ final class BlockTextView: NSTextView {
         syncTypingAttributes()
         isTransforming = false
         hideSelectionToolbar()
-        refreshMathPresentation()
+        // 로드 직후엔 커서가 인위적으로 문서 끝에 놓인다 — 마지막 문단이 수식이어도
+        // "편집 중"으로 오판해 렌더·줄 높이를 초기화하지 않게 강제 렌더한다.
+        // 사용자가 실제로 커서를 움직이면 평소 규칙(커서 문단 = 소스)으로 돌아온다.
+        refreshMathPresentation(forceRender: true)
         needsDisplay = true
     }
 
@@ -629,7 +678,13 @@ final class BlockTextView: NSTextView {
         guard let storage = textStorage, range.length > 0 else { return }
         storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
             var addition: [NSAttributedString.Key: Any] = [:]
-            let base = attrs[.font] as? NSFont ?? bodyFont
+            var base = attrs[.font] as? NSFont ?? bodyFont
+            // 크기 조절은 블록 기본 폰트를 리사이즈한 것 위에 굵게·기울임을 쌓는다.
+            if let size = attrs[.mintFontSize] as? Double,
+                abs(base.pointSize - CGFloat(size)) > 0.1 {
+                base = NSFontManager.shared.convert(base, toSize: CGFloat(size))
+                addition[.font] = base
+            }
             if attrs[.mintCode] as? Bool == true {
                 addition[.font] = NSFont.monospacedSystemFont(
                     ofSize: base.pointSize * 0.78, weight: .regular)
@@ -1000,7 +1055,7 @@ final class BlockTextView: NSTextView {
     /// 수식 문단 표시 갱신 — 커서가 밖에 있고 LaTeX가 파싱되면 소스 글자를
     /// 투명 처리(temporary attribute — storage·undo·저장에 무해)하고, 레이아웃
     /// 매니저가 그 자리에 렌더된 수식을 그린다. 커서가 들어오면 소스로 돌아온다.
-    func refreshMathPresentation() {
+    func refreshMathPresentation(forceRender: Bool = false) {
         guard let layoutManager, let storage = textStorage else { return }
         layoutManager.removeTemporaryAttribute(
             .foregroundColor,
@@ -1021,7 +1076,7 @@ final class BlockTextView: NSTextView {
             let contentEnd = para.location + (content as NSString).length
             // 커서/선택이 문단에 닿아 있으면 편집 모드 — 소스를 보여준다.
             let editing =
-                focused
+                !forceRender && focused
                 && ((sel.length == 0 && sel.location >= para.location
                     && sel.location <= contentEnd)
                     || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0))
@@ -1156,6 +1211,9 @@ final class BlockTextView: NSTextView {
         state.code = attrs[.mintCode] as? Bool == true
         state.align = attrs[.mintAlign] as? String
         state.colorHex = attrs[.mintColor] as? String
+        state.fontSize =
+            (attrs[.mintFontSize] as? Double)
+            ?? Double((attrs[.font] as? NSFont ?? bodyFont).pointSize)
         return state
     }
 
@@ -1166,6 +1224,7 @@ final class BlockTextView: NSTextView {
         case .toggleItalic: toggleInlineStyle(.mintItalic)
         case .toggleCode: toggleInlineStyle(.mintCode)
         case .color(let hex): applyInlineColor(hex)
+        case .fontSize(let size): applyInlineFontSize(size)
         case .align(let align): applyAlignment(align)
         case .block(let block): convertSelectionBlock(to: block)
         }
@@ -1214,6 +1273,30 @@ final class BlockTextView: NSTextView {
             storage.addAttribute(.mintColor, value: hex, range: sel)
         } else {
             storage.removeAttribute(.mintColor, range: sel)
+        }
+        redecorateParagraphs(in: sel)
+        isTransforming = false
+        didChangeText()
+    }
+
+    /// 선택 범위 글자 크기 적용 — 블록 기본 크기와 같아지면 속성을 제거한다
+    /// (저장 마크다운에 불필요한 `<font size>` 래퍼를 남기지 않는다).
+    func applyInlineFontSize(_ size: Double) {
+        guard let storage = textStorage else { return }
+        let sel = selectedRange()
+        guard sel.length > 0 else { return }
+        guard shouldChangeText(in: sel, replacementString: nil) else { return }
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: NSRange(location: min(sel.location, ns.length), length: 0))
+        let info = blockInfo(in: para)
+        let baseSize =
+            (styleAttributes(for: info.block, checked: info.checked)[.font] as? NSFont)?
+            .pointSize ?? bodyFont.pointSize
+        isTransforming = true
+        if abs(CGFloat(size) - baseSize) < 0.5 {
+            storage.removeAttribute(.mintFontSize, range: sel)
+        } else {
+            storage.addAttribute(.mintFontSize, value: size, range: sel)
         }
         redecorateParagraphs(in: sel)
         isTransforming = false
@@ -1281,28 +1364,90 @@ final class BlockTextView: NSTextView {
         } while location < range.upperBound
     }
 
-    /// ⌘B / ⌘I — 선택이 있을 때만 서식 토글로 소비한다.
+    /// ⌘F 검색 · ⌘G 다음/이전 매치 · ⌘B/⌘I 서식 토글(선택 있을 때만).
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
-            selectedRange().length > 0 {
-            switch event.charactersIgnoringModifiers?.lowercased() {
-            case "b":
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        if flags == .command {
+            switch key {
+            case "f":
+                performFind(.showFindInterface)
+                return true
+            case "g":
+                performFind(.nextMatch)
+                return true
+            case "b" where selectedRange().length > 0:
                 toggleInlineStyle(.mintBold)
                 return true
-            case "i":
+            case "i" where selectedRange().length > 0:
                 toggleInlineStyle(.mintItalic)
                 return true
             default:
                 break
             }
+        } else if flags == [.command, .shift], key == "g" {
+            performFind(.previousMatch)
+            return true
         }
         return super.performKeyEquivalent(with: event)
+    }
+
+    /// NSTextFinder 액션 실행 — performTextFinderAction은 sender의 tag로 동작을 읽는다.
+    private func performFind(_ action: NSTextFinder.Action) {
+        let item = NSMenuItem()
+        item.tag = action.rawValue
+        performTextFinderAction(item)
+    }
+
+    // MARK: 커서 펄스 · 리플 · 커서 줄 하이라이트 드로잉
+
+    /// 일반 blink는 유지하되, 켜질 때마다 밝기가 아주 미세하게 물결치는 커서.
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
+        guard flag else {
+            // off 단계 — 넓힌 커서(2pt 라운드)까지 확실히 지운다.
+            setNeedsDisplay(rect.insetBy(dx: -3, dy: -3))
+            return
+        }
+        // blink 주기마다 0.82~1.0 사이를 느리게 오가는 은은한 펄스.
+        let phase = sin(ProcessInfo.processInfo.systemUptime * 2.2)
+        let alpha = 0.91 + 0.09 * phase
+        var caret = rect
+        caret.size.width = 2
+        color.withAlphaComponent(color.alphaComponent * alpha).setFill()
+        NSBezierPath(roundedRect: caret, xRadius: 1, yRadius: 1).fill()
+    }
+
+    /// 커서 이동 리플 — 150ms 동안 퍼지며 사라지는 원 (draw 마지막에 호출).
+    private func drawCaretRipple() {
+        guard let center = rippleCenter else { return }
+        let progress = min(
+            1, (ProcessInfo.processInfo.systemUptime - rippleStart) / rippleDuration)
+        let alpha = 0.22 * (1 - CGFloat(progress))
+        guard alpha > 0.01 else { return }
+        let radius = 4 + 16 * CGFloat(progress)
+        let path = NSBezierPath(
+            ovalIn: NSRect(
+                x: center.x - radius, y: center.y - radius,
+                width: radius * 2, height: radius * 2))
+        path.lineWidth = 1.5
+        palette.ink.withAlphaComponent(alpha).setStroke()
+        path.stroke()
     }
 
     // MARK: 고스트 렌더 (M3 그대로)
 
     override func draw(_ dirtyRect: NSRect) {
+        // 커서 줄 하이라이트 — 본문 아래에 깔리도록 텍스트보다 먼저 그린다.
+        let lineRect = activeLineRect()
+        lastActiveLineRect = lineRect
+        if let lineRect, lineRect.intersects(dirtyRect) {
+            palette.activeLine.setFill()
+            NSBezierPath(roundedRect: lineRect, xRadius: 6, yRadius: 6).fill()
+        }
+
         super.draw(dirtyRect)
+        drawCaretRipple()
+
         guard let ghost = ghostText, !ghost.isEmpty,
             !hasMarkedText(),
             selectedRange().length == 0,
@@ -1365,7 +1510,7 @@ final class BlockTextView: NSTextView {
 
 // MARK: - 블록 장식 레이아웃 매니저
 
-/// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·커서 글로우를 그린다.
+/// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선을 그린다.
 /// 전부 text storage 밖 — 문서·undo·IME에 흔적이 없다.
 final class MintLayoutManager: NSLayoutManager {
 

@@ -25,8 +25,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
     public let toolbar: NSColor
     public let sidebarTint: NSColor
     public let statusbar: NSColor
-    public let glowCore: NSColor
-    public let glowHalo: NSColor
+    /// 커서가 놓인 줄의 은은한 하이라이트 (글로우 대체 — 에디터 v3.1).
+    public let activeLine: NSColor
 
     public static let light = MintTheme(
         ink: NSColor(hex: 0x1C1C1E),
@@ -48,8 +48,7 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         toolbar: NSColor(white: 1, alpha: 0.28),
         sidebarTint: NSColor(white: 0, alpha: 0.018),
         statusbar: NSColor(white: 1, alpha: 0.24),
-        glowCore: NSColor(white: 1, alpha: 0.55),
-        glowHalo: NSColor(red: 175 / 255, green: 205 / 255, blue: 1, alpha: 0.20)
+        activeLine: NSColor(white: 0, alpha: 0.04)
     )
 
     public static let dark = MintTheme(
@@ -73,8 +72,7 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         toolbar: NSColor(white: 1, alpha: 0.04),
         sidebarTint: NSColor(white: 1, alpha: 0.028),
         statusbar: NSColor(white: 1, alpha: 0.03),
-        glowCore: NSColor(white: 1, alpha: 0.13),
-        glowHalo: NSColor(red: 130 / 255, green: 175 / 255, blue: 1, alpha: 0.10)
+        activeLine: NSColor(white: 1, alpha: 0.055)
     )
 
     public static func of(_ scheme: ColorScheme) -> MintTheme {

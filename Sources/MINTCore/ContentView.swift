@@ -36,60 +36,29 @@ private struct MainSurface: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @Environment(\.colorScheme) private var colorScheme
-    /// 커서 중심점 (창 좌표 top-left) — 창 전체 글로우 레이어가 따라간다.
-    @State private var glowPoint: CGPoint?
+    /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
+    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
 
     var body: some View {
         let theme = MintTheme.of(colorScheme)
         ZStack {
             GlassBackground()
             theme.glassWinC
-            CaretGlow(point: glowPoint, theme: theme)
             // 콘텐츠는 타이틀바(신호등 줄) 안전영역 아래부터 — 사이드바 헤더가
             // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
             HSplitView {
-                SidebarView(store: store, theme: theme)
-                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
+                if sidebarVisible {
+                    SidebarView(store: store, theme: theme)
+                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
+                }
                 EditorPane(
                     store: store, completion: completion,
-                    settings: completion.settings, theme: theme,
-                    onCaretMove: { glowPoint = $0 }
+                    settings: completion.settings, theme: theme
                 )
                 .frame(minWidth: 560, maxWidth: .infinity)
             }
         }
         .ignoresSafeArea()
-    }
-}
-
-/// 커서를 따라오는 창 전체 글로우 (디자인 caret glow — z:0, 콘텐츠 아래).
-///
-/// 에디터 내부가 아니라 창 레이어에 그려서, 반투명한 툴바·사이드바·상태 바
-/// 아래로 빛이 자연스럽게 번진다 (에디터 사각형에 갇히지 않는다).
-private struct CaretGlow: View {
-    let point: CGPoint?
-    let theme: MintTheme
-
-    var body: some View {
-        GeometryReader { geo in
-            if let point {
-                let origin = geo.frame(in: .global).origin
-                ZStack {
-                    RadialGradient(
-                        colors: [Color(nsColor: theme.glowHalo), .clear],
-                        center: .center, startRadius: 0, endRadius: 176)
-                    RadialGradient(
-                        colors: [Color(nsColor: theme.glowCore), .clear],
-                        center: .center, startRadius: 0, endRadius: 51)
-                }
-                .frame(width: 640, height: 640)
-                .position(x: point.x - origin.x, y: point.y - origin.y)
-                .animation(.easeOut(duration: 0.3), value: point)
-                .transition(.opacity)
-            }
-        }
-        .animation(.easeOut(duration: 0.4), value: point == nil)
-        .allowsHitTesting(false)
     }
 }
 
@@ -113,7 +82,6 @@ struct EditorPane: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
-    var onCaretMove: ((CGPoint?) -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -128,10 +96,7 @@ struct EditorPane: View {
     }
 
     private var editor: some View {
-        MintBlockEditor(
-            text: bodyBinding, controller: completion, theme: theme,
-            onCaretMove: onCaretMove
-        )
+        MintBlockEditor(text: bodyBinding, controller: completion, theme: theme)
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
                     Text("오늘 하루를 적어보세요…")
@@ -167,10 +132,13 @@ struct EditorToolbar: View {
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     @AppStorage("mint.appearance") private var appearance = ""
+    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @Environment(\.colorScheme) private var colorScheme
+    @State private var sidebarButtonHovered = false
 
     var body: some View {
         HStack(spacing: 12) {
+            sidebarToggle
             Text(store.activeDateLabel)
                 .font(MintFonts.uiFont(13.5, .semibold))
                 .foregroundStyle(theme.inkC)
@@ -181,6 +149,26 @@ struct EditorToolbar: View {
         .padding(.horizontal, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
+    }
+
+    /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
+    private var sidebarToggle: some View {
+        Button {
+            sidebarVisible.toggle()
+        } label: {
+            Image(systemName: "sidebar.left")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(sidebarVisible ? theme.ink2C : theme.ink3C)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(sidebarButtonHovered ? theme.hoverC : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { sidebarButtonHovered = $0 }
+        .help(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기")
     }
 
     /// 디자인의 커스텀 스위치 (42×25, ☾) — 리퀴드 글래스 토글.
@@ -280,8 +268,38 @@ struct ModelChip: View {
             .padding(6)
             theme.sepC.frame(height: 1)
             autocompleteToggle
+            theme.sepC.frame(height: 1)
+            predictionLengthRow
         }
         .frame(width: 264)
+    }
+
+    /// 예측 길이(최대 토큰) 조절 — SettingsView(⌘,)의 스테퍼와 같은 값·범위.
+    /// 값은 다음 제안부터 적용된다 (parameters 스냅샷 경계).
+    private var predictionLengthRow: some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("예측 길이")
+                    .font(MintFonts.uiFont(13, .semibold))
+                    .foregroundStyle(theme.inkC)
+                Text("한 번에 제안하는 최대 토큰")
+                    .font(MintFonts.uiFont(11.5))
+                    .foregroundStyle(theme.ink2C)
+            }
+            Spacer(minLength: 0)
+            StepIconButton(systemName: "minus", theme: theme, help: "짧게") {
+                settings.maxTokens = max(4, settings.maxTokens - 2)
+            }
+            Text("\(settings.maxTokens)")
+                .font(MintFonts.monoUI(12, .semibold))
+                .foregroundStyle(theme.inkC)
+                .frame(minWidth: 22)
+            StepIconButton(systemName: "plus", theme: theme, help: "길게") {
+                settings.maxTokens = min(32, settings.maxTokens + 2)
+            }
+        }
+        .padding(.vertical, 10)
+        .padding(.horizontal, 16)
     }
 
     /// 드롭다운 하단의 자동완성 마스터 스위치 — 끄면 제안·모델 로드 중단.
@@ -413,6 +431,36 @@ struct ModelChip: View {
 
     static func shortID(_ modelID: String) -> String {
         modelID.components(separatedBy: "/").last ?? modelID
+    }
+}
+
+/// 드롭다운의 작은 ± 스텝 버튼 — 칩과 같은 유리 톤.
+private struct StepIconButton: View {
+    let systemName: String
+    let theme: MintTheme
+    let help: String
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(theme.ink2C)
+                .frame(width: 22, height: 22)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(hovered ? theme.hoverC : theme.chipC)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(theme.chipBorderC)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .help(help)
     }
 }
 

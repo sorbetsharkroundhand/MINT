@@ -11,6 +11,9 @@ extension NSAttributedString.Key {
     static let mintCode = NSAttributedString.Key("mint.code")
     /// 글자색 hex ("FF453A") — 저장은 `<font color="#…">` 태그.
     static let mintColor = NSAttributedString.Key("mint.color")
+    /// 글자 크기 pt (Double) — 저장은 `<font size="…">` 태그. 블록 기본 크기와
+    /// 같으면 속성을 두지 않는다 (서식 툴바 크기 조절).
+    static let mintFontSize = NSAttributedString.Key("mint.fontSize")
     /// 문단 정렬 "center"/"right" — 저장은 `<p align="…">` 래퍼 (.p 문단만 직렬화).
     static let mintAlign = NSAttributedString.Key("mint.align")
 }
@@ -20,14 +23,18 @@ enum InlineMarkdown {
 
     /// 인라인 서식 키 전체 — 블록 재스타일 시 보존 대상.
     static let inlineKeys: [NSAttributedString.Key] = [
-        .mintBold, .mintItalic, .mintCode, .mintColor, .mintAlign,
+        .mintBold, .mintItalic, .mintCode, .mintColor, .mintFontSize, .mintAlign,
     ]
 
     typealias Segment = (text: String, attrs: [NSAttributedString.Key: Any])
 
     // 마커 패턴. `(?<!\*)`/`(?!\*)` — `**굵게**` 진행 중에 `*기울임*`이
     // 먼저 오발동하지 않게 이웃 별표를 배제한다.
-    private static let fontTag = regex(##"<font color="#([0-9A-Fa-f]{6})">(.*?)</font>"##)
+    // font 태그는 color·size 속성을 임의 순서로 담는다 (serialize와 왕복 대칭).
+    private static let fontTag = regex(
+        ##"<font ((?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+")(?: (?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+"))*)>(.*?)</font>"##)
+    private static let fontColorAttr = regex(##"color="#([0-9A-Fa-f]{6})""##)
+    private static let fontSizeAttr = regex(#"size="([0-9.]+)""#)
     private static let codeSpan = regex(#"`([^`\n]+)`"#)
     private static let boldItalic = regex(#"(?<!\*)\*\*\*([^*\n]+)\*\*\*(?!\*)"#)
     private static let bold = regex(#"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#)
@@ -91,9 +98,18 @@ enum InlineMarkdown {
             }
             switch kind {
             case .color:
-                // 색 안에 굵게 등이 중첩될 수 있다 — 내부를 재귀 파싱.
+                // 태그 안에 굵게 등이 중첩될 수 있다 — 내부를 재귀 파싱.
                 var attrs = inherited
-                attrs[.mintColor] = ns.substring(with: match.range(at: 1)).uppercased()
+                let tagAttrs = ns.substring(with: match.range(at: 1))
+                let tagRange = NSRange(location: 0, length: (tagAttrs as NSString).length)
+                if let color = fontColorAttr.firstMatch(in: tagAttrs, range: tagRange) {
+                    attrs[.mintColor] =
+                        (tagAttrs as NSString).substring(with: color.range(at: 1)).uppercased()
+                }
+                if let size = fontSizeAttr.firstMatch(in: tagAttrs, range: tagRange),
+                    let value = Double((tagAttrs as NSString).substring(with: size.range(at: 1))) {
+                    attrs[.mintFontSize] = value
+                }
                 segments += parse(ns.substring(with: match.range(at: 2)), inherited: attrs)
             case .code:
                 var attrs = inherited
@@ -139,8 +155,15 @@ enum InlineMarkdown {
                     text = "*\(text)*"
                 }
             }
+            var tagAttrs: [String] = []
             if let hex = attrs[.mintColor] as? String {
-                text = "<font color=\"#\(hex)\">\(text)</font>"
+                tagAttrs.append("color=\"#\(hex)\"")
+            }
+            if let size = attrs[.mintFontSize] as? Double {
+                tagAttrs.append("size=\"\(String(format: "%g", size))\"")
+            }
+            if !tagAttrs.isEmpty {
+                text = "<font \(tagAttrs.joined(separator: " "))>\(text)</font>"
             }
             out += text
         }

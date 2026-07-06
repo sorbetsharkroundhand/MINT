@@ -12,6 +12,8 @@ enum SelectionToolbarAction {
     case align(String?)
     /// 인라인 색 hex, nil = 기본 잉크색으로 복원.
     case color(String?)
+    /// 글자 크기 pt (절대값) — 블록 기본 크기와 같으면 속성이 제거된다.
+    case fontSize(Double)
 }
 
 /// 툴바 버튼 하이라이트용 — 선택 시작 위치의 현재 서식 상태.
@@ -22,6 +24,8 @@ struct SelectionStyleState: Equatable {
     var code = false
     var align: String?
     var colorHex: String?
+    /// 선택 시작 위치의 실제 글자 크기 pt (표시·± 스텝 기준).
+    var fontSize: Double = 20
 }
 
 /// 드래그 선택 위에 뜨는 플로팅 서식 툴바 (리퀴드 글래스 필 — 단축키 필과 동일 톤).
@@ -55,6 +59,17 @@ struct SelectionToolbarView: View {
                 "chevron.left.forwardslash.chevron.right",
                 active: state.code, help: "인라인 코드 (`텍스트`)"
             ) { onAction(.toggleCode) }
+            divider
+            iconButton("textformat.size.smaller", active: false, help: "글자 작게") {
+                onAction(.fontSize(max(10, state.fontSize - 2)))
+            }
+            Text("\(Int(state.fontSize.rounded()))")
+                .font(MintFonts.monoUI(11, .semibold))
+                .foregroundStyle(theme.inkC)
+                .frame(minWidth: 18)
+            iconButton("textformat.size.larger", active: false, help: "글자 크게") {
+                onAction(.fontSize(min(64, state.fontSize + 2)))
+            }
             divider
             iconButton("text.quote", active: state.block == .quote, help: "인용") {
                 onAction(.block(.quote))
