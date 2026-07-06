@@ -45,6 +45,8 @@ private struct MainSurface: View {
             GlassBackground()
             theme.glassWinC
             CaretGlow(point: glowPoint, theme: theme)
+            // 콘텐츠는 타이틀바(신호등 줄) 안전영역 아래부터 — 사이드바 헤더가
+            // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
             HSplitView {
                 SidebarView(store: store, theme: theme)
                     .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)

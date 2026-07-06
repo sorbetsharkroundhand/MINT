@@ -156,6 +156,8 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.emitCaretPosition()
             // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
             textView.refreshMathPresentation()
+            // 드래그 선택 위 서식 툴바 표시/숨김.
+            textView.updateSelectionToolbar()
             guard let controller = parent.controller else { return }
             let range = textView.selectedRange()
             if range.length > 0 {
@@ -324,13 +326,23 @@ final class BlockTextView: NSTextView {
 
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
-        if ok { DispatchQueue.main.async { [weak self] in self?.emitCaretPosition() } }
+        if ok {
+            DispatchQueue.main.async { [weak self] in
+                self?.emitCaretPosition()
+                // 포커스가 돌아오면 커서 문단의 수식을 소스 모드로 되돌린다.
+                self?.refreshMathPresentation()
+            }
+        }
         return ok
     }
 
     override func resignFirstResponder() -> Bool {
         let ok = super.resignFirstResponder()
-        if ok { onCaretMove?(nil) }
+        if ok {
+            onCaretMove?(nil)
+            // 포커스를 잃으면 커서가 수식 문단에 남아 있어도 렌더로 전환.
+            DispatchQueue.main.async { [weak self] in self?.refreshMathPresentation() }
+        }
         return ok
     }
 
@@ -352,6 +364,15 @@ final class BlockTextView: NSTextView {
             var block = MintBlock.p
             var checked = false
             var marker: String?
+            // 정렬 래퍼(<p align="…">…</p>)는 블록 판정 전에 벗긴다.
+            var align: String?
+            if !inCode {
+                let full = NSRange(location: 0, length: (line as NSString).length)
+                if let match = Self.alignWrapper.firstMatch(in: line, range: full) {
+                    align = (line as NSString).substring(with: match.range(at: 1))
+                    line = (line as NSString).substring(with: match.range(at: 2))
+                }
+            }
             if inCode {
                 block = .code
             } else if line.hasPrefix("### ") {
@@ -381,16 +402,41 @@ final class BlockTextView: NSTextView {
             attrs[.mintBlock] = block.rawValue
             if checked { attrs[.mintChecked] = true }
             if let marker { attrs[.mintMarker] = marker }
+            if let align {
+                attrs[.mintAlign] = align
+                if let ps = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy()
+                    as? NSMutableParagraphStyle {
+                    ps.alignment = align == "right" ? .right : .center
+                    attrs[.paragraphStyle] = ps
+                }
+            }
             let suffix = index < lines.count - 1 ? "\n" : ""
-            result.append(NSAttributedString(string: line + suffix, attributes: attrs))
+            switch block {
+            case .code, .math, .divider:
+                // 코드·수식엔 인라인 서식이 없다 — 원문 그대로.
+                result.append(NSAttributedString(string: line + suffix, attributes: attrs))
+            default:
+                for segment in InlineMarkdown.parse(line) {
+                    var merged = attrs
+                    for (key, value) in segment.attrs { merged[key] = value }
+                    result.append(NSAttributedString(string: segment.text, attributes: merged))
+                }
+                result.append(NSAttributedString(string: suffix, attributes: attrs))
+            }
         }
         storage.setAttributedString(result)
+        decorateInline(in: NSRange(location: 0, length: storage.length))
         setSelectedRange(NSRange(location: storage.length, length: 0))
         syncTypingAttributes()
         isTransforming = false
+        hideSelectionToolbar()
         refreshMathPresentation()
         needsDisplay = true
     }
+
+    /// `<p align="center|right">…</p>` — 정렬 저장 래퍼 (.p 문단 전용).
+    private static let alignWrapper = try! NSRegularExpression(
+        pattern: #"^<p align="(center|right)">(.*)</p>$"#)
 
     /// storage를 순수 마크다운으로 되돌린다 (serialize).
     func serialize() -> String {
@@ -404,7 +450,7 @@ final class BlockTextView: NSTextView {
             // "빈 문서 + 블록 typingAttributes" 상태에서 저장 텍스트가 실제
             // 내용과 어긋나 reload 루프를 만든다 (r1 버그).
             let info = storageBlockInfo(in: para)
-            let text = paragraphContent(para)
+            let text = serializedContent(of: para, block: info.block)
             switch info.block {
             case .code:
                 if !inCode { out.append("```"); inCode = true }
@@ -421,7 +467,12 @@ final class BlockTextView: NSTextView {
                 case .todo: out.append("- [" + (info.checked ? "x" : " ") + "] " + text)
                 case .math: out.append("$$" + text + "$$")
                 case .divider: out.append("---")
-                default: out.append(text)
+                default:
+                    if let align = alignValue(at: para) {
+                        out.append("<p align=\"\(align)\">\(text)</p>")
+                    } else {
+                        out.append(text)
+                    }
                 }
             }
             location = para.upperBound
@@ -466,6 +517,24 @@ final class BlockTextView: NSTextView {
         return text
     }
 
+    /// 문단 내용 직렬화 — 코드·수식·구분선은 원문 그대로, 나머지는 인라인
+    /// 서식을 마크다운 마커로 복원한다.
+    private func serializedContent(of paragraph: NSRange, block: MintBlock) -> String {
+        let plain = paragraphContent(paragraph)
+        guard let storage = textStorage, ![MintBlock.code, .math, .divider].contains(block)
+        else { return plain }
+        let contentRange = NSRange(
+            location: paragraph.location, length: (plain as NSString).length)
+        return InlineMarkdown.serialize(storage, in: contentRange)
+    }
+
+    /// 문단의 저장된 정렬 값 ("center"/"right") — 직렬화용.
+    private func alignValue(at paragraph: NSRange) -> String? {
+        guard let storage = textStorage, paragraph.location < storage.length else { return nil }
+        return storage.attribute(.mintAlign, at: paragraph.location, effectiveRange: nil)
+            as? String
+    }
+
     /// 커서 문단에 블록을 부여하고 스타일을 다시 입힌다 (undo 등록 포함).
     func applyBlock(
         _ block: MintBlock, checked: Bool = false, marker: String? = nil,
@@ -482,7 +551,16 @@ final class BlockTextView: NSTextView {
             if registerUndo {
                 _ = shouldChangeText(in: paragraph, replacementString: nil)
             }
+            // setAttributes는 인라인 서식 키까지 지운다 — 코드·수식·구분선이
+            // 아니면 보존했다가 되살린 뒤 폰트·색을 다시 조립한다.
+            let keepInline = ![MintBlock.code, .math, .divider].contains(block)
+            let preserved = keepInline ? inlineSnapshot(in: paragraph) : []
             storage.setAttributes(attrs, range: paragraph)
+            for (range, inline) in preserved {
+                storage.addAttributes(inline, range: range)
+            }
+            decorateInline(in: paragraph)
+            applyStoredAlignment(base: attrs, in: paragraph)
             if registerUndo { didChangeText() }
         }
         // 커서가 이 문단 안에 있을 때만 typingAttributes를 덮는다.
@@ -521,9 +599,78 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let para = ns.paragraphRange(for: NSRange(location: min(caret, ns.length), length: 0))
         if para.location < storage.length {
-            typingAttributes = storage.attributes(at: para.location, effectiveRange: nil)
+            // 굵게 같은 인라인 서식이 커서 앞 글자에서 이어지도록 caret-1 기준 —
+            // 블록 속성은 문단 안에서 균일해 어디를 읽어도 같다.
+            let anchor = min(
+                max(para.location, min(caret, ns.length) - 1), storage.length - 1)
+            typingAttributes = storage.attributes(at: anchor, effectiveRange: nil)
         }
         updateTailSnapshot()
+    }
+
+    // MARK: 인라인 서식 (굵게·기울임·코드·색·정렬)
+
+    /// mint 인라인 키 런 스냅샷 — setAttributes로 지워지기 전에 보관한다.
+    private func inlineSnapshot(
+        in range: NSRange
+    ) -> [(NSRange, [NSAttributedString.Key: Any])] {
+        guard let storage = textStorage, range.length > 0 else { return [] }
+        var runs: [(NSRange, [NSAttributedString.Key: Any])] = []
+        storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
+            let kept = attrs.filter { InlineMarkdown.inlineKeys.contains($0.key) }
+            if !kept.isEmpty { runs.append((run, kept)) }
+        }
+        return runs
+    }
+
+    /// mint 인라인 키를 읽어 폰트·색을 조립한다 — 항상 블록 기본 폰트 위에서
+    /// 호출돼야 한다 (setAttributes 직후 / 로드 직후).
+    func decorateInline(in range: NSRange) {
+        guard let storage = textStorage, range.length > 0 else { return }
+        storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
+            var addition: [NSAttributedString.Key: Any] = [:]
+            let base = attrs[.font] as? NSFont ?? bodyFont
+            if attrs[.mintCode] as? Bool == true {
+                addition[.font] = NSFont.monospacedSystemFont(
+                    ofSize: base.pointSize * 0.78, weight: .regular)
+                addition[.backgroundColor] = palette.codeBg
+            } else {
+                if attrs[.mintBold] as? Bool == true {
+                    let converted = NSFontManager.shared.convert(
+                        base, toHaveTrait: .boldFontMask)
+                    if converted != base { addition[.font] = converted }
+                    // 시스템 serif(New York) 폴백은 볼드가 한글 글리프에
+                    // 적용되지 않는다 — 커버하지 못하면 스트로크로 가짜 볼드.
+                    if !converted.coveredCharacterSet.contains(
+                        UnicodeScalar(0xAC00)!) {
+                        addition[.strokeWidth] = -2.5
+                    }
+                }
+                // 기울임은 항상 obliqueness — 한글엔 이탤릭 페이스가 없어
+                // 폰트 변환으론 라틴만 기울어진다.
+                if attrs[.mintItalic] as? Bool == true {
+                    addition[.obliqueness] = 0.18
+                }
+            }
+            if let hex = attrs[.mintColor] as? String, let color = NSColor(inlineHex: hex) {
+                addition[.foregroundColor] = color
+            }
+            if !addition.isEmpty { storage.addAttributes(addition, range: run) }
+        }
+    }
+
+    /// 문단에 저장된 .mintAlign을 문단 스타일에 반영한다.
+    private func applyStoredAlignment(
+        base attrs: [NSAttributedString.Key: Any], in paragraph: NSRange
+    ) {
+        guard let storage = textStorage, paragraph.location < storage.length,
+            let align = storage.attribute(
+                .mintAlign, at: paragraph.location, effectiveRange: nil) as? String,
+            let ps = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy()
+                as? NSMutableParagraphStyle
+        else { return }
+        ps.alignment = align == "right" ? .right : .center
+        storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
     }
 
     // MARK: 스타일 (디자인 CSS와 1:1)
@@ -604,9 +751,61 @@ final class BlockTextView: NSTextView {
     override func didChangeText() {
         super.didChangeText()
         guard !isTransforming else { return }
-        if !hasMarkedText() { transformMarkerIfNeeded() }
+        if !hasMarkedText() {
+            transformMarkerIfNeeded()
+            transformInlineMarkerIfNeeded()
+        }
         // IME 조합 중에도 갱신 — 문단 위치가 밀리면 렌더 range를 다시 잡아야 한다.
         refreshMathPresentation()
+    }
+
+    /// 커서 바로 앞에서 완성된 인라인 마커(`***…***` `**…**` `*…*` `` `…` ``)를
+    /// 소비해 서식 속성으로 바꾼다 — transformMarkdown의 인라인 판.
+    private func transformInlineMarkerIfNeeded() {
+        guard let storage = textStorage else { return }
+        let sel = selectedRange()
+        guard sel.length == 0 else { return }
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: sel)
+        let info = blockInfo(in: para)
+        guard ![MintBlock.code, .math, .divider].contains(info.block) else { return }
+        let text = paragraphContent(para)
+        let nsText = text as NSString
+        let caretInPara = sel.location - para.location
+
+        for rule in InlineMarkdown.typingRules {
+            let matches = rule.pattern.matches(
+                in: text, range: NSRange(location: 0, length: nsText.length))
+            // 방금 타이핑으로 닫힌 마커만 — 커서 위치에서 끝나는 매치.
+            guard let match = matches.first(where: { $0.range.upperBound == caretInPara })
+            else { continue }
+            let inner = nsText.substring(with: match.range(at: 1))
+            let markerRange = NSRange(
+                location: para.location + match.range.location, length: match.range.length)
+            isTransforming = true
+            if shouldChangeText(in: markerRange, replacementString: inner) {
+                storage.replaceCharacters(in: markerRange, with: inner)
+                storage.addAttributes(
+                    rule.attrs,
+                    range: NSRange(
+                        location: markerRange.location, length: (inner as NSString).length))
+                didChangeText()
+            }
+            isTransforming = false
+            let newPara = (string as NSString).paragraphRange(
+                for: NSRange(location: para.location, length: 0))
+            applyBlock(
+                info.block, checked: info.checked, marker: info.marker,
+                to: newPara, registerUndo: false)
+            // 변환 직후 이어지는 타이핑은 일반 글씨 — 서식이 계속 번지지 않게.
+            var typing = styleAttributes(for: info.block, checked: info.checked)
+            typing[.mintBlock] = info.block.rawValue
+            if info.checked { typing[.mintChecked] = true }
+            if let marker = info.marker { typing[.mintMarker] = marker }
+            typingAttributes = typing
+            updateTailSnapshot()
+            return
+        }
     }
 
     private func transformMarkerIfNeeded() {
@@ -632,6 +831,10 @@ final class BlockTextView: NSTextView {
             consumeMarker(length: 3, in: para, block: .code)
         } else if text == "$$ " {
             consumeMarker(length: 3, in: para, block: .math)
+        } else if text.hasPrefix("$$"), text.hasSuffix("$$"), text.count >= 5 {
+            // "$$H_2$$"처럼 여닫는 마커까지 통째로 타이핑한 경우 — 마커를 벗겨
+            // 수식 블록으로 바꾼다 ("$$ " 두 글자+공백 방식과 동일한 결과).
+            consumeMathWrapper(in: para)
         } else if text == "---" {
             consumeDivider(in: para)
         } else if text.hasPrefix("### ") {
@@ -671,6 +874,26 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let newPara = ns.paragraphRange(for: NSRange(location: paragraph.location, length: 0))
         applyBlock(block, marker: marker, to: newPara)
+    }
+
+    /// "$$…$$" 한 줄을 마커 없이 수식 블록으로 — 내용만 남기고 블록을 부여한다.
+    private func consumeMathWrapper(in paragraph: NSRange) {
+        guard let storage = textStorage else { return }
+        let text = paragraphContent(paragraph)
+        guard text.count >= 5 else { return }
+        let inner = String(text.dropFirst(2).dropLast(2))
+        isTransforming = true
+        let contentRange = NSRange(
+            location: paragraph.location, length: (text as NSString).length)
+        if shouldChangeText(in: contentRange, replacementString: inner) {
+            storage.replaceCharacters(in: contentRange, with: inner)
+            didChangeText()
+        }
+        isTransforming = false
+        let newPara = (string as NSString).paragraphRange(
+            for: NSRange(location: paragraph.location, length: 0))
+        applyBlock(.math, to: newPara)
+        refreshMathPresentation()
     }
 
     private func consumeDivider(in paragraph: NSRange) {
@@ -785,6 +1008,9 @@ final class BlockTextView: NSTextView {
         var renders: [(range: NSRange, image: NSImage)] = []
         let ns = string as NSString
         let sel = selectedRange()
+        // 포커스가 사이드바 등 밖에 있으면 커서가 문단에 남아 있어도 렌더한다 —
+        // 수식이 문서 마지막 문단일 때 소스가 계속 보이는 문제 방지.
+        let focused = window?.firstResponder === self
         var location = 0
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
@@ -795,20 +1021,282 @@ final class BlockTextView: NSTextView {
             let contentEnd = para.location + (content as NSString).length
             // 커서/선택이 문단에 닿아 있으면 편집 모드 — 소스를 보여준다.
             let editing =
-                (sel.length == 0 && sel.location >= para.location && sel.location <= contentEnd)
-                || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0)
+                focused
+                && ((sel.length == 0 && sel.location >= para.location
+                    && sel.location <= contentEnd)
+                    || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0))
             let latex = content.trimmingCharacters(in: .whitespaces)
             guard !latex.isEmpty, !editing,
                 let image = MathRenderer.image(
                     latex: latex, color: palette.ink, fontSize: mathFontSize)
-            else { continue }
+            else {
+                // 소스 모드 — 렌더 때 키워 둔 줄 높이를 기본 스타일로 되돌린다.
+                updateMathLineHeight(nil, in: para)
+                continue
+            }
 
             renders.append((para, image))
+            // 블록 높이가 수식을 따라가게 — 분수·시그마처럼 세로로 큰 수식이
+            // 배경 박스 밖으로 넘치지 않는다.
+            updateMathLineHeight(displayHeight(of: image), in: para)
             layoutManager.addTemporaryAttribute(
                 .foregroundColor, value: NSColor.clear, forCharacterRange: para)
         }
         mathRenders = renders
         needsDisplay = true
+    }
+
+    /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 이미지 높이를 구한다.
+    private func displayHeight(of image: NSImage) -> CGFloat {
+        guard let container = textContainer, image.size.width > 0 else {
+            return image.size.height
+        }
+        let rectWidth = container.size.width - container.lineFragmentPadding * 2
+        let maxWidth = max(40, rectWidth - 32)
+        let scale = min(1, maxWidth / image.size.width)
+        return image.size.height * scale
+    }
+
+    /// 수식 문단의 줄 높이를 렌더 이미지에 맞춘다 (nil이면 기본 스타일로 복원).
+    /// 표시 전용 속성 변경 — 저장 텍스트·undo에 흔적이 없다.
+    private func updateMathLineHeight(_ imageHeight: CGFloat?, in paragraph: NSRange) {
+        guard let storage = textStorage, paragraph.length > 0,
+            paragraph.location < storage.length,
+            let ps = (styleAttributes(for: .math, checked: false)[.paragraphStyle]
+                as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+        else { return }
+        if let imageHeight {
+            // 위아래 여유 12pt — 배경 박스(-6 inset)와 시각적으로 맞는 값.
+            ps.minimumLineHeight = imageHeight + 12
+        }
+        let current =
+            storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
+            as? NSParagraphStyle
+        guard current?.minimumLineHeight != ps.minimumLineHeight else { return }
+        storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
+    }
+
+    /// 폭이 바뀌면 수식 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
+    override func setFrameSize(_ newSize: NSSize) {
+        let widthChanged = abs(frame.width - newSize.width) > 0.5
+        super.setFrameSize(newSize)
+        if widthChanged, !mathRenders.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.refreshMathPresentation() }
+        }
+    }
+
+    // MARK: 서식 툴바 (선택 위 플로팅)
+
+    private var toolbarHost: NSHostingView<SelectionToolbarView>?
+    private var toolbarShowTask: Task<Void, Never>?
+
+    /// 선택이 생기면 잠깐 안정된 뒤 툴바를 띄우고, 사라지면 감춘다.
+    func updateSelectionToolbar() {
+        toolbarShowTask?.cancel()
+        let sel = selectedRange()
+        guard sel.length > 0, !hasMarkedText() else {
+            hideSelectionToolbar()
+            return
+        }
+        // 드래그 중 깜빡임 방지 — 선택이 멈춘 뒤에만 표시한다.
+        toolbarShowTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            self?.presentSelectionToolbar()
+        }
+    }
+
+    func hideSelectionToolbar() {
+        toolbarShowTask?.cancel()
+        toolbarHost?.removeFromSuperview()
+    }
+
+    private func presentSelectionToolbar() {
+        guard let layoutManager, let textContainer else { return }
+        let sel = selectedRange()
+        guard sel.length > 0 else { return }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        rect.origin.x += textContainerOrigin.x
+        rect.origin.y += textContainerOrigin.y
+
+        let view = SelectionToolbarView(
+            theme: palette, state: currentSelectionState()
+        ) { [weak self] action in
+            self?.perform(action)
+        }
+        let host: NSHostingView<SelectionToolbarView>
+        if let existing = toolbarHost {
+            existing.rootView = view
+            host = existing
+        } else {
+            host = NSHostingView(rootView: view)
+            toolbarHost = host
+        }
+        let size = host.fittingSize
+        // 선택 위 중앙 — 문서 맨 위라 걸리면 선택 아래로 내린다 (flipped 좌표).
+        var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY - size.height - 8)
+        if origin.y < 4 { origin.y = rect.maxY + 8 }
+        origin.x = max(8, min(origin.x, bounds.width - size.width - 8))
+        host.frame = NSRect(origin: origin, size: size)
+        if host.superview !== self { addSubview(host) }
+    }
+
+    private func currentSelectionState() -> SelectionStyleState {
+        var state = SelectionStyleState()
+        guard let storage = textStorage else { return state }
+        let sel = selectedRange()
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: NSRange(location: min(sel.location, ns.length), length: 0))
+        state.block = blockInfo(in: para).block
+        guard sel.location < storage.length else { return state }
+        let attrs = storage.attributes(at: sel.location, effectiveRange: nil)
+        state.bold = attrs[.mintBold] as? Bool == true
+        state.italic = attrs[.mintItalic] as? Bool == true
+        state.code = attrs[.mintCode] as? Bool == true
+        state.align = attrs[.mintAlign] as? String
+        state.colorHex = attrs[.mintColor] as? String
+        return state
+    }
+
+    /// 툴바 액션 실행 — 끝나면 포커스를 에디터로 되돌리고 하이라이트를 갱신한다.
+    func perform(_ action: SelectionToolbarAction) {
+        switch action {
+        case .toggleBold: toggleInlineStyle(.mintBold)
+        case .toggleItalic: toggleInlineStyle(.mintItalic)
+        case .toggleCode: toggleInlineStyle(.mintCode)
+        case .color(let hex): applyInlineColor(hex)
+        case .align(let align): applyAlignment(align)
+        case .block(let block): convertSelectionBlock(to: block)
+        }
+        window?.makeFirstResponder(self)
+        presentSelectionToolbar()
+    }
+
+    /// 선택 범위의 인라인 속성 토글 — 전체가 켜져 있으면 끄고, 아니면 켠다.
+    func toggleInlineStyle(_ key: NSAttributedString.Key) {
+        guard let storage = textStorage else { return }
+        let sel = selectedRange()
+        guard sel.length > 0 else { return }
+        var allOn = true
+        storage.enumerateAttribute(key, in: sel, options: []) { value, _, stop in
+            if (value as? Bool) != true {
+                allOn = false
+                stop.pointee = true
+            }
+        }
+        guard shouldChangeText(in: sel, replacementString: nil) else { return }
+        isTransforming = true
+        if allOn {
+            storage.removeAttribute(key, range: sel)
+        } else {
+            storage.addAttribute(key, value: true, range: sel)
+            if key == .mintCode {
+                // 인라인 코드는 배타 — 굵게·기울임·색과 겹치지 않는다.
+                storage.removeAttribute(.mintBold, range: sel)
+                storage.removeAttribute(.mintItalic, range: sel)
+                storage.removeAttribute(.mintColor, range: sel)
+            }
+        }
+        redecorateParagraphs(in: sel)
+        isTransforming = false
+        didChangeText()
+    }
+
+    /// 선택 범위 글자색 적용 (nil = 기본 잉크색으로 복원).
+    func applyInlineColor(_ hex: String?) {
+        guard let storage = textStorage else { return }
+        let sel = selectedRange()
+        guard sel.length > 0 else { return }
+        guard shouldChangeText(in: sel, replacementString: nil) else { return }
+        isTransforming = true
+        if let hex {
+            storage.addAttribute(.mintColor, value: hex, range: sel)
+        } else {
+            storage.removeAttribute(.mintColor, range: sel)
+        }
+        redecorateParagraphs(in: sel)
+        isTransforming = false
+        didChangeText()
+    }
+
+    /// 선택이 걸친 문단들의 정렬 지정 (nil = 왼쪽 기본).
+    /// 저장은 .p 문단만 지원 — 다른 블록에선 화면 정렬만 바뀐다.
+    func applyAlignment(_ align: String?) {
+        guard let storage = textStorage else { return }
+        let sel = selectedRange()
+        let ns = string as NSString
+        var location = sel.location
+        repeat {
+            let para = ns.paragraphRange(
+                for: NSRange(location: min(location, ns.length), length: 0))
+            if para.length > 0, para.location < storage.length {
+                _ = shouldChangeText(in: para, replacementString: nil)
+                isTransforming = true
+                if let align {
+                    storage.addAttribute(.mintAlign, value: align, range: para)
+                } else {
+                    storage.removeAttribute(.mintAlign, range: para)
+                }
+                let info = blockInfo(in: para)
+                applyBlock(
+                    info.block, checked: info.checked, marker: info.marker,
+                    to: para, registerUndo: false)
+                isTransforming = false
+                didChangeText()
+            }
+            location = para.upperBound
+        } while location < sel.upperBound
+    }
+
+    /// 선택이 걸친 문단들을 블록으로 전환 — 이미 그 블록이면 본문으로 토글.
+    func convertSelectionBlock(to target: MintBlock) {
+        let sel = selectedRange()
+        let ns = string as NSString
+        let firstPara = ns.paragraphRange(
+            for: NSRange(location: min(sel.location, ns.length), length: 0))
+        let resolved: MintBlock = blockInfo(in: firstPara).block == target ? .p : target
+        var location = sel.location
+        repeat {
+            let para = ns.paragraphRange(
+                for: NSRange(location: min(location, ns.length), length: 0))
+            applyBlock(resolved, to: para)
+            location = para.upperBound
+        } while location < sel.upperBound
+        refreshMathPresentation()
+    }
+
+    /// 범위에 걸친 문단들을 다시 장식 (블록 기본 + 인라인 조립, undo 미등록).
+    private func redecorateParagraphs(in range: NSRange) {
+        let ns = string as NSString
+        var location = range.location
+        repeat {
+            let para = ns.paragraphRange(
+                for: NSRange(location: min(location, ns.length), length: 0))
+            let info = blockInfo(in: para)
+            applyBlock(
+                info.block, checked: info.checked, marker: info.marker,
+                to: para, registerUndo: false)
+            location = para.upperBound
+        } while location < range.upperBound
+    }
+
+    /// ⌘B / ⌘I — 선택이 있을 때만 서식 토글로 소비한다.
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+            selectedRange().length > 0 {
+            switch event.charactersIgnoringModifiers?.lowercased() {
+            case "b":
+                toggleInlineStyle(.mintBold)
+                return true
+            case "i":
+                toggleInlineStyle(.mintItalic)
+                return true
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
     }
 
     // MARK: 고스트 렌더 (M3 그대로)

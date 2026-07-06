@@ -76,6 +76,8 @@ flowchart TD
 | M2 | 추론 선검증 (`MINTBench` CLI) | 🧪 코드 완료 — 모델별 측정으로 기본 모델 확정 남음 |
 | M3 | 고스트 텍스트 자동완성 | ✅ 완료 (E2E는 실사용으로 검증 중) |
 | v3 | 블록 에디터 · 리퀴드 글래스 · 다중 저널 · 모델 스위처 | ✅ 완료 |
+| 파일시스템 v1 | 폴더(중첩 가능) · 폴더별 저널 · 사이드바 트리 (헤더는 신호등 아랫줄) | ✅ 완료 |
+| 서식 v1 | 선택 서식 툴바(제목·굵게·기울임·코드·인용·정렬·색) · 인라인 마크다운(`**` `*` `` ` ``) 왕복 | ✅ 완료 |
 | M4 | 다듬기 | 🔨 진행 중 |
 
 **M4 남은 것**
@@ -89,11 +91,13 @@ flowchart TD
 |------|------|
 | `Sources/MINT/MINTApp.swift` | `@main` 앱 + Settings 씬(⌘,) |
 | `Sources/MINTCore/ContentView.swift` | 메인 화면 · 툴바 · 모델 스위처 · 상태 바 · `GlassSwitch` |
-| `Sources/MINTCore/SidebarView.swift` | 저널 목록 (이름변경 · 삭제 확인) |
-| `Sources/MINTCore/Editor/BlockTextView.swift` | 블록 에디터 + 고스트 렌더 + Tab/→/Esc |
+| `Sources/MINTCore/SidebarView.swift` | 폴더 트리 + 저널 목록 (이름변경 · 삭제 확인) |
+| `Sources/MINTCore/Editor/BlockTextView.swift` | 블록 에디터 + 고스트 렌더 + Tab/→/Esc + 서식 액션 |
+| `Sources/MINTCore/Editor/InlineStyle.swift` | 인라인 마크다운(굵게·기울임·코드·색·정렬) 파싱/직렬화 |
+| `Sources/MINTCore/Editor/SelectionToolbar.swift` | 드래그 선택 위 플로팅 서식 툴바 |
 | `Sources/MINTCore/Editor/CompletionController.swift` | 디바운스 · 게이트 · 수락/거부 · 취소 |
 | `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 로드 + 취소 가능 생성 (actor) |
-| `Sources/MINTCore/Storage/EntryStore.swift` | 다중 저널 JSON 저장 (디바운스 autosave) |
+| `Sources/MINTCore/Storage/EntryStore.swift` | 다중 저널 + 폴더 트리 JSON 저장 (디바운스 autosave) |
 | `Sources/MINTCore/Settings.swift` | `CompletionSettings` · 모델 프리셋 |
 | `Sources/MINTCore/Theme.swift` | 색·폰트 토큰 (라이트/다크) |
 | `Sources/MINTBench/main.swift` | 추론 벤치 CLI |
