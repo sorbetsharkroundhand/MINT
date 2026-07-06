@@ -1,6 +1,7 @@
 import AppKit
 import SwiftMath
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Notion식 블록 에디터 (에디터 v3 — 디자인 완전 이식).
 ///
@@ -9,7 +10,7 @@ import SwiftUI
 ///   문단에 블록 속성(`.mintBlock`)을 부여한다. 화면에 마커는 남지 않는다.
 /// - `serialize`/`buildDOM` → 저장은 항상 순수 마크다운. 로드 시 마커를 파싱해
 ///   블록으로 복원한다. 파일 포맷은 이전과 완전 호환.
-/// - 블록 장식(불릿·번호·체크박스·인용 바·코드/수식 배경·구분선)은
+/// - 블록 장식(불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·이미지)은
 ///   `MintLayoutManager`가 그린다 — text storage 밖이라 undo·IME에 무해.
 /// - 커서 효과(펄스 blink·이동 리플·커서 줄 하이라이트)는 뷰의 `draw`/
 ///   `drawInsertionPoint`에서 그린다 (에디터 v3.1 — 창 글로우 대체).
@@ -61,6 +62,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         // ⌘F 문서 내 검색 — 스크롤 뷰 상단의 표준 find bar.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
+        // 이미지 파일 드롭 수락 — NSTextView 기본 타입에 이미지 타입을 더한다.
+        textView.registerForDraggedTypes(
+            textView.registeredDraggedTypes + [.fileURL, .png, .tiff])
 
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -137,7 +141,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             // 커서 줄 하이라이트를 새 커서 위치로 옮긴다 (이전 줄 무효화 포함).
             textView.refreshActiveLineHighlight()
             // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
-            textView.refreshMathPresentation()
+            textView.refreshRenderedBlocks()
             // 드래그 선택 위 서식 툴바 표시/숨김.
             textView.updateSelectionToolbar()
             guard let controller = parent.controller else { return }
@@ -193,7 +197,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             // 코드·수식·구분선 블록에서는 제안하지 않는다 (디자인 v3 게이트).
             let paragraph = storage.paragraphRange(for: NSRange(location: caret, length: 0))
             let block = textView.blockInfo(in: paragraph).block
-            let allowed = ![.code, .math, .divider].contains(block)
+            let allowed = ![.code, .math, .divider, .image].contains(block)
 
             controller.noteEdit(
                 prefix: Self.prefix(
@@ -222,7 +226,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
 /// 문단 블록 타입 (디자인의 data-md와 1:1).
 enum MintBlock: String {
-    case p, h1, h2, h3, quote, bullet, number, todo, code, math, divider
+    case p, h1, h2, h3, quote, bullet, number, todo, code, math, divider, image
 }
 
 extension NSAttributedString.Key {
@@ -274,8 +278,11 @@ final class BlockTextView: NSTextView {
     let mathFontSize: CGFloat = 20
 
     /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
-    /// `refreshMathPresentation()`이 갱신하고 레이아웃 매니저가 그린다.
+    /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
     nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
+
+    /// 현재 렌더 모드인 이미지 문단들 (문단 range + 로드된 이미지). 수식과 동일 방식.
+    nonisolated(unsafe) private(set) var imageRenders: [(range: NSRange, image: NSImage)] = []
 
     // MARK: 커서 효과 (에디터 v3.1 — 글로우 대체)
 
@@ -372,7 +379,7 @@ final class BlockTextView: NSTextView {
         if ok {
             DispatchQueue.main.async { [weak self] in
                 // 포커스가 돌아오면 커서 문단의 수식을 소스 모드로 되돌린다.
-                self?.refreshMathPresentation()
+                self?.refreshRenderedBlocks()
                 self?.refreshActiveLineHighlight()
             }
         }
@@ -385,7 +392,7 @@ final class BlockTextView: NSTextView {
             // 포커스를 잃으면 커서가 수식 문단에 남아 있어도 렌더로 전환하고,
             // 커서 줄 하이라이트도 지운다.
             DispatchQueue.main.async { [weak self] in
-                self?.refreshMathPresentation()
+                self?.refreshRenderedBlocks()
                 self?.refreshActiveLineHighlight()
             }
         }
@@ -443,6 +450,11 @@ final class BlockTextView: NSTextView {
                 block = .divider; line = ""
             } else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
                 block = .math; line = String(line.dropFirst(2).dropLast(2))
+            } else if line.range(
+                of: #"^!\[[^\]]*\]\([^)\s]+\)$"#, options: .regularExpression) != nil {
+                // 한 줄 전체가 이미지 마크다운 — 원문(![](src))을 소스로 보관하고
+                // 커서가 밖이면 렌더 이미지로 덮어 그린다 (수식과 같은 방식).
+                block = .image
             }
             var attrs = styleAttributes(for: block, checked: checked)
             attrs[.mintBlock] = block.rawValue
@@ -458,8 +470,8 @@ final class BlockTextView: NSTextView {
             }
             let suffix = index < lines.count - 1 ? "\n" : ""
             switch block {
-            case .code, .math, .divider:
-                // 코드·수식엔 인라인 서식이 없다 — 원문 그대로.
+            case .code, .math, .divider, .image:
+                // 코드·수식·이미지엔 인라인 서식이 없다 — 원문 그대로.
                 result.append(NSAttributedString(string: line + suffix, attributes: attrs))
             default:
                 for segment in InlineMarkdown.parse(line) {
@@ -476,10 +488,10 @@ final class BlockTextView: NSTextView {
         syncTypingAttributes()
         isTransforming = false
         hideSelectionToolbar()
-        // 로드 직후엔 커서가 인위적으로 문서 끝에 놓인다 — 마지막 문단이 수식이어도
+        // 로드 직후엔 커서가 인위적으로 문서 끝에 놓인다 — 마지막 문단이 수식·이미지여도
         // "편집 중"으로 오판해 렌더·줄 높이를 초기화하지 않게 강제 렌더한다.
         // 사용자가 실제로 커서를 움직이면 평소 규칙(커서 문단 = 소스)으로 돌아온다.
-        refreshMathPresentation(forceRender: true)
+        refreshRenderedBlocks(forceRender: true)
         needsDisplay = true
     }
 
@@ -516,6 +528,7 @@ final class BlockTextView: NSTextView {
                 case .todo: out.append("- [" + (info.checked ? "x" : " ") + "] " + text)
                 case .math: out.append("$$" + text + "$$")
                 case .divider: out.append("---")
+                case .image: out.append(text)  // text = 원문 ![](src)
                 default:
                     if let align = alignValue(at: para) {
                         out.append("<p align=\"\(align)\">\(text)</p>")
@@ -570,7 +583,8 @@ final class BlockTextView: NSTextView {
     /// 서식을 마크다운 마커로 복원한다.
     private func serializedContent(of paragraph: NSRange, block: MintBlock) -> String {
         let plain = paragraphContent(paragraph)
-        guard let storage = textStorage, ![MintBlock.code, .math, .divider].contains(block)
+        guard let storage = textStorage,
+            ![MintBlock.code, .math, .divider, .image].contains(block)
         else { return plain }
         let contentRange = NSRange(
             location: paragraph.location, length: (plain as NSString).length)
@@ -600,9 +614,9 @@ final class BlockTextView: NSTextView {
             if registerUndo {
                 _ = shouldChangeText(in: paragraph, replacementString: nil)
             }
-            // setAttributes는 인라인 서식 키까지 지운다 — 코드·수식·구분선이
+            // setAttributes는 인라인 서식 키까지 지운다 — 코드·수식·구분선·이미지가
             // 아니면 보존했다가 되살린 뒤 폰트·색을 다시 조립한다.
-            let keepInline = ![MintBlock.code, .math, .divider].contains(block)
+            let keepInline = ![MintBlock.code, .math, .divider, .image].contains(block)
             let preserved = keepInline ? inlineSnapshot(in: paragraph) : []
             storage.setAttributes(attrs, range: paragraph)
             for (range, inline) in preserved {
@@ -636,7 +650,7 @@ final class BlockTextView: NSTextView {
         }
         syncTypingAttributes()
         // 테마가 바뀌면 잉크 색으로 수식을 다시 렌더한다.
-        refreshMathPresentation()
+        refreshRenderedBlocks()
         needsDisplay = true
     }
 
@@ -787,6 +801,13 @@ final class BlockTextView: NSTextView {
         case .divider:
             ps.minimumLineHeight = 28
             ps.maximumLineHeight = 28
+        case .image:
+            // 소스(![](…)) 편집 모드에서 가운데 정렬 — 렌더 이미지도 중앙에 온다.
+            color = t.ink3
+            font = MintFonts.ui(13)
+            ps.alignment = .center
+            ps.paragraphSpacingBefore = 8
+            ps.paragraphSpacing = 8
         }
 
         var attrs: [NSAttributedString.Key: Any] = [
@@ -811,7 +832,7 @@ final class BlockTextView: NSTextView {
             transformInlineMarkerIfNeeded()
         }
         // IME 조합 중에도 갱신 — 문단 위치가 밀리면 렌더 range를 다시 잡아야 한다.
-        refreshMathPresentation()
+        refreshRenderedBlocks()
     }
 
     /// 커서 바로 앞에서 완성된 인라인 마커(`***…***` `**…**` `*…*` `` `…` ``)를
@@ -823,7 +844,7 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let para = ns.paragraphRange(for: sel)
         let info = blockInfo(in: para)
-        guard ![MintBlock.code, .math, .divider].contains(info.block) else { return }
+        guard ![MintBlock.code, .math, .divider, .image].contains(info.block) else { return }
         let text = paragraphContent(para)
         let nsText = text as NSString
         let caretInPara = sel.location - para.location
@@ -948,7 +969,7 @@ final class BlockTextView: NSTextView {
         let newPara = (string as NSString).paragraphRange(
             for: NSRange(location: paragraph.location, length: 0))
         applyBlock(.math, to: newPara)
-        refreshMathPresentation()
+        refreshRenderedBlocks()
     }
 
     private func consumeDivider(in paragraph: NSRange) {
@@ -994,7 +1015,7 @@ final class BlockTextView: NSTextView {
         let caretPara = (string as NSString).paragraphRange(
             for: NSRange(location: selectedRange().location, length: 0))
         switch info.block {
-        case .h1, .h2, .h3, .quote, .math, .divider:
+        case .h1, .h2, .h3, .quote, .math, .divider, .image:
             applyBlock(.p, to: caretPara)
         case .todo:
             applyBlock(.todo, checked: false, to: caretPara)
@@ -1050,27 +1071,162 @@ final class BlockTextView: NSTextView {
         super.mouseDown(with: event)
     }
 
-    // MARK: 수식 LaTeX 렌더
+    // MARK: 이미지 삽입 (붙여넣기 · 드롭 · 파일 선택)
 
-    /// 수식 문단 표시 갱신 — 커서가 밖에 있고 LaTeX가 파싱되면 소스 글자를
+    /// 클립보드에 이미지가 있으면 이미지 블록으로 붙여넣고, 아니면 기본 붙여넣기.
+    override func paste(_ sender: Any?) {
+        if insertImages(from: NSPasteboard.general) { return }
+        super.paste(sender)
+    }
+
+    /// 툴바 버튼용 — 리스폰더 체인(NSApp.sendAction)으로 도달한다.
+    @objc func insertImageFromMenu(_ sender: Any?) {
+        presentImagePicker()
+    }
+
+    /// ⇧⌘I — 파일 선택 패널로 이미지를 고른다.
+    func presentImagePicker() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes = MintImageStore.imageExtensions.compactMap {
+            UTType(filenameExtension: $0)
+        }
+        guard panel.runModal() == .OK else { return }
+        for url in panel.urls { insertImageFile(url) }
+    }
+
+    /// 파일 URL 하나를 읽어 images 폴더에 복사한 뒤 이미지 블록으로 삽입한다.
+    private func insertImageFile(_ url: URL) {
+        guard let data = try? Data(contentsOf: url),
+            let relative = MintImageStore.save(data, ext: url.pathExtension)
+        else { return }
+        insertImageBlock(relativePath: relative)
+    }
+
+    /// 페이스트보드에서 이미지(파일 URL 또는 비트맵)를 찾아 삽입한다. 하나라도 넣었으면 true.
+    @discardableResult
+    private func insertImages(from pasteboard: NSPasteboard) -> Bool {
+        // 1) 이미지 파일 URL — 원본 확장자를 유지해 복사한다.
+        if let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+            let images = urls.filter {
+                MintImageStore.imageExtensions.contains($0.pathExtension.lowercased())
+            }
+            if !images.isEmpty {
+                images.forEach(insertImageFile)
+                return true
+            }
+        }
+        // 2) 비트맵 데이터(스크린샷·복사한 이미지) — PNG로 정규화해 저장한다.
+        if let data = pasteboard.data(forType: .png),
+            let relative = MintImageStore.save(data, ext: "png") {
+            insertImageBlock(relativePath: relative)
+            return true
+        }
+        if let tiff = pasteboard.data(forType: .tiff),
+            let rep = NSBitmapImageRep(data: tiff),
+            let png = rep.representation(using: .png, properties: [:]),
+            let relative = MintImageStore.save(png, ext: "png") {
+            insertImageBlock(relativePath: relative)
+            return true
+        }
+        return false
+    }
+
+    /// 페이스트보드에 삽입 가능한 이미지가 있는지 (드래그 수락 판정용).
+    private func pasteboardHasImage(_ pasteboard: NSPasteboard) -> Bool {
+        if let urls = pasteboard.readObjects(
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+            urls.contains(where: {
+                MintImageStore.imageExtensions.contains($0.pathExtension.lowercased())
+            }) {
+            return true
+        }
+        return pasteboard.canReadItem(withDataConformingToTypes: [
+            NSPasteboard.PasteboardType.png.rawValue,
+            NSPasteboard.PasteboardType.tiff.rawValue,
+        ])
+    }
+
+    /// `![](상대경로)` 이미지 블록을 커서 위치에 새 문단으로 삽입한다 —
+    /// 앞이 비어 있지 않으면 줄을 나누고, 뒤에는 일반 문단을 만들어 커서를 옮긴다
+    /// (`consumeDivider`와 같은 흐름).
+    func insertImageBlock(relativePath: String) {
+        let markdown = "![](\(relativePath))"
+        let ns = string as NSString
+        let sel = selectedRange()
+        let para = ns.paragraphRange(for: sel)
+        let onEmptyLine = paragraphContent(para).isEmpty
+        let prefix = onEmptyLine && sel.location == para.location ? "" : "\n"
+        insertText(prefix + markdown + "\n", replacementRange: sel)
+
+        // 방금 삽입한 이미지 문단(커서 바로 앞 줄)을 찾아 블록을 지정한다.
+        let caret = selectedRange().location
+        let imagePara = (string as NSString).paragraphRange(
+            for: NSRange(location: max(0, caret - 1), length: 0))
+        applyBlock(.image, to: imagePara)
+        // 커서가 놓인 새 문단은 일반 문단으로.
+        let caretPara = (string as NSString).paragraphRange(
+            for: NSRange(location: selectedRange().location, length: 0))
+        applyBlock(.p, to: caretPara)
+        // 커서는 이미지 다음 문단에 있으므로 이미지가 곧바로 렌더된다.
+        refreshRenderedBlocks()
+    }
+
+    // MARK: 드래그 드롭 (이미지 파일)
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        pasteboardHasImage(sender.draggingPasteboard)
+            ? .copy : super.draggingEntered(sender)
+    }
+
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        pasteboardHasImage(sender.draggingPasteboard)
+            ? .copy : super.draggingUpdated(sender)
+    }
+
+    override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        pasteboardHasImage(sender.draggingPasteboard)
+            ? true : super.prepareForDragOperation(sender)
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        guard pasteboardHasImage(sender.draggingPasteboard) else {
+            return super.performDragOperation(sender)
+        }
+        // 드롭 지점으로 커서를 옮긴 뒤 그 자리에 삽입한다.
+        let point = convert(sender.draggingLocation, from: nil)
+        let index = characterIndexForInsertion(at: point)
+        if index != NSNotFound {
+            setSelectedRange(NSRange(location: min(index, (string as NSString).length), length: 0))
+        }
+        return insertImages(from: sender.draggingPasteboard)
+    }
+
+    // MARK: 수식·이미지 렌더
+
+    /// 수식·이미지 문단 표시 갱신 — 커서가 밖에 있고 소스가 렌더되면 소스 글자를
     /// 투명 처리(temporary attribute — storage·undo·저장에 무해)하고, 레이아웃
-    /// 매니저가 그 자리에 렌더된 수식을 그린다. 커서가 들어오면 소스로 돌아온다.
-    func refreshMathPresentation(forceRender: Bool = false) {
+    /// 매니저가 그 자리에 렌더 결과를 그린다. 커서가 들어오면 소스로 돌아온다.
+    func refreshRenderedBlocks(forceRender: Bool = false) {
         guard let layoutManager, let storage = textStorage else { return }
         layoutManager.removeTemporaryAttribute(
             .foregroundColor,
             forCharacterRange: NSRange(location: 0, length: storage.length))
-        var renders: [(range: NSRange, image: NSImage)] = []
+        var maths: [(range: NSRange, image: NSImage)] = []
+        var images: [(range: NSRange, image: NSImage)] = []
         let ns = string as NSString
         let sel = selectedRange()
         // 포커스가 사이드바 등 밖에 있으면 커서가 문단에 남아 있어도 렌더한다 —
-        // 수식이 문서 마지막 문단일 때 소스가 계속 보이는 문제 방지.
+        // 수식·이미지가 문서 마지막 문단일 때 소스가 계속 보이는 문제 방지.
         let focused = window?.firstResponder === self
         var location = 0
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             defer { location = para.upperBound }
-            guard blockInfo(in: para).block == .math else { continue }
+            let block = blockInfo(in: para).block
+            guard block == .math || block == .image else { continue }
 
             let content = paragraphContent(para)
             let contentEnd = para.location + (content as NSString).length
@@ -1080,28 +1236,55 @@ final class BlockTextView: NSTextView {
                 && ((sel.length == 0 && sel.location >= para.location
                     && sel.location <= contentEnd)
                     || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0))
-            let latex = content.trimmingCharacters(in: .whitespaces)
-            guard !latex.isEmpty, !editing,
-                let image = MathRenderer.image(
-                    latex: latex, color: palette.ink, fontSize: mathFontSize)
-            else {
+            let source = content.trimmingCharacters(in: .whitespaces)
+
+            let rendered: NSImage?
+            switch block {
+            case .math:
+                rendered = source.isEmpty ? nil : MathRenderer.image(
+                    latex: source, color: palette.ink, fontSize: mathFontSize)
+            case .image:
+                rendered = Self.imageSource(from: source)
+                    .flatMap { MintImageStore.image(for: $0) }
+            default:
+                rendered = nil
+            }
+
+            guard let image = rendered, !editing else {
                 // 소스 모드 — 렌더 때 키워 둔 줄 높이를 기본 스타일로 되돌린다.
-                updateMathLineHeight(nil, in: para)
+                updateRenderedLineHeight(nil, block: block, in: para)
                 continue
             }
 
-            renders.append((para, image))
-            // 블록 높이가 수식을 따라가게 — 분수·시그마처럼 세로로 큰 수식이
-            // 배경 박스 밖으로 넘치지 않는다.
-            updateMathLineHeight(displayHeight(of: image), in: para)
+            if block == .math {
+                maths.append((para, image))
+                updateRenderedLineHeight(displayHeight(of: image), block: block, in: para)
+            } else {
+                images.append((para, image))
+                updateRenderedLineHeight(
+                    imageDisplaySize(image).height, block: block, in: para)
+            }
             layoutManager.addTemporaryAttribute(
                 .foregroundColor, value: NSColor.clear, forCharacterRange: para)
         }
-        mathRenders = renders
+        mathRenders = maths
+        imageRenders = images
         needsDisplay = true
     }
 
-    /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 이미지 높이를 구한다.
+    /// `![alt](src)` 한 줄에서 src(상대경로)만 뽑는다. 형식이 아니면 nil.
+    static func imageSource(from line: String) -> String? {
+        guard let match = imageLinePattern.firstMatch(
+            in: line, range: NSRange(location: 0, length: (line as NSString).length))
+        else { return nil }
+        let src = (line as NSString).substring(with: match.range(at: 1))
+        return src.isEmpty ? nil : src
+    }
+
+    private static let imageLinePattern = try! NSRegularExpression(
+        pattern: #"^!\[[^\]]*\]\(([^)\s]+)\)$"#)
+
+    /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 수식 높이를 구한다.
     private func displayHeight(of image: NSImage) -> CGFloat {
         guard let container = textContainer, image.size.width > 0 else {
             return image.size.height
@@ -1112,17 +1295,32 @@ final class BlockTextView: NSTextView {
         return image.size.height * scale
     }
 
-    /// 수식 문단의 줄 높이를 렌더 이미지에 맞춘다 (nil이면 기본 스타일로 복원).
+    /// 이미지가 실제로 그려질 크기 — 컬럼 폭에 맞추고 세로는 480pt로 제한한다.
+    /// (레이아웃 매니저 `drawImage`와 같은 규칙 — 줄 높이와 그림이 어긋나지 않게.)
+    func imageDisplaySize(_ image: NSImage) -> NSSize {
+        guard image.size.width > 0, image.size.height > 0 else { return image.size }
+        let rectWidth =
+            (textContainer.map { $0.size.width - $0.lineFragmentPadding * 2 })
+            ?? bounds.width
+        let maxWidth = max(80, rectWidth - 16)
+        let maxHeight: CGFloat = 480
+        let scale = min(1, min(maxWidth / image.size.width, maxHeight / image.size.height))
+        return NSSize(width: image.size.width * scale, height: image.size.height * scale)
+    }
+
+    /// 수식·이미지 문단의 줄 높이를 렌더 크기에 맞춘다 (nil이면 기본 스타일로 복원).
     /// 표시 전용 속성 변경 — 저장 텍스트·undo에 흔적이 없다.
-    private func updateMathLineHeight(_ imageHeight: CGFloat?, in paragraph: NSRange) {
+    private func updateRenderedLineHeight(
+        _ height: CGFloat?, block: MintBlock, in paragraph: NSRange
+    ) {
         guard let storage = textStorage, paragraph.length > 0,
             paragraph.location < storage.length,
-            let ps = (styleAttributes(for: .math, checked: false)[.paragraphStyle]
+            let ps = (styleAttributes(for: block, checked: false)[.paragraphStyle]
                 as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
         else { return }
-        if let imageHeight {
+        if let height {
             // 위아래 여유 12pt — 배경 박스(-6 inset)와 시각적으로 맞는 값.
-            ps.minimumLineHeight = imageHeight + 12
+            ps.minimumLineHeight = height + 12
         }
         let current =
             storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
@@ -1131,12 +1329,12 @@ final class BlockTextView: NSTextView {
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
     }
 
-    /// 폭이 바뀌면 수식 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
+    /// 폭이 바뀌면 수식·이미지 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged, !mathRenders.isEmpty {
-            DispatchQueue.main.async { [weak self] in self?.refreshMathPresentation() }
+        if widthChanged, !mathRenders.isEmpty || !imageRenders.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.refreshRenderedBlocks() }
         }
     }
 
@@ -1346,7 +1544,7 @@ final class BlockTextView: NSTextView {
             applyBlock(resolved, to: para)
             location = para.upperBound
         } while location < sel.upperBound
-        refreshMathPresentation()
+        refreshRenderedBlocks()
     }
 
     /// 범위에 걸친 문단들을 다시 장식 (블록 기본 + 인라인 조립, undo 미등록).
@@ -1385,9 +1583,17 @@ final class BlockTextView: NSTextView {
             default:
                 break
             }
-        } else if flags == [.command, .shift], key == "g" {
-            performFind(.previousMatch)
-            return true
+        } else if flags == [.command, .shift] {
+            switch key {
+            case "g":
+                performFind(.previousMatch)
+                return true
+            case "i":
+                presentImagePicker()
+                return true
+            default:
+                break
+            }
         }
         return super.performKeyEquivalent(with: event)
     }
@@ -1510,7 +1716,7 @@ final class BlockTextView: NSTextView {
 
 // MARK: - 블록 장식 레이아웃 매니저
 
-/// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선을 그린다.
+/// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·이미지를 그린다.
 /// 전부 text storage 밖 — 문서·undo·IME에 흔적이 없다.
 final class MintLayoutManager: NSLayoutManager {
 
@@ -1624,6 +1830,20 @@ final class MintLayoutManager: NSLayoutManager {
                         ])
                     tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
                 }
+            case .image:
+                if let render = view.imageRenders.first(
+                    where: { $0.range.location == para.location }) {
+                    drawImage(render.image, in: rect)
+                } else {
+                    // 편집 중이거나 파일을 못 읽음 — "이미지" 태그만.
+                    let tag = NSAttributedString(
+                        string: "이미지",
+                        attributes: [
+                            .font: MintFonts.ui(10), .foregroundColor: theme.ink3,
+                            .kern: 0.6,
+                        ])
+                    tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
+                }
             default:
                 break
             }
@@ -1706,6 +1926,23 @@ final class MintLayoutManager: NSLayoutManager {
             let scale = maxWidth / size.width
             size = NSSize(width: size.width * scale, height: size.height * scale)
         }
+        let target = NSRect(
+            x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
+            width: size.width, height: size.height)
+        image.draw(
+            in: target, from: .zero, operation: .sourceOver, fraction: 1,
+            respectFlipped: true, hints: nil)
+    }
+
+    /// 로드된 이미지를 문단 rect 안에 종횡비 유지로 맞춰 중앙에 그린다
+    /// (뷰의 `imageDisplaySize`와 같은 규칙 — 폭·높이 480pt 상한).
+    private func drawImage(_ image: NSImage, in rect: NSRect) {
+        var size = image.size
+        guard size.width > 0, size.height > 0 else { return }
+        // 줄 높이(=display 높이+여유) 안쪽에 살짝 여백을 두고 맞춘다.
+        let box = rect.insetBy(dx: 8, dy: 6)
+        let scale = min(box.width / size.width, box.height / size.height, 1)
+        size = NSSize(width: size.width * scale, height: size.height * scale)
         let target = NSRect(
             x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
             width: size.width, height: size.height)

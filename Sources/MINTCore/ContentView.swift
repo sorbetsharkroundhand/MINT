@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// MINT 에디터 v3 메인 화면 — 디자인 "MINT Editor v3.dc.html" 완전 이식.
@@ -135,6 +136,7 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @Environment(\.colorScheme) private var colorScheme
     @State private var sidebarButtonHovered = false
+    @State private var imageButtonHovered = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -143,12 +145,35 @@ struct EditorToolbar: View {
                 .font(MintFonts.uiFont(13.5, .semibold))
                 .foregroundStyle(theme.inkC)
             Spacer()
+            imageButton
             ModelChip(completion: completion, settings: settings, theme: theme)
             themeSwitch
         }
         .padding(.horizontal, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
+    }
+
+    /// 이미지 삽입 — 리스폰더 체인으로 에디터(BlockTextView)에 파일 선택을 요청한다.
+    /// 붙여넣기(⌘V)·드래그 드롭·⇧⌘I와 같은 삽입 경로를 버튼으로도 노출한다.
+    private var imageButton: some View {
+        Button {
+            NSApp.sendAction(
+                #selector(BlockTextView.insertImageFromMenu(_:)), to: nil, from: nil)
+        } label: {
+            Image(systemName: "photo")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.ink2C)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(imageButtonHovered ? theme.hoverC : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { imageButtonHovered = $0 }
+        .help("이미지 삽입 (⇧⌘I · 붙여넣기 · 드래그)")
     }
 
     /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
