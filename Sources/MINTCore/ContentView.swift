@@ -148,6 +148,8 @@ struct EditorToolbar: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var sidebarButtonHovered = false
     @State private var imageButtonHovered = false
+    @State private var helpButtonHovered = false
+    @State private var helpOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -156,6 +158,7 @@ struct EditorToolbar: View {
                 .font(MintFonts.uiFont(13.5, .semibold))
                 .foregroundStyle(theme.inkC)
             Spacer()
+            helpButton
             imageButton
             ModelChip(completion: completion, settings: settings, theme: theme)
             themeSwitch
@@ -166,6 +169,30 @@ struct EditorToolbar: View {
         .padding(.trailing, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
+    }
+
+    /// 마크다운 서식 도움말 — 블록·인라인 단축 문법을 발견할 수 있는 유일한 창구.
+    /// (예전엔 "# " 같은 변환을 아무도 알 수 없었다.)
+    private var helpButton: some View {
+        Button {
+            helpOpen.toggle()
+        } label: {
+            Image(systemName: "questionmark.circle")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.ink2C)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(helpButtonHovered ? theme.hoverC : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { helpButtonHovered = $0 }
+        .help("마크다운 서식 도움말")
+        .popover(isPresented: $helpOpen, arrowEdge: .bottom) {
+            MarkdownCheatSheet(theme: theme)
+        }
     }
 
     /// 이미지 삽입 — 리스폰더 체인으로 에디터(BlockTextView)에 파일 선택을 요청한다.
@@ -550,6 +577,80 @@ struct PulsingDots: View {
             }
         }
         .onAppear { pulsing = true }
+    }
+}
+
+// MARK: - 마크다운 치트시트
+
+/// 도움말 버튼 팝오버 — 줄 맨 앞/인라인 단축 문법을 한눈에.
+struct MarkdownCheatSheet: View {
+    let theme: MintTheme
+
+    private struct Item: Identifiable {
+        let id = UUID()
+        let syntax: String
+        let label: String
+    }
+
+    private static let blocks: [Item] = [
+        Item(syntax: "# ", label: "제목 1"),
+        Item(syntax: "## ", label: "제목 2"),
+        Item(syntax: "### ", label: "제목 3"),
+        Item(syntax: "- ", label: "글머리 목록"),
+        Item(syntax: "1. ", label: "번호 목록"),
+        Item(syntax: "[ ] ", label: "체크리스트"),
+        Item(syntax: "> ", label: "인용"),
+        Item(syntax: "```", label: "코드 블록"),
+        Item(syntax: "$$ ", label: "수식 (LaTeX)"),
+        Item(syntax: "---", label: "구분선"),
+    ]
+
+    private static let inlines: [Item] = [
+        Item(syntax: "**굵게**", label: "굵게"),
+        Item(syntax: "*기울임*", label: "기울임"),
+        Item(syntax: "`코드`", label: "인라인 코드"),
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionTitle("줄 맨 앞에서 입력")
+            ForEach(Self.blocks) { row($0) }
+            theme.sepC.frame(height: 1).padding(.vertical, 7)
+            sectionTitle("인라인")
+            ForEach(Self.inlines) { row($0) }
+            theme.sepC.frame(height: 1).padding(.vertical, 7)
+            Text("서식 메뉴(⌘⌥1~3, ⌘B/⌘I 등)로도 적용할 수 있어요.")
+                .font(MintFonts.uiFont(11))
+                .foregroundStyle(theme.ink3C)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(16)
+        .frame(width: 264)
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text)
+            .font(MintFonts.monoUI(10))
+            .kerning(0.6)
+            .textCase(.uppercase)
+            .foregroundStyle(theme.ink3C)
+            .padding(.bottom, 6)
+    }
+
+    private func row(_ item: Item) -> some View {
+        HStack(spacing: 10) {
+            Text(item.syntax)
+                .font(MintFonts.monoUI(11.5, .semibold))
+                .foregroundStyle(theme.inkC)
+                .padding(.vertical, 2)
+                .padding(.horizontal, 7)
+                .background(RoundedRectangle(cornerRadius: 5).fill(theme.chipC))
+            Spacer(minLength: 8)
+            Text(item.label)
+                .font(MintFonts.uiFont(12))
+                .foregroundStyle(theme.ink2C)
+        }
+        .padding(.vertical, 3)
     }
 }
 
