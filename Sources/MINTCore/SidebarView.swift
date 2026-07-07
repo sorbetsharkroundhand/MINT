@@ -64,6 +64,10 @@ struct SidebarView: View {
             // ⌘⇧F — 검색 필드로 포커스.
             searchFieldFocused = true
         }
+        .onChange(of: store.renameRequests) { _, _ in
+            // 메뉴 "저널 이름 바꾸기" — 현재 저널의 인라인 편집을 시작한다.
+            if let entry = store.activeEntry { startRename(entry) }
+        }
         .alert(
             "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
             isPresented: Binding(
@@ -424,7 +428,24 @@ struct SidebarView: View {
         .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(entry) })
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
+            moveMenu(for: entry)
             Button("삭제", role: .destructive) { requestDelete(entry) }
+        }
+    }
+
+    /// 저널을 다른 폴더/루트로 옮기는 문맥 메뉴 — 이미 만든 글도 정리할 수 있게 (M3).
+    @ViewBuilder
+    private func moveMenu(for entry: JournalEntry) -> some View {
+        Menu("이동") {
+            Button("루트로 이동") { store.move(entry.id, toFolder: nil) }
+                .disabled(entry.folderID == nil)
+            if !store.folders.isEmpty {
+                Divider()
+                ForEach(store.folders) { folder in
+                    Button(folder.name) { store.move(entry.id, toFolder: folder.id) }
+                        .disabled(entry.folderID == folder.id)
+                }
+            }
         }
     }
 

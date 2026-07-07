@@ -274,6 +274,25 @@ public final class EntryStore: ObservableObject {
         saveNow()
     }
 
+    /// 저널을 다른 폴더(또는 루트=nil)로 옮긴다 — 이미 만든 글도 정리할 수 있게.
+    public func move(_ id: UUID, toFolder folderID: UUID?) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            entries[index].folderID != folderID
+        else { return }
+        entries[index].folderID = folderID
+        // 옮긴 저널이 접힌 폴더에 숨지 않게 대상 폴더를 펼친다.
+        if let folderID { expandedFolderIDs.insert(folderID) }
+        saveNow()
+    }
+
+    /// 메뉴에서 "이름 바꾸기"를 눌렀을 때 사이드바가 현재 저널의 인라인 편집을
+    /// 시작하도록 하는 요청 카운터.
+    @Published public private(set) var renameRequests = 0
+
+    public func requestRename() {
+        renameRequests += 1
+    }
+
     // MARK: - 폴더 변경
 
     @discardableResult
