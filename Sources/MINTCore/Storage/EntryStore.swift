@@ -81,6 +81,10 @@ public final class EntryStore: ObservableObject {
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
 
+    /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
+    /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
+    public nonisolated(unsafe) static weak var current: EntryStore?
+
     private struct Snapshot: Codable {
         var entries: [JournalEntry]
         var activeID: UUID?
@@ -105,6 +109,7 @@ public final class EntryStore: ObservableObject {
         self.activeID = loaded.activeID.flatMap { id in
             entries.contains(where: { $0.id == id }) ? id : nil
         } ?? entries[0].id
+        Self.current = self
     }
 
     /// `~/Documents/MINT/` 경로. 디렉터리가 없으면 만든다.
@@ -326,6 +331,14 @@ public final class EntryStore: ObservableObject {
 
     private func saveNow() {
         saveTask?.cancel()
+        Self.write(currentSnapshot, to: fileURL)
+    }
+
+    /// 대기 중인 디바운스 저장을 즉시 디스크에 쓴다 — 앱 종료·백그라운드 전환 직전에
+    /// 호출해, 입력 직후 ⌘Q로 마지막 문장을 잃는 일을 막는다 (원자적 쓰기라 반복 호출도 안전).
+    public func flush() {
+        saveTask?.cancel()
+        saveTask = nil
         Self.write(currentSnapshot, to: fileURL)
     }
 

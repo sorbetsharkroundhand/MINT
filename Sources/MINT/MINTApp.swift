@@ -33,4 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         true
     }
+
+    // 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { EntryStore.current?.flush() }
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        MainActor.assumeIsolated { EntryStore.current?.flush() }
+    }
 }
