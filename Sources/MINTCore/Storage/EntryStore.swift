@@ -297,6 +297,15 @@ public final class EntryStore: ObservableObject {
     private static let imageRefPattern = try! NSRegularExpression(
         pattern: #"!\[[^\]]*\]\(([^)\s]+)\)"#)
 
+    /// 저널의 작성일을 바꾼다 — 어제 일을 오늘 적었을 때 날짜를 맞추도록 (L9).
+    public func setDate(_ id: UUID, to date: Date) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            entries[index].createdAt != date
+        else { return }
+        entries[index].createdAt = date
+        saveNow()
+    }
+
     /// 저널을 다른 폴더(또는 루트=nil)로 옮긴다 — 이미 만든 글도 정리할 수 있게.
     public func move(_ id: UUID, toFolder folderID: UUID?) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
@@ -390,19 +399,25 @@ public final class EntryStore: ObservableObject {
             expandedFolderIDs: expandedFolderIDs.sorted { $0.uuidString < $1.uuidString })
     }
 
+    /// 저장 대기/진행 중 표시 — 상태 바의 "저장 중…/저장됨" 표시용 (L6).
+    @Published public private(set) var isSaving = false
+
     private func scheduleSave() {
         saveTask?.cancel()
+        isSaving = true
         let snapshot = currentSnapshot
-        saveTask = Task { [autosaveDelay, fileURL] in
+        saveTask = Task { [weak self, autosaveDelay, fileURL] in
             try? await Task.sleep(for: autosaveDelay)
             guard !Task.isCancelled else { return }
             Self.write(snapshot, to: fileURL)
+            self?.isSaving = false
         }
     }
 
     private func saveNow() {
         saveTask?.cancel()
         Self.write(currentSnapshot, to: fileURL)
+        isSaving = false
     }
 
     /// 대기 중인 디바운스 저장을 즉시 디스크에 쓴다 — 앱 종료·백그라운드 전환 직전에
@@ -411,6 +426,7 @@ public final class EntryStore: ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         Self.write(currentSnapshot, to: fileURL)
+        isSaving = false
     }
 
     private static func write(_ snapshot: Snapshot, to url: URL) {

@@ -152,13 +152,13 @@ struct EditorToolbar: View {
     @State private var imageButtonHovered = false
     @State private var helpButtonHovered = false
     @State private var helpOpen = false
+    @State private var dateOpen = false
+    @State private var dateHovered = false
 
     var body: some View {
         HStack(spacing: 12) {
             sidebarToggle
-            Text(store.activeDateLabel)
-                .font(MintFonts.uiFont(13.5, .semibold))
-                .foregroundStyle(theme.inkC)
+            dateButton
             Spacer()
             helpButton
             imageButton
@@ -171,6 +171,43 @@ struct EditorToolbar: View {
         .padding(.trailing, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
+    }
+
+    /// 작성일 — 누르면 날짜를 바꿀 수 있다(어제 일을 오늘 적었을 때 등, L9).
+    private var dateButton: some View {
+        Button {
+            dateOpen.toggle()
+        } label: {
+            Text(store.activeDateLabel)
+                .font(MintFonts.uiFont(13.5, .semibold))
+                .foregroundStyle(theme.inkC)
+                .padding(.vertical, 3)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(dateHovered ? theme.hoverC : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { dateHovered = $0 }
+        .help("작성일 바꾸기")
+        .popover(isPresented: $dateOpen, arrowEdge: .bottom) {
+            DatePicker(
+                "작성일", selection: dateBinding, displayedComponents: [.date]
+            )
+            .datePickerStyle(.graphical)
+            .labelsHidden()
+            .padding(14)
+            .frame(width: 300)
+        }
+    }
+
+    private var dateBinding: Binding<Date> {
+        Binding(
+            get: { store.activeEntry?.createdAt ?? .now },
+            set: { if let id = store.activeEntry?.id { store.setDate(id, to: $0) } }
+        )
     }
 
     /// 마크다운 서식 도움말 — 블록·인라인 단축 문법을 발견할 수 있는 유일한 창구.
@@ -747,6 +784,8 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
+            Text(store.isSaving ? "저장 중…" : "저장됨")
+            separator
             Text("Markdown")
         }
         .font(MintFonts.monoUI(11))
