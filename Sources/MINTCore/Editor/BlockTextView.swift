@@ -1675,6 +1675,17 @@ final class BlockTextView: NSTextView {
     /// 매니저가 그 자리에 렌더 결과를 그린다. 커서가 들어오면 소스로 돌아온다.
     func refreshRenderedBlocks(forceRender: Bool = false) {
         guard let layoutManager, let storage = textStorage else { return }
+        // 빠른 경로: 렌더 중인 블록도, 이미 렌더된 것도, 이미지 선택도 없고 소스에
+        // 수식/이미지 마커("$$"·"![")조차 없으면 — 즉 대다수의 평문 저널이면 —
+        // 문단 순회·임시속성 조작·전체 재그리기를 통째로 건너뛴다(키 입력마다 O(n)
+        // 낭비 제거). 마커 검사는 NSString range 검색이라 문단 순회보다 훨씬 싸다.
+        if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil {
+            let source = storage.string as NSString
+            if source.range(of: "$$").location == NSNotFound,
+                source.range(of: "![").location == NSNotFound {
+                return
+            }
+        }
         layoutManager.removeTemporaryAttribute(
             .foregroundColor,
             forCharacterRange: NSRange(location: 0, length: storage.length))
