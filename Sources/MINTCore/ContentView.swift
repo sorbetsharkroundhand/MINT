@@ -160,7 +160,10 @@ struct EditorToolbar: View {
             ModelChip(completion: completion, settings: settings, theme: theme)
             themeSwitch
         }
-        .padding(.horizontal, 22)
+        // 사이드바를 접으면 툴바가 창 맨 왼쪽까지 차서 신호등(닫기·최소화·최대화)과
+        // 겹친다 — 접힘 상태에선 신호등을 비켜 갈 만큼 왼쪽 여백을 준다.
+        .padding(.leading, sidebarVisible ? 22 : 84)
+        .padding(.trailing, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
     }
@@ -611,7 +614,11 @@ struct ShortcutHintPill: View {
 
 // MARK: - 상태 바
 
-/// 글자 수 · 모델 · Markdown · (실패 시 재시도) · 예측 토큰 (디자인 v3).
+/// 단어 수 · 글자 수 · 읽는 시간 · Markdown (상용 v1.0 — 글쓰기 지표 중심).
+///
+/// 예전엔 모델명·지연·토큰 같은 개발용 텔레메트리를 늘어놨는데, 글쓰기 앱에선
+/// 개발 콘솔처럼 보여 몰입을 깼다. 작가가 흘끗 보고 싶은 값(단어·글자·읽는 시간)만
+/// 남기고, 모델 상태는 툴바의 ModelChip이 담당한다.
 struct EditorStatusBar: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
@@ -620,14 +627,16 @@ struct EditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("\(charCount)자")
+            Text("\(wordCount) 단어")
             separator
-            Text(modelLabel)
-            separator
-            Text("Markdown")
-            if case .failed(let message) = completion.engineState {
+            Text("\(charCount) 자")
+            if !readingLabel.isEmpty {
                 separator
-                Text("로드 실패: \(message)")
+                Text("읽기 \(readingLabel)")
+            }
+            if case .failed = completion.engineState {
+                separator
+                Text("자동완성 로드 실패")
                     .foregroundStyle(.red)
                     .lineLimit(1)
                 Button("다시 시도") { completion.retryEngineLoad() }
@@ -635,7 +644,7 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
-            Text(ghostLabel)
+            Text("Markdown")
         }
         .font(MintFonts.monoUI(11))
         .foregroundStyle(theme.ink3C)
@@ -648,38 +657,24 @@ struct EditorStatusBar: View {
         theme.sepC.frame(width: 1, height: 12)
     }
 
+    private var text: String { store.activeEntry?.body ?? "" }
+
+    /// 공백을 제외한 글자 수 (국문 글자 수 관례).
     private var charCount: Int {
-        (store.activeEntry?.body ?? "").filter { !$0.isWhitespace }.count
+        text.filter { !$0.isWhitespace }.count
     }
 
-    private var modelLabel: String {
-        var label = ModelChip.displayName(settings.modelID)
-        if let choice = ModelChoice.matching(settings.modelID) {
-            label += " \(choice.sizeLabel)"
-        }
-        label += " · 온디바이스"
-        switch completion.engineState {
-        case .downloading(let fraction):
-            label += String(format: " · 다운로드 %.0f%%", fraction * 100)
-        case .loading:
-            label += " · 로드 중"
-        case .ready:
-            if let latency = completion.lastLatency {
-                label += String(format: " · 최근 %.2fs", latency)
-            }
-        default:
-            break
-        }
-        return label
+    /// 공백으로 나뉜 어절/단어 수 — 한글 어절·영문 단어 모두에 자연스럽다.
+    private var wordCount: Int {
+        text.split(whereSeparator: { $0.isWhitespace }).count
     }
 
-    private var ghostLabel: String {
-        if !settings.autocompleteEnabled { return "자동완성 꺼짐" }
-        if let suggestion = completion.suggestion {
-            let length = suggestion.trimmingCharacters(in: .whitespaces).count
-            return "\(max(1, length / 2)) tokens · 예측"
-        }
-        return completion.isPredicting ? "예측 중…" : "대기"
+    /// 읽는 데 걸리는 대략 시간 — 한글 기준 분당 약 500자.
+    private var readingLabel: String {
+        guard charCount > 0 else { return "" }
+        let minutes = Double(charCount) / 500
+        if minutes < 1 { return "1분 미만" }
+        return "약 \(Int(minutes.rounded()))분"
     }
 }
 
