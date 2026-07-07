@@ -310,10 +310,25 @@ final class BlockTextView: NSTextView {
     /// lineSpacing은 자연 줄 높이를 유지해 글자·커서 높이가 일치한다 (요구 1·4).
     var lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing)
 
+    /// 고스트 페이드 인 진행도(0…1) — 없던 제안이 새로 뜰 때만 0에서 1로 올린다.
+    /// AI 제안이 커서 옆에 "쿵" 나타나 시선을 때리지 않고 부드럽게 스며들게 하려는 것.
+    /// 한 단어(→) 수락으로 제안이 짧아질 때는 1을 유지해 다시 깜빡이지 않는다.
+    private var ghostOpacity: CGFloat = 1
+    /// 페이드 인 애니메이션 태스크 — 새 제안·폐기 때 취소하고 다시 건다.
+    private var ghostFadeTask: Task<Void, Never>?
+
     /// 현재 고스트 텍스트. nil/빈 문자열이면 그리지 않는다.
     var ghostText: String? {
         didSet {
             guard ghostText != oldValue else { return }
+            // 없던 자리에 제안이 새로 뜰 때만 페이드 인 — 짧아짐·사라짐은 즉시 반영.
+            if let ghost = ghostText, !ghost.isEmpty, oldValue == nil {
+                startGhostFadeIn()
+            } else if ghostText == nil {
+                ghostFadeTask?.cancel()
+                ghostFadeTask = nil
+                ghostOpacity = 1
+            }
             needsDisplay = true
         }
     }
@@ -2090,6 +2105,28 @@ final class BlockTextView: NSTextView {
 
     // MARK: 고스트 렌더 (M3 그대로)
 
+    /// AI 제안이 처음 뜰 때 투명도를 0→1로 올려 부드럽게 스며들게 한다
+    /// (약 150ms, ease-out). 경과 시간 기반이라 프레임 지터에 흔들리지 않는다.
+    /// 커서 이동·이어지는 입력은 ghostText를 nil로 바꾸며 이 태스크를 취소한다
+    /// (updateSelectionToolbar의 Task 패턴과 동일 — 메인 액터 상속).
+    private func startGhostFadeIn() {
+        ghostFadeTask?.cancel()
+        ghostOpacity = 0
+        needsDisplay = true
+        let start = Date()
+        let duration = 0.15
+        ghostFadeTask = Task { [weak self] in
+            while true {
+                guard !Task.isCancelled, let self else { return }
+                let t = min(1, Date().timeIntervalSince(start) / duration)
+                self.ghostOpacity = CGFloat(t * (2 - t))  // ease-out quad
+                self.needsDisplay = true
+                if t >= 1 { break }
+                try? await Task.sleep(for: .milliseconds(12))
+            }
+        }
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         // 커서 줄 하이라이트 — 본문 아래에 깔리도록 텍스트보다 먼저 그린다.
         let lineRect = activeLineRect()
@@ -2118,7 +2155,7 @@ final class BlockTextView: NSTextView {
         let font = (typingAttributes[.font] as? NSFont) ?? bodyFont
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: palette.ghost,
+            .foregroundColor: palette.ghost.withAlphaComponent(ghostOpacity),
         ]
         // 프래그먼트 top(caretRect.minY)이 아니라 본문 글리프와 같은
         // 베이스라인에 맞춰야 실제 글자 높이와 일치한다 (줄 간격과 무관하게).
