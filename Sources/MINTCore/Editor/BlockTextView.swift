@@ -2125,6 +2125,8 @@ final class BlockTextView: NSTextView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased()
+        // 서식·이미지 단축키는 메뉴 막대(MintCommands)로 옮겨 단일 소스로 관리한다 —
+        // 여기선 문서 내 검색만 처리한다.
         if flags == .command {
             switch key {
             case "f":
@@ -2133,29 +2135,35 @@ final class BlockTextView: NSTextView {
             case "g":
                 performFind(.nextMatch)
                 return true
-            case "b" where selectedRange().length > 0:
-                toggleInlineStyle(.mintBold)
-                return true
-            case "i" where selectedRange().length > 0:
-                toggleInlineStyle(.mintItalic)
-                return true
             default:
                 break
             }
-        } else if flags == [.command, .shift] {
-            switch key {
-            case "g":
-                performFind(.previousMatch)
-                return true
-            case "i":
-                presentImagePicker()
-                return true
-            default:
-                break
-            }
+        } else if flags == [.command, .shift], key == "g" {
+            performFind(.previousMatch)
+            return true
         }
         return super.performKeyEquivalent(with: event)
     }
+
+    // MARK: 메뉴 명령 (리스폰더 체인 — MintCommands가 NSApp.sendAction으로 호출)
+    //
+    // 선택이 있으면 선택에, 없으면 커서 문단에 적용된다(convert/align은 문단 단위,
+    // toggleInlineStyle은 선택이 있어야 동작). 에디터가 first responder일 때만 도달한다.
+
+    @objc func mintFormatBold(_ sender: Any?) { toggleInlineStyle(.mintBold) }
+    @objc func mintFormatItalic(_ sender: Any?) { toggleInlineStyle(.mintItalic) }
+    @objc func mintFormatCode(_ sender: Any?) { toggleInlineStyle(.mintCode) }
+    @objc func mintHeading1(_ sender: Any?) { convertSelectionBlock(to: .h1) }
+    @objc func mintHeading2(_ sender: Any?) { convertSelectionBlock(to: .h2) }
+    @objc func mintHeading3(_ sender: Any?) { convertSelectionBlock(to: .h3) }
+    @objc func mintBodyText(_ sender: Any?) { convertSelectionBlock(to: .p) }
+    @objc func mintBulletList(_ sender: Any?) { convertSelectionBlock(to: .bullet) }
+    @objc func mintNumberedList(_ sender: Any?) { convertSelectionBlock(to: .number) }
+    @objc func mintQuoteBlock(_ sender: Any?) { convertSelectionBlock(to: .quote) }
+    @objc func mintCodeBlock(_ sender: Any?) { convertSelectionBlock(to: .code) }
+    @objc func mintAlignLeft(_ sender: Any?) { applyAlignment(nil) }
+    @objc func mintAlignCenter(_ sender: Any?) { applyAlignment("center") }
+    @objc func mintAlignRight(_ sender: Any?) { applyAlignment("right") }
 
     /// NSTextFinder 액션 실행 — performTextFinderAction은 sender의 tag로 동작을 읽는다.
     private func performFind(_ action: NSTextFinder.Action) {
