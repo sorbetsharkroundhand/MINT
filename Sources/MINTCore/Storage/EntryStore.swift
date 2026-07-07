@@ -9,19 +9,35 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var body: String
     /// 소속 폴더. nil이면 루트 (파일시스템 v1 — 이전 파일엔 키가 없어 nil로 로드).
     public var folderID: UUID?
+    /// 사용자가 직접 제목을 바꿨는가 — true면 본문에서 자동 파생하지 않는다.
+    /// 레거시 파일엔 없는 키(옵셔널) — nil이면 "기본 제목일 때만" 자동 파생을 허용해
+    /// 예전에 붙여 둔 이름은 보존한다.
+    public var titleIsCustom: Bool?
 
     public init(
         id: UUID = UUID(),
         title: String = "새 저널",
         createdAt: Date = .now,
         body: String = "",
-        folderID: UUID? = nil
+        folderID: UUID? = nil,
+        titleIsCustom: Bool? = nil
     ) {
         self.id = id
         self.title = title
         self.createdAt = createdAt
         self.body = body
         self.folderID = folderID
+        self.titleIsCustom = titleIsCustom
+    }
+
+    /// 자동으로 붙는 기본 제목들 — 이 이름이면 본문에서 파생해도 사용자 의도를 해치지 않는다.
+    static let placeholderTitles: Set<String> = ["새 저널", "저널", "제목 없음", ""]
+
+    /// 본문에서 제목을 자동 파생해도 되는가.
+    var allowsAutoTitle: Bool {
+        if let titleIsCustom { return !titleIsCustom }
+        // 레거시 파일: 기본 제목일 때만 자동 파생 — 직접 붙인 이름은 그대로 둔다.
+        return Self.placeholderTitles.contains(title)
     }
 }
 
@@ -125,8 +141,10 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 첫 비어 있지 않은 줄에서 마크다운 마커를 벗겨 제목으로 쓴다.
-    private static func derivedTitle(from body: String) -> String {
-        for line in body.split(separator: "\n") {
+    /// 본문이 길어도 앞부분만 훑는다 — 매 키 입력마다 호출되므로 비용을 묶어 둔다.
+    /// 파생할 내용이 없으면 빈 문자열(호출부에서 "새 저널"로 대체).
+    static func derivedTitle(from body: String) -> String {
+        for line in body.prefix(500).split(separator: "\n") {
             let stripped = line
                 .replacingOccurrences(
                     of: #"^(#{1,3}\s+|>\s?|- \[[ x]\]\s?|[-*]\s+|\d+\.\s+)"#,
@@ -134,7 +152,7 @@ public final class EntryStore: ObservableObject {
                 .trimmingCharacters(in: .whitespaces)
             if !stripped.isEmpty { return String(stripped.prefix(30)) }
         }
-        return "저널"
+        return ""
     }
 
     // MARK: - 조회
@@ -266,15 +284,23 @@ public final class EntryStore: ObservableObject {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         entries[index].title = trimmed.isEmpty ? "제목 없음" : trimmed
+        // 사용자가 직접 붙인 이름 — 이후 본문 편집으로 덮어쓰지 않는다.
+        entries[index].titleIsCustom = true
         saveNow()
     }
 
     /// 에디터 바인딩이 매 키 입력마다 호출 — 본문 갱신 + 디바운스 autosave.
+    /// 제목이 사용자 지정이 아니면 첫 줄에서 자동 파생한다 — 사이드바가 "새 저널"
+    /// 무더기가 되지 않도록 (자동 저널링의 기본 기대).
     public func updateActiveBody(_ text: String) {
         guard let index = entries.firstIndex(where: { $0.id == activeID }),
             entries[index].body != text
         else { return }
         entries[index].body = text
+        if entries[index].allowsAutoTitle {
+            let derived = Self.derivedTitle(from: text)
+            entries[index].title = derived.isEmpty ? "새 저널" : derived
+        }
         scheduleSave()
     }
 
