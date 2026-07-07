@@ -105,6 +105,7 @@ struct EditorPane: View {
         MintBlockEditor(
             text: bodyBinding, controller: completion, theme: theme,
             lineSpacing: CGFloat(settings.lineSpacing),
+            baseFontSize: CGFloat(settings.editorFontSize),
             focusRequest: store.editorFocusRequests)
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {

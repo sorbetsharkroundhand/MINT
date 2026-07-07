@@ -48,17 +48,10 @@ struct SelectionToolbarView: View {
     static let maxLineSpacing = 20.0
 
     var body: some View {
+        // 인라인 문자 서식에 집중한다 — 제목·목록·인용·정렬·코드 블록 같은 블록/구조
+        // 서식은 서식 메뉴(⌘⌥1~3 등)로 옮겨 툴바를 가볍게 했다(예전엔 ~20개가 본문을
+        // 가렸다). 툴바엔 쓰다가 바로 집는 것만: 굵게·기울임·코드·크기·색.
         HStack(spacing: 2) {
-            textButton("H1", active: state.block == .h1, help: "큰 제목") {
-                onAction(.block(.h1))
-            }
-            textButton("H2", active: state.block == .h2, help: "중간 제목") {
-                onAction(.block(.h2))
-            }
-            textButton("H3", active: state.block == .h3, help: "작은 제목") {
-                onAction(.block(.h3))
-            }
-            divider
             textButton("B", weight: .bold, active: state.bold, help: "굵게 (⌘B / **텍스트**)") {
                 onAction(.toggleBold)
             }
@@ -67,7 +60,7 @@ struct SelectionToolbarView: View {
             }
             iconButton(
                 "chevron.left.forwardslash.chevron.right",
-                active: state.code, help: "인라인 코드 (`텍스트`)"
+                active: state.code, help: "인라인 코드 (⌘⇧C / `텍스트`)"
             ) { onAction(.toggleCode) }
             divider
             iconButton("textformat.size.smaller", active: false, help: "글자 작게") {
@@ -80,40 +73,6 @@ struct SelectionToolbarView: View {
             ) { onAction(.fontSize($0)) }
             iconButton("textformat.size.larger", active: false, help: "글자 크게") {
                 onAction(.fontSize(min(Self.maxFontSize, state.fontSize + 2)))
-            }
-            divider
-            // 줄 간격 — 선택 줄에 한해 조절 (요구 4).
-            Image(systemName: "arrow.up.and.down.text.horizontal")
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.ink3C)
-                .help("줄 간격 (선택 줄)")
-            iconButton("minus", active: false, help: "줄 간격 좁게 (선택 줄)") {
-                onAction(.lineSpacing(max(Self.minLineSpacing, state.lineSpacing - 1)))
-            }
-            NumberField(
-                theme: theme, value: state.lineSpacing,
-                range: Self.minLineSpacing...Self.maxLineSpacing,
-                help: "줄 간격 (누르면 전체 선택 · 숫자 입력 후 Enter · 선택 줄)"
-            ) { onAction(.lineSpacing($0)) }
-            iconButton("plus", active: false, help: "줄 간격 넓게 (선택 줄)") {
-                onAction(.lineSpacing(min(Self.maxLineSpacing, state.lineSpacing + 1)))
-            }
-            divider
-            iconButton("text.quote", active: state.block == .quote, help: "인용") {
-                onAction(.block(.quote))
-            }
-            iconButton("curlybraces", active: state.block == .code, help: "코드 블록 (```)") {
-                onAction(.block(.code))
-            }
-            divider
-            iconButton("text.alignleft", active: state.align == nil, help: "왼쪽 정렬") {
-                onAction(.align(nil))
-            }
-            iconButton(
-                "text.aligncenter", active: state.align == "center", help: "가운데 정렬"
-            ) { onAction(.align("center")) }
-            iconButton("text.alignright", active: state.align == "right", help: "오른쪽 정렬") {
-                onAction(.align("right"))
             }
             divider
             colorDot(nil)

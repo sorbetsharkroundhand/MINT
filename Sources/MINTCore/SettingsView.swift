@@ -60,6 +60,15 @@ public struct SettingsView: View {
 
             Section("에디터") {
                 Stepper(
+                    "글자 크기: \(Int(settings.editorFontSize.rounded()))pt",
+                    value: $settings.editorFontSize,
+                    in: CompletionSettings.minFontSize...CompletionSettings.maxFontSize,
+                    step: 1
+                )
+                Text("본문·제목이 이 크기에 비례해요 (⌘+ / ⌘− / ⌘0).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Stepper(
                     "줄 간격: \(Int(settings.lineSpacing.rounded()))pt",
                     value: $settings.lineSpacing,
                     in: 0...20,

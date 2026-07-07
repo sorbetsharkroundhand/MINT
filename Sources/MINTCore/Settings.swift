@@ -103,6 +103,11 @@ public final class CompletionSettings: ObservableObject {
     public static let defaultContextCharacters = 1_200
     /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
     public static let defaultLineSpacing = 7.0
+    /// 본문 기본 글자 크기(pt) 기본값 — 디자인 기준. 모든 블록이 이 값에 비례한다.
+    public static let defaultFontSize = 20.0
+    /// 글자 크기 허용 범위 — ⌘+/⌘−·Settings 공용.
+    public static let minFontSize = 14.0
+    public static let maxFontSize = 30.0
 
     public static let shared = CompletionSettings()
 
@@ -115,6 +120,7 @@ public final class CompletionSettings: ObservableObject {
         static let temperature = "completion.temperature"
         static let contextCharacters = "completion.contextCharacters"
         static let lineSpacing = "editor.lineSpacing"
+        static let fontSize = "editor.fontSize"
     }
 
     private let defaults: UserDefaults
@@ -145,6 +151,14 @@ public final class CompletionSettings: ObservableObject {
     @Published public var lineSpacing: Double {
         didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) }
     }
+    /// 본문 기본 글자 크기(pt) — 모든 블록이 이 값에 비례한다(⌘+/⌘−).
+    @Published public var editorFontSize: Double {
+        didSet {
+            let clamped = min(Self.maxFontSize, max(Self.minFontSize, editorFontSize))
+            if clamped != editorFontSize { editorFontSize = clamped; return }
+            defaults.set(editorFontSize, forKey: Keys.fontSize)
+        }
+    }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -166,6 +180,9 @@ public final class CompletionSettings: ObservableObject {
         self.lineSpacing =
             defaults.object(forKey: Keys.lineSpacing) as? Double
             ?? Self.defaultLineSpacing
+        self.editorFontSize =
+            defaults.object(forKey: Keys.fontSize) as? Double
+            ?? Self.defaultFontSize
     }
 
     /// 추론 엔진으로 넘기는 값 스냅샷.

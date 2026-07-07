@@ -24,6 +24,14 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
+        // 파일 저장 영역 옆에 "이름 바꾸기" — 사이드바가 현재 저널의 인라인 편집을 연다.
+        CommandGroup(after: .saveItem) {
+            Button("저널 이름 바꾸기") {
+                sidebarVisible = true
+                store.requestRename()
+            }
+        }
+
         // 서식 ▸ 텍스트 스타일 · 블록 · 정렬 · 이미지.
         CommandMenu("서식") {
             Button("굵게") { send(#selector(BlockTextView.mintFormatBold(_:))) }
@@ -79,6 +87,19 @@ public struct MintCommands: Commands {
                 sidebarVisible.toggle()
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+
+            Divider()
+
+            Button("글자 크게") { CompletionSettings.shared.editorFontSize += 1 }
+                .keyboardShortcut("+", modifiers: .command)
+            Button("글자 작게") { CompletionSettings.shared.editorFontSize -= 1 }
+                .keyboardShortcut("-", modifiers: .command)
+            Button("기본 글자 크기") {
+                CompletionSettings.shared.editorFontSize = CompletionSettings.defaultFontSize
+            }
+            .keyboardShortcut("0", modifiers: .command)
+
+            Divider()
 
             Button(effectiveDark ? "라이트 모드" : "다크 모드") {
                 appearance = effectiveDark ? "light" : "dark"

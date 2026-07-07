@@ -39,6 +39,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let theme: MintTheme
     /// 본문 줄 간격(pt) — 설정에서 조절. 낮추면 줄이 촘촘해진다.
     private let lineSpacing: CGFloat
+    /// 본문 기본 글자 크기(pt) — 설정에서 조절(⌘+/⌘−).
+    private let baseFontSize: CGFloat
     /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
     /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
     private let focusRequest: Int
@@ -48,12 +50,14 @@ public struct MintBlockEditor: NSViewRepresentable {
         controller: CompletionController? = nil,
         theme: MintTheme = .light,
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
+        baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         focusRequest: Int = 0
     ) {
         self._text = text
         self.controller = controller
         self.theme = theme
         self.lineSpacing = lineSpacing
+        self.baseFontSize = baseFontSize
         self.focusRequest = focusRequest
     }
 
@@ -98,6 +102,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
         textView.palette = theme
         textView.lineSpacing = lineSpacing
+        textView.baseFontSize = baseFontSize
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
@@ -127,6 +132,11 @@ public struct MintBlockEditor: NSViewRepresentable {
         // 줄 간격 설정이 바뀌면 전체 문단 스타일을 다시 적용한다.
         if textView.lineSpacing != lineSpacing {
             textView.lineSpacing = lineSpacing
+            textView.restyleAll()
+        }
+        // 글자 크기 설정이 바뀌면 폰트를 다시 만들고 전체 문단·수식을 다시 그린다.
+        if textView.baseFontSize != baseFontSize {
+            textView.baseFontSize = baseFontSize
             textView.restyleAll()
         }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
@@ -364,8 +374,20 @@ final class BlockTextView: NSTextView {
         )
     }
 
-    /// 본문 기본 폰트 — 디자인: Noto Serif KR 20px.
-    let bodyFont = MintFonts.serif(20)
+    /// 본문 기본 글자 크기(pt) — 설정에서 주입. 모든 블록 크기가 이 값에 비례한다.
+    /// 디자인 기준은 20pt. 값이 바뀌면 bodyFont를 다시 만든다.
+    var baseFontSize: CGFloat = 20 {
+        didSet {
+            guard baseFontSize != oldValue else { return }
+            bodyFont = MintFonts.serif(baseFontSize)
+        }
+    }
+
+    /// 본문 기본 폰트 — 디자인: Noto Serif KR. 크기는 baseFontSize를 따른다.
+    private(set) var bodyFont = MintFonts.serif(20)
+
+    /// 디자인 기준(20pt) 대비 배율 — 제목·코드·수식 크기를 함께 확대/축소한다.
+    private var fontScale: CGFloat { baseFontSize / 20 }
 
     /// 본문 줄 간격(pt) — 설정에서 주입. `lineHeightMultiple` 대신 `lineSpacing`을
     /// 쓰는 이유: 배수는 여백을 라인 위쪽에 몰아 글자가 커서 아래쪽에 붙지만,
@@ -398,8 +420,8 @@ final class BlockTextView: NSTextView {
     /// 마커 소비/스타일 적용 중 재진입 방지.
     private var isTransforming = false
 
-    /// 수식 렌더 폰트 크기 — 본문(serif 20)과 맞춘다.
-    let mathFontSize: CGFloat = 20
+    /// 수식 렌더 폰트 크기 — 본문 크기와 맞춘다.
+    var mathFontSize: CGFloat { baseFontSize }
 
     /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
     /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
@@ -878,15 +900,15 @@ final class BlockTextView: NSTextView {
             // 사이(lineSpacing)에는 영향이 없다.
             ps.paragraphSpacing = 10
         case .h1:
-            font = MintFonts.serif(31, weight: .bold)
+            font = MintFonts.serif(31 * fontScale, weight: .bold)
             ps.paragraphSpacingBefore = 16
             ps.paragraphSpacing = 4
         case .h2:
-            font = MintFonts.serif(25, weight: .semibold)
+            font = MintFonts.serif(25 * fontScale, weight: .semibold)
             ps.paragraphSpacingBefore = 12
             ps.paragraphSpacing = 2
         case .h3:
-            font = MintFonts.serif(21, weight: .semibold)
+            font = MintFonts.serif(21 * fontScale, weight: .semibold)
             ps.paragraphSpacingBefore = 8
         case .quote:
             color = t.ink2
@@ -905,7 +927,7 @@ final class BlockTextView: NSTextView {
             ps.headIndent = 32
             if checked { color = t.ink3 }
         case .code:
-            font = NSFont.monospacedSystemFont(ofSize: 14.5, weight: .regular)
+            font = NSFont.monospacedSystemFont(ofSize: 14.5 * fontScale, weight: .regular)
             ps.firstLineHeadIndent = 18
             ps.headIndent = 18
             ps.tailIndent = -18
@@ -923,7 +945,7 @@ final class BlockTextView: NSTextView {
         case .image:
             // 소스(![](…)) 편집 모드에서 가운데 정렬 — 렌더 이미지도 중앙에 온다.
             color = t.ink3
-            font = MintFonts.ui(13)
+            font = MintFonts.ui(13 * fontScale)
             ps.alignment = .center
             ps.paragraphSpacingBefore = 8
             ps.paragraphSpacing = 8
@@ -1371,9 +1393,11 @@ final class BlockTextView: NSTextView {
         else { return }
         // 커서는 그대로 두고(어차피 숨김) 객체 선택만 채택 — setSelectedRange
         // 재귀를 피한다. refresh가 뒤이어 렌더를 유지한다.
+        // 화살표로 스쳐 지날 때 툴바/박스를 띄우지 않는다 — 편집 조작은 클릭했을 때만
+        // 시작하게 해, 이동 중 UI가 불쑥 튀어나오지 않게 한다 (M10). 클릭 경로
+        // (selectImageObject)는 그대로 박스·툴바를 보여준다.
         selectedImageLocation = caretPara.location
         refreshRenderedBlocks()
-        presentImageToolbar(for: caretPara)
         needsDisplay = true
     }
 
@@ -1886,13 +1910,18 @@ final class BlockTextView: NSTextView {
     func updateSelectionToolbar() {
         toolbarShowTask?.cancel()
         let sel = selectedRange()
-        guard sel.length > 0, !hasMarkedText() else {
+        // 공백만 있는(단어 삭제용 같은) 사소한 선택이나 IME 조합 중이면 띄우지 않는다.
+        let selected = sel.length > 0 ? (string as NSString).substring(with: sel) : ""
+        guard sel.length > 0, !hasMarkedText(),
+            !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
             hideSelectionToolbar()
             return
         }
-        // 드래그 중 깜빡임 방지 — 선택이 멈춘 뒤에만 표시한다.
+        // 드래그 중 깜빡임 방지 — 선택이 멈춘 뒤에 띄우되, 지연은 짧게(120ms)해 굼떠
+        // 보이지 않게 한다.
         toolbarShowTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(200))
+            try? await Task.sleep(for: .milliseconds(120))
             guard !Task.isCancelled else { return }
             self?.presentSelectionToolbar()
         }
