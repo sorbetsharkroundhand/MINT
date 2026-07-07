@@ -85,6 +85,23 @@ public final class EntryStore: ObservableObject {
         editorFocusRequests += 1
     }
 
+    /// 사이드바 검색 필드에 포커스를 달라는 요청 카운터 (⌘⇧F).
+    @Published public private(set) var searchFocusRequests = 0
+
+    public func requestSearchFocus() {
+        searchFocusRequests += 1
+    }
+
+    /// 제목·본문에서 질의어를 포함하는 저널 (대소문자 무시). 전역 검색용.
+    public func search(_ query: String) -> [JournalEntry] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return [] }
+        return entries.filter {
+            $0.title.range(of: q, options: .caseInsensitive) != nil
+                || $0.body.range(of: q, options: .caseInsensitive) != nil
+        }
+    }
+
     /// 본문 autosave까지 기다리는 시간. 입력이 멈춘 뒤에만 쓴다.
     private let autosaveDelay: Duration
     private let fileURL: URL

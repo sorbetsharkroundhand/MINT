@@ -65,8 +65,16 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
         }
 
-        // 보기 ▸ 사이드바 · 외형.
+        // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
+            Button("저널 검색") {
+                sidebarVisible = true
+                store.requestSearchFocus()
+            }
+            .keyboardShortcut("f", modifiers: [.command, .shift])
+
+            Divider()
+
             Button(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기") {
                 sidebarVisible.toggle()
             }

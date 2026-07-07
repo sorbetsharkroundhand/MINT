@@ -19,19 +19,32 @@ struct SidebarView: View {
     /// 내용이 있어 삭제 전 확인이 필요한 폴더 — alert 표시 중.
     @State private var folderDeleteCandidate: JournalFolder?
     @FocusState private var renameFieldFocused: Bool
+    /// 전역 검색어 — 비어 있지 않으면 트리 대신 검색 결과(평탄)를 보여준다.
+    @State private var searchText = ""
+    @FocusState private var searchFieldFocused: Bool
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             theme.sepC.frame(height: 1)
+            searchField
+            theme.sepC.frame(height: 1)
             ScrollView {
                 LazyVStack(spacing: 2) {
-                    ForEach(items) { item in
-                        switch item {
-                        case .folder(let folder, let depth):
-                            folderRow(folder, depth: depth)
-                        case .entry(let entry, let depth):
-                            row(entry, depth: depth)
+                    if isSearching {
+                        searchResults
+                    } else {
+                        ForEach(items) { item in
+                            switch item {
+                            case .folder(let folder, let depth):
+                                folderRow(folder, depth: depth)
+                            case .entry(let entry, let depth):
+                                row(entry, depth: depth)
+                            }
                         }
                     }
                 }
@@ -46,6 +59,10 @@ struct SidebarView: View {
             // Enter(onSubmit) 외에 포커스를 잃어도 커밋 — Esc는 editingID를
             // 먼저 비우므로 여기 걸리지 않는다.
             if !focused, let id = editingID { commitRename(id) }
+        }
+        .onChange(of: store.searchFocusRequests) { _, _ in
+            // ⌘⇧F — 검색 필드로 포커스.
+            searchFieldFocused = true
         }
         .alert(
             "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
@@ -153,6 +170,114 @@ struct SidebarView: View {
         .padding(.leading, 18)
         .padding(.trailing, 12)
         .frame(height: 52)
+    }
+
+    // MARK: - 전역 검색
+
+    private var searchField: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(theme.ink3C)
+            TextField("모든 저널 검색", text: $searchText)
+                .textFieldStyle(.plain)
+                .font(MintFonts.uiFont(13))
+                .foregroundStyle(theme.inkC)
+                .focused($searchFieldFocused)
+            if !searchText.isEmpty {
+                Button {
+                    searchText = ""
+                    searchFieldFocused = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(theme.ink3C)
+                }
+                .buttonStyle(.plain)
+                .help("검색 지우기")
+            }
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.chipC))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.chipBorderC))
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+    }
+
+    @ViewBuilder
+    private var searchResults: some View {
+        let results = store.search(searchText)
+        if results.isEmpty {
+            Text("일치하는 저널이 없어요")
+                .font(MintFonts.uiFont(12))
+                .foregroundStyle(theme.ink3C)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 11)
+                .padding(.top, 6)
+        } else {
+            ForEach(results) { entry in
+                searchRow(entry)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func searchRow(_ entry: JournalEntry) -> some View {
+        let active = entry.id == store.activeID
+        Button {
+            store.select(entry.id)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(entry.title)
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(active ? theme.inkC : theme.ink2C)
+                        .lineLimit(1)
+                    Spacer(minLength: 6)
+                    Text(store.dayLabel(for: entry))
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(theme.ink3C)
+                }
+                if let snippet = Self.snippet(entry.body, query: searchText) {
+                    Text(snippet)
+                        .font(MintFonts.uiFont(11.5))
+                        .foregroundStyle(theme.ink3C)
+                        .lineLimit(2)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+            .padding(.vertical, 8)
+            .padding(.horizontal, 11)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(active ? theme.activeBgC : .clear))
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 매치 주변 발췌 — 앞뒤 24자에 줄임표. 본문 인덱스로 직접 잘라 안전하다.
+    private static func snippet(_ body: String, query: String) -> String? {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty,
+            let range = body.range(of: q, options: .caseInsensitive)
+        else { return nil }
+        let start =
+            body.index(range.lowerBound, offsetBy: -24, limitedBy: body.startIndex)
+            ?? body.startIndex
+        let end =
+            body.index(range.upperBound, offsetBy: 24, limitedBy: body.endIndex)
+            ?? body.endIndex
+        var text = String(body[start..<end])
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        if start != body.startIndex { text = "…" + text }
+        if end != body.endIndex { text += "…" }
+        return text
     }
 
     // MARK: - 폴더 행
