@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 메뉴 막대 명령 (에디터 v3 — 상용 v1.0).
 ///
@@ -24,12 +25,20 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
 
-        // 파일 저장 영역 옆에 "이름 바꾸기" — 사이드바가 현재 저널의 인라인 편집을 연다.
+        // 파일 저장 영역 옆에 이름 바꾸기 · 내보내기 · 인쇄.
         CommandGroup(after: .saveItem) {
             Button("저널 이름 바꾸기") {
                 sidebarVisible = true
                 store.requestRename()
             }
+
+            Divider()
+
+            Button("Markdown으로 내보내기…") { exportMarkdown() }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+            // 인쇄 대화상자의 "PDF로 저장"으로 PDF 내보내기까지 커버한다.
+            Button("인쇄…") { NSApp.sendAction(Selector(("print:")), to: nil, from: nil) }
+                .keyboardShortcut("p", modifiers: .command)
         }
 
         // 서식 ▸ 텍스트 스타일 · 블록 · 정렬 · 이미지.
@@ -110,6 +119,25 @@ public struct MintCommands: Commands {
 
     private func send(_ selector: Selector) {
         NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
+    /// 현재 저널을 순수 마크다운(.md)으로 저장한다 — 본문 자체가 마크다운이라 그대로 쓴다.
+    private func exportMarkdown() {
+        guard let entry = store.activeEntry else { return }
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = "\(sanitizedFileName(entry.title)).md"
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        try? entry.body.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// 파일 이름에 쓸 수 없는 문자를 정리한다.
+    private func sanitizedFileName(_ name: String) -> String {
+        let cleaned = name.components(separatedBy: CharacterSet(charactersIn: "/:\\?%*|\"<>"))
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return cleaned.isEmpty ? "저널" : String(cleaned.prefix(60))
     }
 
     /// 현재 유효 외형이 다크인가 — 명시값이 있으면 그대로, "시스템 따름"이면 실제
