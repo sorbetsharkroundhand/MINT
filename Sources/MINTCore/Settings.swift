@@ -67,7 +67,9 @@ public struct ModelChoice: Identifiable, Sendable {
 
 /// 추론 엔진(actor)에 넘기는 값 스냅샷.
 /// MainActor의 `CompletionSettings`에서 복사해 격리 경계를 넘긴다.
-/// 기본값 = PLAN 확정치(§1·§9): Qwen3.6-35B-A3B 4bit · 이어쓰기 · 토큰 상한 12 · 온도 0.3.
+/// 기본 모델은 첫 실행 부담을 줄이려 가장 가벼운 nano(~1GB)로 둔다 — 예전 기본값인
+/// pro(35B·A3B)는 ~20GB라, 앱을 켜자마자 조용히 대용량을 내려받아 사용자를 놀라게 했다.
+/// 더 자연스러운 문장을 원하면 툴바 모델 스위처나 Settings(⌘,)에서 air/pro로 올린다.
 public struct CompletionParameters: Sendable, Equatable {
     public var modelID: String
     public var promptStyle: PromptStyle
@@ -77,7 +79,7 @@ public struct CompletionParameters: Sendable, Equatable {
     public var temperature: Double
 
     public init(
-        modelID: String = ModelPresets.qwen3_6_35B_A3B,
+        modelID: String = ModelPresets.qwen2_5_1_5B,
         promptStyle: PromptStyle = .continuation,
         maxTokens: Int = 12,
         temperature: Double = 0.3
