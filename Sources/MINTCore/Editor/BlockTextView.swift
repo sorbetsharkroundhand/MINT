@@ -92,6 +92,11 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 56, height: 44)
         // 커서는 잉크색(라이트=검정/다크=하양) — 높이는 커서 위치의 글자 크기를 따른다.
         textView.insertionPointColor = theme.ink
+        // 선택 하이라이트를 앱 강조색(파랑)의 은은한 틴트로 — 시스템 기본 하이라이트가
+        // 따뜻한 세리프 저널과 겉돌지 않게 (L1).
+        textView.selectedTextAttributes = [
+            .backgroundColor: theme.blue.withAlphaComponent(0.20)
+        ]
         // ⌘F 문서 내 검색 — 스크롤 뷰 상단의 표준 find bar.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
@@ -132,6 +137,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         if textView.palette.ink != theme.ink {
             textView.palette = theme
             textView.insertionPointColor = theme.ink
+            textView.selectedTextAttributes = [
+                .backgroundColor: theme.blue.withAlphaComponent(0.20)
+            ]
             textView.restyleAll()
         }
         // 줄 간격 설정이 바뀌면 전체 문단 스타일을 다시 적용한다.

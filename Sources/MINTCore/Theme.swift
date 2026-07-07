@@ -48,7 +48,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         toolbar: NSColor(white: 1, alpha: 0.28),
         sidebarTint: NSColor(white: 0, alpha: 0.018),
         statusbar: NSColor(white: 1, alpha: 0.24),
-        activeLine: NSColor(white: 0, alpha: 0.04)
+        // 현재 줄 인식이 실제로 느껴지도록 아주 옅던 값을 살짝 올린다 (L3).
+        activeLine: NSColor(white: 0, alpha: 0.055)
     )
 
     public static let dark = MintTheme(
@@ -72,7 +73,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         toolbar: NSColor(white: 1, alpha: 0.04),
         sidebarTint: NSColor(white: 1, alpha: 0.028),
         statusbar: NSColor(white: 1, alpha: 0.03),
-        activeLine: NSColor(white: 1, alpha: 0.055)
+        // 어두운 유리 위에서 현재 줄이 또렷하도록 살짝 올린다 (L3).
+        activeLine: NSColor(white: 1, alpha: 0.075)
     )
 
     public static func of(_ scheme: ColorScheme) -> MintTheme {
