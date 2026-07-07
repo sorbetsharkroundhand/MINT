@@ -840,7 +840,10 @@ final class BlockTextView: NSTextView {
 
         switch block {
         case .p:
-            break
+            // 문단 사이에 숨 쉴 여백 — Enter로 나뉜 문단이 랩된 줄과 구분돼 프로즈
+            // 리듬이 산다. paragraphSpacing은 하드 리턴 뒤에만 붙고 랩된 줄
+            // 사이(lineSpacing)에는 영향이 없다.
+            ps.paragraphSpacing = 10
         case .h1:
             font = MintFonts.serif(31, weight: .bold)
             ps.paragraphSpacingBefore = 16
