@@ -97,7 +97,9 @@ struct EditorPane: View {
     }
 
     private var editor: some View {
-        MintBlockEditor(text: bodyBinding, controller: completion, theme: theme)
+        MintBlockEditor(
+            text: bodyBinding, controller: completion, theme: theme,
+            lineSpacing: CGFloat(settings.lineSpacing))
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
                     Text("오늘 하루를 적어보세요…")

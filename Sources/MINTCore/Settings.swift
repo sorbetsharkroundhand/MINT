@@ -99,6 +99,8 @@ public final class CompletionSettings: ObservableObject {
     public static let defaultDebounceMilliseconds = 350
     /// 커서 앞에서 프롬프트로 쓰는 최대 문자 수 (현재 문서만, PLAN §1).
     public static let defaultContextCharacters = 1_200
+    /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
+    public static let defaultLineSpacing = 7.0
 
     public static let shared = CompletionSettings()
 
@@ -110,6 +112,7 @@ public final class CompletionSettings: ObservableObject {
         static let maxTokens = "completion.maxTokens"
         static let temperature = "completion.temperature"
         static let contextCharacters = "completion.contextCharacters"
+        static let lineSpacing = "editor.lineSpacing"
     }
 
     private let defaults: UserDefaults
@@ -136,6 +139,10 @@ public final class CompletionSettings: ObservableObject {
     @Published public var contextCharacters: Int {
         didSet { defaults.set(contextCharacters, forKey: Keys.contextCharacters) }
     }
+    /// 본문 줄 간격(pt) — 에디터 표시용(추론과 무관). 낮추면 줄이 촘촘해진다.
+    @Published public var lineSpacing: Double {
+        didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) }
+    }
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -154,6 +161,9 @@ public final class CompletionSettings: ObservableObject {
         self.contextCharacters =
             defaults.object(forKey: Keys.contextCharacters) as? Int
             ?? Self.defaultContextCharacters
+        self.lineSpacing =
+            defaults.object(forKey: Keys.lineSpacing) as? Double
+            ?? Self.defaultLineSpacing
     }
 
     /// 추론 엔진으로 넘기는 값 스냅샷.

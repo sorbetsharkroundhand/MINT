@@ -16,6 +16,9 @@ extension NSAttributedString.Key {
     static let mintFontSize = NSAttributedString.Key("mint.fontSize")
     /// 문단 정렬 "center"/"right" — 저장은 `<p align="…">` 래퍼 (.p 문단만 직렬화).
     static let mintAlign = NSAttributedString.Key("mint.align")
+    /// 문단별 줄 간격 pt (Double) — 선택 줄에 한해 조절 (요구 4). 표시 전용이라
+    /// 마크다운으로는 저장되지 않고, 재로드 시 전역 설정값으로 돌아간다.
+    static let mintLineSpacing = NSAttributedString.Key("mint.lineSpacing")
 }
 
 /// 인라인 마크다운 ↔ mint 인라인 속성 변환기 (파싱·직렬화 왕복 대칭).
@@ -24,6 +27,7 @@ enum InlineMarkdown {
     /// 인라인 서식 키 전체 — 블록 재스타일 시 보존 대상.
     static let inlineKeys: [NSAttributedString.Key] = [
         .mintBold, .mintItalic, .mintCode, .mintColor, .mintFontSize, .mintAlign,
+        .mintLineSpacing,
     ]
 
     typealias Segment = (text: String, attrs: [NSAttributedString.Key: Any])

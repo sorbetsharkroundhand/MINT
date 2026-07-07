@@ -57,6 +57,18 @@ public struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            Section("에디터") {
+                Stepper(
+                    "줄 간격: \(Int(settings.lineSpacing.rounded()))pt",
+                    value: $settings.lineSpacing,
+                    in: 0...20,
+                    step: 1
+                )
+                Text("줄 사이 여백을 조절해요 — 낮추면 촘촘하게, 높이면 시원하게.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 440)
