@@ -2194,14 +2194,16 @@ final class BlockTextView: NSTextView {
             if !flag { setNeedsDisplay(rect.insetBy(dx: -2, dy: -2)) }
             return
         }
-        // 시스템 캐럿 rect는 라인 전체(ascender~descender)라, 라인 top(ascender)이
-        // 대문자 top(capHeight)보다 (ascender − capHeight)만큼 위에 있어 글자 위로 떠
-        // 보인다. 그 여백을 잘라 cap~descender 범위로 줄여 그린다 (폰트 메트릭 기반,
-        // super가 그리므로 blink 잔상도 없다).
+        // 시스템 캐럿 rect는 라인 전체를 덮어 글자 위로 떠 보인다. 베이스라인 위
+        // "글자 실제 높이"만큼만 그려 글자에 딱 맞춘다. 라틴 capHeight로 자르면
+        // 한글보다 짧아 보이므로(한글 온디바이스 저널), capHeight~ascender 사이로
+        // 올려 한글 상단까지 덮는다(요구: 커서가 글자와 같은 키).
         let font = caretLineFont()
+        let baseline = rect.minY + font.ascender
+        let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
-        caret.origin.y += max(0, font.ascender - font.capHeight)
-        caret.size.height = max(1, font.capHeight - font.descender)  // descender 음수
+        caret.origin.y = baseline - glyphTop
+        caret.size.height = max(1, glyphTop - font.descender)  // descender 음수
         super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
     }
 
