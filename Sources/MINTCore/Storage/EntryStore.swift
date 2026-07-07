@@ -275,7 +275,27 @@ public final class EntryStore: ObservableObject {
         if entries.isEmpty { entries = [JournalEntry()] }
         if !entries.contains(where: { $0.id == activeID }) { activeID = entries[0].id }
         saveNow()
+        pruneOrphanImages()
     }
+
+    /// 어떤 저널에서도 더 이상 참조하지 않는 이미지 파일을 정리한다 (삭제 후, L4).
+    private func pruneOrphanImages() {
+        var referenced: Set<String> = []
+        for entry in entries {
+            let ns = entry.body as NSString
+            Self.imageRefPattern.enumerateMatches(
+                in: entry.body, range: NSRange(location: 0, length: ns.length)
+            ) { match, _, _ in
+                if let m = match, m.numberOfRanges > 1 {
+                    referenced.insert(ns.substring(with: m.range(at: 1)))
+                }
+            }
+        }
+        MintImageStore.pruneUnreferenced(keeping: referenced)
+    }
+
+    private static let imageRefPattern = try! NSRegularExpression(
+        pattern: #"!\[[^\]]*\]\(([^)\s]+)\)"#)
 
     /// 저널을 다른 폴더(또는 루트=nil)로 옮긴다 — 이미 만든 글도 정리할 수 있게.
     public func move(_ id: UUID, toFolder folderID: UUID?) {
@@ -324,6 +344,7 @@ public final class EntryStore: ObservableObject {
         if entries.isEmpty { entries = [JournalEntry()] }
         if !entries.contains(where: { $0.id == activeID }) { activeID = entries[0].id }
         saveNow()
+        pruneOrphanImages()
     }
 
     public func toggleExpanded(_ folderID: UUID) {

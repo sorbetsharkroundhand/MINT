@@ -68,6 +68,21 @@ public enum MintImageStore {
         return image
     }
 
+    /// 어떤 저널에서도 참조하지 않는 이미지 파일을 지운다 — 저널·폴더 삭제로 생긴
+    /// 고아 파일을 정리한다 (L4). `referenced`는 살려 둘 상대경로 집합.
+    public static func pruneUnreferenced(keeping referenced: Set<String>) {
+        let dir = imagesDirectory()
+        guard let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil)
+        else { return }
+        for file in files {
+            let relative = "images/\(file.lastPathComponent)"
+            guard !referenced.contains(relative) else { continue }
+            try? FileManager.default.removeItem(at: file)
+            cache.removeValue(forKey: relative)
+        }
+    }
+
     private static func normalizedExtension(_ ext: String) -> String {
         let lowered = ext.lowercased()
         guard imageExtensions.contains(lowered) else { return "png" }
