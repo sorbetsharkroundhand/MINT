@@ -100,6 +100,7 @@ public final class EntryStore: ObservableObject {
             $0.title.range(of: q, options: .caseInsensitive) != nil
                 || $0.body.range(of: q, options: .caseInsensitive) != nil
         }
+        .sorted { $0.createdAt > $1.createdAt }
     }
 
     /// 본문 autosave까지 기다리는 시간. 입력이 멈춘 뒤에만 쓴다.
@@ -199,7 +200,9 @@ public final class EntryStore: ObservableObject {
 
     /// 한 폴더에 담긴 저널들 (nil = 루트).
     public func childEntries(of folderID: UUID?) -> [JournalEntry] {
+        // 최신 저널이 위로 오도록 작성일 내림차순 — 삽입 순서 대신 안정적 시간 순서.
         entries.filter { $0.folderID == folderID }
+            .sorted { $0.createdAt > $1.createdAt }
     }
 
     public func isExpanded(_ folderID: UUID) -> Bool {
