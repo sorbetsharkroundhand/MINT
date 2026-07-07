@@ -107,13 +107,16 @@ struct EditorPane: View {
             lineSpacing: CGFloat(settings.lineSpacing))
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
-                    Text("오늘 하루를 적어보세요…")
-                        .font(MintFonts.serifUI(20))
-                        .foregroundStyle(theme.ghostC)
-                        // MintBlockEditor의 textContainerInset(56,44)에 맞춰 정렬.
-                        .padding(.top, 51)
-                        .padding(.leading, 61)
-                        .allowsHitTesting(false)
+                    // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
+                    // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
+                    GeometryReader { geo in
+                        Text("오늘 하루를 적어보세요…")
+                            .font(MintFonts.serifUI(20))
+                            .foregroundStyle(theme.ghostC)
+                            .padding(.top, 51)
+                            .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
+                    }
+                    .allowsHitTesting(false)
                 }
             }
             .overlay(alignment: .bottom) {

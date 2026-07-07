@@ -15,6 +15,22 @@ import UniformTypeIdentifiers
 /// - 커서 효과(펄스 blink·이동 리플·커서 줄 하이라이트)는 뷰의 `draw`/
 ///   `drawInsertionPoint`에서 그린다 (에디터 v3.1 — 창 글로우 대체).
 ///
+/// 에디터 본문의 가독 폭 상수 — 창을 넓혀도 한 줄이 끝없이 길어지지 않게
+/// 편안한 폭으로 묶고 남는 폭은 좌우 여백으로 돌린다(글이 가운데 컬럼에 놓인다).
+/// iA Writer·Ulysses·Bear가 프리미엄으로 느껴지는 핵심 — 긴 줄은 눈이 다음 줄을
+/// 찾기 어려워 장시간 읽기를 피로하게 한다.
+public enum EditorMetrics {
+    /// 본문 최대 폭(pt) — 한글 약 38자·라틴 약 70자 수준의 차분한 measure.
+    public static let maxContentWidth: CGFloat = 760
+    /// 좁은 창에서의 기본 좌우 여백(pt) — 디자인 padding.
+    public static let minSideInset: CGFloat = 56
+
+    /// 뷰 폭에 맞는 좌우 inset — 폭이 넓어지면 여백을 키워 본문을 가운데로 모은다.
+    public static func sideInset(forWidth width: CGFloat) -> CGFloat {
+        max(minSideInset, ((width - maxContentWidth) / 2).rounded())
+    }
+}
+
 /// 고스트 텍스트(M3)는 기존 방식 그대로: storage 밖에서 `draw(_:)`로만 그린다.
 public struct MintBlockEditor: NSViewRepresentable {
     @Binding var text: String
@@ -1800,7 +1816,14 @@ final class BlockTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
-        if widthChanged, !mathRenders.isEmpty || !imageRenders.isEmpty {
+        guard widthChanged else { return }
+        // 가독 폭 유지 — 넓어진 만큼 좌우 여백(inset)을 키워 본문을 가운데로 모은다.
+        let inset = EditorMetrics.sideInset(forWidth: newSize.width)
+        if abs(textContainerInset.width - inset) > 0.5 {
+            textContainerInset = NSSize(width: inset, height: textContainerInset.height)
+        }
+        // 폭이 바뀌면 수식·이미지 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
+        if !mathRenders.isEmpty || !imageRenders.isEmpty {
             DispatchQueue.main.async { [weak self] in self?.refreshRenderedBlocks() }
         }
     }
