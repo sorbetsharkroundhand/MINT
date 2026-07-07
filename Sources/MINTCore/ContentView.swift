@@ -104,7 +104,8 @@ struct EditorPane: View {
     private var editor: some View {
         MintBlockEditor(
             text: bodyBinding, controller: completion, theme: theme,
-            lineSpacing: CGFloat(settings.lineSpacing))
+            lineSpacing: CGFloat(settings.lineSpacing),
+            focusRequest: store.editorFocusRequests)
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
                     // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을

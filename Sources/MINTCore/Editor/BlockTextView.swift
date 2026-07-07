@@ -39,17 +39,22 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let theme: MintTheme
     /// 본문 줄 간격(pt) — 설정에서 조절. 낮추면 줄이 촘촘해진다.
     private let lineSpacing: CGFloat
+    /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
+    /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
+    private let focusRequest: Int
 
     public init(
         text: Binding<String>,
         controller: CompletionController? = nil,
         theme: MintTheme = .light,
-        lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing)
+        lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
+        focusRequest: Int = 0
     ) {
         self._text = text
         self.controller = controller
         self.theme = theme
         self.lineSpacing = lineSpacing
+        self.focusRequest = focusRequest
     }
 
     public func makeNSView(context: Context) -> NSScrollView {
@@ -95,6 +100,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.lineSpacing = lineSpacing
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
+        // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
+        context.coordinator.lastFocusRequest = focusRequest
 
         let scrollView = WritingScrollView()
         scrollView.documentView = textView
@@ -132,6 +139,14 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.ghostText = nil
             controller?.dismissSuggestion()
         }
+        // 새 저널 등 포커스 요청 — reload 뒤에 first responder로 만든다.
+        if focusRequest != context.coordinator.lastFocusRequest {
+            context.coordinator.lastFocusRequest = focusRequest
+            DispatchQueue.main.async { [weak textView] in
+                guard let textView, let window = textView.window else { return }
+                window.makeFirstResponder(textView)
+            }
+        }
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -145,6 +160,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         var parent: MintBlockEditor
         /// 마지막으로 바인딩과 동기화된 마크다운 — updateNSView의 reload 기준.
         var lastSyncedText = ""
+        /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
+        var lastFocusRequest = 0
 
         init(_ parent: MintBlockEditor) {
             self.parent = parent
@@ -440,6 +457,19 @@ final class BlockTextView: NSTextView {
         return NSRect(x: x, y: top, width: w, height: bottom - top)
     }
 
+    /// 창에 처음 붙을 때 한 번만 자동 포커스 — 앱을 켜면 곧바로 쓸 수 있게.
+    private var didInitialFocus = false
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard !didInitialFocus, window != nil else { return }
+        didInitialFocus = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let window = self.window else { return }
+            window.makeFirstResponder(self)
+        }
+    }
+
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok {
@@ -551,15 +581,18 @@ final class BlockTextView: NSTextView {
         }
         storage.setAttributedString(result)
         decorateInline(in: NSRange(location: 0, length: storage.length))
-        setSelectedRange(NSRange(location: storage.length, length: 0))
+        // 저널을 열면 맨 위·처음에 커서를 둔다 — 예전엔 문서 끝에 놓여, 뷰포트는
+        // 위인데 커서는 아래라 첫 키 입력이 바닥으로 순간이동하는 혼란이 있었다.
+        setSelectedRange(NSRange(location: 0, length: 0))
+        // 뷰포트도 맨 위로 — 긴 저널을 열면 처음부터 보이게.
+        scrollToBeginningOfDocument(nil)
         syncTypingAttributes()
         isTransforming = false
         selectedImageLocation = nil
         hideImageToolbar()
         hideSelectionToolbar()
-        // 로드 직후엔 커서가 인위적으로 문서 끝에 놓인다 — 마지막 문단이 수식·이미지여도
-        // "편집 중"으로 오판해 렌더·줄 높이를 초기화하지 않게 강제 렌더한다.
-        // 사용자가 실제로 커서를 움직이면 평소 규칙(커서 문단 = 소스)으로 돌아온다.
+        // 커서가 어느 문단에 있든(수식·이미지 포함) 로드 직후엔 전부 렌더로 강제한다 —
+        // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
         needsDisplay = true
     }

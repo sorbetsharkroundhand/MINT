@@ -75,6 +75,15 @@ public final class EntryStore: ObservableObject {
     @Published public private(set) var activeID: UUID
     /// 사이드바에서 펼쳐진 폴더들 — 함께 저장해 재실행 시 트리 모양을 유지한다.
     @Published public private(set) var expandedFolderIDs: Set<UUID>
+    /// 에디터에 포커스를 달라는 요청 카운터 — 새 저널 생성 시 올려, 곧바로 타이핑할
+    /// 수 있게 한다("＋ 누르고 다시 클릭해야 써지는" 마찰 제거). 이름 변경과 충돌하지
+    /// 않도록 선택(select)에서는 올리지 않는다.
+    @Published public private(set) var editorFocusRequests = 0
+
+    /// 에디터 포커스를 명시적으로 요청한다.
+    public func requestEditorFocus() {
+        editorFocusRequests += 1
+    }
 
     /// 본문 autosave까지 기다리는 시간. 입력이 멈춘 뒤에만 쓴다.
     private let autosaveDelay: Duration
@@ -235,6 +244,8 @@ public final class EntryStore: ObservableObject {
         activeID = entry.id
         // 새 저널이 접힌 폴더 안에 숨지 않게 부모를 펼친다.
         if let folderID { expandedFolderIDs.insert(folderID) }
+        // 새 저널은 곧바로 쓸 수 있게 에디터로 포커스를 옮긴다.
+        editorFocusRequests += 1
         saveNow()
         return entry.id
     }
