@@ -88,16 +88,23 @@ struct EditorPane: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
+    /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
+    @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     var body: some View {
         VStack(spacing: 0) {
-            EditorToolbar(
-                store: store, completion: completion, settings: settings, theme: theme)
-            theme.sepC.frame(height: 1)
+            if !chromeHidden {
+                EditorToolbar(
+                    store: store, completion: completion, settings: settings, theme: theme)
+                theme.sepC.frame(height: 1)
+            }
             editor
-            theme.sepC.frame(height: 1)
-            EditorStatusBar(
-                store: store, completion: completion, settings: settings, theme: theme)
+            if !chromeHidden {
+                theme.sepC.frame(height: 1)
+                EditorStatusBar(
+                    store: store, completion: completion, settings: settings, theme: theme)
+            }
         }
     }
 

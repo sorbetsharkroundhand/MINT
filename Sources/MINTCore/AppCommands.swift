@@ -11,6 +11,7 @@ public struct MintCommands: Commands {
     let store: EntryStore
     @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
+    @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     public init(store: EntryStore) {
         self.store = store
@@ -96,6 +97,11 @@ public struct MintCommands: Commands {
                 sidebarVisible.toggle()
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
+
+            Button(chromeHidden ? "집중 모드 끄기" : "집중 모드") {
+                chromeHidden.toggle()
+            }
+            .keyboardShortcut("d", modifiers: [.command, .shift])
 
             Divider()
 
