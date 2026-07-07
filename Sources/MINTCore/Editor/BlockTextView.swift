@@ -41,6 +41,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let lineSpacing: CGFloat
     /// 본문 기본 글자 크기(pt) — 설정에서 조절(⌘+/⌘−).
     private let baseFontSize: CGFloat
+    /// 현재 편집 중인 저널 id — 전환 시 커서 위치를 저장/복원하는 키 (M6).
+    private let entryID: UUID
     /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
     /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
     private let focusRequest: Int
@@ -51,6 +53,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         theme: MintTheme = .light,
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
+        entryID: UUID = UUID(),
         focusRequest: Int = 0
     ) {
         self._text = text
@@ -58,6 +61,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.theme = theme
         self.lineSpacing = lineSpacing
         self.baseFontSize = baseFontSize
+        self.entryID = entryID
         self.focusRequest = focusRequest
     }
 
@@ -105,6 +109,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.baseFontSize = baseFontSize
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
+        context.coordinator.loadedEntryID = entryID
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
         context.coordinator.lastFocusRequest = focusRequest
 
@@ -139,6 +144,12 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.baseFontSize = baseFontSize
             textView.restyleAll()
         }
+        // 저널이 바뀌면(전환) 직전 저널의 커서 위치를 저장해 둔다 — 아직 옛 내용을
+        // 보여주는 지금 selectedRange가 옛 커서다 (M6).
+        let entryChanged = entryID != context.coordinator.loadedEntryID
+        if entryChanged, let prev = context.coordinator.loadedEntryID {
+            context.coordinator.caretByEntry[prev] = textView.selectedRange().location
+        }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
         // serialize() 재비교가 아니라 "마지막 동기화 텍스트"와 비교한다 —
         // 직렬화 왕복의 미세한 비대칭이 렌더 → reload → publish → 렌더의
@@ -148,7 +159,13 @@ public struct MintBlockEditor: NSViewRepresentable {
             context.coordinator.lastSyncedText = text
             textView.ghostText = nil
             controller?.dismissSuggestion()
+            // 다시 찾은 저널이면 마지막으로 있던 위치로 커서·스크롤을 복원한다.
+            // (처음 여는 저널은 저장값이 없어 load의 맨 위 규칙을 그대로 둔다.)
+            if entryChanged, let saved = context.coordinator.caretByEntry[entryID] {
+                textView.restoreCaret(to: saved)
+            }
         }
+        if entryChanged { context.coordinator.loadedEntryID = entryID }
         // 새 저널 등 포커스 요청 — reload 뒤에 first responder로 만든다.
         if focusRequest != context.coordinator.lastFocusRequest {
             context.coordinator.lastFocusRequest = focusRequest
@@ -172,6 +189,10 @@ public struct MintBlockEditor: NSViewRepresentable {
         var lastSyncedText = ""
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
         var lastFocusRequest = 0
+        /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
+        var caretByEntry: [UUID: Int] = [:]
+        /// 현재 로드된 저널 id — 전환 감지·커서 저장/복원 키.
+        var loadedEntryID: UUID?
 
         init(_ parent: MintBlockEditor) {
             self.parent = parent
@@ -617,6 +638,15 @@ final class BlockTextView: NSTextView {
         // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
         needsDisplay = true
+    }
+
+    /// 저장해 둔 커서 위치로 되돌리고 그 자리로 스크롤한다 (저널 재방문, M6).
+    func restoreCaret(to location: Int) {
+        let length = (string as NSString).length
+        let clamped = max(0, min(location, length))
+        setSelectedRange(NSRange(location: clamped, length: 0))
+        syncTypingAttributes()
+        scrollRangeToVisible(selectedRange())
     }
 
     /// `<p align="center|right">…</p>` — 정렬 저장 래퍼 (.p 문단 전용).

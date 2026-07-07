@@ -106,6 +106,7 @@ struct EditorPane: View {
             text: bodyBinding, controller: completion, theme: theme,
             lineSpacing: CGFloat(settings.lineSpacing),
             baseFontSize: CGFloat(settings.editorFontSize),
+            entryID: store.activeID,
             focusRequest: store.editorFocusRequests)
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
