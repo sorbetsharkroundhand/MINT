@@ -6,12 +6,17 @@ import SwiftUI
 /// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(다중 저널),
 /// 우측 에디터 컬럼(툴바 · Notion식 블록 에디터 · 단축키 필 · 상태 바).
 public struct ContentView: View {
-    @StateObject private var store = EntryStore()
-    @StateObject private var completion = CompletionController()
+    // 저장소·자동완성은 App(단일 인스턴스)에서 주입받는다 — 창마다 별도 저장소가
+    // 생기던 문제를 없애기 위해 소유권을 위로 올렸다.
+    @ObservedObject private var store: EntryStore
+    @ObservedObject private var completion: CompletionController
     /// ""=시스템 따름 / "light" / "dark" — 툴바 토글로 전환.
     @AppStorage("mint.appearance") private var appearance = ""
 
-    public init() {}
+    public init(store: EntryStore, completion: CompletionController) {
+        self.store = store
+        self.completion = completion
+    }
 
     public var body: some View {
         MainSurface(store: store, completion: completion)
@@ -675,6 +680,6 @@ struct EditorStatusBar: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(store: EntryStore(), completion: CompletionController())
         .frame(width: 1180, height: 760)
 }
