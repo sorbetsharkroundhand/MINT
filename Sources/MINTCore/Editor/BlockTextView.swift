@@ -80,10 +80,13 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
 
-        let scrollView = NSScrollView()
+        let scrollView = WritingScrollView()
         scrollView.documentView = textView
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
+        // 타자기 존을 직접 관리하므로 안전영역 기반 자동 인셋은 끈다 — 이 스크롤 뷰는
+        // 타이틀바 밑이 아니라 툴바·상태 바 사이에 있어 자동 상단 인셋은 어차피 0이다.
+        scrollView.automaticallyAdjustsContentInsets = false
 
         context.coordinator.attach(to: textView)
         return scrollView
@@ -231,6 +234,32 @@ public struct MintBlockEditor: NSViewRepresentable {
                 with: NSRange(location: caret, length: paragraph.upperBound - caret))
             return tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
+    }
+}
+
+// MARK: - 타자기 존 스크롤 뷰
+
+/// 마지막으로 쓰는 줄이 창 바닥(상태 바 바로 위)에 붙지 않고, 화면 중하단의
+/// 편안한 위치에 머물게 하는 스크롤 뷰.
+///
+/// 왜: 기본 NSTextView는 타이핑 중 커서가 보이도록 뷰 하단(=textContainerInset
+/// 44pt)까지만 스크롤한다. 그래서 글이 한 화면을 넘기면 그 뒤로는 줄곧 커서가
+/// **바닥을 긁으며** 써지고, 이는 답답함 → "그만 쓰고 싶다"로 이어진다.
+/// 아래쪽에 뷰 높이의 일부만큼 스크롤 여백(contentInsets.bottom)을 두면,
+/// `BlockTextView.scrollRangeToVisible`가 이 여백만큼 커서 아래를 함께 드러내
+/// 활성 줄이 대략 화면 75% 지점에 park하게 한다 — iA Writer·Ulysses의 차분한
+/// 글쓰기 존과 같은 감각. 한 화면 안에 드는 짧은 글엔 스크롤이 없어 영향이 없다.
+final class WritingScrollView: NSScrollView {
+    /// 활성 줄이 park할 지점을 남기기 위해 뷰 높이에 곱하는 하단 여백 비율.
+    /// 0.25 → 커서가 바닥(≈93%)이 아니라 화면 75% 지점에 머문다(약 4~5줄 여유).
+    private let gutterFraction: CGFloat = 0.25
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        // 높이에 비례해 여백을 갱신 — 작은 창에선 작게, 큰 창에선 크게.
+        let gutter = (newSize.height * gutterFraction).rounded()
+        guard abs(contentInsets.bottom - gutter) > 0.5 else { return }
+        contentInsets = NSEdgeInsets(top: contentInsets.top, left: 0, bottom: gutter, right: 0)
     }
 }
 
@@ -2201,6 +2230,35 @@ final class BlockTextView: NSTextView {
             lineTop = extra.minY
         }
         return textContainerOrigin.y + lineTop + baselineOffset
+    }
+
+    // MARK: 타자기 존 스크롤
+
+    /// 커서를 드러낼 때 커서 **아래로 여백(gutter)까지** 함께 보이도록 스크롤한다 —
+    /// 활성 줄이 창 바닥에 붙지 않고 화면 중하단의 편안한 위치에 park한다.
+    ///
+    /// 기본 `scrollRangeToVisible`은 커서를 뷰 하단 끝에 딱 맞춰 park시켜, 글이 한
+    /// 화면을 넘기면 그 뒤로 줄곧 바닥을 긁으며 써진다(답답함 → 그만 쓰고 싶음).
+    /// 여백은 스크롤 뷰의 `contentInsets.bottom`(=`WritingScrollView`가 뷰 높이에
+    /// 비례해 잡아 둔 값)에서 읽는다 — 그래야 문서 끝에서도 그 인셋만큼 더 스크롤할
+    /// 수 있어 마지막 줄까지 실제로 들어 올려진다. 인셋이 0이거나(타자기 존 미적용)
+    /// 드래그 선택(length>0)·수식 편집 등은 기본 동작으로 넘긴다.
+    override func scrollRangeToVisible(_ range: NSRange) {
+        let gutter = enclosingScrollView?.contentInsets.bottom ?? 0
+        guard range.length == 0, gutter > 0, let window else {
+            super.scrollRangeToVisible(range)
+            return
+        }
+        let screen = firstRect(forCharacterRange: range, actualRange: nil)
+        guard screen.height > 0 else {
+            super.scrollRangeToVisible(range)
+            return
+        }
+        let inView = convert(window.convertFromScreen(screen), from: nil)
+        _ = scrollToVisible(
+            NSRect(
+                x: inView.minX, y: inView.minY,
+                width: max(1, inView.width), height: inView.height + gutter))
     }
 }
 
