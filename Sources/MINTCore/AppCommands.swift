@@ -22,6 +22,8 @@ public struct MintCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("새 저널") { store.newEntry() }
                 .keyboardShortcut("n", modifiers: .command)
+            Button("새 소설") { store.newEntry(kind: .novel) }
+                .keyboardShortcut("n", modifiers: [.command, .option])
             Button("새 폴더") { store.newFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }

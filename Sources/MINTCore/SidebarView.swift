@@ -163,6 +163,12 @@ struct SidebarView: View {
                 Image(systemName: "folder.badge.plus")
                     .font(.system(size: 13.5, weight: .medium))
             }
+            HeaderIconButton(theme: theme, help: "새 소설") {
+                store.newEntry(kind: .novel)
+            } label: {
+                Image(systemName: "book.closed")
+                    .font(.system(size: 13, weight: .medium))
+            }
             HeaderIconButton(theme: theme, help: "새 저널") {
                 store.newEntry()
             } label: {
@@ -237,6 +243,11 @@ struct SidebarView: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
+                    if entry.resolvedKind == .novel {
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(theme.novelC)
+                    }
                     Text(entry.title)
                         .font(MintFonts.uiFont(13, .semibold))
                         .foregroundStyle(active ? theme.inkC : theme.ink2C)
@@ -359,6 +370,7 @@ struct SidebarView: View {
         .simultaneousGesture(TapGesture(count: 2).onEnded { startRenameFolder(folder) })
         .contextMenu {
             Button("새 저널") { store.newEntry(in: folder.id) }
+            Button("새 소설") { store.newEntry(in: folder.id, kind: .novel) }
             Button("새 하위 폴더") { store.newFolder(in: folder.id) }
             Button("이름 바꾸기") { startRenameFolder(folder) }
             Button("삭제", role: .destructive) { requestDeleteFolder(folder) }
@@ -374,9 +386,19 @@ struct SidebarView: View {
         let hovered = hoveredID == entry.id
 
         HStack(spacing: 11) {
-            Circle()
-                .fill(active ? theme.blueC : theme.ink3C)
-                .frame(width: 7, height: 7)
+            // 종류별 아이콘 — 저널은 점, 소설은 책 (보라 액센트).
+            Group {
+                if entry.resolvedKind == .novel {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(active ? theme.novelC : theme.ink3C)
+                } else {
+                    Circle()
+                        .fill(active ? theme.blueC : theme.ink3C)
+                        .frame(width: 7, height: 7)
+                }
+            }
+            .frame(width: 11)
 
             if editing {
                 TextField("제목", text: $draftTitle)
@@ -396,8 +418,11 @@ struct SidebarView: View {
                         renameFieldFocused = false
                     }
             } else {
+                // 소설 제목은 본문과 같은 세리프 — 목록에서도 "책" 느낌이 나게.
                 Text(entry.title)
-                    .font(MintFonts.uiFont(13, active ? .semibold : .medium))
+                    .font(entry.resolvedKind == .novel
+                        ? MintFonts.serifUI(13, active ? .semibold : .medium)
+                        : MintFonts.uiFont(13, active ? .semibold : .medium))
                     .foregroundStyle(active ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
             }
@@ -417,7 +442,9 @@ struct SidebarView: View {
         .padding(.leading, CGFloat(depth) * 14)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(active ? theme.activeBgC : (hovered ? theme.hoverC : .clear))
+                .fill(active
+                    ? (entry.resolvedKind == .novel ? theme.novelBgC : theme.activeBgC)
+                    : (hovered ? theme.hoverC : .clear))
         )
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .onHover { hoveredID = $0 ? entry.id : nil }

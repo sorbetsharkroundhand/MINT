@@ -1,6 +1,21 @@
 import Foundation
 import SwiftUI
 
+/// 저널 종류 — 일반 글쓰기와 소설 쓰기를 구분한다.
+/// 본문은 같은 마크다운이지만, 사이드바 아이콘·에디터 크롬이 다르고
+/// 이후 기능(자동완성 프롬프트·통계 등)이 여기서 갈라진다.
+public enum EntryKind: String, Codable, Sendable {
+    case journal
+    case novel
+
+    public var label: String {
+        switch self {
+        case .journal: "저널"
+        case .novel: "소설"
+        }
+    }
+}
+
 /// 저널 한 편 (에디터 v3 — 다중 저널).
 public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -13,6 +28,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     /// 레거시 파일엔 없는 키(옵셔널) — nil이면 "기본 제목일 때만" 자동 파생을 허용해
     /// 예전에 붙여 둔 이름은 보존한다.
     public var titleIsCustom: Bool?
+    /// 저널 종류. 레거시 파일엔 없는 키 — nil이면 일반 글쓰기(journal).
+    public var kind: EntryKind?
 
     public init(
         id: UUID = UUID(),
@@ -20,7 +37,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         createdAt: Date = .now,
         body: String = "",
         folderID: UUID? = nil,
-        titleIsCustom: Bool? = nil
+        titleIsCustom: Bool? = nil,
+        kind: EntryKind? = nil
     ) {
         self.id = id
         self.title = title
@@ -28,10 +46,14 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.body = body
         self.folderID = folderID
         self.titleIsCustom = titleIsCustom
+        self.kind = kind
     }
 
+    /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
+    public var resolvedKind: EntryKind { kind ?? .journal }
+
     /// 자동으로 붙는 기본 제목들 — 이 이름이면 본문에서 파생해도 사용자 의도를 해치지 않는다.
-    static let placeholderTitles: Set<String> = ["새 저널", "저널", "제목 없음", ""]
+    static let placeholderTitles: Set<String> = ["새 저널", "새 소설", "저널", "제목 없음", ""]
 
     /// 본문에서 제목을 자동 파생해도 되는가.
     var allowsAutoTitle: Bool {
@@ -128,6 +150,20 @@ public final class EntryStore: ObservableObject {
         let loaded = Self.loadSnapshot(from: fileURL) ?? Self.migratedOrEmptySnapshot(in: dir)
         var entries = loaded.entries
         if entries.isEmpty { entries = [JournalEntry()] }
+        // 마이그레이션: 예전 파생 버그로 제목에 인라인 마크업(<font …>)이 얼어붙은
+        // 항목 정리. 파생 제목은 본문에서 다시 만들고, 직접 지은 이름은 글자를
+        // 보존한 채 태그만 벗긴다 (제목에 태그가 남는 건 어느 쪽이든 의도가 아니다).
+        for index in entries.indices where entries[index].title.contains("<") {
+            if entries[index].titleIsCustom == true {
+                let cleaned = Self.strippedInlineTags(entries[index].title)
+                    .trimmingCharacters(in: .whitespaces)
+                entries[index].title = cleaned.isEmpty ? "제목 없음" : cleaned
+            } else {
+                let derived = Self.derivedTitle(from: entries[index].body)
+                entries[index].title = derived.isEmpty ? "새 저널" : derived
+                entries[index].titleIsCustom = false
+            }
+        }
         self.entries = entries
         let folders = loaded.folders ?? []
         self.folders = folders
@@ -172,17 +208,37 @@ public final class EntryStore: ObservableObject {
         return Snapshot(entries: [entry], activeID: entry.id)
     }
 
-    /// 첫 비어 있지 않은 줄에서 마크다운 마커를 벗겨 제목으로 쓴다.
+    /// 첫 비어 있지 않은 줄에서 마크다운 마커·인라인 마크업을 벗겨 제목으로 쓴다.
     /// 본문이 길어도 앞부분만 훑는다 — 매 키 입력마다 호출되므로 비용을 묶어 둔다.
-    /// 파생할 내용이 없으면 빈 문자열(호출부에서 "새 저널"로 대체).
+    /// 파생할 내용이 없으면 빈 문자열(호출부에서 기본 제목으로 대체).
+    /// 인라인 래퍼 태그(<font …>·</font>·<p align="…">·</p>)만 벗긴다 —
+    /// 안의 글자는 남는다. 제목 파생·마이그레이션 공용.
+    static func strippedInlineTags(_ text: String) -> String {
+        text.replacingOccurrences(
+            of: #"</?(?:font|p)\b[^>]*>"#,
+            with: "", options: .regularExpression)
+    }
+
     static func derivedTitle(from body: String) -> String {
         for line in body.prefix(500).split(separator: "\n") {
-            let stripped = line
+            var stripped = strippedInlineTags(
+                String(line)
+                    // 블록 마커 (#·>·목록·번호) 제거.
+                    .replacingOccurrences(
+                        of: #"^(#{1,3}\s+|>\s?|- \[[ x]\]\s?|[-*]\s+|\d+\.\s+)"#,
+                        with: "", options: .regularExpression))
+                // 인라인 마커(*** ** * `)도 글자만 남긴다.
                 .replacingOccurrences(
-                    of: #"^(#{1,3}\s+|>\s?|- \[[ x]\]\s?|[-*]\s+|\d+\.\s+)"#,
+                    of: #"[*`]+"#,
                     with: "", options: .regularExpression)
-                .trimmingCharacters(in: .whitespaces)
-            if !stripped.isEmpty { return String(stripped.prefix(30)) }
+            stripped = stripped.trimmingCharacters(in: .whitespaces)
+            guard !stripped.isEmpty else { continue }
+            // 산문이 아닌 줄(수식·이미지·코드 펜스·구분선)은 제목이 될 수 없다.
+            if stripped.hasPrefix("$$") || stripped.hasPrefix("![") { continue }
+            if stripped.range(of: #"^-{3,}$"#, options: .regularExpression) != nil {
+                continue
+            }
+            return String(stripped.prefix(30))
         }
         return ""
     }
@@ -258,8 +314,12 @@ public final class EntryStore: ObservableObject {
     }
 
     @discardableResult
-    public func newEntry(in folderID: UUID? = nil) -> UUID {
-        let entry = JournalEntry(folderID: folderID)
+    public func newEntry(in folderID: UUID? = nil, kind: EntryKind = .journal) -> UUID {
+        // titleIsCustom=false — 이름을 직접 바꾸기 전까지 본문에서 계속 파생한다.
+        // (nil이면 첫 파생 직후 제목이 플레이스홀더가 아니게 돼 한 글자에서 얼어붙는다.)
+        let entry = JournalEntry(
+            title: kind == .novel ? "새 소설" : "새 저널", folderID: folderID,
+            titleIsCustom: false, kind: kind)
         entries.insert(entry, at: 0)
         activeID = entry.id
         // 새 저널이 접힌 폴더 안에 숨지 않게 부모를 펼친다.
@@ -384,7 +444,11 @@ public final class EntryStore: ObservableObject {
         entries[index].body = text
         if entries[index].allowsAutoTitle {
             let derived = Self.derivedTitle(from: text)
-            entries[index].title = derived.isEmpty ? "새 저널" : derived
+            let fallback = entries[index].resolvedKind == .novel ? "새 소설" : "새 저널"
+            entries[index].title = derived.isEmpty ? fallback : derived
+            // 파생 제목임을 명시 — 레거시(nil) 항목이 첫 파생 후 플레이스홀더
+            // 판정에서 벗어나 한 글자 제목으로 얼어붙던 버그 방지.
+            entries[index].titleIsCustom = false
         }
         scheduleSave()
     }

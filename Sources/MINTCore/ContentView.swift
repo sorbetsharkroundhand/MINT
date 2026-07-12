@@ -166,6 +166,19 @@ struct EditorToolbar: View {
         HStack(spacing: 12) {
             sidebarToggle
             dateButton
+            // 소설 저널이면 날짜 옆에 종류 배지 — 지금 어떤 모드로 쓰는지 보이게.
+            if store.activeEntry?.resolvedKind == .novel {
+                HStack(spacing: 4) {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 9))
+                    Text("소설")
+                        .font(MintFonts.serifUI(11, .semibold))
+                }
+                .foregroundStyle(theme.novelC)
+                .padding(.vertical, 3)
+                .padding(.horizontal, 8)
+                .background(Capsule().fill(theme.novelBgC))
+            }
             Spacer()
             helpButton
             imageButton
@@ -313,6 +326,8 @@ struct ModelChip: View {
     @State private var menuOpen = false
     @State private var hoveredID: String?
     @State private var chipHovered = false
+    /// 모델 가중치 프리페치 — 드롭다운 행의 다운로드 버튼·진행률 담당.
+    @StateObject private var downloads = ModelDownloadManager()
 
     var body: some View {
         Button {
@@ -384,6 +399,8 @@ struct ModelChip: View {
             predictionLengthRow
         }
         .frame(width: 264)
+        // 열 때마다 로컬 캐시를 다시 확인한다 — 엔진 로드로 받아진 모델도 반영.
+        .onAppear { downloads.refresh(ModelChoice.all.map(\.id)) }
     }
 
     /// 예측 길이(최대 토큰) 조절 — SettingsView(⌘,)의 스테퍼와 같은 값·범위.
@@ -441,46 +458,88 @@ struct ModelChip: View {
         .help("자동완성 켜기/끄기")
     }
 
+    // 행 전체는 탭 제스처(모델 선택), 다운로드 버튼은 내부의 독립 Button —
+    // Button 안에 Button을 겹치면 탭이 엉키므로 행을 제스처로 구성한다.
     private func row(_ choice: ModelChoice) -> some View {
         let selected = settings.modelID == choice.id
-        return Button {
-            pick(choice.id)
-        } label: {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(choice.name)
-                            .font(MintFonts.uiFont(13, .semibold))
-                            .foregroundStyle(theme.inkC)
-                        Text(choice.sizeLabel)
-                            .font(MintFonts.monoUI(10.5))
-                            .foregroundStyle(theme.ink3C)
-                    }
-                    Text(choice.detail)
-                        .font(MintFonts.uiFont(11.5))
-                        .foregroundStyle(theme.ink2C)
+        return HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 1) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text(choice.name)
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                    Text(choice.sizeLabel)
+                        .font(MintFonts.monoUI(10.5))
+                        .foregroundStyle(theme.ink3C)
                 }
-                Spacer(minLength: 0)
-                Text(choice.latencyLabel)
-                    .font(MintFonts.monoUI(10.5))
-                    .foregroundStyle(theme.ink3C)
-                Text(selected ? "✓" : "")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundStyle(theme.blueC)
-                    .frame(width: 16)
+                Text(choice.detail)
+                    .font(MintFonts.uiFont(11.5))
+                    .foregroundStyle(theme.ink2C)
             }
-            .padding(.vertical, 9)
-            .padding(.horizontal, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(selected
-                        ? theme.activeBgC
-                        : (hoveredID == choice.id ? theme.hoverC : .clear))
-            )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            Spacer(minLength: 0)
+            downloadAccessory(choice)
+            Text(choice.latencyLabel)
+                .font(MintFonts.monoUI(10.5))
+                .foregroundStyle(theme.ink3C)
+            Text(selected ? "✓" : "")
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(theme.blueC)
+                .frame(width: 16)
         }
-        .buttonStyle(.plain)
+        .padding(.vertical, 9)
+        .padding(.horizontal, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(selected
+                    ? theme.activeBgC
+                    : (hoveredID == choice.id ? theme.hoverC : .clear))
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .onTapGesture { pick(choice.id) }
         .onHover { hoveredID = $0 ? choice.id : nil }
+    }
+
+    /// 행 우측의 다운로드 상태 — 안 받았으면 받기 버튼, 진행 중엔 %, 받았으면 체크.
+    /// 미리 받아 두면 그 모델로 전환할 때 다운로드 없이 바로 로드된다.
+    @ViewBuilder
+    private func downloadAccessory(_ choice: ModelChoice) -> some View {
+        switch downloads.states[choice.id] {
+        case .downloading(let fraction):
+            Button {
+                downloads.cancel(choice.id)
+            } label: {
+                Text(String(format: "%.0f%%", fraction * 100))
+                    .font(MintFonts.monoUI(10, .semibold))
+                    .foregroundStyle(theme.blueC)
+            }
+            .buttonStyle(.plain)
+            .help("다운로드 중 — 누르면 취소")
+        case .downloaded:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.ink3C)
+                .help("다운로드됨 — 전환 시 바로 로드")
+        case .failed(let message):
+            Button {
+                downloads.download(choice.id)
+            } label: {
+                Image(systemName: "exclamationmark.arrow.circlepath")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.ink2C)
+            }
+            .buttonStyle(.plain)
+            .help("실패 — 다시 시도 (\(message))")
+        case .notDownloaded, .none:
+            Button {
+                downloads.download(choice.id)
+            } label: {
+                Image(systemName: "arrow.down.circle")
+                    .font(.system(size: 13))
+                    .foregroundStyle(theme.blueC)
+            }
+            .buttonStyle(.plain)
+            .help("모델 미리 받기 (\(choice.sizeLabel))")
+        }
     }
 
     /// Settings(⌘,)에서 직접 입력한 저장소 id도 선택 상태로 보이게.

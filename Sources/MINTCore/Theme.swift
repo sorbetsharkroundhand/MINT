@@ -27,6 +27,13 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
     public let statusbar: NSColor
     /// 커서가 놓인 줄의 은은한 하이라이트 (글로우 대체 — 에디터 v3.1).
     public let activeLine: NSColor
+    /// 드래그 선택 영역 틴트 — 시스템 사각 하이라이트 대신 우리가 그리는
+    /// 라운드 영역 표시의 채움색 (다크는 유리 배경 위에서 읽히도록 더 진하게).
+    public let selection: NSColor
+    /// 소설 글쓰기 액센트 — 저널(파랑)과 나란히 놓아도 구분되는 보라 계열.
+    public let novel: NSColor
+    /// 소설 액센트의 은은한 배경 틴트 (활성 행·배지).
+    public let novelBg: NSColor
 
     public static let light = MintTheme(
         ink: NSColor(hex: 0x1C1C1E),
@@ -49,7 +56,10 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         sidebarTint: NSColor(white: 0, alpha: 0.018),
         statusbar: NSColor(white: 1, alpha: 0.24),
         // 현재 줄 인식이 실제로 느껴지도록 아주 옅던 값을 살짝 올린다 (L3).
-        activeLine: NSColor(white: 0, alpha: 0.055)
+        activeLine: NSColor(white: 0, alpha: 0.055),
+        selection: NSColor(hex: 0x0A84FF, alpha: 0.16),
+        novel: NSColor(hex: 0xA550E0),
+        novelBg: NSColor(hex: 0xA550E0, alpha: 0.10)
     )
 
     public static let dark = MintTheme(
@@ -74,7 +84,10 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         sidebarTint: NSColor(white: 1, alpha: 0.028),
         statusbar: NSColor(white: 1, alpha: 0.03),
         // 어두운 유리 위에서 현재 줄이 또렷하도록 살짝 올린다 (L3).
-        activeLine: NSColor(white: 1, alpha: 0.075)
+        activeLine: NSColor(white: 1, alpha: 0.075),
+        selection: NSColor(hex: 0x0A84FF, alpha: 0.30),
+        novel: NSColor(hex: 0xBF5AF2),
+        novelBg: NSColor(hex: 0xBF5AF2, alpha: 0.18)
     )
 
     public static func of(_ scheme: ColorScheme) -> MintTheme {
@@ -100,6 +113,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
     public var toolbarC: Color { Color(nsColor: toolbar) }
     public var sidebarTintC: Color { Color(nsColor: sidebarTint) }
     public var statusbarC: Color { Color(nsColor: statusbar) }
+    public var novelC: Color { Color(nsColor: novel) }
+    public var novelBgC: Color { Color(nsColor: novelBg) }
 }
 
 extension NSColor {

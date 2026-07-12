@@ -92,11 +92,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.textContainerInset = NSSize(width: 56, height: 44)
         // 커서는 잉크색(라이트=검정/다크=하양) — 높이는 커서 위치의 글자 크기를 따른다.
         textView.insertionPointColor = theme.ink
-        // 선택 하이라이트를 앱 강조색(파랑)의 은은한 틴트로 — 시스템 기본 하이라이트가
-        // 따뜻한 세리프 저널과 겉돌지 않게 (L1).
-        textView.selectedTextAttributes = [
-            .backgroundColor: theme.blue.withAlphaComponent(0.20)
-        ]
+        // 시스템 사각 선택 하이라이트는 끈다 — 선택 영역은 우리가 draw()에서
+        // 라운드 사각형(테마 selection 틴트)으로 직접 그린다 (우리식 드래그 표시).
+        textView.selectedTextAttributes = [.backgroundColor: NSColor.clear]
         // ⌘F 문서 내 검색 — 스크롤 뷰 상단의 표준 find bar.
         textView.usesFindBar = true
         textView.isIncrementalSearchingEnabled = true
@@ -137,9 +135,6 @@ public struct MintBlockEditor: NSViewRepresentable {
         if textView.palette.ink != theme.ink {
             textView.palette = theme
             textView.insertionPointColor = theme.ink
-            textView.selectedTextAttributes = [
-                .backgroundColor: theme.blue.withAlphaComponent(0.20)
-            ]
             textView.restyleAll()
         }
         // 줄 간격 설정이 바뀌면 전체 문단 스타일을 다시 적용한다.
@@ -1213,6 +1208,14 @@ final class BlockTextView: NSTextView {
     // MARK: 키 동작 (Enter/Backspace 블록 규칙)
 
     override func insertNewline(_ sender: Any?) {
+        // 이미지 객체 선택 중 Enter — 이미지 아래에 새 문단을 만들고 커서를 옮긴다
+        // (그림 블럭 완성도). insertText가 막혀 있어 기본 경로로는 아무 일도 없다.
+        if let loc = selectedImageLocation {
+            let para = (string as NSString).paragraphRange(
+                for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+            imageLineBreak(after: para)
+            return
+        }
         guard !hasMarkedText() else { return super.insertNewline(sender) }
         let sel = selectedRange()
         let ns = string as NSString
@@ -1481,6 +1484,56 @@ final class BlockTextView: NSTextView {
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         guard selectedImageLocation == nil else { return }
         super.insertText(insertString, replacementRange: replacementRange)
+    }
+
+    /// 이미지 객체 선택 중 Esc — 선택만 해제한다 (그림 블럭 완성도).
+    override func cancelOperation(_ sender: Any?) {
+        if selectedImageLocation != nil {
+            clearImageSelection()
+            return
+        }
+        super.cancelOperation(sender)
+    }
+
+    /// 이미지 객체 선택 중 ⌘C/⌘X — 이미지 비트맵을 클립보드로 (그림 블럭 완성도).
+    /// 붙여넣기는 기존 insertImages의 TIFF 경로로 다시 이미지 블록이 된다.
+    override func copy(_ sender: Any?) {
+        if let loc = selectedImageLocation, copySelectedImage(atParagraph: loc) { return }
+        super.copy(sender)
+    }
+
+    override func cut(_ sender: Any?) {
+        if let loc = selectedImageLocation {
+            guard copySelectedImage(atParagraph: loc) else { return }
+            let para = (string as NSString).paragraphRange(
+                for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+            deleteImageParagraph(para)
+            return
+        }
+        super.cut(sender)
+    }
+
+    /// 선택된 이미지 문단의 비트맵을 클립보드에 쓴다. 원본을 못 읽으면 false.
+    private func copySelectedImage(atParagraph loc: Int) -> Bool {
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
+        guard let attrs = Self.imageAttrs(
+                from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
+            let image = MintImageStore.image(for: attrs.src)
+        else { return false }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        return pasteboard.writeObjects([image])
+    }
+
+    /// 렌더된 이미지 위에서는 포인터 커서 — 클릭(객체 선택) 대상임을 알린다.
+    override func resetCursorRects() {
+        super.resetCursorRects()
+        for render in imageRenders {
+            if let rect = imageDrawnRect(forParagraphAt: render.range.location) {
+                addCursorRect(rect, cursor: .pointingHand)
+            }
+        }
     }
 
     /// 이미지 툴바 액션 실행 (요구 3).
@@ -1779,10 +1832,18 @@ final class BlockTextView: NSTextView {
         // 수식/이미지 마커("$$"·"![")조차 없으면 — 즉 대다수의 평문 저널이면 —
         // 문단 순회·임시속성 조작·전체 재그리기를 통째로 건너뛴다(키 입력마다 O(n)
         // 낭비 제거). 마커 검사는 NSString range 검색이라 문단 순회보다 훨씬 싸다.
+        // 주의: 수식/이미지 블록은 마커("$$"·"![")가 이미 **소비**돼 storage 텍스트에
+        // 남아 있지 않다 — 커서 문단이 수식/이미지면 마커 검사와 무관하게 전체
+        // 경로를 타야 한다 (안 그러면 편집 후 렌더로 영영 못 돌아가는 버그).
         if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil {
             let source = storage.string as NSString
-            if source.range(of: "$$").location == NSNotFound,
+            let caretPara = source.paragraphRange(
+                for: NSRange(location: min(selectedRange().location, source.length), length: 0))
+            let caretBlock = blockInfo(in: caretPara).block
+            if caretBlock != .math, caretBlock != .image,
+                source.range(of: "$$").location == NSNotFound,
                 source.range(of: "![").location == NSNotFound {
+                hideMathPreview()
                 return
             }
         }
@@ -1791,6 +1852,8 @@ final class BlockTextView: NSTextView {
             forCharacterRange: NSRange(location: 0, length: storage.length))
         var maths: [(range: NSRange, image: NSImage)] = []
         var images: [ImageRender] = []
+        // 편집 모드인 수식 문단 — 루프 뒤 라이브 미리보기 패널을 붙인다.
+        var editingMath: (para: NSRange, source: String)?
         let ns = string as NSString
         let sel = selectedRange()
         // 포커스가 사이드바 등 밖에 있으면 커서가 문단에 남아 있어도 렌더한다 —
@@ -1830,6 +1893,7 @@ final class BlockTextView: NSTextView {
 
             switch block {
             case .math:
+                if editing { editingMath = (para, source) }
                 if let image = rendered {
                     // 렌더되는 한 줄 높이(마진)를 **항상** 유지한다 — 커서가 들어와도,
                     // 다른 곳 갔다 와도 풀리지 않게 (요구 2). 편집 모드면 소스만 보인다.
@@ -1867,7 +1931,63 @@ final class BlockTextView: NSTextView {
         mathRenders = maths
         imageRenders = images
         repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
+        // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다.
+        if let (para, source) = editingMath {
+            presentMathPreview(source: source, below: para)
+        } else {
+            hideMathPreview()
+        }
+        // 렌더된 이미지 위 포인터 커서 rect를 새 위치로 갱신한다.
+        window?.invalidateCursorRects(for: self)
         needsDisplay = true
+    }
+
+    // MARK: 수식 라이브 미리보기 (수식 블럭 완성도)
+
+    /// 수식 편집 중 미리보기 패널 — 소스가 바뀔 때마다 refreshRenderedBlocks가 갱신.
+    private var mathPreviewHost: NSHostingView<MathPreviewView>?
+
+    /// 편집 중인 수식 문단 아래에 렌더 결과(또는 힌트·오류 안내)를 띄운다.
+    private func presentMathPreview(source: String, below para: NSRange) {
+        guard let rect = paragraphRectInView(para) else {
+            hideMathPreview()
+            return
+        }
+        let image = source.isEmpty
+            ? nil
+            : MathRenderer.image(latex: source, color: palette.ink, fontSize: mathFontSize)
+        let message: String?
+        let isError: Bool
+        if image != nil {
+            message = nil
+            isError = false
+        } else if source.isEmpty {
+            message = "LaTeX 입력 — 예: E = mc^2"
+            isError = false
+        } else {
+            message = "수식을 해석할 수 없어요 — LaTeX 문법을 확인하세요"
+            isError = true
+        }
+        let view = MathPreviewView(
+            theme: palette, image: image, message: message, isError: isError)
+        let host: NSHostingView<MathPreviewView>
+        if let existing = mathPreviewHost {
+            existing.rootView = view
+            host = existing
+        } else {
+            host = NSHostingView(rootView: view)
+            mathPreviewHost = host
+        }
+        let size = host.fittingSize
+        // 문단 아래 중앙 (flipped 좌표) — 좌우는 화면 안쪽으로 클램프.
+        var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.maxY + 8)
+        origin.x = max(8, min(origin.x, bounds.width - size.width - 8))
+        host.frame = NSRect(origin: origin, size: size)
+        if host.superview !== self { addSubview(host) }
+    }
+
+    private func hideMathPreview() {
+        mathPreviewHost?.removeFromSuperview()
     }
 
     /// `![alt](src)` 한 줄에서 src(상대경로)만 뽑는다. 형식이 아니면 nil.
@@ -2416,6 +2536,10 @@ final class BlockTextView: NSTextView {
             NSBezierPath(roundedRect: lineRect, xRadius: 6, yRadius: 6).fill()
         }
 
+        // 드래그 선택 영역 — 시스템 사각 하이라이트 대신 줄별 라운드 사각형을
+        // 본문 아래에 깔아 그린다 (우리식 드래그 표시, 테마 selection 토큰).
+        drawSelectionHighlight(in: dirtyRect)
+
         super.draw(dirtyRect)
 
         // 이미지 이동 드래그 중 드롭 위치 표시선 (요구 B).
@@ -2442,6 +2566,25 @@ final class BlockTextView: NSTextView {
         let y = caretBaselineY().map { $0 - font.ascender } ?? caretRect.minY
         NSAttributedString(string: ghost, attributes: attributes)
             .draw(at: NSPoint(x: caretRect.maxX, y: y))
+    }
+
+    /// 선택 영역을 줄별 라운드 사각형으로 그린다 — 글자 주위를 살짝(2pt) 감싸
+    /// 디자인의 영역 표시처럼 보이게 한다. 무효화는 refreshActiveLineHighlight의
+    /// lastSelectionRect(전체 폭 밴드)가 담당하므로 여기선 그리기만 한다.
+    private func drawSelectionHighlight(in dirtyRect: NSRect) {
+        let sel = selectedRange()
+        guard sel.length > 0, let layoutManager, let textContainer else { return }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return }
+        let origin = textContainerOrigin
+        palette.selection.setFill()
+        layoutManager.enumerateEnclosingRects(
+            forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: textContainer
+        ) { rect, _ in
+            let r = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -2, dy: 0.5)
+            guard r.intersects(dirtyRect) else { return }
+            NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4).fill()
+        }
     }
 
     private func caretRectInView() -> NSRect? {
