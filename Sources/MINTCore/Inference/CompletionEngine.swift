@@ -133,7 +133,7 @@ public actor CompletionEngine {
     /// MLX GPU 캐시 상한 — 타이핑마다 생성이 반복되므로 캐시가 무한히
     /// 자라지 않게 1회 설정한다.
     private static let mlxConfigured: Void = {
-        GPU.set(cacheLimit: 256 * 1024 * 1024)
+        Memory.cacheLimit = 256 * 1024 * 1024
     }()
 
     // MARK: - 생성

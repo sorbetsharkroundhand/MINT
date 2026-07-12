@@ -477,10 +477,48 @@ final class BlockTextView: NSTextView {
     /// 마지막으로 그린 커서 줄 하이라이트 rect — 이동 시 이전 줄 무효화용.
     private var lastActiveLineRect: NSRect?
 
+    /// 직전 선택(길이>0) 하이라이트가 걸친 영역 — 더블클릭으로 잡힌 공백·개행
+    /// 선택은 글리프 rect 바깥까지 그려져, 선택 해제 시 AppKit의 무효화가
+    /// 다 덮지 못하고 잔상이 남는다. 선택이 바뀔 때 이 rect를 직접 지운다.
+    private var lastSelectionRect: NSRect?
+
     /// 커서 줄 하이라이트를 다시 그린다 — 이전 줄과 새 줄만 무효화.
+    /// 선택 변경·포커스 전환마다 불리므로, 선택 잔상 무효화와 캐럿 뷰 동기화도 겸한다.
+    ///
+    /// `lastActiveLineRect` 기록은 **오직 여기서만** 갱신한다 — 무효화와 기록이
+    /// 한 트랜잭션이어야 이전 줄 밴드가 빠짐없이 지워진다 (하이라이트 최대 1개 보장).
     func refreshActiveLineHighlight() {
+        let new = activeLineRect()
         if let old = lastActiveLineRect { setNeedsDisplay(old) }
-        if let new = activeLineRect() { setNeedsDisplay(new) }
+        if let new { setNeedsDisplay(new) }
+        lastActiveLineRect = new
+        // 직전 선택 하이라이트 영역 무효화 — 공백·개행 선택 잔상 방지.
+        if let oldSelection = lastSelectionRect {
+            setNeedsDisplay(oldSelection.insetBy(dx: -4, dy: -4))
+        }
+        lastSelectionRect = selectionHighlightRect()
+        syncCaretView()
+    }
+
+    /// 현재 선택 하이라이트가 그려질 수 있는 영역 (뷰 좌표). 선택이 없으면 nil.
+    ///
+    /// 개행 선택은 마지막 글리프 오른쪽 바깥까지 그려지므로, 세로는 글리프
+    /// bounding rect를 따르되 가로는 컨테이너 전체 폭으로 잡는다 — 지우기
+    /// 전용이라 넓게 잡아도 다시 그리는 비용만 조금 늘 뿐 안전하다.
+    private func selectionHighlightRect() -> NSRect? {
+        let range = selectedRange()
+        guard range.length > 0, let layoutManager, let textContainer else { return nil }
+        let glyphRange = layoutManager.glyphRange(
+            forCharacterRange: range, actualCharacterRange: nil)
+        var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
+        // 문서 끝 개행까지 선택되면 여분 라인 프래그먼트에도 하이라이트가 걸친다.
+        if range.upperBound >= (string as NSString).length {
+            let extra = layoutManager.extraLineFragmentRect
+            if !extra.isEmpty { rect = rect.union(extra) }
+        }
+        rect.origin.x = 0
+        rect.size.width = textContainer.size.width
+        return rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
     }
 
     /// 커서 줄 하이라이트 rect (뷰 좌표). 포커스 밖이면 nil.
@@ -2252,26 +2290,90 @@ final class BlockTextView: NSTextView {
 
     // MARK: 커서 펄스 · 리플 · 커서 줄 하이라이트 드로잉
 
-    /// 일반 blink는 유지하되, 켜질 때마다 밝기가 아주 미세하게 물결치는 커서.
-    /// 커서 — 특수효과 없이 기본 깜빡임만, 다만 폭을 얇게 그린다 (요구 2).
-    /// 이미지가 객체로 선택된 동안엔 커서를 그리지 않는다 — 이미지 내부는 편집
-    /// 대상이 아니라 조작 대상이므로 커서가 보이면 혼란스럽다 (요구 1).
-    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {
-        guard selectedImageLocation == nil else {
-            if !flag { setNeedsDisplay(rect.insetBy(dx: -2, dy: -2)) }
+    /// 캐럿은 본문 픽셀에 직접 그리지 않는다 — 레거시 캐럿 드로잉도, 시스템
+    /// `NSTextInsertionIndicator`도 이 macOS에서 페이드 블링크 중 커서가
+    /// 이동하면 사라지던 잔상을 남긴다. 대신 우리가 소유한 단일 NSView를
+    /// 캐럿으로 쓴다: 뷰가 하나뿐이고 블링크 애니메이션도 그 뷰의 레이어에만
+    /// 붙으므로, 프레임을 옮기면 페이드 중이던 픽셀까지 통째로 따라와
+    /// 잔상이 구조적으로 불가능하다.
+    /// 이 오버라이드는 시스템 캐럿을 비활성화하는 스위치 역할만 한다.
+    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {}
+
+    /// 우리가 소유한 캐럿 뷰. 표시 조건·위치는 `syncCaretView()`가 담당.
+    private lazy var caretView: NSView = {
+        let view = NSView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 1
+        view.isHidden = true
+        addSubview(view)
+        return view
+    }()
+
+    /// 자체 블링크 타이머 — 시스템 블링크 대신 캐럿 뷰의 alpha를 페이드한다.
+    private var caretBlinkTimer: Timer?
+
+    /// AppKit이 캐럿 상태를 갱신하는 모든 시점(커서 이동·포커스 변화·블링크
+    /// 재시작)에 캐럿 뷰·커서 줄 하이라이트를 함께 맞춘다 — 선택 변경 알림이
+    /// 오지 않는 경로까지 덮는 안전망.
+    override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
+        super.updateInsertionPointStateAndRestartTimer(restartFlag)
+        refreshActiveLineHighlight()
+    }
+
+    /// 줄바꿈 폭 변경 등 재배치 후에도 캐럿 뷰·하이라이트가 글자를 따라가게 한다.
+    override func layout() {
+        super.layout()
+        refreshActiveLineHighlight()
+    }
+
+    /// 캐럿 뷰를 현재 커서 위치·테마 색에 맞추고 블링크를 처음부터 다시 시작한다.
+    ///
+    /// 높이: 시스템 캐럿 rect는 라인 전체를 덮어 글자 위로 떠 보인다. 베이스라인
+    /// 위 "글자 실제 높이"만큼만 잡아 글자에 딱 맞춘다. 라틴 capHeight로 자르면
+    /// 한글보다 짧아 보이므로 capHeight~ascender 사이로 올려 한글 상단까지 덮는다.
+    /// 이미지가 객체로 선택된 동안엔 숨긴다 — 이미지 내부는 편집 대상이 아니라
+    /// 조작 대상이므로 커서가 보이면 혼란스럽다.
+    private func syncCaretView() {
+        let visible =
+            window?.firstResponder === self
+            && selectedRange().length == 0
+            && selectedImageLocation == nil
+        guard visible, let rect = caretRectInView() else {
+            caretBlinkTimer?.invalidate()
+            caretBlinkTimer = nil
+            caretView.isHidden = true
             return
         }
-        // 시스템 캐럿 rect는 라인 전체를 덮어 글자 위로 떠 보인다. 베이스라인 위
-        // "글자 실제 높이"만큼만 그려 글자에 딱 맞춘다. 라틴 capHeight로 자르면
-        // 한글보다 짧아 보이므로(한글 온디바이스 저널), capHeight~ascender 사이로
-        // 올려 한글 상단까지 덮는다(요구: 커서가 글자와 같은 키).
         let font = caretLineFont()
         let baseline = rect.minY + font.ascender
         let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
         caret.origin.y = baseline - glyphTop
         caret.size.height = max(1, glyphTop - font.descender)  // descender 음수
-        super.drawInsertionPoint(in: caret, color: color, turnedOn: flag)
+        caret.size.width = 2  // firstRect의 캐럿 폭은 0 — 얇은 표준 폭으로.
+        caretView.layer?.backgroundColor = insertionPointColor.cgColor
+        caretView.frame = caret
+        caretView.isHidden = false
+        restartCaretBlink()
+    }
+
+    /// 블링크를 "보임" 상태부터 다시 시작한다 — 타이핑·이동 중엔 캐럿이
+    /// 항상 또렷하게 보이고, 멈춘 뒤부터 부드럽게 깜빡인다.
+    private func restartCaretBlink() {
+        caretBlinkTimer?.invalidate()
+        caretView.layer?.removeAllAnimations()
+        caretView.alphaValue = 1
+        caretBlinkTimer = Timer.scheduledTimer(withTimeInterval: 0.55, repeats: true) {
+            [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                let target: CGFloat = self.caretView.alphaValue > 0.5 ? 0 : 1
+                NSAnimationContext.runAnimationGroup { context in
+                    context.duration = 0.18
+                    self.caretView.animator().alphaValue = target
+                }
+            }
+        }
     }
 
     /// 커서가 놓인 줄의 폰트 — 캐럿·하이라이트가 공유하는 메트릭 소스.
@@ -2305,8 +2407,10 @@ final class BlockTextView: NSTextView {
 
     override func draw(_ dirtyRect: NSRect) {
         // 커서 줄 하이라이트 — 본문 아래에 깔리도록 텍스트보다 먼저 그린다.
+        // 항상 "현재 커서 줄" 하나만 그린다. lastActiveLineRect 기록은 여기서
+        // 건드리지 않는다 — 부분 재그리기가 커서 이동 직후·refresh 이전에
+        // 끼어들면 이전 줄 rect 기록을 잃어 그 줄 밴드가 잔상으로 남는다.
         let lineRect = activeLineRect()
-        lastActiveLineRect = lineRect
         if let lineRect, lineRect.intersects(dirtyRect) {
             palette.activeLine.setFill()
             NSBezierPath(roundedRect: lineRect, xRadius: 6, yRadius: 6).fill()

@@ -38,7 +38,7 @@ public struct MintCommands: Commands {
             Button("Markdown으로 내보내기…") { exportMarkdown() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             // 인쇄 대화상자의 "PDF로 저장"으로 PDF 내보내기까지 커버한다.
-            Button("인쇄…") { NSApp.sendAction(Selector(("print:")), to: nil, from: nil) }
+            Button("인쇄…") { NSApp.sendAction(#selector(NSView.printView(_:)), to: nil, from: nil) }
                 .keyboardShortcut("p", modifiers: .command)
         }
 
