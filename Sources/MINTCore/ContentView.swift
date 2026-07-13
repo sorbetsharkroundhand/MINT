@@ -54,7 +54,7 @@ private struct MainSurface: View {
             // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
             HSplitView {
                 if sidebarVisible {
-                    SidebarView(store: store, theme: theme)
+                    SidebarView(store: store, completion: completion, theme: theme)
                         .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
                 }
                 EditorPane(
