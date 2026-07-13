@@ -28,8 +28,11 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
     /// 커서가 놓인 줄의 은은한 하이라이트 (글로우 대체 — 에디터 v3.1).
     public let activeLine: NSColor
     /// 드래그 선택 영역 틴트 — 시스템 사각 하이라이트 대신 우리가 그리는
-    /// 라운드 영역 표시의 채움색 (다크는 유리 배경 위에서 읽히도록 더 진하게).
+    /// 라운드 영역 표시의 채움색. 앱 이름 그대로 **민트** 계열 — 파랑(액센트)과
+    /// 구분되는 MINT만의 선택 표시 (다크는 유리 배경 위에서 읽히도록 더 진하게).
     public let selection: NSColor
+    /// 드래그 선택 영역의 헤어라인 테두리 — 채움과 같은 민트 계열, 더 또렷하게.
+    public let selectionBorder: NSColor
     /// 소설 글쓰기 액센트 — 저널(파랑)과 나란히 놓아도 구분되는 보라 계열.
     public let novel: NSColor
     /// 소설 액센트의 은은한 배경 틴트 (활성 행·배지).
@@ -57,7 +60,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         statusbar: NSColor(white: 1, alpha: 0.24),
         // 현재 줄 인식이 실제로 느껴지도록 아주 옅던 값을 살짝 올린다 (L3).
         activeLine: NSColor(white: 0, alpha: 0.055),
-        selection: NSColor(hex: 0x0A84FF, alpha: 0.16),
+        selection: NSColor(hex: 0x00C7BE, alpha: 0.16),
+        selectionBorder: NSColor(hex: 0x00A89E, alpha: 0.45),
         novel: NSColor(hex: 0xA550E0),
         novelBg: NSColor(hex: 0xA550E0, alpha: 0.10)
     )
@@ -85,7 +89,8 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         statusbar: NSColor(white: 1, alpha: 0.03),
         // 어두운 유리 위에서 현재 줄이 또렷하도록 살짝 올린다 (L3).
         activeLine: NSColor(white: 1, alpha: 0.075),
-        selection: NSColor(hex: 0x0A84FF, alpha: 0.30),
+        selection: NSColor(hex: 0x00C7BE, alpha: 0.26),
+        selectionBorder: NSColor(hex: 0x4DE0D6, alpha: 0.55),
         novel: NSColor(hex: 0xBF5AF2),
         novelBg: NSColor(hex: 0xBF5AF2, alpha: 0.18)
     )

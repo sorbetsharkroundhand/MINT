@@ -39,6 +39,8 @@ public struct MintCommands: Commands {
 
             Button("Markdown으로 내보내기…") { exportMarkdown() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
+            // 소설을 전자책으로 (요구 7) — 소설이 아닌 저널도 내보낼 수는 있다.
+            Button("EPUB으로 내보내기…") { exportEpub() }
             // 인쇄 대화상자의 "PDF로 저장"으로 PDF 내보내기까지 커버한다.
             Button("인쇄…") { NSApp.sendAction(#selector(NSView.printView(_:)), to: nil, from: nil) }
                 .keyboardShortcut("p", modifiers: .command)
@@ -87,6 +89,15 @@ public struct MintCommands: Commands {
 
         // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
+            // 문서 내 검색 — 에디터의 performKeyEquivalent(⌘F)가 우선 처리하고,
+            // 한글 IME 등으로 뷰에 닿지 못한 경우 이 메뉴가 안전망이 된다.
+            Button("문서에서 찾기") { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("다음 찾기") { send(#selector(BlockTextView.mintFindNext(_:))) }
+                .keyboardShortcut("g", modifiers: .command)
+            Button("이전 찾기") { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+
             Button("저널 검색") {
                 sidebarVisible = true
                 store.requestSearchFocus()
@@ -138,6 +149,12 @@ public struct MintCommands: Commands {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         try? entry.body.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    /// 현재 저널을 EPUB 3 전자책으로 저장한다 (요구 7 — 소설 내보내기).
+    private func exportEpub() {
+        guard let entry = store.activeEntry else { return }
+        EpubExporter.exportWithPanel(entry)
     }
 
     /// 파일 이름에 쓸 수 없는 문자를 정리한다.

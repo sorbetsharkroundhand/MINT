@@ -239,7 +239,8 @@ struct SidebarView: View {
     private func searchRow(_ entry: JournalEntry) -> some View {
         let active = entry.id == store.activeID
         Button {
-            store.select(entry.id)
+            // 저널만 여는 게 아니라 본문 매치 위치로 스크롤·표시까지 (요구 2).
+            store.requestSearchJump(entry.id, query: searchText)
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
@@ -456,6 +457,10 @@ struct SidebarView: View {
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
             moveMenu(for: entry)
+            // 소설만 — 전자책(EPUB)으로 내보내기 (요구 7).
+            if entry.resolvedKind == .novel {
+                Button("EPUB으로 내보내기…") { EpubExporter.exportWithPanel(entry) }
+            }
             Button("삭제", role: .destructive) { requestDelete(entry) }
         }
     }

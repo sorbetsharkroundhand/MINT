@@ -114,7 +114,8 @@ struct EditorPane: View {
             lineSpacing: CGFloat(settings.lineSpacing),
             baseFontSize: CGFloat(settings.editorFontSize),
             entryID: store.activeID,
-            focusRequest: store.editorFocusRequests)
+            focusRequest: store.editorFocusRequests,
+            searchJump: store.searchJump)
             .overlay(alignment: .topLeading) {
                 if (store.activeEntry?.body ?? "").isEmpty {
                     // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을

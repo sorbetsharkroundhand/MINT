@@ -114,6 +114,22 @@ public final class EntryStore: ObservableObject {
         searchFocusRequests += 1
     }
 
+    /// 전역 검색 결과 클릭 → 에디터가 해당 저널의 매치 위치로 스크롤·표시하라는
+    /// 요청. seq가 바뀔 때만 한 번 소비된다 (같은 결과를 다시 눌러도 다시 이동).
+    public struct SearchJump: Equatable, Sendable {
+        public let entryID: UUID
+        public let query: String
+        public let seq: Int
+    }
+
+    @Published public private(set) var searchJump: SearchJump?
+
+    /// 검색 결과 선택 — 저널을 열고 본문 매치 위치로 이동을 요청한다.
+    public func requestSearchJump(_ id: UUID, query: String) {
+        select(id)
+        searchJump = SearchJump(entryID: id, query: query, seq: (searchJump?.seq ?? 0) + 1)
+    }
+
     /// 제목·본문에서 질의어를 포함하는 저널 (대소문자 무시). 전역 검색용.
     public func search(_ query: String) -> [JournalEntry] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)

@@ -46,6 +46,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
     /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
     private let focusRequest: Int
+    /// 전역 검색 결과 클릭 — seq가 바뀌면 본문 매치 위치로 스크롤·선택 표시 (요구 2).
+    private let searchJump: EntryStore.SearchJump?
 
     public init(
         text: Binding<String>,
@@ -54,7 +56,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         entryID: UUID = UUID(),
-        focusRequest: Int = 0
+        focusRequest: Int = 0,
+        searchJump: EntryStore.SearchJump? = nil
     ) {
         self._text = text
         self.controller = controller
@@ -63,6 +66,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.baseFontSize = baseFontSize
         self.entryID = entryID
         self.focusRequest = focusRequest
+        self.searchJump = searchJump
     }
 
     public func makeNSView(context: Context) -> NSScrollView {
@@ -115,6 +119,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         context.coordinator.loadedEntryID = entryID
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
         context.coordinator.lastFocusRequest = focusRequest
+        context.coordinator.lastSearchJumpSeq = searchJump?.seq ?? 0
 
         let scrollView = WritingScrollView()
         scrollView.documentView = textView
@@ -177,6 +182,14 @@ public struct MintBlockEditor: NSViewRepresentable {
                 window.makeFirstResponder(textView)
             }
         }
+        // 검색 결과 클릭 — reload·레이아웃이 끝난 다음 틱에 매치 위치로 이동·표시.
+        if let jump = searchJump, jump.seq != context.coordinator.lastSearchJumpSeq,
+            jump.entryID == entryID {
+            context.coordinator.lastSearchJumpSeq = jump.seq
+            DispatchQueue.main.async { [weak textView] in
+                textView?.revealMatch(of: jump.query)
+            }
+        }
     }
 
     public func makeCoordinator() -> Coordinator {
@@ -192,6 +205,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         var lastSyncedText = ""
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
         var lastFocusRequest = 0
+        /// 마지막으로 처리한 검색 이동 요청 seq — 값이 바뀔 때만 이동한다.
+        var lastSearchJumpSeq = 0
         /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
         var caretByEntry: [UUID: Int] = [:]
         /// 현재 로드된 저널 id — 전환 감지·커서 저장/복원 키.
@@ -447,6 +462,11 @@ final class BlockTextView: NSTextView {
     /// 수식 렌더 폰트 크기 — 본문 크기와 맞춘다.
     var mathFontSize: CGFloat { baseFontSize }
 
+    /// 수식 배경 박스가 렌더된 수식보다 사방으로 확보하는 여백(pt) — 항상 글씨보다
+    /// 이만큼 크게, 분수처럼 세로로 큰 수식이면 박스도 그만큼 커진다 (요구 5).
+    /// 레이아웃 매니저의 nonisolated 드로잉에서도 읽는 불변 상수.
+    nonisolated static let mathBoxMargin: CGFloat = 10
+
     /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
     /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
     nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
@@ -679,6 +699,31 @@ final class BlockTextView: NSTextView {
         // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
         needsDisplay = true
+    }
+
+    /// 전역 검색 결과 클릭 — 본문에서 질의어의 첫 매치를 선택하고 화면 가운데쯤으로
+    /// 스크롤한다 (요구 2). 선택 하이라이트(민트 영역)가 곧 "여기예요" 표시가 된다.
+    /// 매치가 없으면(제목만 걸렸거나 마커에 걸친 경우) 그대로 둔다.
+    func revealMatch(of query: String) {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return }
+        let ns = string as NSString
+        let match = ns.range(of: q, options: .caseInsensitive)
+        guard match.location != NSNotFound else { return }
+        window?.makeFirstResponder(self)
+        setSelectedRange(match)
+        // 매치 줄이 화면 가장자리에 걸리지 않게 위아래 여유를 두고 드러낸다.
+        if let layoutManager, let textContainer {
+            layoutManager.ensureLayout(for: textContainer)
+            let glyphs = layoutManager.glyphRange(
+                forCharacterRange: match, actualCharacterRange: nil)
+            let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+                .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+            _ = scrollToVisible(rect.insetBy(dx: 0, dy: -140))
+        } else {
+            scrollRangeToVisible(match)
+        }
+        refreshActiveLineHighlight()
     }
 
     /// 저장해 둔 커서 위치로 되돌리고 그 자리로 스크롤한다 (저널 재방문, M6).
@@ -1299,6 +1344,16 @@ final class BlockTextView: NSTextView {
                     selectImageObject(at: para)
                     return
                 }
+                // 렌더된 수식 박스 클릭 — 끌면 블록 이동, 그 자리에서 떼면
+                // 기존처럼 소스 편집 모드 (요구 6).
+                if info.block == .math,
+                    let mathBox = mathDrawnRect(forParagraphAt: para.location)?
+                        .insetBy(dx: -Self.mathBoxMargin, dy: -Self.mathBoxMargin),
+                    mathBox.contains(point) {
+                    clearImageSelection()
+                    trackMathDrag(from: event, paragraph: para)
+                    return
+                }
             }
         }
         // 이미지가 아닌 곳을 누르면 객체 선택을 해제한다.
@@ -1527,11 +1582,19 @@ final class BlockTextView: NSTextView {
     }
 
     /// 렌더된 이미지 위에서는 포인터 커서 — 클릭(객체 선택) 대상임을 알린다.
+    /// 렌더된 수식 위에서는 열린 손 — 끌어 옮길 수 있음을 알린다 (요구 6).
     override func resetCursorRects() {
         super.resetCursorRects()
         for render in imageRenders {
             if let rect = imageDrawnRect(forParagraphAt: render.range.location) {
                 addCursorRect(rect, cursor: .pointingHand)
+            }
+        }
+        for render in mathRenders {
+            if let rect = mathDrawnRect(forParagraphAt: render.range.location) {
+                addCursorRect(
+                    rect.insetBy(dx: -Self.mathBoxMargin, dy: -Self.mathBoxMargin),
+                    cursor: .openHand)
             }
         }
     }
@@ -1743,6 +1806,11 @@ final class BlockTextView: NSTextView {
 
     /// 이미지 문단을 드롭 지점의 문단 앞으로 옮긴다 (요구 B).
     func moveImageParagraph(at loc: Int, toViewPoint p: NSPoint) {
+        moveParagraph(at: loc, as: .image, toViewPoint: p)
+    }
+
+    /// 블록 문단(이미지·수식)을 통째로 드롭 지점의 문단 앞으로 옮긴다 (요구 B·6).
+    func moveParagraph(at loc: Int, as block: MintBlock, toViewPoint p: NSPoint) {
         imageDropIndicatorY = nil
         guard let storage = textStorage else { return }
         let ns = string as NSString
@@ -1784,11 +1852,79 @@ final class BlockTextView: NSTextView {
 
         let newPara = (string as NSString).paragraphRange(
             for: NSRange(location: insertLoc, length: 0))
-        applyBlock(.image, to: newPara, registerUndo: false)
-        setSelectedRange(NSRange(location: newPara.location, length: 0))
-        didChangeText()
-        // 옮긴 이미지를 다시 객체 선택해 박스를 이어서 보여준다.
-        selectImageObject(at: newPara)
+        applyBlock(block, to: newPara, registerUndo: false)
+        if block == .image {
+            setSelectedRange(NSRange(location: newPara.location, length: 0))
+            didChangeText()
+            // 옮긴 이미지를 다시 객체 선택해 박스를 이어서 보여준다.
+            selectImageObject(at: newPara)
+        } else {
+            // 커서는 블록 **다음** 문단에 — 수식은 커서가 들어오면 소스로 풀리므로
+            // 옮긴 직후에도 렌더 상태를 유지한다.
+            setSelectedRange(NSRange(
+                location: min(newPara.upperBound, (string as NSString).length), length: 0))
+            didChangeText()
+            refreshRenderedBlocks()
+        }
+    }
+
+    // MARK: 수식 블록 드래그 이동 (요구 6)
+
+    /// 렌더된 수식이 실제 그려지는 뷰 좌표 rect — `drawMath`와 같은 축소 규칙.
+    /// 히트 판정·커서 rect의 기준.
+    func mathDrawnRect(forParagraphAt loc: Int) -> NSRect? {
+        guard let render = mathRenders.first(where: { $0.range.location == loc }),
+            let row = paragraphRectInView(
+                (string as NSString).paragraphRange(
+                    for: NSRange(location: min(loc, (string as NSString).length), length: 0)))
+        else { return nil }
+        var size = render.image.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let maxWidth = max(40, row.width - 32)
+        if size.width > maxWidth {
+            let scale = maxWidth / size.width
+            size = NSSize(width: size.width * scale, height: size.height * scale)
+        }
+        return NSRect(
+            x: row.midX - size.width / 2, y: row.midY - size.height / 2,
+            width: size.width, height: size.height)
+    }
+
+    /// 수식 클릭/드래그 판별 루프 — 3pt 이상 끌면 이동 모드(드롭 표시선 + 손 커서),
+    /// 그 자리에서 떼면 평소처럼 커서를 넣어 소스 편집 모드로 들어간다.
+    private func trackMathDrag(from event: NSEvent, paragraph para: NSRange) {
+        guard let window else { return }
+        var moved = false
+        while let next = window.nextEvent(matching: [.leftMouseDragged, .leftMouseUp]) {
+            if next.type == .leftMouseDragged {
+                if abs(next.locationInWindow.x - event.locationInWindow.x) > 3
+                    || abs(next.locationInWindow.y - event.locationInWindow.y) > 3 {
+                    moved = true
+                }
+                if moved {
+                    NSCursor.closedHand.set()
+                    updateImageDropIndicator(
+                        toViewPoint: convert(next.locationInWindow, from: nil))
+                }
+                continue
+            }
+            // mouseUp — 이동 확정 또는 편집 진입.
+            imageDropIndicatorY = nil
+            if moved {
+                moveParagraph(
+                    at: para.location, as: .math,
+                    toViewPoint: convert(next.locationInWindow, from: nil))
+                NSCursor.arrow.set()
+            } else {
+                let p = convert(event.locationInWindow, from: nil)
+                let idx = min(characterIndexForInsertion(at: p), (string as NSString).length)
+                window.makeFirstResponder(self)
+                setSelectedRange(NSRange(location: idx, length: 0))
+                refreshRenderedBlocks()
+            }
+            needsDisplay = true
+            return
+        }
     }
 
     // MARK: 드래그 드롭 (이미지 파일)
@@ -2069,8 +2205,15 @@ final class BlockTextView: NSTextView {
                 as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
         else { return }
         if let height {
-            // 위아래 여유 12pt — 배경 박스(-6 inset)와 시각적으로 맞는 값.
-            ps.minimumLineHeight = height + 12
+            switch block {
+            case .math:
+                // 수식 박스(렌더 ±mathBoxMargin)가 이웃 줄과 겹치지 않도록,
+                // 박스 높이에 숨 쉴 틈 4pt를 더한 줄 높이 (요구 5).
+                ps.minimumLineHeight = height + Self.mathBoxMargin * 2 + 4
+            default:
+                // 위아래 여유 12pt — 배경 박스(-6 inset)와 시각적으로 맞는 값.
+                ps.minimumLineHeight = height + 12
+            }
         }
         let current =
             storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
@@ -2151,12 +2294,22 @@ final class BlockTextView: NSTextView {
             toolbarHost = host
         }
         let size = host.fittingSize
+        // 이미 떠 있으면 위치를 고정한다 — 글자 크기를 줄이면 선택 rect가 움직여
+        // 툴바가 따라다니며 연타를 방해했다. 한번 뜬 툴바는 선택이 사라질 때까지
+        // 그 자리(상단 중앙 기준)에 머문다 (요구 3).
+        if host.superview === self {
+            let old = host.frame
+            host.frame = NSRect(
+                x: old.midX - size.width / 2, y: old.minY,
+                width: size.width, height: size.height)
+            return
+        }
         // 선택 위 중앙 — 문서 맨 위라 걸리면 선택 아래로 내린다 (flipped 좌표).
         var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.minY - size.height - 8)
         if origin.y < 4 { origin.y = rect.maxY + 8 }
         origin.x = max(8, min(origin.x, bounds.width - size.width - 8))
         host.frame = NSRect(origin: origin, size: size)
-        if host.superview !== self { addSubview(host) }
+        addSubview(host)
     }
 
     private func currentSelectionState() -> SelectionStyleState {
@@ -2361,25 +2514,33 @@ final class BlockTextView: NSTextView {
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let key = event.charactersIgnoringModifiers?.lowercased()
+        // 한글 입력기에선 charactersIgnoringModifiers가 자모("ㄹ")를 돌려줘 문자
+        // 비교가 조용히 실패한다 — ⌘F를 눌러도 찾기 바가 안 뜨던 버그. 레이아웃
+        // 무관한 물리 keyCode(F=3 · G=5)로 함께 판정한다.
+        let code = event.keyCode
         // 서식·이미지 단축키는 메뉴 막대(MintCommands)로 옮겨 단일 소스로 관리한다 —
         // 여기선 문서 내 검색만 처리한다.
         if flags == .command {
-            switch key {
-            case "f":
+            if key == "f" || code == 3 {
                 performFind(.showFindInterface)
                 return true
-            case "g":
+            }
+            if key == "g" || code == 5 {
                 performFind(.nextMatch)
                 return true
-            default:
-                break
             }
-        } else if flags == [.command, .shift], key == "g" {
+        } else if flags == [.command, .shift], key == "g" || code == 5 {
             performFind(.previousMatch)
             return true
         }
         return super.performKeyEquivalent(with: event)
     }
+
+    // 메뉴(보기 ▸ 문서에서 찾기)용 리스폰더 체인 진입점 — 단축키가 IME 사정으로
+    // 뷰에 닿지 못해도 메뉴 경로로는 항상 열리게 한다.
+    @objc func mintFindInDocument(_ sender: Any?) { performFind(.showFindInterface) }
+    @objc func mintFindNext(_ sender: Any?) { performFind(.nextMatch) }
+    @objc func mintFindPrevious(_ sender: Any?) { performFind(.previousMatch) }
 
     // MARK: 메뉴 명령 (리스폰더 체인 — MintCommands가 NSApp.sendAction으로 호출)
     //
@@ -2568,22 +2729,27 @@ final class BlockTextView: NSTextView {
             .draw(at: NSPoint(x: caretRect.maxX, y: y))
     }
 
-    /// 선택 영역을 줄별 라운드 사각형으로 그린다 — 글자 주위를 살짝(2pt) 감싸
-    /// 디자인의 영역 표시처럼 보이게 한다. 무효화는 refreshActiveLineHighlight의
-    /// lastSelectionRect(전체 폭 밴드)가 담당하므로 여기선 그리기만 한다.
+    /// 선택 영역을 줄별 라운드 사각형으로 그린다 — 글자 주위를 살짝(3pt) 감싸는
+    /// MINT만의 민트 틴트 영역 + 헤어라인 테두리 (요구 4). 무효화는
+    /// refreshActiveLineHighlight의 lastSelectionRect(전체 폭 밴드)가 담당하므로
+    /// 여기선 그리기만 한다.
     private func drawSelectionHighlight(in dirtyRect: NSRect) {
         let sel = selectedRange()
         guard sel.length > 0, let layoutManager, let textContainer else { return }
         let glyphs = layoutManager.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
         guard glyphs.length > 0 else { return }
         let origin = textContainerOrigin
-        palette.selection.setFill()
         layoutManager.enumerateEnclosingRects(
             forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: textContainer
-        ) { rect, _ in
-            let r = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -2, dy: 0.5)
+        ) { [palette] rect, _ in
+            let r = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0.5)
             guard r.intersects(dirtyRect) else { return }
-            NSBezierPath(roundedRect: r, xRadius: 4, yRadius: 4).fill()
+            let path = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5)
+            palette.selection.setFill()
+            path.fill()
+            palette.selectionBorder.setStroke()
+            path.lineWidth = 1
+            path.stroke()
         }
     }
 
@@ -2706,7 +2872,15 @@ final class MintLayoutManager: NSLayoutManager {
                     codeStart = nil
                 }
                 if block == .math {
-                    drawGroupBackground(charRange: para, origin: origin, color: theme.codeBg)
+                    // 렌더 모드 수식의 박스는 drawGlyphs가 **수식 크기에 맞춰**
+                    // 그린다 (요구 5) — 여기선 소스 편집 중일 때만 문단 폭 배경.
+                    let rendered = view.mathRenders.contains {
+                        $0.range.location == para.location
+                    }
+                    if !rendered {
+                        drawGroupBackground(
+                            charRange: para, origin: origin, color: theme.codeBg)
+                    }
                 }
             }
             location = para.upperBound
@@ -2761,7 +2935,7 @@ final class MintLayoutManager: NSLayoutManager {
             case .math:
                 if let render = view.mathRenders.first(
                     where: { $0.range.location == para.location }) {
-                    drawMath(render.image, in: rect)
+                    drawMath(render.image, in: rect, theme: theme)
                 } else {
                     // 편집 중이거나 아직 파싱 안 되는 소스 — "수식" 태그만.
                     let tag = NSAttributedString(
@@ -2861,7 +3035,9 @@ final class MintLayoutManager: NSLayoutManager {
     }
 
     /// 렌더된 LaTeX 이미지를 수식 문단 중앙에 그린다 (폭 초과 시 축소).
-    private func drawMath(_ image: NSImage, in rect: NSRect) {
+    /// 배경 박스는 문단 폭이 아니라 **수식 크기 + 사방 mathBoxMargin(10pt)** —
+    /// 분수처럼 큰 수식이면 박스도 함께 커진다 (요구 5).
+    private func drawMath(_ image: NSImage, in rect: NSRect, theme: MintTheme) {
         var size = image.size
         guard size.width > 0, size.height > 0 else { return }
         let maxWidth = max(40, rect.width - 32)
@@ -2872,6 +3048,10 @@ final class MintLayoutManager: NSLayoutManager {
         let target = NSRect(
             x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
             width: size.width, height: size.height)
+        let box = target.insetBy(
+            dx: -BlockTextView.mathBoxMargin, dy: -BlockTextView.mathBoxMargin)
+        theme.codeBg.setFill()
+        NSBezierPath(roundedRect: box, xRadius: 12, yRadius: 12).fill()
         image.draw(
             in: target, from: .zero, operation: .sourceOver, fraction: 1,
             respectFlipped: true, hints: nil)
