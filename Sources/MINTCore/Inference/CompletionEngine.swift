@@ -73,6 +73,58 @@ public actor CompletionEngine {
             in: container, prefix: prefix, parameters: parameters)
     }
 
+    /// 폴더 멤버 문서들의 내용에서 짧은 폴더 이름을 생성한다 (사이드바 DnD 1.4).
+    ///
+    /// promptStyle 설정과 무관하게 항상 instruct 챗으로 실행 — 이어쓰기는 이름
+    /// 짓기에 맞지 않는다. 자동완성과 같은 컨테이너를 공유한다(모델 이중 로드 없음).
+    /// 빈 문자열을 반환하면 호출부가 기본 이름("새 폴더")을 유지한다.
+    public func generateFolderName(
+        content: String,
+        parameters: CompletionParameters
+    ) async throws -> String {
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ""
+        }
+        let container = try await loadedContainer(
+            modelID: parameters.modelID, onProgress: nil)
+        try Task.checkCancellation()
+        return try await container.perform { context in
+            let chat: [Chat.Message] = [
+                .system(Prompting.folderNameSystem),
+                .user(Prompting.folderNameUser(content: content)),
+            ]
+            let userInput = UserInput(
+                chat: chat, additionalContext: ["enable_thinking": false])
+            let input = try await context.processor.prepare(input: userInput)
+            try Task.checkCancellation()
+
+            let generateParameters = GenerateParameters(
+                maxTokens: 16,
+                temperature: Float(parameters.temperature),
+                topP: 0.9
+            )
+
+            var text = ""
+            let stream = try MLXLMCommon.generate(
+                input: input, parameters: generateParameters, context: context)
+            for await generation in stream {
+                if Task.isCancelled { break }
+                if case .chunk(let chunk) = generation {
+                    text += chunk
+                    // 이름은 한 줄 — 내용이 생긴 뒤 줄바꿈이 나오면 그만 받는다
+                    // (문장 경계 로직은 이름의 마침표 오검출 위험이 있어 안 쓴다).
+                    if text.contains("\n"),
+                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    {
+                        break
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            return Self.cleanFolderName(text)
+        }
+    }
+
     // MARK: - 모델 로드 (1회, 교체 가능)
 
     private func loadedContainer(
@@ -226,6 +278,20 @@ public actor CompletionEngine {
             \(prefix)
             """
         }
+
+        static let folderNameSystem = """
+            너는 문서 묶음에 어울리는 폴더 이름을 짓는 도우미다. \
+            문서들의 공통 주제를 담은 짧은 한국어 폴더 이름(2~5단어, 명사형)을 \
+            하나만 출력한다. 설명·번호·따옴표·마침표 없이 이름만 출력한다.
+            """
+
+        static func folderNameUser(content: String) -> String {
+            """
+            다음 문서들을 담을 폴더의 이름을 지어라.
+
+            \(content)
+            """
+        }
     }
 
     // MARK: - 후처리
@@ -258,6 +324,33 @@ public actor CompletionEngine {
             text.removeLast()
         }
         return text
+    }
+
+    /// 폴더 이름 후처리 — 모델 출력에서 깨끗한 한 줄 이름만 남긴다.
+    /// 빈 결과를 반환하면 호출부가 기본 이름("새 폴더")을 유지한다.
+    private static func cleanFolderName(_ raw: String) -> String {
+        var text = stripThinking(raw)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let newline = text.firstIndex(of: "\n") {
+            text = String(text[..<newline])
+        }
+        text = stripSurroundingQuotes(text.trimmingCharacters(in: .whitespaces))
+        // 앞머리 마크다운·불릿·번호 마커만 벗긴다 — 마커 뒤 공백을 요구해
+        // "2024.03 회고"처럼 숫자·점으로 시작하는 정상 이름은 건드리지 않는다.
+        text = text.replacingOccurrences(
+            of: #"^(?:#{1,6}\s+|[-*•]\s+|\d+[.)]\s+|>\s+)+"#,
+            with: "", options: .regularExpression)
+        // 끝쪽 문장부호·공백 정리 — "이름만" 규칙을 모델이 어겨도 복구.
+        let trailing: Set<Character> = [
+            ".", "。", "!", "！", "?", "？", "…", ",", "，", ":", "：",
+        ]
+        while let last = text.last, trailing.contains(last) || last.isWhitespace {
+            text.removeLast()
+        }
+        // 내부 공백 뭉치는 하나로.
+        text = text.replacingOccurrences(
+            of: #"\s+"#, with: " ", options: .regularExpression)
+        return String(text.prefix(20)).trimmingCharacters(in: .whitespaces)
     }
 
     /// Qwen3 계열이 `<think>…</think>`를 앞에 붙이는 경우 제거.
