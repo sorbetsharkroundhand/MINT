@@ -166,23 +166,39 @@ struct EditorToolbar: View {
     @State private var helpOpen = false
     @State private var dateOpen = false
     @State private var dateHovered = false
+    @State private var bibleOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
             sidebarToggle
             dateButton
-            // 소설 저널이면 날짜 옆에 종류 배지 — 지금 어떤 모드로 쓰는지 보이게.
+            // 소설 저널이면 날짜 옆에 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             if store.activeEntry?.resolvedKind == .novel {
-                HStack(spacing: 4) {
-                    Image(systemName: "book.closed.fill")
-                        .font(.system(size: 9))
-                    Text("소설")
-                        .font(MintFonts.serifUI(11, .semibold))
+                Button {
+                    bibleOpen.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "book.closed.fill")
+                            .font(.system(size: 9))
+                        Text("소설")
+                            .font(MintFonts.serifUI(11, .semibold))
+                        // 등록된 인물 수 — 배지가 바이블 입구임을 알리는 최소 신호.
+                        if let count = store.activeEntry?.characters?.count, count > 0 {
+                            Text("\(count)")
+                                .font(MintFonts.monoUI(9, .semibold))
+                        }
+                    }
+                    .foregroundStyle(theme.novelC)
+                    .padding(.vertical, 3)
+                    .padding(.horizontal, 8)
+                    .background(Capsule().fill(theme.novelBgC))
+                    .contentShape(Capsule())
                 }
-                .foregroundStyle(theme.novelC)
-                .padding(.vertical, 3)
-                .padding(.horizontal, 8)
-                .background(Capsule().fill(theme.novelBgC))
+                .buttonStyle(.plain)
+                .help("스토리 바이블 — 장르·인물 카드")
+                .popover(isPresented: $bibleOpen, arrowEdge: .bottom) {
+                    CharacterBibleView(store: store, theme: theme)
+                }
             }
             Spacer()
             helpButton
