@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// 좌측 저널 사이드바 (에디터 v3 — 디자인 이식, 파일시스템 v1).
 ///
@@ -8,7 +9,12 @@ import SwiftUI
 /// 목록: 폴더 트리(펼침/접힘, hover 시 하위 폴더·저널 추가) + 저널 행.
 struct SidebarView: View {
     @ObservedObject var store: EntryStore
+    /// AI 폴더 명명(requestFolderName)과 진행 표시(namingFolderIDs)에 쓴다.
+    @ObservedObject var completion: CompletionController
     let theme: MintTheme
+
+    /// 드래그&드롭 세션 상태 — 드래그 원본·드롭 표시 위치.
+    @StateObject private var dragModel = SidebarDragModel()
 
     /// 이름 변경 중인 항목 — 저널·폴더가 id 공간을 공유한다.
     @State private var editingID: UUID?
@@ -46,12 +52,31 @@ struct SidebarView: View {
                                 row(entry, depth: depth)
                             }
                         }
+                        // 목록 바로 아래 빈 띠 — 루트 맨 끝으로 드롭하는 받이.
+                        Color.clear
+                            .frame(height: 44)
+                            .contentShape(Rectangle())
+                            .overlay(alignment: .top) {
+                                if dragModel.indicator == .root {
+                                    SidebarInsertionLine(theme: theme, depth: 0)
+                                        .offset(y: 2)
+                                }
+                            }
+                            .onDrop(
+                                of: [.plainText],
+                                delegate: RootAreaDropDelegate(
+                                    store: store, model: dragModel))
                     }
                 }
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
             }
+            // 짧은 목록에서 받이 띠 아래의 넓은 빈 영역도 루트 드롭을 받는다 —
+            // 행 위 드롭은 더 깊은 히트 테스트가 이기므로 충돌하지 않는다.
+            .onDrop(
+                of: [.plainText],
+                delegate: RootAreaDropDelegate(store: store, model: dragModel))
         }
         .background(theme.sidebarTintC)
         .overlay(alignment: .trailing) { theme.sepC.frame(width: 1) }
@@ -243,10 +268,15 @@ struct SidebarView: View {
         } label: {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 8) {
+                    // 트리와 같은 종류 아이콘 규칙 — 검색 결과에서도 저널/소설이 갈리게.
                     if entry.resolvedKind == .novel {
                         Image(systemName: "book.closed.fill")
                             .font(.system(size: 9))
                             .foregroundStyle(theme.novelC)
+                    } else {
+                        Image(systemName: "doc.text")
+                            .font(.system(size: 9, weight: .medium))
+                            .foregroundStyle(active ? theme.blueC : theme.ink3C)
                     }
                     Text(entry.title)
                         .font(MintFonts.uiFont(13, .semibold))
@@ -302,6 +332,8 @@ struct SidebarView: View {
         let expanded = store.isExpanded(folder.id)
         let editing = editingID == folder.id
         let hovered = hoveredID == folder.id
+        let dropTarget = dragModel.indicator == .into(folder.id)
+        let naming = completion.namingFolderIDs.contains(folder.id)
 
         HStack(spacing: 7) {
             Image(systemName: "chevron.right")
@@ -337,6 +369,10 @@ struct SidebarView: View {
                     .font(MintFonts.uiFont(13, .semibold))
                     .foregroundStyle(theme.ink2C)
                     .lineLimit(1)
+                // AI가 이름을 짓는 동안 — 임시 이름("새 폴더") 옆 진행 점.
+                if naming {
+                    PulsingDots(color: theme.ink3C)
+                }
             }
 
             Spacer(minLength: 6)
@@ -360,14 +396,42 @@ struct SidebarView: View {
         .padding(.leading, CGFloat(depth) * 14)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(hovered ? theme.hoverC : .clear)
+                .fill(dropTarget ? theme.activeBgC : (hovered ? theme.hoverC : .clear))
         )
+        // 드롭 "안으로" 대상 표시 — 파란 링 (접힌 폴더에도 이동을 약속).
+        .overlay {
+            if dropTarget {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(theme.blueC, lineWidth: 1.5)
+            }
+        }
+        // 형제 폴더 사이 삽입선.
+        .overlay(alignment: .top) {
+            if dragModel.indicator == .before(folder.id) {
+                SidebarInsertionLine(theme: theme, depth: depth).offset(y: -2)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if dragModel.indicator == .after(folder.id) {
+                SidebarInsertionLine(theme: theme, depth: depth).offset(y: 2)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .onHover { hoveredID = $0 ? folder.id : nil }
         // 저널 행과 같은 이유 — 첫 탭 즉시 펼침/접힘 (더블탭이 오면 두 번
         // 토글돼 원상복구된 채 이름변경으로 들어간다).
         .simultaneousGesture(TapGesture().onEnded { store.toggleExpanded(folder.id) })
         .simultaneousGesture(TapGesture(count: 2).onEnded { startRenameFolder(folder) })
+        .onDrag {
+            guard editingID == nil else { return NSItemProvider() }
+            dragModel.beginDrag(.folder(id: folder.id))
+            return NSItemProvider(object: folder.id.uuidString as NSString)
+        }
+        .onDrop(
+            of: [.plainText],
+            delegate: FolderRowDropDelegate(
+                folder: folder, expanded: expanded, store: store, model: dragModel,
+                requestNaming: { completion.requestFolderName(for: $0, in: store) }))
         .contextMenu {
             Button("새 저널") { store.newEntry(in: folder.id) }
             Button("새 소설") { store.newEntry(in: folder.id, kind: .novel) }
@@ -384,18 +448,21 @@ struct SidebarView: View {
         let active = entry.id == store.activeID
         let editing = editingID == entry.id
         let hovered = hoveredID == entry.id
+        let dropTarget = dragModel.indicator == .into(entry.id)
 
         HStack(spacing: 11) {
-            // 종류별 아이콘 — 저널은 점, 소설은 책 (보라 액센트).
+            // 종류별 아이콘 — 일반은 문서, 소설은 책. 소설은 비활성에서도 보라
+            // 정체성을 유지해 목록만 훑어도 종류가 갈린다 (파랑 계열 = 저널).
             Group {
                 if entry.resolvedKind == .novel {
                     Image(systemName: "book.closed.fill")
                         .font(.system(size: 10.5))
-                        .foregroundStyle(active ? theme.novelC : theme.ink3C)
+                        .foregroundStyle(
+                            active ? theme.novelC : theme.novelC.opacity(0.6))
                 } else {
-                    Circle()
-                        .fill(active ? theme.blueC : theme.ink3C)
-                        .frame(width: 7, height: 7)
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundStyle(active ? theme.blueC : theme.ink3C)
                 }
             }
             .frame(width: 11)
@@ -442,10 +509,30 @@ struct SidebarView: View {
         .padding(.leading, CGFloat(depth) * 14)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(active
-                    ? (entry.resolvedKind == .novel ? theme.novelBgC : theme.activeBgC)
-                    : (hovered ? theme.hoverC : .clear))
+                .fill(dropTarget
+                    ? theme.activeBgC
+                    : active
+                        ? (entry.resolvedKind == .novel ? theme.novelBgC : theme.activeBgC)
+                        : (hovered ? theme.hoverC : .clear))
         )
+        // 드롭 "안으로"(= 두 저널을 새 폴더로 병합) 대상 표시 — 파란 링.
+        .overlay {
+            if dropTarget {
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .strokeBorder(theme.blueC, lineWidth: 1.5)
+            }
+        }
+        // 형제 사이 삽입선 — 행 위/아래 2pt 간격에 걸쳐 그린다.
+        .overlay(alignment: .top) {
+            if dragModel.indicator == .before(entry.id) {
+                SidebarInsertionLine(theme: theme, depth: depth).offset(y: -2)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if dragModel.indicator == .after(entry.id) {
+                SidebarInsertionLine(theme: theme, depth: depth).offset(y: 2)
+            }
+        }
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         .onHover { hoveredID = $0 ? entry.id : nil }
         // onTapGesture(count:2)+onTapGesture 조합은 단일 클릭이 더블클릭 판별
@@ -453,6 +540,18 @@ struct SidebarView: View {
         // 첫 탭에서 즉시 select하고, 두 번째 탭이 오면 그때 이름변경에 들어간다.
         .simultaneousGesture(TapGesture().onEnded { store.select(entry.id) })
         .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(entry) })
+        .onDrag {
+            // 이름 변경 중엔 드래그를 시작하지 않는다 — 빈 프로바이더를 돌려주면
+            // 델리게이트들이 dragged==nil로 거부한다.
+            guard editingID == nil else { return NSItemProvider() }
+            dragModel.beginDrag(.entry(id: entry.id))
+            return NSItemProvider(object: entry.id.uuidString as NSString)
+        }
+        .onDrop(
+            of: [.plainText],
+            delegate: EntryRowDropDelegate(
+                entry: entry, store: store, model: dragModel,
+                requestNaming: { completion.requestFolderName(for: $0, in: store) }))
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
             moveMenu(for: entry)
