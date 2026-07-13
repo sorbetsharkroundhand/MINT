@@ -18,6 +18,13 @@ struct BenchOptions {
     var temperature = CompletionParameters().temperature
     var runs = 2
     var prompt = "오늘은 오랜만에 한강을 따라 오래 걸었다. 바람이 차가웠지만 기분이 좋았고,"
+    // 리플레이 벤치 (PLAN §13) — 실제 원고를 컷포인트에서 잘라 제안 품질·지연 측정.
+    var replayPath: String?
+    var cuts = 12
+    var truthChars = 40
+    var contextChars = CompletionSettings.defaultNovelContextCharacters
+    var title = ""
+    var genre = ""
 
     enum ParseResult {
         case options(BenchOptions)
@@ -66,6 +73,32 @@ struct BenchOptions {
                     return .failure("--prompt 값 누락")
                 }
                 options.prompt = value
+            case "--replay":
+                guard let value = iterator.next(), !value.isEmpty else {
+                    return .failure("--replay 파일 경로 누락")
+                }
+                options.replayPath = value
+            case "--cuts":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    return .failure("--cuts 는 양의 정수여야 함")
+                }
+                options.cuts = parsed
+            case "--truth-chars":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    return .failure("--truth-chars 는 양의 정수여야 함")
+                }
+                options.truthChars = parsed
+            case "--context":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    return .failure("--context 는 양의 정수여야 함")
+                }
+                options.contextChars = parsed
+            case "--title":
+                guard let value = iterator.next() else { return .failure("--title 값 누락") }
+                options.title = value
+            case "--genre":
+                guard let value = iterator.next() else { return .failure("--genre 값 누락") }
+                options.genre = value
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -82,6 +115,16 @@ struct BenchOptions {
           --runs <n>           스타일별 반복 횟수 (기본: 2 — 1회차는 워밍업 포함)
           --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
           --help               이 도움말
+
+        리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
+          --replay <파일>      원고 텍스트 파일 — 문장 경계 컷포인트마다 제안을
+                               생성해 정답(이어지는 원문)과 비교. 컷마다 2회 실행:
+                               1회차 콜드, 2회차 웜(KV 프리필 재사용 검증)
+          --cuts <n>           컷포인트 수 (기본: 12)
+          --truth-chars <n>    정답으로 비교할 이어지는 원문 길이 (기본: 40자)
+          --context <n>        컷 앞에서 읽는 컨텍스트 길이 (기본: 4000자)
+          --title <text>       작품 제목 — 지정 시 소설 헤더(A)를 조립에 포함
+          --genre <text>       작품 장르 — 위와 동일
 
         모델 대안(가벼운 순): \(ModelPresets.qwen2_5_1_5B)
                               \(ModelPresets.qwen2_5_3B)
@@ -149,6 +192,12 @@ do {
 }
 print(String(format: "✅ 모델 로드 완료: %.1fs (다운로드 캐시 포함)", Date().timeIntervalSince(loadStart)))
 
+// 리플레이 모드 — 단발 측정 대신 원고 기반 품질 루프 (PLAN §13).
+if let replayPath = options.replayPath {
+    let ok = await runReplay(path: replayPath, engine: engine, options: options)
+    exit(ok ? 0 : 1)
+}
+
 struct RunRecord {
     let style: PromptStyle
     let run: Int
@@ -212,3 +261,134 @@ print("""
     · 목표 초과 시 --max-tokens 축소(8) 또는 더 작은 모델로 재측정
     · 확정값은 Sources/MINTCore/Settings.swift 의 CompletionParameters 기본값에 반영
     """)
+
+// MARK: - 리플레이 벤치 (PLAN §13)
+
+/// 원고를 문장 경계 컷포인트에서 잘라, 컷 앞 컨텍스트로 제안을 만들고
+/// 실제로 이어지는 원문(정답)과 비교한다. 컷마다 2회 실행:
+/// 1회차는 콜드(캐시 무관), 2회차는 같은 프롬프트라 KV 프리필 재사용이
+/// 일어나야 정상 — 웜 TTFC가 콜드보다 눈에 띄게 짧으면 PLAN §12가 작동하는 것.
+func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) async -> Bool {
+    guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
+        !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else {
+        print("❌ 리플레이 파일을 읽을 수 없음: \(path)")
+        return false
+    }
+    let text = Array(raw)  // Character 배열 — 컷 계산 단순화 (벤치라 성능 무관)
+
+    // 컷 후보: 문장 경계 문자 바로 뒤가 공백/줄바꿈인 위치 (문장이 막 끝난 순간).
+    let boundaries: Set<Character> = [".", "!", "?", "…", "。", "！", "？", "\n"]
+    let minCut = max(200, options.truthChars)
+    var candidates: [Int] = []
+    for index in 0..<max(0, text.count - 1)
+    where boundaries.contains(text[index])
+        && (text[index + 1].isWhitespace || text[index + 1].isNewline)
+    {
+        let cut = index + 1
+        if cut >= minCut, cut + options.truthChars <= text.count {
+            candidates.append(cut)
+        }
+    }
+    guard !candidates.isEmpty else {
+        print("❌ 컷포인트 없음 — 문장 경계가 있는 더 긴 원고가 필요합니다.")
+        return false
+    }
+    // 후보에서 균등 샘플.
+    var cuts: [Int] = []
+    if candidates.count <= options.cuts {
+        cuts = candidates
+    } else {
+        for i in 0..<options.cuts {
+            cuts.append(candidates[i * (candidates.count - 1) / max(1, options.cuts - 1)])
+        }
+    }
+
+    // 소설 헤더(A) — 제목·장르가 주어졌을 때만 (없으면 Fast 모드 그대로).
+    let document: DocumentContext? =
+        (options.title.isEmpty && options.genre.isEmpty)
+        ? nil
+        : DocumentContext(
+            title: options.title, kind: .novel,
+            genre: options.genre.isEmpty ? nil : options.genre)
+    // 리플레이 기본은 이어쓰기 — --style 로 하나만 고르면 그 스타일.
+    let style: PromptStyle = options.styles.count == 1 ? options.styles[0] : .continuation
+    var parameters = CompletionParameters()
+    parameters.modelID = options.modelID
+    parameters.promptStyle = style
+    parameters.maxTokens = options.maxTokens
+    parameters.temperature = options.temperature
+
+    print("\n== 리플레이 벤치 ==")
+    print("원고: \(path) (\(text.count)자) · 컷 \(cuts.count)개 · 컨텍스트 \(options.contextChars)자")
+    print("스타일: \(style.rawValue) · 헤더: \(document == nil ? "없음" : "소설(제목/장르)")\n")
+
+    struct Row {
+        let cut: Int
+        let accepted: Int
+        let suggestionLength: Int
+        let coldTTFC: TimeInterval?
+        let warmTTFC: TimeInterval?
+        let promptTokens: Int
+        let warmReused: Int
+    }
+    var rows: [Row] = []
+
+    for (index, cut) in cuts.enumerated() {
+        let contextStart = max(0, cut - options.contextChars)
+        let context = String(text[contextStart..<cut])
+        let truth = String(text[cut..<(cut + options.truthChars)])
+        let prompt = ContextAssembler.assemble(
+            prefix: context, document: document, style: style)
+        do {
+            let cold = try await engine.complete(prompt: prompt, parameters: parameters)
+            let warm = try await engine.complete(prompt: prompt, parameters: parameters)
+            // 수락 프록시: 제안과 정답의 문자 단위 공통 접두 길이.
+            var accepted = 0
+            for (a, b) in zip(cold.text, truth) {
+                guard a == b else { break }
+                accepted += 1
+            }
+            rows.append(
+                Row(
+                    cut: cut, accepted: accepted,
+                    suggestionLength: cold.text.count,
+                    coldTTFC: cold.timeToFirstChunk, warmTTFC: warm.timeToFirstChunk,
+                    promptTokens: cold.promptTokenCount,
+                    warmReused: warm.reusedPromptTokens))
+            print(
+                "[\(index + 1)/\(cuts.count)] @\(cut)자"
+                    + " · 일치 \(accepted)자/\(cold.text.count)자"
+                    + " · 콜드 \(format(cold.timeToFirstChunk)) → 웜 \(format(warm.timeToFirstChunk))"
+                    + " · 프롬프트 \(cold.promptTokenCount)tok (웜 재사용 \(warm.reusedPromptTokens)tok)")
+            print("    제안: \"\(cold.text)\"")
+            print("    정답: \"\(truth.prefix(cold.text.count + 10))\"")
+        } catch {
+            print("[\(index + 1)/\(cuts.count)] @\(cut)자 ❌ 생성 실패: \(error.localizedDescription)")
+        }
+    }
+
+    guard !rows.isEmpty else {
+        print("측정 결과 없음 — 생성이 모두 실패했습니다.")
+        return false
+    }
+
+    func mean(_ values: [Double]) -> Double {
+        values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
+    }
+    let meanAccepted = mean(rows.map { Double($0.accepted) })
+    let hitRate = Double(rows.filter { $0.accepted >= 2 }.count) / Double(rows.count)
+    let coldTTFC = mean(rows.compactMap { $0.coldTTFC })
+    let warmTTFC = mean(rows.compactMap { $0.warmTTFC })
+    let meanPromptTokens = mean(rows.map { Double($0.promptTokens) })
+    let meanReused = mean(rows.map { Double($0.warmReused) })
+
+    print("\n== 리플레이 요약 (커밋·PR에 남길 수치, CLAUDE.md §6) ==")
+    print(String(format: "수락 프록시  : 평균 %.1f자 일치 · 적중률(≥2자) %.0f%%", meanAccepted, hitRate * 100))
+    print(String(format: "TTFC        : 콜드 %.2fs → 웜 %.2fs", coldTTFC, warmTTFC))
+    print(String(format: "프롬프트     : 평균 %.0f tok · 웜 재사용 평균 %.0f tok", meanPromptTokens, meanReused))
+    if meanReused < 1 {
+        print("⚠️ 웜 재사용 0 — KV 캐시(PLAN §12)가 작동하지 않고 있다. kvCache 설정·trim 경로 확인.")
+    }
+    return true
+}
