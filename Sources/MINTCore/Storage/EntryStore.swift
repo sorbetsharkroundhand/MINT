@@ -16,6 +16,34 @@ public enum EntryKind: String, Codable, Sendable {
     }
 }
 
+/// 스토리 바이블 v0 — 사용자가 직접 쓰는 인물 카드 (PLAN §6.2·§7).
+///
+/// 사용자 저작 데이터이므로 파생 캐시(지식 사이드카)가 아니라 원문 스토어에
+/// 산다 — 원문이 유일한 진실(CLAUDE.md §2-1). M6 자동 추출이 도입돼도 이
+/// 카드는 잠금 취급이라 자동이 덮지 않는다 (CLAUDE.md §1-5).
+public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
+    public var id: UUID
+    /// 정식 이름 — 최근 창 언급 감지(카드 선택)의 키 (PLAN §11).
+    public var name: String
+    /// 별칭·호칭, 쉼표 구분 원문 그대로 보관 — 배열로 쪼개 저장하면 입력 중
+    /// 쉼표·공백이 바인딩 왕복에서 먹혀 타이핑을 방해한다. 파싱은 조립기가 한다.
+    public var aliases: String
+    /// 성격·말투·관계 자유 기술 — 프롬프트 A 헤더에 그대로 실린다 (짧을수록 좋다).
+    public var note: String
+
+    public init(
+        id: UUID = UUID(),
+        name: String = "",
+        aliases: String = "",
+        note: String = ""
+    ) {
+        self.id = id
+        self.name = name
+        self.aliases = aliases
+        self.note = note
+    }
+}
+
 /// 저널 한 편 (에디터 v3 — 다중 저널).
 public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var id: UUID
@@ -30,6 +58,11 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var titleIsCustom: Bool?
     /// 저널 종류. 레거시 파일엔 없는 키 — nil이면 일반 글쓰기(journal).
     public var kind: EntryKind?
+    /// 작품 장르 (소설 메타, PLAN §5) — 예측 프롬프트 A 헤더에 실린다.
+    /// 사용자 저작 데이터라 파생 캐시가 아닌 여기 산다. 레거시 파일엔 없는 키.
+    public var genre: String?
+    /// 스토리 바이블 v0 — 인물 카드 (PLAN §7). 레거시 파일엔 없는 키.
+    public var characters: [CharacterCard]?
     /// 폴더 안 표시 순서 (사이드바 DnD 재정렬). 레거시 파일엔 없는 키 —
     /// nil이면 로드 시 기존 표시 순서(작성일 내림차순)로 시드된다.
     public var sortOrder: Double?
@@ -42,6 +75,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         folderID: UUID? = nil,
         titleIsCustom: Bool? = nil,
         kind: EntryKind? = nil,
+        genre: String? = nil,
+        characters: [CharacterCard]? = nil,
         sortOrder: Double? = nil
     ) {
         self.id = id
@@ -51,6 +86,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.folderID = folderID
         self.titleIsCustom = titleIsCustom
         self.kind = kind
+        self.genre = genre
+        self.characters = characters
         self.sortOrder = sortOrder
     }
 
@@ -657,6 +694,56 @@ public final class EntryStore: ObservableObject {
         entries[index].title = trimmed.isEmpty ? "제목 없음" : trimmed
         // 사용자가 직접 붙인 이름 — 이후 본문 편집으로 덮어쓰지 않는다.
         entries[index].titleIsCustom = true
+        saveNow()
+    }
+
+    // MARK: - 작품 메타·인물 카드 (스토리 바이블 v0, PLAN §7)
+
+    /// 예측 조립에 쓰는 활성 문서 스냅샷 — CompletionController가 예측 직전
+    /// pull한다 (값 복사로 actor 격리 경계를 넘긴다, CompletionParameters 패턴).
+    public var activeDocumentContext: DocumentContext? {
+        guard let entry = activeEntry else { return nil }
+        return DocumentContext(
+            // 플레이스홀더 제목은 신호가 아니라 소음 — 헤더에서 뺀다.
+            title: JournalEntry.placeholderTitles.contains(entry.title) ? "" : entry.title,
+            kind: entry.resolvedKind,
+            genre: entry.genre,
+            characters: entry.characters ?? []
+        )
+    }
+
+    /// 작품 장르 갱신 — 바이블 팝오버의 타이핑 필드라 디바운스 저장.
+    public func setGenre(_ genre: String, for id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let trimmed = genre.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value: String? = trimmed.isEmpty ? nil : trimmed
+        guard entries[index].genre != value else { return }
+        entries[index].genre = value
+        scheduleSave()
+    }
+
+    /// 인물 카드 추가/수정 — 팝오버 텍스트 필드가 매 키 입력마다 부르므로 디바운스 저장.
+    public func upsertCharacter(_ card: CharacterCard, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var cards = entries[index].characters ?? []
+        if let i = cards.firstIndex(where: { $0.id == card.id }) {
+            guard cards[i] != card else { return }
+            cards[i] = card
+        } else {
+            cards.append(card)
+        }
+        entries[index].characters = cards
+        scheduleSave()
+    }
+
+    /// 인물 카드 삭제 — 구조 변경은 즉시 저장 (스토어의 기존 규칙).
+    public func removeCharacter(_ cardID: UUID, from id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            var cards = entries[index].characters,
+            cards.contains(where: { $0.id == cardID })
+        else { return }
+        cards.removeAll { $0.id == cardID }
+        entries[index].characters = cards.isEmpty ? nil : cards
         saveNow()
     }
 
