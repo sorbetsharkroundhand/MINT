@@ -30,6 +30,9 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var titleIsCustom: Bool?
     /// 저널 종류. 레거시 파일엔 없는 키 — nil이면 일반 글쓰기(journal).
     public var kind: EntryKind?
+    /// 폴더 안 표시 순서 (사이드바 DnD 재정렬). 레거시 파일엔 없는 키 —
+    /// nil이면 로드 시 기존 표시 순서(작성일 내림차순)로 시드된다.
+    public var sortOrder: Double?
 
     public init(
         id: UUID = UUID(),
@@ -38,7 +41,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         body: String = "",
         folderID: UUID? = nil,
         titleIsCustom: Bool? = nil,
-        kind: EntryKind? = nil
+        kind: EntryKind? = nil,
+        sortOrder: Double? = nil
     ) {
         self.id = id
         self.title = title
@@ -47,6 +51,7 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.folderID = folderID
         self.titleIsCustom = titleIsCustom
         self.kind = kind
+        self.sortOrder = sortOrder
     }
 
     /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
@@ -65,23 +70,42 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
 
 /// 저널을 프로젝트처럼 묶는 폴더 (파일시스템 v1). parentID로 중첩된다.
 public struct JournalFolder: Identifiable, Codable, Equatable, Sendable {
+    /// 자동 생성 폴더의 기본 이름 — AI 명명(renameFolderIfPlaceholder)은 이름이
+    /// 아직 이 값일 때만 덮어쓴다 (사용자가 먼저 바꾸면 그쪽이 이긴다).
+    public static let placeholderName = "새 폴더"
+
     public var id: UUID
     public var name: String
     public var parentID: UUID?
     public var createdAt: Date
+    /// 형제 폴더 사이 표시 순서 (사이드바 DnD 재정렬). 레거시 파일엔 없는 키 —
+    /// nil이면 로드 시 기존 배열 순서로 시드된다.
+    public var sortOrder: Double?
 
     public init(
         id: UUID = UUID(),
-        name: String = "새 폴더",
+        name: String = JournalFolder.placeholderName,
         parentID: UUID? = nil,
-        createdAt: Date = .now
+        createdAt: Date = .now,
+        sortOrder: Double? = nil
     ) {
         self.id = id
         self.name = name
         self.parentID = parentID
         self.createdAt = createdAt
+        self.sortOrder = sortOrder
     }
 }
+
+/// 사이드바 정렬 비교에 필요한 공통 필드 — JournalEntry·JournalFolder 공용.
+protocol SortOrderable {
+    var id: UUID { get }
+    var createdAt: Date { get }
+    var sortOrder: Double? { get }
+}
+
+extension JournalEntry: SortOrderable {}
+extension JournalFolder: SortOrderable {}
 
 /// 여러 저널을 로컬 JSON 하나에 보관하는 스토어 (에디터 v3).
 ///
@@ -180,8 +204,15 @@ public final class EntryStore: ObservableObject {
                 entries[index].titleIsCustom = false
             }
         }
+        var folders = loaded.folders ?? []
+        // 마이그레이션: sortOrder 없는 항목(DnD 재정렬 도입 이전 파일)은 기존 표시
+        // 순서 그대로 시드한다 — 엔트리는 폴더별 작성일 내림차순(M5), 폴더는 배열
+        // 순서. 메모리만 바꾸고 저장은 첫 구조 변경 때 이뤄진다.
+        if entries.contains(where: { $0.sortOrder == nil })
+            || folders.contains(where: { $0.sortOrder == nil }) {
+            Self.seedSortOrders(entries: &entries, folders: &folders)
+        }
         self.entries = entries
-        let folders = loaded.folders ?? []
         self.folders = folders
         self.expandedFolderIDs = Set(loaded.expandedFolderIDs ?? [])
             .intersection(folders.map(\.id))
@@ -222,6 +253,29 @@ public final class EntryStore: ObservableObject {
         let entry = JournalEntry(
             title: Self.derivedTitle(from: body), createdAt: modified, body: body)
         return Snapshot(entries: [entry], activeID: entry.id)
+    }
+
+    /// sortOrder가 없는 파일을 위한 시드 — 사용자가 보던 순서를 그대로 굳힌다.
+    /// 엔트리는 폴더별 작성일 내림차순(도입 전 표시 순서), 폴더는 배열 순서.
+    /// nil이 섞인 형제 그룹만 다시 시드한다 — 이미 손으로 정렬한 폴더는 건드리지 않는다.
+    private static func seedSortOrders(
+        entries: inout [JournalEntry], folders: inout [JournalFolder]
+    ) {
+        let entryGroups = Dictionary(grouping: entries.indices) { entries[$0].folderID }
+        for indices in entryGroups.values
+        where indices.contains(where: { entries[$0].sortOrder == nil }) {
+            let ordered = indices.sorted { entries[$0].createdAt > entries[$1].createdAt }
+            for (position, index) in ordered.enumerated() {
+                entries[index].sortOrder = Double(position)
+            }
+        }
+        let folderGroups = Dictionary(grouping: folders.indices) { folders[$0].parentID }
+        for indices in folderGroups.values
+        where indices.contains(where: { folders[$0].sortOrder == nil }) {
+            for (position, index) in indices.sorted().enumerated() {
+                folders[index].sortOrder = Double(position)
+            }
+        }
     }
 
     /// 첫 비어 있지 않은 줄에서 마크다운 마커·인라인 마크업을 벗겨 제목으로 쓴다.
@@ -265,16 +319,32 @@ public final class EntryStore: ObservableObject {
         entries.first(where: { $0.id == activeID })
     }
 
-    /// 한 폴더의 하위 폴더들 (nil = 루트).
+    /// 한 폴더의 하위 폴더들 (nil = 루트). 사용자 정렬(sortOrder) 순.
     public func childFolders(of parentID: UUID?) -> [JournalFolder] {
         folders.filter { $0.parentID == parentID }
+            .sorted(by: Self.bySortOrder)
     }
 
-    /// 한 폴더에 담긴 저널들 (nil = 루트).
+    /// 한 폴더에 담긴 저널들 (nil = 루트). 사용자 정렬(sortOrder) 순 — DnD 재정렬
+    /// 도입으로 작성일 내림차순(M5)은 초기 시드로만 남는다. 이에 따라 setDate(L9)는
+    /// 더 이상 목록 위치를 바꾸지 않는다 (검색 결과는 여전히 작성일 순).
     public func childEntries(of folderID: UUID?) -> [JournalEntry] {
-        // 최신 저널이 위로 오도록 작성일 내림차순 — 삽입 순서 대신 안정적 시간 순서.
         entries.filter { $0.folderID == folderID }
-            .sorted { $0.createdAt > $1.createdAt }
+            .sorted(by: Self.bySortOrder)
+    }
+
+    /// sortOrder 오름차순, nil은 뒤로. 동률은 작성일 내림차순 → id로 안정화.
+    private static func bySortOrder(
+        _ a: some SortOrderable, _ b: some SortOrderable
+    ) -> Bool {
+        switch (a.sortOrder, b.sortOrder) {
+        case let (x?, y?) where x != y: return x < y
+        case (.some, .none): return true
+        case (.none, .some): return false
+        default:
+            if a.createdAt != b.createdAt { return a.createdAt > b.createdAt }
+            return a.id.uuidString < b.id.uuidString
+        }
     }
 
     public func isExpanded(_ folderID: UUID) -> Bool {
@@ -335,7 +405,9 @@ public final class EntryStore: ObservableObject {
         // (nil이면 첫 파생 직후 제목이 플레이스홀더가 아니게 돼 한 글자에서 얼어붙는다.)
         let entry = JournalEntry(
             title: kind == .novel ? "새 소설" : "새 저널", folderID: folderID,
-            titleIsCustom: false, kind: kind)
+            titleIsCustom: false, kind: kind,
+            // 새 저널은 목록 맨 위 — 첫 형제보다 작은 sortOrder.
+            sortOrder: (childEntries(of: folderID).first?.sortOrder ?? 0) - 1)
         entries.insert(entry, at: 0)
         activeID = entry.id
         // 새 저널이 접힌 폴더 안에 숨지 않게 부모를 펼친다.
@@ -383,14 +455,149 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 저널을 다른 폴더(또는 루트=nil)로 옮긴다 — 이미 만든 글도 정리할 수 있게.
+    /// (컨텍스트 메뉴 "이동"용 — 위치는 대상 폴더 맨 끝.)
     public func move(_ id: UUID, toFolder folderID: UUID?) {
-        guard let index = entries.firstIndex(where: { $0.id == id }),
-            entries[index].folderID != folderID
-        else { return }
+        moveEntry(id, toFolder: folderID, before: nil)
+    }
+
+    // MARK: - 정렬·이동 (사이드바 DnD)
+
+    /// 저널을 대상 폴더로 옮기고 beforeID 앞에 놓는다 (nil = 맨 끝).
+    /// 같은 폴더 안이면 순수 재정렬. 이동 후 형제 그룹 전체를 0…n으로 재번호한다 —
+    /// 목록이 작아 분수 순서 관리보다 단순한 쪽을 택한다.
+    public func moveEntry(_ id: UUID, toFolder folderID: UUID?, before beforeID: UUID?) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        // 드래그한 항목을 뺀 형제 목록에 삽입 위치를 잡는다 — 같은 목록 안 이동도
+        // 인덱스가 어긋나지 않는다.
+        var siblings = childEntries(of: folderID).filter { $0.id != id }
+        let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
+            ?? siblings.count
+        var moved = entries[index]
+        let orderUnchanged = moved.folderID == folderID
+            && childEntries(of: folderID).firstIndex(where: { $0.id == id }) == insertAt
+        guard !orderUnchanged else { return }
+        moved.folderID = folderID
+        siblings.insert(moved, at: insertAt)
+        renumberEntries(siblings)
         entries[index].folderID = folderID
         // 옮긴 저널이 접힌 폴더에 숨지 않게 대상 폴더를 펼친다.
         if let folderID { expandedFolderIDs.insert(folderID) }
         saveNow()
+    }
+
+    /// 폴더를 다른 부모로 옮기고 beforeID 앞에 놓는다 (nil = 맨 끝).
+    /// 자기 자신·자기 자손으로의 이동은 거부한다 (순환 방지).
+    @discardableResult
+    public func moveFolder(_ id: UUID, toParent parentID: UUID?, before beforeID: UUID?) -> Bool {
+        guard canMoveFolder(id, toParent: parentID),
+            let index = folders.firstIndex(where: { $0.id == id })
+        else { return false }
+        var siblings = childFolders(of: parentID).filter { $0.id != id }
+        let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
+            ?? siblings.count
+        var moved = folders[index]
+        let orderUnchanged = moved.parentID == parentID
+            && childFolders(of: parentID).firstIndex(where: { $0.id == id }) == insertAt
+        guard !orderUnchanged else { return true }
+        moved.parentID = parentID
+        siblings.insert(moved, at: insertAt)
+        renumberFolders(siblings)
+        folders[index].parentID = parentID
+        if let parentID { expandedFolderIDs.insert(parentID) }
+        saveNow()
+        return true
+    }
+
+    /// 폴더를 해당 부모로 옮겨도 되는가 — 드롭 중 시각 피드백(forbidden)용.
+    /// 자기 자신 또는 자기 자손 폴더 안으로는 옮길 수 없다.
+    public func canMoveFolder(_ id: UUID, toParent parentID: UUID?) -> Bool {
+        guard let parentID else { return true }
+        return !descendantFolderIDs(of: id).contains(parentID)
+    }
+
+    /// 저널을 저널 위에 떨어뜨리면 둘을 묶는 새 폴더를 만든다 (사이드바 DnD).
+    /// 대상 저널이 있던 폴더 아래, 폴더 블록 맨 끝에 생긴다. 이름은 플레이스홀더 —
+    /// 호출부가 AI 명명(requestFolderName)을 이어서 요청한다.
+    @discardableResult
+    public func createFolder(merging draggedID: UUID, onto targetID: UUID) -> UUID? {
+        guard draggedID != targetID,
+            let target = entries.first(where: { $0.id == targetID }),
+            entries.contains(where: { $0.id == draggedID })
+        else { return nil }
+        let parent = target.folderID
+        let folder = JournalFolder(
+            parentID: parent,
+            // 폴더 블록 맨 끝 — 대상 저널이 있던 엔트리 영역과 시각적으로 가깝게.
+            sortOrder: (childFolders(of: parent).last?.sortOrder ?? -1) + 1)
+        folders.insert(folder, at: 0)
+        expandedFolderIDs.insert(folder.id)
+        // 대상을 먼저, 드래그한 저널을 그 뒤에 — 떨어뜨린 방향 그대로 읽히게.
+        moveEntryWithoutSave(targetID, toFolder: folder.id, position: 0)
+        moveEntryWithoutSave(draggedID, toFolder: folder.id, position: 1)
+        saveNow()
+        return folder.id
+    }
+
+    /// 이름이 아직 자동 생성 기본값("새 폴더")일 때만 바꾼다 — AI 명명이 끝나기 전에
+    /// 사용자가 직접 이름을 붙였다면 그쪽을 존중한다.
+    public func renameFolderIfPlaceholder(_ id: UUID, to name: String) {
+        guard let index = folders.firstIndex(where: { $0.id == id }),
+            folders[index].name == JournalFolder.placeholderName
+        else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        folders[index].name = trimmed
+        saveNow()
+    }
+
+    /// 펼침 전용 — 드래그 hover 스프링 로딩용. toggle이 아니라서 hover 중
+    /// 재호출돼도 도로 접히지 않는다.
+    public func expand(_ folderID: UUID) {
+        guard !expandedFolderIDs.contains(folderID),
+            folders.contains(where: { $0.id == folderID })
+        else { return }
+        expandedFolderIDs.insert(folderID)
+        saveNow()
+    }
+
+    /// AI 폴더 명명 입력 — 멤버 저널의 제목 + 본문 앞부분을 이어 붙인다.
+    public func folderNamingContext(for folderID: UUID, maxCharacters: Int) -> String {
+        let members = childEntries(of: folderID)
+        guard !members.isEmpty else { return "" }
+        let joined = members.enumerated().map { index, entry in
+            "[문서 \(index + 1)] 제목: \(entry.title)\n\(entry.body.prefix(300))"
+        }
+        .joined(separator: "\n\n")
+        return String(joined.prefix(maxCharacters))
+    }
+
+    /// folderID 변경 + 지정 위치 삽입 — createFolder(merging:) 내부 전용
+    /// (saveNow는 호출부가 한 번만).
+    private func moveEntryWithoutSave(_ id: UUID, toFolder folderID: UUID?, position: Int) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var siblings = childEntries(of: folderID).filter { $0.id != id }
+        var moved = entries[index]
+        moved.folderID = folderID
+        siblings.insert(moved, at: min(position, siblings.count))
+        renumberEntries(siblings)
+        entries[index].folderID = folderID
+    }
+
+    /// 형제 그룹을 표시 순서대로 0…n 재번호 — sortOrder를 항상 촘촘하게 유지한다.
+    private func renumberEntries(_ ordered: [JournalEntry]) {
+        for (position, sibling) in ordered.enumerated() {
+            if let i = entries.firstIndex(where: { $0.id == sibling.id }) {
+                entries[i].sortOrder = Double(position)
+            }
+        }
+    }
+
+    private func renumberFolders(_ ordered: [JournalFolder]) {
+        for (position, sibling) in ordered.enumerated() {
+            if let i = folders.firstIndex(where: { $0.id == sibling.id }) {
+                folders[i].sortOrder = Double(position)
+            }
+        }
     }
 
     /// 메뉴에서 "이름 바꾸기"를 눌렀을 때 사이드바가 현재 저널의 인라인 편집을
@@ -405,7 +612,10 @@ public final class EntryStore: ObservableObject {
 
     @discardableResult
     public func newFolder(in parentID: UUID? = nil) -> UUID {
-        let folder = JournalFolder(parentID: parentID)
+        let folder = JournalFolder(
+            parentID: parentID,
+            // 새 폴더는 형제 폴더 맨 위.
+            sortOrder: (childFolders(of: parentID).first?.sortOrder ?? 0) - 1)
         folders.insert(folder, at: 0)
         expandedFolderIDs.insert(folder.id)
         if let parentID { expandedFolderIDs.insert(parentID) }
