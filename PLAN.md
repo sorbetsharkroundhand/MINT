@@ -287,8 +287,11 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 
 - 무효화: 지식 세대 변경 → 1번 폐기. 모델 교체·메모리 경고 → 전부 폐기.
   캐시 메모리는 MLX `Memory.cacheLimit`(현행 256MB)과 함께 상한 관리.
-- 구현 리스크: `mlx-swift-lm`의 `generate` 편의 API가 외부 KV 주입을 안 열어주면
-  `TokenIterator` 수준으로 내려간다 — M5에서 스파이크로 먼저 확정 (§14).
+- ~~구현 리스크: `generate` 편의 API가 외부 KV 주입을 안 열어줄 가능성~~ —
+  **스파이크로 해소** (핀 버전 3.31.3 확인): `generate(input:cache:parameters:context:)`
+  오버로드 + `makePromptCache` / `canTrimPromptCache` / `trimPromptCache(_:numTokens:)`
+  전부 존재. 구현은 `Inference/PromptCache.swift` — trim 양을 `offset − lcp`로 잡아
+  생성 토큰·중단된 프리필의 별도 부기를 없앴다.
 - 그 외 캐시는 §9 메모이제이션(추출·요약)과 §6 요약 피라미드의 해시 게이트 —
   전부 "같은 입력 재계산 금지"의 변주다.
 
@@ -315,16 +318,21 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 
 ### M5 — MVP "기억의 골격" (예측이 작품을 안다)
 
-- [ ] KV 스파이크: `mlx-swift-lm` 캐시 주입 가능성 확정 (§12 리스크 해소) — **최우선**
-- [ ] A 고정 헤더: 작품 메타(제목·장르 — `JournalEntry` 옵셔널 필드) 주입
-- [ ] 서픽스 LCP KV 재사용 — Fast 모드부터 (기존 M4 잔여의 완성)
-- [ ] `DocumentOutline`: 헤딩 파싱·블록 해시·더티 마킹 (LLM 없음, 결정적)
-- [ ] 바이블 v0: **사용자 수동 인물 카드** (자동 감지 없이 UI·주입 먼저) +
-      최근 창 언급 시 카드 주입 (Story 모드의 원형)
-- [ ] 소설 컨텍스트 확대(토큰 기준 예산) + topP 승격
-- [ ] MINTBench 리플레이 벤치 v0 (수락 프록시·TTFC)
-- **완료 기준**: 소설 픽스처에서 인물 이름 정확도·수락 프록시가 Fast 대비 유의미
-  상승, Story 웜 TTFC ≤ 500ms(nano) — 수치로 확인.
+코드 구현 완료 (2026-07) — **Mac에서 `swift build` + 리플레이 벤치 검증 대기**.
+
+- [x] KV 스파이크: `mlx-swift-lm` 3.31.3 캐시 API 확정 (§12 리스크 해소)
+- [x] A 고정 헤더: 작품 메타(제목·장르 — `JournalEntry` 옵셔널 필드) 주입
+      — `ContextAssembler` (소설만, 저널은 현행 Fast 유지)
+- [x] 서픽스 LCP KV 재사용 — `PromptCacheBox` + 에디터 창 시작 512격자 스냅
+      (창이 키 입력마다 밀리면 LCP가 0이 되는 문제를 에디터 쪽에서 해결)
+- [x] `DocumentOutline`: 헤딩 파싱·씬 해시·시점 차단 질의 원형 (소비자는 M6)
+- [x] 바이블 v0: 사용자 수동 인물 카드 (툴바 소설 배지 → 팝오버) +
+      최근 창 언급 우선 카드 ≤3장 주입 (Story 모드의 원형)
+- [x] 소설 컨텍스트 확대(기본 4000자, 토큰 안전 예산 3072) + topP 승격
+- [x] MINTBench 리플레이 벤치 v0 (`--replay` — 수락 프록시·TTFC·KV 웜/콜드)
+- [ ] **검증 게이트**: Mac에서 빌드·E2E(CLAUDE.md §6) + 리플레이 수치 확보 —
+      완료 기준: 소설 픽스처에서 인물 이름 정확도·수락 프록시가 Fast 대비
+      유의미 상승, 웜 TTFC ≤ 500ms(nano). 수치는 docs/에 기록.
 
 ### M6 — Beta "살아있는 바이블" (백그라운드가 이해를 만든다)
 
@@ -409,7 +417,9 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 | `Sources/MINTCore/Settings.swift` | `CompletionSettings` · 모델 프리셋 |
 | `Sources/MINTCore/Theme.swift` | 색·폰트 토큰 (라이트/다크) |
 | `Sources/MINTBench/main.swift` | 추론·품질 벤치 CLI (§13) |
-| *(신규 예정)* `Sources/MINTCore/Knowledge/DocumentOutline.swift` | 헤딩 트리 · 블록 앵커 · 더티 추적 (§5) |
-| *(신규 예정)* `Sources/MINTCore/Knowledge/KnowledgeStore.swift` | 바이블·요약·사건·문체 사이드카 (§6) |
-| *(신규 예정)* `Sources/MINTCore/Knowledge/BackgroundIndexer.swift` | 유휴 이해 파이프라인 (§9) |
-| *(신규 예정)* `Sources/MINTCore/Inference/ContextAssembler.swift` | 모드·랭킹·예산·조립 (§10–§11) |
+| `Sources/MINTCore/Knowledge/DocumentOutline.swift` | 헤딩 트리 · 씬 해시 · 시점 차단 질의 (§5, M5) |
+| `Sources/MINTCore/Inference/ContextAssembler.swift` | A/B/C 조립 · 카드 선택 (§10–§11, M5) |
+| `Sources/MINTCore/Inference/PromptCache.swift` | LCP trim + 증분 프리필 KV 재사용 (§12, M5) |
+| `Sources/MINTCore/CharacterBibleView.swift` | 바이블 v0 편집 팝오버 (§7, M5) |
+| *(신규 예정)* `Sources/MINTCore/Knowledge/KnowledgeStore.swift` | 바이블·요약·사건·문체 사이드카 (§6, M6) |
+| *(신규 예정)* `Sources/MINTCore/Knowledge/BackgroundIndexer.swift` | 유휴 이해 파이프라인 (§9, M6) |
