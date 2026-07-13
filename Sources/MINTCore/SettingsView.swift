@@ -56,6 +56,30 @@ public struct SettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+                VStack(alignment: .leading) {
+                    Slider(value: $settings.topP, in: 0.5...1.0) {
+                        Text(String(format: "top-p: %.2f", settings.topP))
+                    }
+                    Text("누적 확률 컷 — 벤치(MINTBench)로 확정하는 값이에요 (PLAN §10).")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Toggle("KV 캐시 재사용", isOn: $settings.kvCacheEnabled)
+                Text("타이핑 중 프리필을 증분 처리해 제안이 빨라져요 — 이상 동작 시 꺼 보세요.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("소설") {
+                Stepper(
+                    "소설 컨텍스트: \(settings.novelContextCharacters)자",
+                    value: $settings.novelContextCharacters,
+                    in: 1_200...12_000,
+                    step: 400
+                )
+                Text("소설 종류 문서가 커서 앞에서 읽는 최대 분량 — 넓을수록 멀리 기억하지만 첫 제안이 느려질 수 있어요.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("에디터") {

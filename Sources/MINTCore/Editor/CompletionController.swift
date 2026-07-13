@@ -38,6 +38,19 @@ public final class CompletionController: ObservableObject {
 
     public let settings: CompletionSettings
     private let engine: CompletionEngine
+
+    /// 활성 문서 스냅샷 공급자 — ContentView가 1회 배선한다. 예측 직전에 pull해
+    /// 제목·장르·인물 카드를 조립기에 넘긴다 (PLAN §10). 푸시(onChange) 대신
+    /// pull인 이유: 본문이 큰 저널에서 매 키 입력마다 Equatable 비교를 하지 않는다.
+    public var documentContextProvider: (() -> DocumentContext?)?
+
+    /// 종류별 컨텍스트 창 상한 — 소설은 넓게 (PLAN §10 Smart/Story 예산).
+    /// 에디터(BlockTextView)가 prefix 추출 한도로 읽는다.
+    public var effectiveContextCharacters: Int {
+        documentContextProvider?()?.kind == .novel
+            ? settings.novelContextCharacters
+            : settings.contextCharacters
+    }
     private var pendingTask: Task<Void, Never>?
     /// 편집/커서 이벤트마다 증가 — 뒤늦게 도착한 stale 응답을 버리는 기준.
     private var generation = 0
@@ -296,8 +309,15 @@ public final class CompletionController: ObservableObject {
     ) async {
         // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
         defer { if expected == generation { isPredicting = false } }
+        // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드)을 얹기만
+        // 하고, 지식 계산은 전부 백그라운드/저장 시점의 몫이다 (CLAUDE.md §2-2).
+        let prompt = ContextAssembler.assemble(
+            prefix: prefix,
+            document: documentContextProvider?(),
+            style: parameters.promptStyle
+        )
         do {
-            let completion = try await engine.complete(prefix: prefix, parameters: parameters) {
+            let completion = try await engine.complete(prompt: prompt, parameters: parameters) {
                 fraction in
                 Task { @MainActor [weak self] in
                     self?.noteLoadProgress(fraction)

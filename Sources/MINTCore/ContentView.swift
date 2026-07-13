@@ -23,8 +23,12 @@ public struct ContentView: View {
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
             .onAppear {
-                // 모델 상주(PLAN §9-2) — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다.
+                // 모델 상주 — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다 (PLAN §10).
                 completion.preloadEngine()
+                // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
+                completion.documentContextProvider = { [weak store] in
+                    store?.activeDocumentContext
+                }
             }
     }
 

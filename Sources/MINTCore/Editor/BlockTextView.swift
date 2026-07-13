@@ -298,15 +298,37 @@ public struct MintBlockEditor: NSViewRepresentable {
 
             controller.noteEdit(
                 prefix: Self.prefix(
-                    of: storage, before: caret, limit: controller.settings.contextCharacters),
+                    of: storage, before: caret, limit: controller.effectiveContextCharacters),
                 caretLocation: caret,
                 isComposing: textView.hasMarkedText(),
                 caretAtParagraphEnd: allowed && Self.isCaretAtParagraphEnd(storage, caret: caret)
             )
         }
 
+        /// 커서 앞 원문 창(C). 시작점을 512(UTF-16) 격자에 내림 스냅해 타이핑
+        /// 중 창 시작이 한 글자씩 밀리지 않게 한다 — 창 시작이 고정돼야 직전
+        /// 요청과의 공통 접두(LCP)가 살아남아 KV 프리필 재사용이 가능하다
+        /// (PLAN §11–§12). 내림 스냅이라 창이 limit보다 최대 한 격자 길 수 있다
+        /// (soft 예산 — 하드 상한은 엔진의 토큰 예산이 지킨다).
         private static func prefix(of storage: NSString, before caret: Int, limit: Int) -> String {
-            String(storage.substring(to: caret).suffix(limit))
+            let raw = max(0, caret - limit)
+            guard raw > 0 else { return storage.substring(to: caret) }
+            var start = (raw / 512) * 512
+            // 서러게이트 페어(이모지 등) 중간을 피해 합성 문자 경계로 물러난다.
+            start = storage.rangeOfComposedCharacterSequence(at: start).location
+            // 근처(≤256자)에 문단 경계가 있으면 그 뒤에서 시작 — 모델이 문단
+            // 중간부터 읽지 않게 한다. 줄바꿈 위치도 고정이라 안정성은 유지된다.
+            let searchLength = min(256, caret - start)
+            if searchLength > 0 {
+                let newline = storage.range(
+                    of: "\n", options: [],
+                    range: NSRange(location: start, length: searchLength))
+                if newline.location != NSNotFound, newline.location + 1 < caret {
+                    start = newline.location + 1
+                }
+            }
+            return storage.substring(
+                with: NSRange(location: start, length: caret - start))
         }
 
         private static func isCaretAtParagraphEnd(_ storage: NSString, caret: Int) -> Bool {

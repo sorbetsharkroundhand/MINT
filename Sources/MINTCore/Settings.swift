@@ -73,21 +73,34 @@ public struct ModelChoice: Identifiable, Sendable {
 public struct CompletionParameters: Sendable, Equatable {
     public var modelID: String
     public var promptStyle: PromptStyle
-    /// 생성 토큰 상한 — 단어/구 단위 제안 + 저지연 (PLAN §9-2, ~8–16).
+    /// 생성 토큰 상한 — 단어/구 단위 제안 + 저지연 (PLAN §10, ~8–16).
     public var maxTokens: Int
     /// 낮을수록 결정적 — 자동완성은 일관성이 중요.
     public var temperature: Double
+    /// 누적 확률 컷 — 하드코딩(0.9)에서 승격, MINTBench로 튜닝 (PLAN §10).
+    public var topP: Double
+    /// 프리필 토큰 안전 예산 — 문자 창이 넘칠 때만 프롬프트 앞을 잘라낸다
+    /// (PLAN §11). UI 미노출, 벤치에서 오버라이드.
+    public var maxPromptTokens: Int
+    /// 이어쓰기 프리필 KV 재사용 (PLAN §12) — 문제 시 끌 수 있는 킬 스위치.
+    public var kvCacheEnabled: Bool
 
     public init(
         modelID: String = ModelPresets.qwen2_5_1_5B,
         promptStyle: PromptStyle = .continuation,
         maxTokens: Int = 12,
-        temperature: Double = 0.3
+        temperature: Double = 0.3,
+        topP: Double = 0.9,
+        maxPromptTokens: Int = 3_072,
+        kvCacheEnabled: Bool = true
     ) {
         self.modelID = modelID
         self.promptStyle = promptStyle
         self.maxTokens = maxTokens
         self.temperature = temperature
+        self.topP = topP
+        self.maxPromptTokens = maxPromptTokens
+        self.kvCacheEnabled = kvCacheEnabled
     }
 }
 
@@ -99,8 +112,11 @@ public struct CompletionParameters: Sendable, Equatable {
 public final class CompletionSettings: ObservableObject {
     /// 입력이 멈춘 뒤 제안을 트리거하기까지 대기(ms) — PLAN §5 "수백 ms".
     public static let defaultDebounceMilliseconds = 350
-    /// 커서 앞에서 프롬프트로 쓰는 최대 문자 수 (현재 문서만, PLAN §1).
+    /// 커서 앞에서 프롬프트로 쓰는 최대 문자 수 (저널 = Fast 모드, PLAN §10).
     public static let defaultContextCharacters = 1_200
+    /// 소설의 컨텍스트 창 상한 (Smart/Story, PLAN §10) — KV 재사용(PLAN §12)이
+    /// 있어야 부담 없는 크기라 M5에서 함께 도입한다.
+    public static let defaultNovelContextCharacters = 4_000
     /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
     public static let defaultLineSpacing = 7.0
     /// 본문 기본 글자 크기(pt) 기본값 — 디자인 기준. 모든 블록이 이 값에 비례한다.
@@ -118,7 +134,10 @@ public final class CompletionSettings: ObservableObject {
         static let debounceMilliseconds = "completion.debounceMilliseconds"
         static let maxTokens = "completion.maxTokens"
         static let temperature = "completion.temperature"
+        static let topP = "completion.topP"
         static let contextCharacters = "completion.contextCharacters"
+        static let novelContextCharacters = "completion.novelContextCharacters"
+        static let kvCache = "completion.kvCache"
         static let lineSpacing = "editor.lineSpacing"
         static let fontSize = "editor.fontSize"
     }
@@ -144,8 +163,19 @@ public final class CompletionSettings: ObservableObject {
     @Published public var temperature: Double {
         didSet { defaults.set(temperature, forKey: Keys.temperature) }
     }
+    @Published public var topP: Double {
+        didSet { defaults.set(topP, forKey: Keys.topP) }
+    }
     @Published public var contextCharacters: Int {
         didSet { defaults.set(contextCharacters, forKey: Keys.contextCharacters) }
+    }
+    /// 소설 종류 문서의 컨텍스트 창 상한 (PLAN §10).
+    @Published public var novelContextCharacters: Int {
+        didSet { defaults.set(novelContextCharacters, forKey: Keys.novelContextCharacters) }
+    }
+    /// KV 프리필 재사용 (PLAN §12) — 이상 동작 시 사용자가 끌 수 있는 킬 스위치.
+    @Published public var kvCacheEnabled: Bool {
+        didSet { defaults.set(kvCacheEnabled, forKey: Keys.kvCache) }
     }
     /// 본문 줄 간격(pt) — 에디터 표시용(추론과 무관). 낮추면 줄이 촘촘해진다.
     @Published public var lineSpacing: Double {
@@ -174,9 +204,15 @@ public final class CompletionSettings: ObservableObject {
         self.maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? base.maxTokens
         self.temperature =
             defaults.object(forKey: Keys.temperature) as? Double ?? base.temperature
+        self.topP = defaults.object(forKey: Keys.topP) as? Double ?? base.topP
         self.contextCharacters =
             defaults.object(forKey: Keys.contextCharacters) as? Int
             ?? Self.defaultContextCharacters
+        self.novelContextCharacters =
+            defaults.object(forKey: Keys.novelContextCharacters) as? Int
+            ?? Self.defaultNovelContextCharacters
+        self.kvCacheEnabled =
+            defaults.object(forKey: Keys.kvCache) as? Bool ?? base.kvCacheEnabled
         self.lineSpacing =
             defaults.object(forKey: Keys.lineSpacing) as? Double
             ?? Self.defaultLineSpacing
@@ -191,7 +227,9 @@ public final class CompletionSettings: ObservableObject {
             modelID: modelID,
             promptStyle: promptStyle,
             maxTokens: maxTokens,
-            temperature: temperature
+            temperature: temperature,
+            topP: topP,
+            kvCacheEnabled: kvCacheEnabled
         )
     }
 }
