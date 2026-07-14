@@ -338,19 +338,25 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 
 ### M6 — Beta "살아있는 바이블" (백그라운드가 이해를 만든다)
 
-착수 설계(구현 순서·인터페이스·선결정 사항): [docs/m6-prep.md](docs/m6-prep.md)
+착수 설계: [docs/m6-prep.md](docs/m6-prep.md) ·
+구현 기록·측정 (2026-07-14): [docs/m6-knowledge.md](docs/m6-knowledge.md)
 
-- [ ] `BackgroundIndexer`: 유휴 2단 패스 · 선점 · 열/전력 게이트 · 해시 메모
-- [ ] 요약 피라미드 증분 갱신 + B 블록 조립(`state_at`, 시점 차단)
-- [ ] 인물 자동 감지 깔때기 + 사용자 확인 UX + LLM 프로파일링
+- [x] `BackgroundIndexer`: 유휴 2단 패스 · 선점 · 열/전력 게이트 · 해시 메모
+- [x] 요약 피라미드 증분 갱신 + B 블록 조립(시점 차단 — `state_at`은 사건 로그와 함께)
+- [x] 인물 자동 감지 깔때기 + 사용자 확인 UX + LLM 프로파일링
+      (결정적 후보 정밀도 한계는 docs/m6-knowledge.md — 대화 인접 가중은 대화 모드와 함께)
 - [ ] 사건 로그 + 인물 역색인 + StateDelta 버전 상태
 - [ ] 대화 모드 (화자 추정 · 말투 카드 승격 · 발화 끝 정지) + 존대 매트릭스 v1
 - [ ] A+B 프리픽스 KV 프리웜 (이해 경로 마지막 단계)
-- [ ] 바이블 패널 UI (열람·수정·`locked`·미확인 검토)
+- [ ] 바이블 패널 UI (열람·수정·`locked`·미확인 검토) — v0: 팝오버에 후보 확인 배너
 - **완료 기준**: 1200자 창 밖의 인물·설정을 쓰는 제안이 벤치에서 입증,
   존대 일치율 유의미 상승, 백그라운드 가동 중 타이핑 지연 무회귀.
   리플레이 수락 프록시가 Fast 대비 유의미 상승 (M5 게이트에서 이관 —
   동일 픽스처·절차: docs/m5-replay-bench.md).
+  ⚠️ 2026-07-14 측정: 지식 주입(③)도 접두 일치 프록시는 동률 — 문장 경계
+  컷의 "다음 문단 첫 마디"는 지식으로 못 올리는 지표라는 게 결론
+  (docs/m6-knowledge.md). 실사용 수락률 로깅(M7)을 완료 기준의 본 지표로
+  승격하고, 벤치는 씬 중간 컷·어절 적중으로 확장한다.
 
 ### M7 — Advanced "공저자"
 
@@ -383,11 +389,17 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   장기적으로 고스트 렌더·서식 분리 후보.
 - topP 하드코딩·문자 수 clamp — M5에서 해소 예정. 컨트롤러 주변 자동 테스트 부재.
 - 코드 주석의 `PLAN §N` 일부는 구판 번호 — 만나는 대로 부록 A 기준으로 갱신.
+- MINTBench 릴리즈 CLI 간헐 세그폴트 (~2/10 실행, 문장 경계 조기 종료의 스트림
+  중단 경로 의심 — mlx-swift 내부, 앱 미재현). mlx-swift 업데이트 시 재확인
+  (docs/m6-knowledge.md).
 
 **열린 질문 (결정 전 — CLAUDE.md §5 체크리스트로 평가)**
 
-1. nano(1.5B)가 백그라운드 추출을 감당하는 품질인가 — 추출만 air를 쓰면 단일
-   모델 원칙과 충돌. M6 초입에 벤치로 판정.
+1. nano(1.5B)가 백그라운드 추출을 감당하는 품질인가 — **2026-07-14 측정: 미달**
+   (씬 요약에 사실 오류·환각, docs/m6-knowledge.md). air(3B)는 사용 가능.
+   추출만 air를 쓰면 단일 모델 원칙과 충돌 — 남은 선택지: (a) 기본 모델을 air로
+   상향 (b) nano 사용자에겐 B 블록 미주입 (잘못된 요약은 독) (c) 요약 프롬프트
+   개선 재측정. 실사용 수락률 데이터(M7)와 함께 판정.
 2. "폴더 = 작품(장별 문서)" 전환 — 초장편 UX엔 유리하나 아웃라인·Pos·KV 전략
    전반에 파급. 1작품 1문서의 실사용 한계가 보일 때 재론.
 3. 지식 사이드카 SQLite 전환 시점 (§6 전환 조건 도달 여부).
@@ -427,5 +439,6 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 | `Sources/MINTCore/Inference/ContextAssembler.swift` | A/B/C 조립 · 카드 선택 (§10–§11, M5) |
 | `Sources/MINTCore/Inference/PromptCache.swift` | LCP trim + 증분 프리필 KV 재사용 (§12, M5) |
 | `Sources/MINTCore/CharacterBibleView.swift` | 바이블 v0 편집 팝오버 (§7, M5) |
-| *(신규 예정)* `Sources/MINTCore/Knowledge/KnowledgeStore.swift` | 바이블·요약·사건·문체 사이드카 (§6, M6) |
-| *(신규 예정)* `Sources/MINTCore/Knowledge/BackgroundIndexer.swift` | 유휴 이해 파이프라인 (§9, M6) |
+| `Sources/MINTCore/Knowledge/KnowledgeStore.swift` | 지식 사이드카 + 예측용 스냅샷 (§6, M6) |
+| `Sources/MINTCore/Knowledge/BackgroundIndexer.swift` | 유휴 이해 파이프라인 · 요약 피라미드 (§9, M6) |
+| `Sources/MINTCore/Knowledge/CharacterDetector.swift` | 인물 후보 결정적 감지 깔때기 (§7, M6) |

@@ -26,6 +26,11 @@ public final class BackgroundIndexer: ObservableObject {
     @Published public private(set) var snapshot: KnowledgeSnapshot?
     /// 진행 중 패스 표시 (툴바 칩 등 UI 관찰용 — 조용한 UI 원칙상 필수는 아니다).
     @Published public private(set) var isIndexing = false
+    /// 인물 감지 후보 (M6, PLAN §7) — 감지는 자동, **등록은 사용자 확인**
+    /// (CLAUDE.md §3). 바이블 팝오버가 맨 앞 하나씩만 묻는다.
+    @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
+    /// 후보가 어느 문서 것인지 — 문서 전환 시 낡은 후보를 보여주지 않기 위한 짝.
+    @Published public private(set) var candidatesEntryID: UUID?
 
     /// 빠른 패스 유휴 대기 — 예측 디바운스(수백 ms)와 별도 타이머 (PLAN §9).
     nonisolated static let fastPassIdle: Duration = .seconds(5)
@@ -107,12 +112,29 @@ public final class BackgroundIndexer: ObservableObject {
         // B 블록이 흔들려 KV 프리픽스가 식는다 (PLAN §12).
         parameters.temperature = min(parameters.temperature, 0.3)
         let liveEntryIDs = Set(store?.entries.map(\.id) ?? [])
+        // 인물 감지 제외 목록 — 이미 등록된 이름·별칭 + 사용자가 무시한 이름.
+        let knownNames = Set(
+            (entry.characters ?? []).flatMap { card in
+                [card.name] + card.aliases.split(separator: ",").map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+            }.filter { !$0.isEmpty })
+        let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
 
         isIndexing = true
         // 파싱·디스크 IO·프롬프트 준비를 메인에서 떼어낸다 — 생성 자체는 엔진
         // actor에서 돌므로, 여기서 중요한 건 30만 자 파싱이 메인을 막지 않는 것.
         // self는 앱 수명 객체라 패스 동안의 강참조가 수명을 늘리지 않는다.
         passTask = Task.detached(priority: .utility) { [engine, self] in
+            // 인물 감지 — 결정적·LLM 없음이라 게이트·예산 밖에서 먼저 (PLAN §7).
+            let outline = DocumentOutline.parse(body)
+            let candidates = CharacterDetector.detect(
+                body: body, outline: outline,
+                known: knownNames, rejected: rejectedNames)
+            await MainActor.run {
+                self.characterCandidates = candidates
+                self.candidatesEntryID = entryID
+            }
             await Self.runPass(
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
@@ -125,6 +147,79 @@ public final class BackgroundIndexer: ObservableObject {
                 self.isIndexing = false
             }
         }
+    }
+
+    // MARK: - 인물 후보 확인 (등록은 사용자, CLAUDE.md §3)
+
+    /// 후보 등록 — 카드를 즉시 만들고, 소개는 백그라운드 LLM 프로파일링이
+    /// 채운다 (PLAN §7 깔때기 3단). 프로파일링 실패 시 이름만 남는다 —
+    /// 이름만으로도 카드 선택(§11)에는 충분하다.
+    public func approveCandidate(_ candidate: CharacterDetector.Candidate) {
+        guard let store, let entry = store.activeEntry else { return }
+        let card = CharacterCard(name: candidate.name)
+        store.upsertCharacter(card, in: entry.id)
+        characterCandidates.removeAll { $0.name == candidate.name }
+
+        let body = entry.body
+        let parameters = settings.parameters
+        let entryID = entry.id
+        Task { [engine, weak store] in
+            let note = await Self.profileCharacter(
+                named: candidate.name, in: body,
+                engine: engine, parameters: parameters)
+            guard let note, let store else { return }
+            // 그 사이 사용자가 직접 소개를 썼다면 그쪽이 이긴다 (CLAUDE.md §1-5).
+            guard
+                var current = store.entries.first(where: { $0.id == entryID })?
+                    .characters?.first(where: { $0.id == card.id }),
+                current.note.isEmpty
+            else { return }
+            current.note = note
+            store.upsertCharacter(current, in: entryID)
+        }
+    }
+
+    /// 후보 무시 — 거부 목록에 저장, 같은 이름은 다시 묻지 않는다 (PLAN §7).
+    public func rejectCandidate(_ candidate: CharacterDetector.Candidate) {
+        guard let store, let id = store.activeEntry?.id else { return }
+        store.rejectCharacterName(candidate.name, in: id)
+        characterCandidates.removeAll { $0.name == candidate.name }
+    }
+
+    /// 등록 직후의 인물 프로파일링 — 이름이 등장하는 문장들만 모아 한 번의
+    /// instruct로 성격·말투 초안을 뽑는다 (PLAN §7, `generateFolderName` 규율).
+    nonisolated private static func profileCharacter(
+        named name: String, in body: String,
+        engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> String? {
+        // 언급 문장 수집 (결정적) — 앞에서부터 최대 8문장·1000자.
+        var snippets: [String] = []
+        var total = 0
+        for line in body.split(separator: "\n") where line.contains(name) {
+            let sentence = line.trimmingCharacters(in: .whitespaces)
+            snippets.append(sentence)
+            total += sentence.count
+            if snippets.count >= 8 || total > 1_000 { break }
+        }
+        guard !snippets.isEmpty else { return nil }
+        let note =
+            (try? await engine.generateOneShot(
+                system: """
+                    너는 소설 인물 카드를 쓰는 도우미다. 발췌에 근거해 인물의 \
+                    성격·말투·관계를 한국어 1~2문장(최대 140자)으로 쓴다. \
+                    발췌에 없는 내용은 지어내지 않는다. 설명·머리말 없이 본문만 출력한다.
+                    """,
+                user: """
+                    인물 '\(name)'에 대한 발췌다. 이 인물의 카드 소개를 써라.
+
+                    \(snippets.joined(separator: "\n"))
+                    """,
+                maxTokens: 96,
+                parameters: parameters)) ?? ""
+        let collapsed = note
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return collapsed.isEmpty ? nil : String(collapsed.prefix(140))
     }
 
     /// 한 번의 이해 패스 — 값 입력만 받아 detached에서 돈다.
@@ -260,6 +355,11 @@ public final class BackgroundIndexer: ObservableObject {
     nonisolated public static func summarizeScene(
         _ text: String, engine: CompletionEngine, parameters: CompletionParameters
     ) async -> String? {
+        // 헤딩 한 줄뿐인 초미니 씬은 요약할 내용이 없다 — 모델에 넣으면 환각
+        // 요약이 생긴다 (벤치에서 확인). 인덱서·벤치 공용 가드.
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
+            return nil
+        }
         let summary =
             (try? await engine.generateOneShot(
                 system: Prompts.sceneSystem,

@@ -376,6 +376,16 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         knowledge = KnowledgeSnapshot(
             entryID: UUID(), outline: outline,
             summariesByHash: byHash, workSummary: work)
+
+        // 인물 감지 깔때기 1단 점검 (M6, PLAN §7) — 결정적 후보를 그대로 찍는다.
+        let candidates = CharacterDetector.detect(
+            body: raw, outline: outline, known: [], rejected: [])
+        print(
+            "[인물 후보] "
+                + (candidates.isEmpty
+                    ? "없음"
+                    : candidates.map { "\($0.name)(\($0.mentions)회·\($0.sceneCount)씬)" }
+                        .joined(separator: " · ")))
     }
 
     print("\n== 리플레이 벤치 ==")

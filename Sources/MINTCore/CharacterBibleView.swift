@@ -1,13 +1,15 @@
 import SwiftUI
 
-/// 스토리 바이블 v0 — 장르·인물 카드 편집 팝오버 (PLAN §7, M5: 사용자 수동 카드만).
+/// 스토리 바이블 v0 — 장르·인물 카드 편집 팝오버 (PLAN §7).
 ///
 /// 툴바의 "소설" 배지에서 연다. 여기 적은 내용이 소설 예측 프롬프트의
 /// A 헤더에 그대로 실린다 — 카드가 짧을수록 토큰당 품질이 좋다 (PLAN §11).
-/// 자동 감지·등록 제안은 M6 (감지는 자동, 등록은 사용자 확인 — CLAUDE.md §3).
+/// M6: 감지된 인물 후보 확인 배너 — 감지는 자동, 등록은 사용자 확인 (CLAUDE.md §3).
 struct CharacterBibleView: View {
     @ObservedObject var store: EntryStore
     let theme: MintTheme
+    /// 인물 감지 깔때기 (M6) — nil이면 수동 카드만 (프리뷰 등).
+    var indexer: BackgroundIndexer?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -19,6 +21,11 @@ struct CharacterBibleView: View {
                     .font(MintFonts.uiFont(13, .semibold))
                     .foregroundStyle(theme.inkC)
                 Spacer()
+            }
+
+            // 인물 후보 확인 — 비모달, 맨 앞 후보 하나씩만 (PLAN §7 깔때기 2단).
+            if let indexer {
+                CandidateBanner(indexer: indexer, store: store, theme: theme)
             }
 
             TextField("장르 (예: 판타지 · 로맨스 · 추리)", text: genreBinding)
@@ -97,6 +104,49 @@ struct CharacterBibleView: View {
     private func remove(_ card: CharacterCard) {
         guard let id = store.activeEntry?.id else { return }
         store.removeCharacter(card.id, from: id)
+    }
+}
+
+/// 감지된 인물 후보 확인 배너 (M6, PLAN §7) — "등록"은 카드 생성 + 백그라운드
+/// 프로파일링, "무시"는 거부 목록행(재질문 금지). 답하기 전엔 아무것도 바꾸지 않는다.
+private struct CandidateBanner: View {
+    @ObservedObject var indexer: BackgroundIndexer
+    @ObservedObject var store: EntryStore
+    let theme: MintTheme
+
+    var body: some View {
+        if indexer.candidatesEntryID == store.activeID,
+            let candidate = indexer.characterCandidates.first
+        {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle.badge.questionmark")
+                    .font(.system(size: 12))
+                    .foregroundStyle(theme.novelC)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("'\(candidate.name)' — 인물로 등록할까요?")
+                        .font(MintFonts.uiFont(11.5, .medium))
+                        .foregroundStyle(theme.inkC)
+                    Text("언급 \(candidate.mentions)회 · 씬 \(candidate.sceneCount)곳")
+                        .font(MintFonts.uiFont(10))
+                        .foregroundStyle(theme.ink3C)
+                }
+                Spacer()
+                Button("등록") { indexer.approveCandidate(candidate) }
+                    .font(MintFonts.uiFont(11, .semibold))
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(theme.novelC)
+                Button("무시") { indexer.rejectCandidate(candidate) }
+                    .font(MintFonts.uiFont(11))
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .padding(8)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(theme.novelBgC)
+            )
+        }
     }
 }
 

@@ -63,6 +63,9 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     public var genre: String?
     /// 스토리 바이블 v0 — 인물 카드 (PLAN §7). 레거시 파일엔 없는 키.
     public var characters: [CharacterCard]?
+    /// 인물 감지에서 사용자가 "무시"한 이름들 (M6, PLAN §7 거부 목록) —
+    /// 같은 후보를 다시 묻지 않는다. 사용자 결정이므로 파생 캐시가 아니라 여기 산다.
+    public var rejectedCharacterNames: [String]?
     /// 폴더 안 표시 순서 (사이드바 DnD 재정렬). 레거시 파일엔 없는 키 —
     /// nil이면 로드 시 기존 표시 순서(작성일 내림차순)로 시드된다.
     public var sortOrder: Double?
@@ -77,6 +80,7 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         kind: EntryKind? = nil,
         genre: String? = nil,
         characters: [CharacterCard]? = nil,
+        rejectedCharacterNames: [String]? = nil,
         sortOrder: Double? = nil
     ) {
         self.id = id
@@ -88,6 +92,7 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.kind = kind
         self.genre = genre
         self.characters = characters
+        self.rejectedCharacterNames = rejectedCharacterNames
         self.sortOrder = sortOrder
     }
 
@@ -740,6 +745,17 @@ public final class EntryStore: ObservableObject {
         }
         entries[index].characters = cards
         scheduleSave()
+    }
+
+    /// 인물 감지 후보 "무시" — 거부 목록에 넣어 같은 후보를 다시 묻지 않는다
+    /// (M6, PLAN §7). 사용자 결정 = 구조 변경이라 즉시 저장.
+    public func rejectCharacterName(_ name: String, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var rejected = entries[index].rejectedCharacterNames ?? []
+        guard !rejected.contains(name) else { return }
+        rejected.append(name)
+        entries[index].rejectedCharacterNames = rejected
+        saveNow()
     }
 
     /// 인물 카드 삭제 — 구조 변경은 즉시 저장 (스토어의 기존 규칙).

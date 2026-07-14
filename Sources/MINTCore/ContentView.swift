@@ -26,7 +26,7 @@ public struct ContentView: View {
     }
 
     public var body: some View {
-        MainSurface(store: store, completion: completion)
+        MainSurface(store: store, completion: completion, indexer: indexer)
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
             .onAppear {
@@ -69,6 +69,8 @@ public struct ContentView: View {
 private struct MainSurface: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
+    /// 인물 감지 후보 UI 배선용 (M6) — 프리뷰 등에서는 nil.
+    var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
     /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
@@ -87,7 +89,8 @@ private struct MainSurface: View {
                 }
                 EditorPane(
                     store: store, completion: completion,
-                    settings: completion.settings, theme: theme
+                    settings: completion.settings, theme: theme,
+                    indexer: indexer
                 )
                 .frame(minWidth: 560, maxWidth: .infinity)
             }
@@ -116,6 +119,7 @@ struct EditorPane: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    var indexer: BackgroundIndexer?
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
@@ -124,7 +128,8 @@ struct EditorPane: View {
         VStack(spacing: 0) {
             if !chromeHidden {
                 EditorToolbar(
-                    store: store, completion: completion, settings: settings, theme: theme)
+                    store: store, completion: completion, settings: settings, theme: theme,
+                    indexer: indexer)
                 theme.sepC.frame(height: 1)
             }
             editor
@@ -181,6 +186,7 @@ struct EditorToolbar: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    var indexer: BackgroundIndexer?
     @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @Environment(\.colorScheme) private var colorScheme
@@ -211,6 +217,10 @@ struct EditorToolbar: View {
                             Text("\(count)")
                                 .font(MintFonts.monoUI(9, .semibold))
                         }
+                        // 감지된 인물 후보가 기다리는 중 — 점 하나만 (비침습, M6).
+                        if let indexer {
+                            CandidateDot(indexer: indexer, store: store, theme: theme)
+                        }
                     }
                     .foregroundStyle(theme.novelC)
                     .padding(.vertical, 3)
@@ -221,7 +231,7 @@ struct EditorToolbar: View {
                 .buttonStyle(.plain)
                 .help("스토리 바이블 — 장르·인물 카드")
                 .popover(isPresented: $bibleOpen, arrowEdge: .bottom) {
-                    CharacterBibleView(store: store, theme: theme)
+                    CharacterBibleView(store: store, theme: theme, indexer: indexer)
                 }
             }
             Spacer()
@@ -359,6 +369,24 @@ struct EditorToolbar: View {
 
     private var isDark: Bool {
         appearance == "dark" || (appearance.isEmpty && colorScheme == .dark)
+    }
+}
+
+/// 소설 배지 안의 인물 후보 대기 점 (M6, PLAN §7) — 감지는 자동이지만 UI는
+/// 점 하나뿐이다. 화면을 흔들지 않는다 (CLAUDE.md §3 "고스트는 조용히"의 연장).
+private struct CandidateDot: View {
+    @ObservedObject var indexer: BackgroundIndexer
+    @ObservedObject var store: EntryStore
+    let theme: MintTheme
+
+    var body: some View {
+        if indexer.candidatesEntryID == store.activeID,
+            !indexer.characterCandidates.isEmpty
+        {
+            Circle()
+                .fill(theme.novelC)
+                .frame(width: 5, height: 5)
+        }
     }
 }
 
