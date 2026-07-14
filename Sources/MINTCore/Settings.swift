@@ -116,7 +116,7 @@ public final class CompletionSettings: ObservableObject {
     public static let defaultContextCharacters = 1_200
     /// 소설의 컨텍스트 창 상한 (Smart/Story, PLAN §10) — KV 재사용(PLAN §12)이
     /// 있어야 부담 없는 크기라 M5에서 함께 도입한다.
-    public static let defaultNovelContextCharacters = 4_000
+    nonisolated public static let defaultNovelContextCharacters = 4_000
     /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
     public static let defaultLineSpacing = 7.0
     /// 본문 기본 글자 크기(pt) 기본값 — 디자인 기준. 모든 블록이 이 값에 비례한다.

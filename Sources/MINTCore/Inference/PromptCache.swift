@@ -73,7 +73,7 @@ final class PromptCacheBox: @unchecked Sendable {
         if lcp == tokens.count { lcp -= 1 }
         guard lcp > 0, canTrimPromptCache(cache) else { return nil }
         let trim = offset - lcp
-        guard trimPromptCache(cache, trim) == trim else { return nil }
+        guard trimPromptCache(cache, numTokens: trim) == trim else { return nil }
         return Reuse(cache: cache, suffix: Array(tokens[lcp...]), reusedTokens: lcp)
     }
 
