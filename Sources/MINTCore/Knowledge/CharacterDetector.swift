@@ -2,49 +2,53 @@ import Foundation
 
 /// 인물 후보 감지 — 결정적 깔때기 1단 (M6, PLAN §7).
 ///
-/// LLM 없이 빈도·조사 휴리스틱만으로 후보를 뽑는다 (CLAUDE.md §2-5 —
-/// 정규식·통계로 되는 일에 토큰을 쓰지 않는다). 오탐은 깔때기의 다음 단이
-/// 거른다: **등록은 반드시 사용자 확인**을 거치므로(CLAUDE.md §3) 여기서는
-/// 재현율보다 "그럴듯한 후보만 조용히" 내는 정밀도를 우선한다.
+/// **품사 없이 품사를 판별한다.** 한국어는 Apple 형태소 분석기가 품사·개체명을
+/// 지원하지 않으므로(`CharacterLexicon` 참조), 교착어 구조로 대신한다:
+///
+/// 1. **격조사는 체언(명사·대명사)에만 붙는다.** 동사("걸었다")·형용사·부사
+///    ("천천히")·접속사("그러나")는 격조사를 취하지 않는다 → 격 증거가 없으면
+///    애초에 후보가 아니다. 이 하나로 비명사 대량 오탐이 구조적으로 사라진다.
+/// 2. **여격(에게/한테/께)·호격(아/야)·발화 귀속("~가 말했다")은 유정물(사람)
+///    에게만** 나타난다. 사물("일지"·"등불")은 격조사는 취해도 이 신호는 못
+///    받는다 → **유정 신호를 인물 후보의 필수 조건**으로 삼아 명사 중에서도
+///    사람만 남긴다. 이것이 Precision을 끌어올리는 핵심 레버다.
+/// 3. 대명사("그녀")·호칭("소장님")은 구조로는 사람처럼 보이므로 닫힌 부류
+///    목록으로 제외한다. 동음이의("소리"=소리/인물명)는 불용어로 뭉개지 않고
+///    구조 신호(발화 귀속)가 실제 인물일 때만 통과시킨다.
+///
+/// 재현율보다 정밀도 우선(사용자 요구 + CLAUDE.md §2 품질>적극성): 유정 신호가
+/// 하나도 없으면 침묵한다. 원고가 자라며 발화·여격이 생기면 다음 패스가 잡는다.
+/// **등록은 언제나 사용자 확인**을 거치므로(CLAUDE.md §3) 남은 소수 오탐도 안전하다.
 public enum CharacterDetector {
 
-    /// 후보 하나 — 이름과 근거 수치 (확인 UI 문구용).
+    /// 후보 하나 — 이름과 근거 수치 (확인 UI 문구 + 벤치 리포트용).
     public struct Candidate: Equatable, Sendable {
         public let name: String
-        /// 전체 언급 횟수 (조사 변형 포함).
+        /// 전체 언급 횟수 (조사 변형 + 맨 이름 포함).
         public let mentions: Int
-        /// 등장 씬 수 — 여러 씬에 걸쳐야 "지나가는 단어"가 아니다.
+        /// 등장 씬 수.
         public let sceneCount: Int
+        /// 유정 신호 횟수 (여격 + 호격 + 발화 귀속) — 이 값이 0이면 후보가 아니다.
+        public let animacyHits: Int
+        /// 서로 다른 격 역할 수 (명사다움 — 여러 역할로 격변화할수록 큼).
+        public let caseRoleCount: Int
     }
 
-    /// 임계 (PLAN §7 예시값) — 씬 3+ · 언급 5+. 씬이 적은 짧은 원고는
-    /// 씬 요건을 문서 씬 수까지 낮춘다 (첫 장부터 감지가 아예 침묵하지 않게).
+    /// 임계 (PLAN §7) — 언급 5+ · 씬 3+. 씬이 적은 짧은 원고는 문서 씬 수까지 낮춘다.
     static let minMentions = 5
     static let minScenes = 3
+    /// 이름 어간 길이 (한글) — 1자는 대명사·조사 파편, 5자↑은 구·문장 파편.
+    static let minStemLength = 2
+    static let maxStemLength = 4
 
-    /// 이름 뒤에 붙는 조사 — 붙은 형태("서연이가")를 어간("서연")으로 접는다.
-    /// 긴 것 먼저 매칭 (예: "에게서"가 "에"보다 먼저).
-    private static let particles = [
-        "이에게서", "에게서", "이라고", "라고", "한테서", "에게", "한테", "께서",
-        "이랑", "랑", "하고", "에서", "에는", "에도", "으로", "로", "에", "이면",
-        "과", "와", "의", "은", "는", "이", "가", "을", "를",
-        "도", "만", "아", "야", "처럼", "보다", "부터", "까지", "이다", "이었다",
-    ]
+    /// 어간별 누적 증거.
+    private struct Evidence {
+        var mentions = 0
+        var scenes: Set<Int> = []
+        var caseRoles: Set<CharacterLexicon.Role> = []
+        var animacyHits = 0  // 여격 + 호격 + 발화 귀속
+    }
 
-    /// 사람 이름일 수 없는 흔한 낱말 — 호칭·대명사·시간·일반명사.
-    /// 완전한 목록이 아니다 — 최종 방어선은 사용자 확인이다.
-    private static let stopwords: Set<String> = [
-        "그것", "이것", "저것", "우리", "당신", "자신", "그녀", "그는", "그가",
-        "사람", "생각", "소리", "시간", "오늘", "어제", "내일", "지금", "이제",
-        "하나", "다시", "함께", "모두", "정말", "그냥", "아직", "이미", "가장",
-        "얼굴", "마음", "이야기", "말씀", "아버지", "어머니", "할아버지", "할머니",
-        "아저씨", "아주머니", "선생님", "소장님", "그날", "그때", "여기", "거기",
-        "저기", "무엇", "누구", "어디", "언제",
-    ]
-
-    /// 본문에서 인물 후보를 뽑는다. `known`(이미 등록된 이름·별칭)과
-    /// `rejected`(사용자가 무시한 이름)는 후보에서 뺀다 — 같은 후보 재질문
-    /// 금지 (PLAN §7).
     public static func detect(
         body: String,
         outline: DocumentOutline,
@@ -52,84 +56,122 @@ public enum CharacterDetector {
         rejected: Set<String>
     ) -> [Candidate] {
         guard !outline.scenes.isEmpty else { return [] }
+        let lexicon = CharacterLexicon.current()
         let text = body as NSString
+        var evidence: [String: Evidence] = [:]
 
-        // 씬별로 토큰을 접어 (어간 → 언급 수, 등장 씬 집합)을 만든다.
-        var mentions: [String: Int] = [:]
-        var scenes: [String: Set<Int>] = [:]
         for (sceneIndex, scene) in outline.scenes.enumerated() {
             let sceneText = text.substring(
                 with: NSRange(
                     location: scene.utf16Range.lowerBound,
                     length: scene.utf16Range.count))
-            for token in tokens(in: sceneText) {
-                guard let stem = stem(of: token) else { continue }
-                mentions[stem, default: 0] += 1
-                scenes[stem, default: []].insert(sceneIndex)
-            }
+            accumulate(
+                sceneText, sceneIndex: sceneIndex,
+                lexicon: lexicon, into: &evidence)
         }
 
+        let excluded = lexicon.excluded
         let sceneThreshold = min(minScenes, outline.scenes.count)
-        let candidates = mentions.compactMap { stem, count -> Candidate? in
-            guard count >= minMentions,
-                let sceneSet = scenes[stem], sceneSet.count >= sceneThreshold,
-                !known.contains(stem), !rejected.contains(stem)
+
+        let candidates = evidence.compactMap { stem, ev -> Candidate? in
+            guard (minStemLength...maxStemLength).contains(stem.count),
+                ev.mentions >= minMentions,
+                ev.scenes.count >= sceneThreshold,
+                // ── 정밀도 레버: 유정 신호(사람만 받는 것)가 반드시 있어야 한다.
+                ev.animacyHits >= 1,
+                // ── 명사다움: 격조사를 취하는 체언이어야 한다(고정 낱말 배제).
+                !ev.caseRoles.isEmpty,
+                !known.contains(stem), !rejected.contains(stem),
+                !excluded.contains(stem)
             else { return nil }
-            return Candidate(name: stem, mentions: count, sceneCount: sceneSet.count)
+            return Candidate(
+                name: stem, mentions: ev.mentions, sceneCount: ev.scenes.count,
+                animacyHits: ev.animacyHits, caseRoleCount: ev.caseRoles.count)
         }
-        // 언급 많은 순 — 확인 UI는 맨 앞 하나씩만 묻는다 (조용한 UX).
-        // 상위 5개까지만: 일반명사 오탐이 섞이는 걸 알기에 질문 줄을 세우지
-        // 않는다 (품질 > 적극성). 나머지는 원고가 자라며 다음 패스에 다시 온다.
+
+        // 랭킹: 유정 신호 > 격 다양성 > 빈도. 확인 UI는 맨 앞부터 하나씩 묻는다.
+        // 상위 5개 컷 — 질문 줄을 세우지 않는다(품질 > 적극성).
         return Array(
             candidates
-                .sorted { ($0.mentions, $0.name) > ($1.mentions, $1.name) }
+                .sorted {
+                    ($0.animacyHits, $0.caseRoleCount, $0.mentions, $0.name)
+                        > ($1.animacyHits, $1.caseRoleCount, $1.mentions, $1.name)
+                }
                 .prefix(5))
     }
 
-    /// 한글 연속 토큰 (2–5자에 조사가 붙은 꼴까지 고려해 2–8자).
-    private static func tokens(in text: String) -> [String] {
+    /// 한 씬을 훑어 어간별 증거를 누적한다. 토큰 순서를 보존해 "이름+주어표지"
+    /// 다음 토큰의 발화 동사(대화 귀속)를 본다.
+    private static func accumulate(
+        _ sceneText: String, sceneIndex: Int,
+        lexicon: CharacterLexicon, into evidence: inout [String: Evidence]
+    ) {
+        let words = hangulRuns(sceneText)
+        for (i, word) in words.enumerated() {
+            guard let parsed = parse(word, lexicon: lexicon) else { continue }
+            let stem = parsed.stem
+            var ev = evidence[stem] ?? Evidence()
+            ev.mentions += 1
+            ev.scenes.insert(sceneIndex)
+            if let role = parsed.role {
+                ev.caseRoles.insert(role)
+                if role == .dative || role == .vocative { ev.animacyHits += 1 }
+            }
+            // 대화 귀속 — 주어 표지가 붙은 이름 뒤 1~2 토큰에 발화 동사가 오면 화자.
+            if let role = parsed.role, role == .subject || role == .topic {
+                let followers = words[(i + 1)..<min(i + 3, words.count)]
+                if followers.contains(where: { next in
+                    lexicon.speechVerbPrefixes.contains { next.hasPrefix($0) }
+                }) {
+                    ev.animacyHits += 1
+                }
+            }
+            evidence[stem] = ev
+        }
+    }
+
+    /// 한 토큰을 (어간, 격역할)로 분해한다. 격조사가 붙었으면 그 역할을,
+    /// 안 붙은 맨 이름이면 role=nil로. 명사가 아닌 토큰(동사·부사 등)은 nil 반환.
+    private static func parse(
+        _ word: String, lexicon: CharacterLexicon
+    ) -> (stem: String, role: CharacterLexicon.Role?)? {
+        // 서술어 종결("~다")은 동사·형용사다 — 체언이 아니다.
+        if word.hasSuffix("다") { return nil }
+
+        for (suffix, role) in lexicon.particles where word.count > suffix.count {
+            guard word.hasSuffix(suffix) else { continue }
+            var stem = String(word.dropLast(suffix.count))
+            // "서연이가/서연이는" — 받침 이름 뒤 매개 "이"까지 벗긴다(주격 이 제외).
+            if role != .subject, stem.count >= minStemLength + 1, stem.hasSuffix("이") {
+                stem = String(stem.dropLast())
+            }
+            guard isNameShape(stem) else { return nil }
+            return (stem, role)
+        }
+        // 조사가 없는 맨 토큰 — 이름꼴이면 어간(맨 이름, 대화문 "도경."), 아니면 버림.
+        guard isNameShape(word) else { return nil }
+        return (word, nil)
+    }
+
+    /// 이름 어간의 형태 조건 — 순수 한글 2~4자.
+    private static func isNameShape(_ stem: String) -> Bool {
+        guard (minStemLength...maxStemLength).contains(stem.count) else { return false }
+        return stem.unicodeScalars.allSatisfy { (0xAC00...0xD7A3).contains($0.value) }
+    }
+
+    /// 텍스트를 한글 최대 연속 토큰의 순서 있는 배열로 자른다(공백·문장부호 경계).
+    private static func hangulRuns(_ text: String) -> [String] {
         var result: [String] = []
         var current = ""
         for scalar in text.unicodeScalars {
             if (0xAC00...0xD7A3).contains(scalar.value) {
                 current.unicodeScalars.append(scalar)
-            } else {
-                if (2...8).contains(current.count) { result.append(current) }
+            } else if !current.isEmpty {
+                result.append(current)
                 current = ""
             }
         }
-        if (2...8).contains(current.count) { result.append(current) }
+        if !current.isEmpty { result.append(current) }
         return result
-    }
-
-    /// 토큰에서 이름 어간을 뽑는다 — 조사 제거 후 2–4자 한글이면 후보 어간.
-    ///
-    /// "서연이가"→"서연", "도경은"→"도경". 조사가 안 붙은 맨 이름("서연")도
-    /// 그대로 어간이다. 규칙:
-    /// - 조사가 붙었으면 **벗긴 형태만** 어간 후보다 — "눈이"가 "눈"이 짧다고
-    ///   "눈이"로 남으면 조사 낀 오탐이 산다.
-    /// - 가장 많이 벗긴 형태가 흔한 낱말(stopwords)이면 토큰 전체를 버린다 —
-    ///   "소리는"은 이름이 아니라 명사 "소리"+조사다.
-    /// - "~다"로 끝나는 토큰은 서술어(있었다·말했다)로 보고 버린다.
-    /// 한계: 형태소 분석이 아니라서 일반명사가 새어 들어온다 — 임계(여러 씬 ×
-    /// 여러 조사 변형)·상위 5개 컷·사용자 확인이 거른다.
-    private static func stem(of token: String) -> String? {
-        guard !token.hasSuffix("다") else { return nil }
-        var candidates = [token]
-        for particle in particles where token.hasSuffix(particle) {
-            let stem = String(token.dropLast(particle.count))
-            // 조사를 찾았으면 원형은 더 이상 후보가 아니다.
-            candidates = [stem]
-            // "서연이가" 꼴 — 받침 이름 뒤 매개 "이"까지 벗긴 형태가 더 우선.
-            if particle.first != "이", stem.hasSuffix("이"), stem.count >= 3 {
-                candidates.insert(String(stem.dropLast()), at: 0)
-            }
-            break  // 긴 조사 우선 — 첫 매칭이 가장 길다
-        }
-        for candidate in candidates {  // 가장 많이 벗긴 쪽 우선
-            if stopwords.contains(candidate) { return nil }  // 흔한 낱말 + 조사
-            if (2...4).contains(candidate.count) { return candidate }
-        }
-        return nil
     }
 }

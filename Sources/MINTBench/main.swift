@@ -27,6 +27,10 @@ struct BenchOptions {
     var genre = ""
     /// 리플레이 전에 원고 전체를 요약(씬→장→작품)해 B 블록으로 주입 (M6, PLAN §11).
     var knowledge = false
+    /// 모델 로드 없이 인물 감지기만 돌려 후보 전체를 출력 (정밀도 점검, PLAN §7).
+    var detectOnly = false
+    /// --detect-only 정밀도 채점용 정답 인물 (쉼표 구분).
+    var truePeople = ""
 
     enum ParseResult {
         case options(BenchOptions)
@@ -103,6 +107,11 @@ struct BenchOptions {
                 options.genre = value
             case "--knowledge":
                 options.knowledge = true
+            case "--detect-only":
+                options.detectOnly = true
+            case "--true-people":
+                guard let value = iterator.next() else { return .failure("--true-people 값 누락") }
+                options.truePeople = value
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -183,6 +192,39 @@ case .failure(let message):
     exit(2)
 case .options(let parsed):
     options = parsed
+}
+
+// 인물 감지 정밀도 점검 — 모델 로드 없이 감지기만 (결정적이라 GPU 불필요, PLAN §7).
+if options.detectOnly {
+    guard let replayPath = options.replayPath,
+        let raw = try? String(contentsOfFile: replayPath, encoding: .utf8)
+    else {
+        print("❌ --detect-only 는 --replay <원고 파일>이 필요하다.")
+        exit(2)
+    }
+    let outline = DocumentOutline.parse(raw)
+    let candidates = CharacterDetector.detect(
+        body: raw, outline: outline, known: [], rejected: [])
+    let truth = Set(
+        options.truePeople.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+    print("== 인물 감지 정밀도 (씬 \(outline.scenes.count) · 후보 \(candidates.count)) ==")
+    var tp = 0
+    for c in candidates {
+        let mark = truth.isEmpty ? "•" : (truth.contains(c.name) ? "✅인물" : "❌오탐")
+        if truth.contains(c.name) { tp += 1 }
+        print(
+            "  \(mark) \(c.name) — 언급\(c.mentions)·씬\(c.sceneCount)·유정\(c.animacyHits)·격\(c.caseRoleCount)")
+    }
+    if !truth.isEmpty {
+        let precision = candidates.isEmpty ? 0 : Double(tp) / Double(candidates.count) * 100
+        let recall = Double(tp) / Double(truth.count) * 100
+        print(
+            String(
+                format: "Precision %.0f%% (%d/%d) · Recall %.0f%% (%d/%d)",
+                precision, tp, candidates.count, recall, tp, truth.count))
+    }
+    exit(0)
 }
 
 print("== MINT M2 추론 선검증 ==")
@@ -384,8 +426,9 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
             "[인물 후보] "
                 + (candidates.isEmpty
                     ? "없음"
-                    : candidates.map { "\($0.name)(\($0.mentions)회·\($0.sceneCount)씬)" }
-                        .joined(separator: " · ")))
+                    : candidates.map {
+                        "\($0.name)(언급\($0.mentions)·씬\($0.sceneCount)·유정\($0.animacyHits)·격\($0.caseRoleCount))"
+                    }.joined(separator: " · ")))
     }
 
     print("\n== 리플레이 벤치 ==")
