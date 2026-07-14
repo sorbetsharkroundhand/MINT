@@ -44,14 +44,29 @@ public enum ContextAssembler {
     static let maxCards = 3
     /// 카드 한 장의 소개 글 상한 — 토큰당 품질 원칙 (CLAUDE.md §5-1).
     static let maxCardNoteCharacters = 140
+    /// B(요약 지식) 문자 상한 — 초과 시 커서에서 먼 것부터 버린다 (PLAN §10 삭감).
+    static let maxKnowledgeCharacters = 600
 
     /// C(최근 원문 창)에 A·B를 얹어 최종 프롬프트를 만든다.
+    ///
+    /// `knowledge`/`prefixStartUTF16`은 M6 — 인덱서가 발행한 스냅샷에서 C 창
+    /// **밖**(이전) 씬의 요약만 골라 넣는다. 시점 차단(커서 이후 지식 미주입,
+    /// CLAUDE.md §2-4)은 씬 위치 비교라 여기서 결정적으로 성립한다.
     public static func assemble(
         prefix: String,
         document: DocumentContext?,
+        knowledge: KnowledgeSnapshot? = nil,
+        prefixStartUTF16: Int = 0,
         style: PromptStyle
     ) -> AssembledPrompt {
-        let header = headerText(document: document, window: prefix)
+        var header = headerText(document: document, window: prefix)
+        if document?.kind == .novel,
+            let knowledge,
+            case let block = knowledgeText(knowledge, before: prefixStartUTF16),
+            !block.isEmpty
+        {
+            header = header.isEmpty ? block : header + "\n" + block
+        }
         switch style {
         case .continuation:
             // 헤더와 본문은 빈 줄 하나로만 구분 — 이어쓰기 흐름을 깨지 않는 최소 구조.
@@ -63,6 +78,55 @@ public enum ContextAssembler {
                 : instructSystem + "\n\n[작품 정보]\n" + header
             return .instruct(system: system, user: instructUser(prefix: prefix))
         }
+    }
+
+    /// B 블록 — C 창이 시작되기 **전에 끝난** 씬들의 요약 (PLAN §11).
+    ///
+    /// 구성: 작품 요약 → 이전 장 요약 → (커서와 같은 장의) 이전 씬 요약.
+    /// 예산 초과 시 커서에서 먼 것부터 버린다 — 가까운 맥락이 더 예측에 기여한다.
+    /// 창 시작이 512 격자에 스냅되므로(에디터·PLAN §12) 결과 문자열은 키 입력에
+    /// 안정적 — KV 프리픽스가 식지 않는다.
+    static func knowledgeText(_ knowledge: KnowledgeSnapshot, before windowStart: Int) -> String {
+        let scenes = knowledge.outline.scenes
+        // C 창 이전에 완전히 끝난 씬들 — 창과 겹치는 씬은 원문이 이미 C에 있다.
+        let outside = scenes.filter { $0.utf16Range.upperBound <= windowStart }
+        guard !outside.isEmpty else { return "" }
+
+        // 커서(창)가 속한 장 — 같은 장의 씬은 요약으로, 이전 장은 장 요약으로.
+        let cursorChapter = scenes.last(where: { $0.utf16Range.lowerBound <= windowStart })
+            .map { Array($0.headingPath.prefix(2)) }
+
+        var budget = maxKnowledgeCharacters
+        var lines: [String] = []
+
+        if let work = knowledge.workSummary, work.count + 12 <= budget {
+            lines.append("지난 줄거리: \(work)")
+            budget -= work.count + 12
+        }
+
+        // 가까운 것부터 담고(예산 소진 시 먼 것이 자연히 빠진다) 문서 순서로 뒤집는다.
+        var picked: [String] = []
+        var coveredChapters: Set<String> = []
+        for scene in outside.reversed() {
+            let chapter = Array(scene.headingPath.prefix(2))
+            let chapterKey = chapter.joined(separator: " > ")
+            let line: String
+            if chapter == cursorChapter || knowledge.chapterSummariesByPath[chapterKey] == nil {
+                // 같은 장(또는 장 요약이 아직 없는 장)은 씬 해상도로.
+                guard let summary = knowledge.summariesByHash[scene.contentHash] else { continue }
+                let label = scene.headingPath.last.flatMap { $0.isEmpty ? nil : $0 }
+                line = label.map { "앞선 장면(\($0)): \(summary)" } ?? "앞선 장면: \(summary)"
+            } else {
+                // 이전 장은 장 해상도 한 줄로 — 장 하나당 한 번만.
+                guard coveredChapters.insert(chapterKey).inserted else { continue }
+                line = "\(chapterKey): \(knowledge.chapterSummariesByPath[chapterKey]!)"
+            }
+            guard line.count <= budget else { break }
+            picked.append(line)
+            budget -= line.count
+        }
+        lines.append(contentsOf: picked.reversed())
+        return lines.joined(separator: "\n")
     }
 
     /// A 고정 헤더 + B 인물 카드. 소설 전용 — 저널은 빈 문자열(Fast = C만).

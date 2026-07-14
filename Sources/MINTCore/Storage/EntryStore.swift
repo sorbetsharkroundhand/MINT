@@ -211,6 +211,10 @@ public final class EntryStore: ObservableObject {
     /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
     public nonisolated(unsafe) static weak var current: EntryStore?
 
+    /// 본문 편집·문서 전환 알림 (M6) — BackgroundIndexer가 배선한다.
+    /// 지식 로직은 여기 두지 않는다 (CLAUDE.md §4) — 신호만 내보낸다.
+    public var documentDidChange: ((UUID) -> Void)?
+
     private struct Snapshot: Codable {
         var entries: [JournalEntry]
         var activeID: UUID?
@@ -434,6 +438,8 @@ public final class EntryStore: ObservableObject {
         activeID = id
         // 전환은 잦고 activeID만 바뀐다 — 동기 디스크 쓰기 대신 디바운스 저장.
         scheduleSave()
+        // 문서 전환도 인덱서에겐 "활동" — 새 문서의 유휴 타이머를 감는다 (M6).
+        documentDidChange?(id)
     }
 
     @discardableResult
@@ -764,6 +770,9 @@ public final class EntryStore: ObservableObject {
             entries[index].titleIsCustom = false
         }
         scheduleSave()
+        // 타이핑 = 인덱서 선점 신호 (M6) — 진행 중 백그라운드 이해를 멈추고
+        // 유휴 타이머를 다시 감는다.
+        documentDidChange?(activeID)
     }
 
     // MARK: - 저장

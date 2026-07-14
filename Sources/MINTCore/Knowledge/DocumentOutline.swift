@@ -115,6 +115,12 @@ public struct DocumentOutline: Equatable, Sendable {
     }
 
     private static func hash(_ text: Substring) -> String {
+        stableHash(String(text))
+    }
+
+    /// 프로세스 간 안정 해시 — 씬 해시와 같은 규격 (SHA-256 앞 16자).
+    /// 장·작품 노드의 결합 해시(BackgroundIndexer)도 이 규격을 쓴다.
+    static func stableHash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8))
             .prefix(8)
             .map { String(format: "%02x", $0) }

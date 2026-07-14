@@ -156,6 +156,61 @@ public actor CompletionEngine {
         }
     }
 
+    /// 백그라운드 이해 파이프라인의 일회성 instruct 호출 (M6, PLAN §9) —
+    /// 씬 요약·장 요약·인물 프로파일링이 이 하나로 통한다.
+    ///
+    /// `generateFolderName`과 같은 규율: 항상 instruct 챗, 프롬프트 캐시 불가침
+    /// (예측의 프리픽스가 식지 않는다), 협조 취소(타이핑 재개 → 인덱서가 태스크를
+    /// 취소하면 다음 청크에서 멈춘다). 실패·빈 결과는 호출부가 무시한다 —
+    /// 백그라운드 실패는 다음 패스가 다시 시도하면 그만이다.
+    public func generateOneShot(
+        system: String,
+        user: String,
+        maxTokens: Int,
+        parameters: CompletionParameters
+    ) async throws -> String {
+        guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return ""
+        }
+        let container = try await loadedContainer(
+            modelID: parameters.modelID, onProgress: nil)
+        try Task.checkCancellation()
+        return try await container.perform { context in
+            let chat: [Chat.Message] = [.system(system), .user(user)]
+            let userInput = UserInput(
+                chat: chat, additionalContext: ["enable_thinking": false])
+            let input = try await context.processor.prepare(input: userInput)
+            try Task.checkCancellation()
+
+            let generateParameters = GenerateParameters(
+                maxTokens: maxTokens,
+                temperature: Float(parameters.temperature),
+                topP: Float(parameters.topP)
+            )
+
+            var text = ""
+            let stream = try MLXLMCommon.generate(
+                input: input, parameters: generateParameters, context: context)
+            for await generation in stream {
+                if Task.isCancelled { break }
+                if case .chunk(let chunk) = generation {
+                    text += chunk
+                    // 요약은 한 문단 — 내용이 생긴 뒤 빈 줄(문단 경계)이 나오면
+                    // 그만 받는다 (설명·부연이 이어지는 걸 끊는다).
+                    if text.contains("\n\n"),
+                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    {
+                        break
+                    }
+                }
+            }
+            try Task.checkCancellation()
+            let cleaned = Self.stripThinking(text)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return Self.stripSurroundingQuotes(cleaned)
+        }
+    }
+
     // MARK: - 모델 로드 (1회, 교체 가능)
 
     private func loadedContainer(

@@ -25,6 +25,8 @@ struct BenchOptions {
     var contextChars = CompletionSettings.defaultNovelContextCharacters
     var title = ""
     var genre = ""
+    /// 리플레이 전에 원고 전체를 요약(씬→장→작품)해 B 블록으로 주입 (M6, PLAN §11).
+    var knowledge = false
 
     enum ParseResult {
         case options(BenchOptions)
@@ -99,6 +101,8 @@ struct BenchOptions {
             case "--genre":
                 guard let value = iterator.next() else { return .failure("--genre 값 누락") }
                 options.genre = value
+            case "--knowledge":
+                options.knowledge = true
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -125,6 +129,8 @@ struct BenchOptions {
           --context <n>        컷 앞에서 읽는 컨텍스트 길이 (기본: 4000자)
           --title <text>       작품 제목 — 지정 시 소설 헤더(A)를 조립에 포함
           --genre <text>       작품 장르 — 위와 동일
+          --knowledge          리플레이 전에 원고를 요약(씬→장→작품)해 B 블록으로
+                               주입 — 인덱서(M6)와 같은 프롬프트·규격 (PLAN §11)
 
         모델 대안(가벼운 순): \(ModelPresets.qwen2_5_1_5B)
                               \(ModelPresets.qwen2_5_3B)
@@ -150,6 +156,17 @@ final class ProgressReporter: @unchecked Sendable {
 func format(_ interval: TimeInterval?) -> String {
     guard let interval else { return "—" }
     return String(format: "%.2fs", interval)
+}
+
+/// 두 텍스트가 2자 이상 어절(문장부호 제거)을 공유하는가 — 리플레이 보조 지표.
+func sharesWord(_ a: String, _ b: String) -> Bool {
+    func words(_ text: String) -> Set<String> {
+        Set(
+            text.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
+                .map { $0.trimmingCharacters(in: .punctuationCharacters) }
+                .filter { $0.count >= 2 })
+    }
+    return !words(a).isDisjoint(with: words(b))
 }
 
 // MARK: - 실행
@@ -319,13 +336,58 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     parameters.maxTokens = options.maxTokens
     parameters.temperature = options.temperature
 
+    // B 블록 지식 (M6) — 인덱서와 같은 프롬프트·규격으로 사전 요약해 스냅샷을
+    // 만든다. 출력을 그대로 찍는다 — nano 요약 품질 수동 검수가 M6 선결정 사항.
+    var knowledge: KnowledgeSnapshot?
+    if options.knowledge {
+        guard document != nil else {
+            print("❌ --knowledge 는 --title/--genre(소설 헤더)와 함께 써야 한다 — B는 소설 전용.")
+            return false
+        }
+        let outline = DocumentOutline.parse(raw)
+        let ns = raw as NSString
+        print("\n== 지식 사전 구축 (씬 \(outline.scenes.count)개) ==")
+        var byHash: [String: String] = [:]
+        var ordered: [String] = []
+        for (index, scene) in outline.scenes.enumerated() {
+            let sceneText = String(
+                ns.substring(
+                    with: NSRange(
+                        location: scene.utf16Range.lowerBound,
+                        length: scene.utf16Range.count)
+                ).prefix(BackgroundIndexer.maxSceneCharacters))
+            guard
+                let summary = await BackgroundIndexer.summarizeScene(
+                    sceneText, engine: engine, parameters: parameters)
+            else {
+                print("[씬 \(index + 1)] ❌ 요약 실패")
+                continue
+            }
+            byHash[scene.contentHash] = summary
+            ordered.append(summary)
+            print("[씬 \(index + 1)] \(scene.headingPath.joined(separator: " > ")): \(summary)")
+        }
+        var work: String?
+        if ordered.count >= 2 {
+            work = await BackgroundIndexer.rollup(
+                ordered, level: .work, engine: engine, parameters: parameters)
+            if let work { print("[작품] \(work)") }
+        }
+        knowledge = KnowledgeSnapshot(
+            entryID: UUID(), outline: outline,
+            summariesByHash: byHash, workSummary: work)
+    }
+
     print("\n== 리플레이 벤치 ==")
     print("원고: \(path) (\(text.count)자) · 컷 \(cuts.count)개 · 컨텍스트 \(options.contextChars)자")
-    print("스타일: \(style.rawValue) · 헤더: \(document == nil ? "없음" : "소설(제목/장르)")\n")
+    print(
+        "스타일: \(style.rawValue) · 헤더: \(document == nil ? "없음" : "소설(제목/장르)")"
+            + " · 지식(B): \(knowledge == nil ? "없음" : "요약 피라미드")\n")
 
     struct Row {
         let cut: Int
         let accepted: Int
+        let sharedWord: Bool
         let suggestionLength: Int
         let coldTTFC: TimeInterval?
         let warmTTFC: TimeInterval?
@@ -338,8 +400,12 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         let contextStart = max(0, cut - options.contextChars)
         let context = String(text[contextStart..<cut])
         let truth = String(text[cut..<(cut + options.truthChars)])
+        // B의 시점 차단 기준 — C 창이 시작하는 본문 위치 (utf16, 조립기 규격).
+        let prefixStartUTF16 = String(text[0..<contextStart]).utf16.count
         let prompt = ContextAssembler.assemble(
-            prefix: context, document: document, style: style)
+            prefix: context, document: document,
+            knowledge: knowledge, prefixStartUTF16: prefixStartUTF16,
+            style: style)
         do {
             let cold = try await engine.complete(prompt: prompt, parameters: parameters)
             let warm = try await engine.complete(prompt: prompt, parameters: parameters)
@@ -349,9 +415,12 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
                 guard a == b else { break }
                 accepted += 1
             }
+            // 보조 지표 — 정답과 어절(≥2자)을 공유하는가. 접두 일치가 0이어도
+            // 방향이 맞는 제안(이름·소재 적중)을 잡는다 (docs/m5-replay-bench.md 후속).
+            let sharedWord = sharesWord(cold.text, truth)
             rows.append(
                 Row(
-                    cut: cut, accepted: accepted,
+                    cut: cut, accepted: accepted, sharedWord: sharedWord,
                     suggestionLength: cold.text.count,
                     coldTTFC: cold.timeToFirstChunk, warmTTFC: warm.timeToFirstChunk,
                     promptTokens: cold.promptTokenCount,
@@ -359,6 +428,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
             print(
                 "[\(index + 1)/\(cuts.count)] @\(cut)자"
                     + " · 일치 \(accepted)자/\(cold.text.count)자"
+                    + (sharedWord ? " · 어절 적중" : "")
                     + " · 콜드 \(format(cold.timeToFirstChunk)) → 웜 \(format(warm.timeToFirstChunk))"
                     + " · 프롬프트 \(cold.promptTokenCount)tok (웜 재사용 \(warm.reusedPromptTokens)tok)")
             print("    제안: \"\(cold.text)\"")
@@ -378,6 +448,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     }
     let meanAccepted = mean(rows.map { Double($0.accepted) })
     let hitRate = Double(rows.filter { $0.accepted >= 2 }.count) / Double(rows.count)
+    let wordRate = Double(rows.filter(\.sharedWord).count) / Double(rows.count)
     let coldTTFC = mean(rows.compactMap { $0.coldTTFC })
     let warmTTFC = mean(rows.compactMap { $0.warmTTFC })
     let meanPromptTokens = mean(rows.map { Double($0.promptTokens) })
@@ -385,6 +456,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
 
     print("\n== 리플레이 요약 (커밋·PR에 남길 수치, CLAUDE.md §6) ==")
     print(String(format: "수락 프록시  : 평균 %.1f자 일치 · 적중률(≥2자) %.0f%%", meanAccepted, hitRate * 100))
+    print(String(format: "어절 적중률  : %.0f%% (정답과 ≥2자 어절 공유)", wordRate * 100))
     print(String(format: "TTFC        : 콜드 %.2fs → 웜 %.2fs", coldTTFC, warmTTFC))
     print(String(format: "프롬프트     : 평균 %.0f tok · 웜 재사용 평균 %.0f tok", meanPromptTokens, meanReused))
     if meanReused < 1 {

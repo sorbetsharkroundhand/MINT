@@ -10,12 +10,19 @@ public struct ContentView: View {
     // 생기던 문제를 없애기 위해 소유권을 위로 올렸다.
     @ObservedObject private var store: EntryStore
     @ObservedObject private var completion: CompletionController
+    /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
+    private let indexer: BackgroundIndexer?
     /// ""=시스템 따름 / "light" / "dark" — 툴바 토글로 전환.
     @AppStorage("mint.appearance") private var appearance = ""
 
-    public init(store: EntryStore, completion: CompletionController) {
+    public init(
+        store: EntryStore,
+        completion: CompletionController,
+        indexer: BackgroundIndexer? = nil
+    ) {
         self.store = store
         self.completion = completion
+        self.indexer = indexer
     }
 
     public var body: some View {
@@ -28,6 +35,23 @@ public struct ContentView: View {
                 // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
                 completion.documentContextProvider = { [weak store] in
                     store?.activeDocumentContext
+                }
+                // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
+                // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
+                if let indexer {
+                    indexer.attach(store: store)
+                    store.documentDidChange = { [weak indexer] id in
+                        indexer?.noteChange(entryID: id)
+                    }
+                    completion.knowledgeProvider = { [weak indexer, weak store] in
+                        guard let snapshot = indexer?.snapshot,
+                            snapshot.entryID == store?.activeID
+                        else { return nil }
+                        return snapshot
+                    }
+                    // 시작 직후에도 유휴 타이머를 감는다 — 앱을 켜두기만 해도
+                    // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
+                    indexer.noteChange(entryID: store.activeID)
                 }
             }
     }

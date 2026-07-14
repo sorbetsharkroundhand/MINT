@@ -44,6 +44,10 @@ public final class CompletionController: ObservableObject {
     /// pull인 이유: 본문이 큰 저널에서 매 키 입력마다 Equatable 비교를 하지 않는다.
     public var documentContextProvider: (() -> DocumentContext?)?
 
+    /// 지식 스냅샷 공급자 (M6, PLAN §11) — 인덱서가 발행한 인메모리 값만 pull.
+    /// 활성 문서와의 일치 확인은 배선부(ContentView)의 몫이다.
+    public var knowledgeProvider: (() -> KnowledgeSnapshot?)?
+
     /// 종류별 컨텍스트 창 상한 — 소설은 넓게 (PLAN §10 Smart/Story 예산).
     /// 에디터(BlockTextView)가 prefix 추출 한도로 읽는다.
     public var effectiveContextCharacters: Int {
@@ -309,11 +313,14 @@ public final class CompletionController: ObservableObject {
     ) async {
         // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
         defer { if expected == generation { isPredicting = false } }
-        // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드)을 얹기만
-        // 하고, 지식 계산은 전부 백그라운드/저장 시점의 몫이다 (CLAUDE.md §2-2).
+        // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
+        // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let prompt = ContextAssembler.assemble(
             prefix: prefix,
             document: documentContextProvider?(),
+            knowledge: knowledgeProvider?(),
+            // C 창이 본문 어디서 시작하는지 — 이 앞에서 끝난 씬만 B로 들어간다.
+            prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
             style: parameters.promptStyle
         )
         do {

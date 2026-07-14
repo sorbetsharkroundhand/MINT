@@ -11,11 +11,15 @@ struct MINTApp: App {
     // 열고 각 창이 같은 entries.json에 별도 EntryStore로 써서 저장이 충돌했다.
     // 단일 Window로 바꿔 그 위험을 없애고, ⌘N을 "새 저널"로 되돌린다(MintCommands).
     @StateObject private var store = EntryStore()
-    @StateObject private var completion = CompletionController()
+    // 단일 모델 원칙 (CLAUDE.md §2-6) — 예측과 백그라운드 이해가 같은 엔진
+    // (같은 상주 모델)을 쓴다. 인덱서는 예측에 항상 양보한다 (PLAN §9 선점).
+    private static let sharedEngine = CompletionEngine()
+    @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
+    @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
 
     var body: some Scene {
         Window("MINT", id: "main") {
-            ContentView(store: store, completion: completion)
+            ContentView(store: store, completion: completion, indexer: indexer)
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)
