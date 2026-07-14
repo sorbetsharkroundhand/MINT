@@ -2729,8 +2729,13 @@ final class BlockTextView: NSTextView {
             .draw(at: NSPoint(x: caretRect.maxX, y: y))
     }
 
-    /// 선택 영역을 줄별 라운드 사각형으로 그린다 — 글자 주위를 살짝(3pt) 감싸는
-    /// MINT만의 민트 틴트 영역 + 헤어라인 테두리 (요구 4). 무효화는
+    /// 선택 영역을 하나의 병합 실루엣으로 그린다 — 글자 주위를 살짝(3pt) 감싸는
+    /// MINT만의 민트 틴트 영역 + 헤어라인 테두리 (요구 4).
+    ///
+    /// 줄별 라운드 사각형을 개별로 그리거나 union하면 폭이 다른 줄의 접합부에
+    /// 각 사각형의 코너가 돌출부·계단으로 남는다. 대신 줄 rect들을 하나의
+    /// 폴리곤 경계로 만들어 시계 방향으로 한 번에 추적하고, 모든 꼭짓점(볼록·오목)을
+    /// 탄젠트 아크로 둥글려 TextEdit·Notes처럼 연속된 윤곽을 얻는다. 무효화는
     /// refreshActiveLineHighlight의 lastSelectionRect(전체 폭 밴드)가 담당하므로
     /// 여기선 그리기만 한다.
     private func drawSelectionHighlight(in dirtyRect: NSRect) {
@@ -2739,18 +2744,100 @@ final class BlockTextView: NSTextView {
         let glyphs = layoutManager.glyphRange(forCharacterRange: sel, actualCharacterRange: nil)
         guard glyphs.length > 0 else { return }
         let origin = textContainerOrigin
+
+        // 같은 줄(Y 밴드가 겹치는) 조각들은 가로 union — 폰트·속성이 섞인 줄에서
+        // 글자 단위로 쪼개진 rect가 경계를 만들지 않게 줄당 하나로 만든다.
+        var rects: [NSRect] = []
         layoutManager.enumerateEnclosingRects(
             forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: textContainer
-        ) { [palette] rect, _ in
-            let r = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0.5)
-            guard r.intersects(dirtyRect) else { return }
-            let path = NSBezierPath(roundedRect: r, xRadius: 5, yRadius: 5)
-            palette.selection.setFill()
-            path.fill()
-            palette.selectionBorder.setStroke()
-            path.lineWidth = 1
-            path.stroke()
+        ) { rect, _ in
+            let r = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -3, dy: 0)
+            if let last = rects.last, r.minY < last.maxY - 0.5 {
+                rects[rects.count - 1] = last.union(r)
+            } else {
+                rects.append(r)
+            }
         }
+        guard !rects.isEmpty else { return }
+        let n = rects.count
+
+        // 이웃 줄이 정확히 맞닿아야 경계 추적이 성립한다 — 줄 간격 틈을 메운다.
+        for i in 0..<(n - 1) {
+            rects[i].size.height = rects[i + 1].minY - rects[i].minY
+        }
+        // 전체 모양의 위·아래 가장자리만 0.5pt 물려 이전(insetBy dy: 0.5)과 동일하게.
+        rects[0].origin.y += 0.5
+        rects[0].size.height -= 0.5
+        rects[n - 1].size.height -= 0.5
+
+        let radius: CGFloat = 5
+        // 이웃 줄과 가장자리 차이가 오목+볼록 아크 두 개를 넣을 폭도 안 되면
+        // 잔계단이 되므로, 바깥쪽 가장자리에 맞춰 붙인다. 스냅이 새 잔계단을
+        // 만들 수 있어(가운데 줄이 좁은 경우) 두 번 돌려 수렴시킨다.
+        let snap = radius * 2 + 2
+        for _ in 0..<2 {
+            for i in 0..<(n - 1) {
+                if abs(rects[i].minX - rects[i + 1].minX) < snap {
+                    let x = min(rects[i].minX, rects[i + 1].minX)
+                    rects[i].size.width = rects[i].maxX - x
+                    rects[i].origin.x = x
+                    rects[i + 1].size.width = rects[i + 1].maxX - x
+                    rects[i + 1].origin.x = x
+                }
+                if abs(rects[i].maxX - rects[i + 1].maxX) < snap {
+                    let x = max(rects[i].maxX, rects[i + 1].maxX)
+                    rects[i].size.width = x - rects[i].minX
+                    rects[i + 1].size.width = x - rects[i + 1].minX
+                }
+            }
+        }
+
+        // 경계 꼭짓점 나열 — 오른쪽 가장자리(위→아래) + 왼쪽 가장자리(아래→위),
+        // 플립 좌표 기준 시계 방향 폐곡선. 폭이 같은 이웃 줄 사이엔 꼭짓점이 없다.
+        var corners: [CGPoint] = []
+        corners.append(CGPoint(x: rects[0].maxX, y: rects[0].minY))
+        for i in 0..<(n - 1) where abs(rects[i].maxX - rects[i + 1].maxX) > 0.5 {
+            corners.append(CGPoint(x: rects[i].maxX, y: rects[i].maxY))
+            corners.append(CGPoint(x: rects[i + 1].maxX, y: rects[i].maxY))
+        }
+        corners.append(CGPoint(x: rects[n - 1].maxX, y: rects[n - 1].maxY))
+        corners.append(CGPoint(x: rects[n - 1].minX, y: rects[n - 1].maxY))
+        for i in stride(from: n - 1, to: 0, by: -1) where abs(rects[i].minX - rects[i - 1].minX) > 0.5 {
+            corners.append(CGPoint(x: rects[i].minX, y: rects[i].minY))
+            corners.append(CGPoint(x: rects[i - 1].minX, y: rects[i].minY))
+        }
+        corners.append(CGPoint(x: rects[0].minX, y: rects[0].minY))
+
+        // 꼭짓점마다 탄젠트 아크 — 볼록/오목 방향은 addArc가 알아서 잡고,
+        // 반지름은 이웃 변 길이의 절반을 넘지 않게 줄여 아크끼리 겹치지 않게 한다.
+        let path = CGMutablePath()
+        let first = corners[0]
+        let last = corners[corners.count - 1]
+        path.move(to: CGPoint(x: (first.x + last.x) / 2, y: (first.y + last.y) / 2))
+        for i in 0..<corners.count {
+            let prev = i == 0 ? last : corners[i - 1]
+            let c = corners[i]
+            let next = corners[(i + 1) % corners.count]
+            let r = min(
+                radius,
+                hypot(c.x - prev.x, c.y - prev.y) / 2,
+                hypot(next.x - c.x, next.y - c.y) / 2)
+            path.addArc(tangent1End: c, tangent2End: next, radius: max(r, 0))
+        }
+        path.closeSubpath()
+
+        guard path.boundingBoxOfPath.intersects(dirtyRect),
+            let ctx = NSGraphicsContext.current?.cgContext
+        else { return }
+        ctx.saveGState()
+        ctx.addPath(path)
+        ctx.setFillColor(palette.selection.cgColor)
+        ctx.fillPath()
+        ctx.addPath(path)
+        ctx.setLineWidth(1)
+        ctx.setStrokeColor(palette.selectionBorder.cgColor)
+        ctx.strokePath()
+        ctx.restoreGState()
     }
 
     private func caretRectInView() -> NSRect? {
