@@ -2,8 +2,8 @@ import SwiftUI
 import AppKit
 import MINTCore
 
-/// MINT — Mac INtelligent note Taker
-/// 온디바이스 한글 자동완성 저널 에디터의 진입점.
+/// MINT — 한글 장편 소설을 위한 온디바이스 예측 글쓰기 엔진의 진입점.
+/// (저널·일반 문서는 같은 엔진의 가벼운 모드 — CLAUDE.md §1.)
 @main
 struct MINTApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
