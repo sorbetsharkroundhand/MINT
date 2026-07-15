@@ -197,6 +197,7 @@ struct EditorToolbar: View {
     @State private var dateOpen = false
     @State private var dateHovered = false
     @State private var bibleOpen = false
+    @State private var timelineOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -232,6 +233,28 @@ struct EditorToolbar: View {
                 .help("스토리 바이블 — 장르·인물 카드")
                 .popover(isPresented: $bibleOpen, arrowEdge: .bottom) {
                     CharacterBibleView(store: store, theme: theme, indexer: indexer)
+                }
+
+                // 이해 타임라인 입구 (M6-5) — 백그라운드가 문서를 어떻게 쪼갰고
+                // 무엇을 사건으로 봤는지. 지식은 사용자가 볼 수 있어야 한다
+                // (CLAUDE.md §1-5).
+                if let indexer {
+                    Button {
+                        timelineOpen.toggle()
+                    } label: {
+                        Image(systemName: "arrow.triangle.branch")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(theme.novelC)
+                            .padding(.vertical, 3)
+                            .padding(.horizontal, 6)
+                            .background(Capsule().fill(theme.novelBgC))
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("이해 타임라인 — 장면 분할과 사건")
+                    .popover(isPresented: $timelineOpen, arrowEdge: .bottom) {
+                        KnowledgeTimelineView(indexer: indexer, store: store, theme: theme)
+                    }
                 }
             }
             Spacer()
