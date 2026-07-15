@@ -25,13 +25,17 @@ public enum ModelPresets {
     public static let qwen3_6_35B_A3B = "mlx-community/Qwen3.6-35B-A3B-4bit"
     /// mlx-swift-lm LLMRegistry에 수록된 검증된 MoE 대안 (활성 ~3B, ~17GB).
     public static let qwen3_30B_A3B = "mlx-community/Qwen3-30B-A3B-4bit"
-    /// 더 가벼운 대안 (~1.9GB) — PLAN 실험 대안.
+    /// air 모델 — MoE(총 30B, 활성 ~3B: 라우팅 전문가 64개 중 4개 + 공유 1개), ~16.9GB.
+    /// 활성 파라미터가 3B대라 디코딩은 3B 밀집 모델급이면서 30B의 이해를 쓴다.
+    /// `glm4_moe_lite` 아키텍처는 mlx-swift-lm 3.31.3 LLMModelFactory에 등록되어 있다.
+    public static let glm4_7_flash = "mlx-community/GLM-4.7-Flash-4bit"
+    /// 더 가벼운 대안 (~1.9GB) — PLAN 실험 대안. air가 안 올라가는 기기의 대체재.
     public static let qwen2_5_3B = "mlx-community/Qwen2.5-3B-Instruct-4bit"
     /// 가장 빠른 대안 (~1GB) — PLAN 실험 대안.
     public static let qwen2_5_1_5B = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
 
     public static let all: [String] = [
-        qwen3_6_35B_A3B, qwen3_30B_A3B, qwen2_5_3B, qwen2_5_1_5B,
+        qwen3_6_35B_A3B, qwen3_30B_A3B, glm4_7_flash, qwen2_5_3B, qwen2_5_1_5B,
     ]
 }
 
@@ -51,9 +55,11 @@ public struct ModelChoice: Identifiable, Sendable {
     public static let nano = ModelChoice(
         id: ModelPresets.qwen2_5_1_5B, name: "MINT nano", sizeLabel: "1.5B",
         detail: "가장 빠른 응답", latencyLabel: "~60ms")
+    /// 지연 표기는 아직 MINTBench로 재지 않았다 (CLAUDE.md §2-7 — 측정 없이 튜닝 없음).
+    /// Qwen2.5-3B의 ~180ms는 다른 모델의 수치이므로 물려쓰지 않는다.
     public static let air = ModelChoice(
-        id: ModelPresets.qwen2_5_3B, name: "MINT air", sizeLabel: "3B",
-        detail: "속도와 품질의 균형", latencyLabel: "~180ms")
+        id: ModelPresets.glm4_7_flash, name: "MINT air", sizeLabel: "30B·A3B",
+        detail: "속도와 품질의 균형", latencyLabel: "측정 전")
     public static let pro = ModelChoice(
         id: ModelPresets.qwen3_6_35B_A3B, name: "MINT pro", sizeLabel: "35B·A3B",
         detail: "가장 자연스러운 문장", latencyLabel: "~420ms")
