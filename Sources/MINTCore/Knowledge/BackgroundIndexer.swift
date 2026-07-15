@@ -112,6 +112,8 @@ public final class BackgroundIndexer: ObservableObject {
         // B 블록이 흔들려 KV 프리픽스가 식는다 (PLAN §12).
         parameters.temperature = min(parameters.temperature, 0.3)
         let liveEntryIDs = Set(store?.entries.map(\.id) ?? [])
+        // 사건의 참여자로 링크할 수 있는 인물 = 등록된 카드뿐 (CLAUDE.md §3).
+        let characters = entry.characters ?? []
         // 인물 감지 제외 목록 — 이미 등록된 이름·별칭 + 사용자가 무시한 이름.
         let knownNames = Set(
             (entry.characters ?? []).flatMap { card in
@@ -138,7 +140,7 @@ public final class BackgroundIndexer: ObservableObject {
             await Self.runPass(
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
-                liveEntryIDs: liveEntryIDs
+                liveEntryIDs: liveEntryIDs, characters: characters
             ) { snapshot in
                 Task { @MainActor in self.snapshot = snapshot }
             }
@@ -230,6 +232,7 @@ public final class BackgroundIndexer: ObservableObject {
         parameters: CompletionParameters,
         engine: CompletionEngine,
         liveEntryIDs: Set<UUID>,
+        characters: [CharacterCard],
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void
     ) async {
         guard gateAllows(deep: deep) else { return }
@@ -270,7 +273,31 @@ public final class BackgroundIndexer: ObservableObject {
             publish(makeSnapshot(entryID: entryID, outline: outline, sidecar: sidecar))
         }
 
-        // ② 상향 전파 (깊은 패스 전용) — 장 → 작품, 더티 경로만 (PLAN §6.1).
+        // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
+        // 요약보다 뒤에 두는 이유: 빠른 패스의 LLM 예산은 요약이 먼저 쓴다
+        // (docs/m6-events.md 결정 3).
+        if deep, !Task.isCancelled {
+            relinkParticipants(sidecar: &sidecar, characters: characters)
+            for scene in outline.scenes {
+                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                // 키 존재 = 추출 완료(빈 배열이면 "사건 없음") — 메모 적중은 건너뛴다.
+                guard sidecar.events[scene.contentHash] == nil else { continue }
+                let sceneText = String(
+                    text.substring(
+                        with: NSRange(
+                            location: scene.utf16Range.lowerBound,
+                            length: scene.utf16Range.count)
+                    ).prefix(maxSceneCharacters))
+                let extracted = await extractEvents(
+                    sceneText, sceneHash: scene.contentHash,
+                    characters: characters, engine: engine, parameters: parameters)
+                guard let extracted else { continue }  // 실패·인물 미등록 — 재시도 여지
+                sidecar.events[scene.contentHash] = extracted
+                sidecar.save()  // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
+            }
+        }
+
+        // ③ 상향 전파 (깊은 패스 전용) — 장 → 작품, 더티 경로만 (PLAN §6.1).
         if deep, !Task.isCancelled {
             await propagate(
                 outline: outline, sidecar: &sidecar,
@@ -369,6 +396,64 @@ public final class BackgroundIndexer: ObservableObject {
         return summary.isEmpty ? nil : clamp(summary, to: 120)
     }
 
+    /// 등록 인물 ↔ 과거 사건 참여자 소급 연결 (결정적·LLM 없음, CLAUDE.md §2-5).
+    ///
+    /// 왜 필요한가: 추출은 **그 시점에 등록된 카드만** 참여자로 링크한다
+    /// (CLAUDE.md §3). 그래서 나중에 등록된 인물은 이미 메모된 과거 사건에
+    /// 영영 연결되지 못하고, 역색인이 빈 채로 남아 카드의 "최근" 줄이 나오지
+    /// 않는다. 등록 때마다 전 씬을 재추출하면 LLM 비용이 등록 횟수만큼 곱해지므로,
+    /// 사건 요약문의 이름 매칭으로 잇는다.
+    ///
+    /// 트레이드오프: 요약에 이름이 있지만 실제 참여자가 아닌 경우("서연이 민준의
+    /// 편지를 읽었다"의 민준)까지 링크된다. 이름이 언급된 사건은 그 인물의
+    /// 맥락으로서 여전히 유효하다고 보고 받아들인다 — 역색인에 구멍이 남는 쪽이
+    /// 더 나쁘다. 기존 참여자는 지우지 않는다(추출 당시의 판단을 신뢰).
+    nonisolated private static func relinkParticipants(
+        sidecar: inout KnowledgeSidecar, characters: [CharacterCard]
+    ) {
+        guard !characters.isEmpty else { return }
+        let nameIndex = EventParser.nameIndex(characters)
+        for (hash, events) in sidecar.events {
+            var updated = events
+            for offset in updated.indices {
+                let summary = updated[offset].summary
+                var participants = Set(updated[offset].participants)
+                for (name, id) in nameIndex where summary.contains(name) {
+                    participants.insert(id)
+                }
+                guard participants.count != updated[offset].participants.count else { continue }
+                updated[offset].participants = Array(participants)
+            }
+            if updated != events { sidecar.events[hash] = updated }
+        }
+    }
+
+    /// 씬 하나에서 사건을 뽑는다 (PLAN §6.3, M6-5) — 깊은 패스 전용.
+    ///
+    /// 요약과 **별도 호출**인 이유: 요약 경로는 이미 측정·출시됐고, 사건 파싱
+    /// 실패가 요약까지 죽이면 회귀다 (docs/m6-events.md 결정 3).
+    /// 등록 카드가 없으면 호출 자체를 건너뛴다 — 참여자를 링크할 수 없는 사건은
+    /// 역색인에 들어가지 못해 토큰만 태운다 (CLAUDE.md §5-1).
+    /// 벤치가 같은 프롬프트를 쓰도록 public (요약 경로와 같은 이유).
+    nonisolated public static func extractEvents(
+        _ text: String, sceneHash: String, characters: [CharacterCard],
+        engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> [StoryEvent]? {
+        let nameIndex = EventParser.nameIndex(characters)
+        guard !nameIndex.isEmpty else { return nil }
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
+            return []  // 요약과 같은 초미니 씬 가드 — 뽑을 사건이 없다(환각 방지)
+        }
+        let output =
+            (try? await engine.generateOneShot(
+                system: Prompts.eventSystem,
+                user: Prompts.eventUser(text, names: nameIndex.keys.sorted()),
+                maxTokens: 160,
+                parameters: parameters)) ?? ""
+        guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
+        return EventParser.parse(output, sceneHash: sceneHash, nameIndex: nameIndex)
+    }
+
     /// 하위 요약 묶음 → 상위 요약 (장 ≤300자 · 작품 ≤500자).
     nonisolated public enum RollupLevel { case chapter, work }
 
@@ -410,7 +495,8 @@ public final class BackgroundIndexer: ObservableObject {
                 uniqueKeysWithValues: sidecar.chapterSummaries.map {
                     ($0.headingPath.joined(separator: " > "), $0.summary)
                 }),
-            workSummary: sidecar.workSummary?.summary
+            workSummary: sidecar.workSummary?.summary,
+            events: sidecar.events
         )
     }
 
@@ -477,6 +563,30 @@ public final class BackgroundIndexer: ObservableObject {
             다음 요약들을 묶어 하나의 줄거리로 요약하라.
 
             \(summaries.map { "- \($0)" }.joined(separator: "\n"))
+            """
+        }
+
+        // MARK: 사건 추출 (PLAN §6.3) — JSON 대신 줄 형식 (docs/m6-events.md 결정 4)
+
+        static let eventSystem = """
+            너는 소설 장면에서 사건을 뽑는 도우미다. 장면에서 실제로 일어난 일만 \
+            중요한 순서로 최대 3개까지, 한 줄에 하나씩 아래 형식으로 출력한다.
+
+            사건요약(최대 80자) | 참여: 인물이름들 | 중요도: 1~5
+
+            규칙: 주어진 인물 목록에 있는 이름만 참여에 쓴다. 장면에 없는 일을 \
+            지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
+            """
+
+        /// 등록 인물 목록을 함께 준다 — 모델이 지어낸 인물은 파서가 버리지만
+        /// (EventParser.resolve), 목록을 미리 주면 애초에 덜 지어낸다.
+        static func eventUser(_ text: String, names: [String]) -> String {
+            """
+            인물 목록: \(names.joined(separator: ", "))
+
+            다음 장면에서 사건을 뽑아라.
+
+            \(text)
             """
         }
     }

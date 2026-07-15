@@ -13,7 +13,9 @@ import Foundation
 public struct KnowledgeSidecar: Codable, Equatable, Sendable {
 
     /// 지식 스키마 버전 — 구조가 바뀌면 올린다. 다른 버전 파일은 로드 시 폐기.
-    public static let currentSchemaVersion = 1
+    /// v2 (M6-5): 사건 로그 추가 — 기존 요약도 함께 폐기·재구축된다
+    /// (마이그레이션 코드를 쌓지 않는 값, docs/m6-events.md 결정 5).
+    public static let currentSchemaVersion = 2
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -55,6 +57,12 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     public var sceneSummaries: [String: SceneSummary]
     public var chapterSummaries: [ChapterSummary]
     public var workSummary: WorkSummary?
+    /// 씬 해시 → 그 씬의 사건들 (PLAN §6.3, M6-5).
+    ///
+    /// **키 존재 자체가 메모다** — 빈 배열은 "추출했고 사건이 없었다"이고 키
+    /// 부재는 "아직 안 뽑았다"다. 이 구분이 없으면 사건 없는 씬을 깊은 패스마다
+    /// 다시 뽑는다 (CLAUDE.md §4 메모이제이션).
+    public var events: [String: [StoryEvent]]
 
     public init(entryID: UUID) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -63,6 +71,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         self.sceneSummaries = [:]
         self.chapterSummaries = []
         self.workSummary = nil
+        self.events = [:]
     }
 
     // MARK: - 디스크 IO (인덱서 전용)
@@ -106,14 +115,19 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 버전 불일치 파일에서 세대 카운터만 건져 재구축 이력을 잇는다.
     private struct GenerationPeek: Codable { var generation: Int }
 
-    /// 저장 (원자적 쓰기). 현재 아웃라인에 없는 씬 요약은 여기서 정리한다 —
+    /// 저장 (원자적 쓰기). 현재 아웃라인에 없는 씬 요약·사건은 여기서 정리한다 —
     /// 저장 시점이 곧 가비지 컬렉션이라 별도 청소 경로가 없다.
+    ///
+    /// 사건에는 이 정리가 곧 PLAN §8의 **톰스톤**이다: 블록이 수정되면 씬 해시가
+    /// 바뀌어 그 씬의 사건이 고아가 되고, 여기서 사라진 뒤 다음 깊은 패스가
+    /// 새 해시로 재추출한다. 무효화 전용 코드가 따로 없는 이유다.
     public func save(pruningTo liveHashes: Set<String>? = nil) {
         var snapshot = self
         if let liveHashes {
             snapshot.sceneSummaries = snapshot.sceneSummaries.filter {
                 liveHashes.contains($0.key)
             }
+            snapshot.events = snapshot.events.filter { liveHashes.contains($0.key) }
         }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -143,18 +157,71 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// 헤딩 경로("1부 > 3장" 조인 키) → 장 요약문.
     public let chapterSummariesByPath: [String: String]
     public let workSummary: String?
+    /// 담화 순서(Pos = 씬 배열 인덱스)로 정렬된 사건들 (PLAN §6.3).
+    /// 아웃라인에 없는 해시(톰스톤)는 여기서 이미 빠져 있다.
+    public let events: [StoryEvent]
+    /// 인물 id → `events` 인덱스 목록 — PLAN §6.3의 역색인.
+    /// §11 엔티티 앵커 검색의 기반이자 `lastAppearance` 질의의 실체다.
+    public let eventIndexByCharacter: [UUID: [Int]]
+    /// 씬 해시 → 그 씬이 끝나는 UTF-16 위치. 시점 차단 질의를 예측 경로에서
+    /// O(1)로 하기 위해 미리 접어 둔다 (조립은 조립만 — CLAUDE.md §2-2).
+    private let sceneEndByHash: [String: Int]
 
     public init(
         entryID: UUID,
         outline: DocumentOutline,
         summariesByHash: [String: String],
         chapterSummariesByPath: [String: String] = [:],
-        workSummary: String? = nil
+        workSummary: String? = nil,
+        events: [String: [StoryEvent]] = [:]
     ) {
         self.entryID = entryID
         self.outline = outline
         self.summariesByHash = summariesByHash
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
+
+        // 사건을 담화 순서로 편다 — 저장은 해시 키(삽입에 불변), 순서는 여기서
+        // 아웃라인으로부터 파생한다 (docs/m6-events.md 결정 1).
+        var ends: [String: Int] = [:]
+        var ordered: [StoryEvent] = []
+        for scene in outline.scenes {
+            ends[scene.contentHash] = scene.utf16Range.upperBound
+            // 같은 씬 안에서는 중요도 높은 사건이 먼저 — 예산 삭감이 뒤에서
+            // 잘리므로 중요한 것이 살아남는다 (PLAN §11).
+            let sceneEvents = (events[scene.contentHash] ?? [])
+                .sorted { $0.importance > $1.importance }
+            ordered.append(contentsOf: sceneEvents)
+        }
+        self.events = ordered
+        self.sceneEndByHash = ends
+
+        var index: [UUID: [Int]] = [:]
+        for (offset, event) in ordered.enumerated() {
+            for participant in event.participants {
+                index[participant, default: []].append(offset)
+            }
+        }
+        self.eventIndexByCharacter = index
+    }
+
+    // MARK: - 표준 질의 (PLAN §8) — ContextAssembler는 이것만 쓴다
+
+    /// 주어진 위치 **이전에 완전히 끝난** 씬의 사건들 (담화 순서).
+    /// 커서 이후 지식 누출 차단(CLAUDE.md §2-4)이 여기서 결정적으로 성립한다 —
+    /// 3장을 고치는 중에 9장의 사건이 새어 들어가지 않는다.
+    public func events(before utf16Offset: Int) -> [StoryEvent] {
+        events.filter { (sceneEndByHash[$0.sceneHash] ?? .max) <= utf16Offset }
+    }
+
+    /// 인물이 마지막으로 등장한 사건 (그 위치 이전) — PLAN §8 `lastAppearance`.
+    /// 역색인을 뒤에서부터 훑으므로 사건이 많아도 첫 적중에서 끝난다.
+    public func lastAppearance(of characterID: UUID, before utf16Offset: Int) -> StoryEvent? {
+        guard let offsets = eventIndexByCharacter[characterID] else { return nil }
+        for offset in offsets.reversed() {
+            let event = events[offset]
+            if (sceneEndByHash[event.sceneHash] ?? .max) <= utf16Offset { return event }
+        }
+        return nil
     }
 }

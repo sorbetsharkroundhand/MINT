@@ -59,7 +59,9 @@ public enum ContextAssembler {
         prefixStartUTF16: Int = 0,
         style: PromptStyle
     ) -> AssembledPrompt {
-        var header = headerText(document: document, window: prefix)
+        var header = headerText(
+            document: document, window: prefix,
+            knowledge: knowledge, windowStart: prefixStartUTF16)
         if document?.kind == .novel,
             let knowledge,
             case let block = knowledgeText(knowledge, before: prefixStartUTF16),
@@ -129,8 +131,23 @@ public enum ContextAssembler {
         return lines.joined(separator: "\n")
     }
 
+    /// 인물 한 명의 "최근" 줄 상한 — 사건 요약(≤80자)을 그대로 쓴다.
+    static let maxRecentEventCharacters = 80
+
     /// A 고정 헤더 + B 인물 카드. 소설 전용 — 저널은 빈 문자열(Fast = C만).
-    static func headerText(document: DocumentContext?, window: String) -> String {
+    ///
+    /// `knowledge`/`windowStart`(M6-5): 카드마다 **커서 이전 마지막 등장 사건**을
+    /// 한 줄 붙인다 (PLAN §8 `lastAppearance`). 사건을 B 블록에 따로 나열하지
+    /// 않는 이유: 같은 씬을 씬 요약이 이미 말하고 있어 지식이 겹치고 예산만
+    /// 태운다. 사건이 요약 대비 더 가진 것은 **참여자 링크**뿐이므로, 그 값은
+    /// "인물 → 그 인물의 사건"이라는 질의에서만 나온다 (PLAN §11 엔티티 앵커
+    /// 검색). 이 줄이 M6 완료 기준의 "1200자 창 밖 인물을 쓰는 제안"을 겨눈다.
+    static func headerText(
+        document: DocumentContext?,
+        window: String,
+        knowledge: KnowledgeSnapshot? = nil,
+        windowStart: Int = 0
+    ) -> String {
         guard let document, document.kind == .novel else { return "" }
         var lines: [String] = []
 
@@ -157,7 +174,14 @@ public enum ContextAssembler {
                     .replacingOccurrences(of: "\n", with: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .prefix(maxCardNoteCharacters))
-            lines.append(note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)")
+            var line = note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)"
+            // 커서가 이미 보고 있는 사건은 붙이지 않는다 — C 창에 원문이 그대로
+            // 있는데 요약을 겹쳐 넣으면 토큰만 쓴다 (`lastAppearance`가 창 밖
+            // 사건만 돌려주므로 이 조건은 질의에서 이미 성립).
+            if let recent = knowledge?.lastAppearance(of: card.id, before: windowStart) {
+                line += " · 최근: \(recent.summary.prefix(maxRecentEventCharacters))"
+            }
+            lines.append(line)
         }
         return String(lines.joined(separator: "\n").prefix(maxHeaderCharacters))
     }
