@@ -134,14 +134,27 @@ extension NSColor {
 }
 
 /// 디자인 폰트 — Noto Serif KR(본문)·Pretendard(UI). 설치돼 있으면 쓰고,
-/// 없으면 시스템 serif/산세리프로 대체한다 (앱에 폰트를 번들하지 않는다).
+/// 없으면 **한글을 덮는** 대체 폰트로 내려간다 (앱에 폰트를 번들하지 않는다).
+///
+/// ⚠️ 폴백은 취향 문제가 아니라 **성능 문제**다 (2026-07-15 측정, docs/editor-perf.md).
+/// 한글을 못 덮는 폰트(시스템 serif = New York)를 본문에 깔면 NSTextStorage의
+/// 폰트 고정이 한글마다 대체 런을 쪼갠다 — 88k자 원고에서 속성 런이 537개 →
+/// **42,678개**로 폭발하고, 매 키 입력마다 도는 `serialize()`가 5ms → **43ms**가
+/// 되어 프레임을 놓친다. 한국어 앱에서 라틴 전용 폰트 폴백은 금지다.
 public enum MintFonts {
-    /// 설치된 본문 세리프 패밀리 이름. 없으면 nil → 시스템 serif.
-    static let serifFamily: String? = ["Noto Serif KR", "NotoSerifKR"]
-        .first { NSFontManager.shared.availableFontFamilies.contains($0) }
+    /// 설치된 본문 세리프 패밀리. 전부 **한글 커버 필수** — 앞에서부터 고른다.
+    /// Nanum Myeongjo·AppleMyungjo는 macOS 한국어 지원에 딸려 오는 명조체다
+    /// (Nanum은 Bold 보유, AppleMyungjo는 Regular뿐이라 뒤에 둔다).
+    static let serifFamily: String? = [
+        "Noto Serif KR", "NotoSerifKR", "Nanum Myeongjo", "AppleMyungjo",
+    ]
+    .first { NSFontManager.shared.availableFontFamilies.contains($0) }
 
-    static let uiFamily: String? = ["Pretendard Variable", "Pretendard"]
-        .first { NSFontManager.shared.availableFontFamilies.contains($0) }
+    /// UI 산세리프. Apple SD Gothic Neo는 한글 9종 굵기로 macOS에 항상 있다.
+    static let uiFamily: String? = [
+        "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo",
+    ]
+    .first { NSFontManager.shared.availableFontFamilies.contains($0) }
 
     /// 본문 세리프 (AppKit).
     public static func serif(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
