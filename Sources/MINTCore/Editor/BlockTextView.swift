@@ -175,6 +175,8 @@ public struct MintBlockEditor: NSViewRepresentable {
             if entryChanged, let saved = context.coordinator.caretByEntry[entryID] {
                 textView.restoreCaret(to: saved)
             }
+            // 긴 문단 감지는 문서 로드 때 1회 — 키 입력 경로에 O(문서)를 안 넣는다.
+            controller?.refreshLongParagraphDetection()
         }
         if entryChanged { context.coordinator.loadedEntryID = entryID }
         // 새 저널 등 포커스 요청 — reload 뒤에 first responder로 만든다.
@@ -222,6 +224,17 @@ public struct MintBlockEditor: NSViewRepresentable {
         func attach(to textView: BlockTextView) {
             parent.controller?.suggestionDidChange = { [weak textView] suggestion in
                 textView?.ghostText = suggestion
+            }
+            // 긴 문단 감지·나누기 다리 (docs/editor-paragraph-split.md).
+            parent.controller?.detectLongParagraphs = { [weak textView] in
+                guard let textView else { return .none }
+                let (count, maxLen) = textView.oversizedProseParagraphs()
+                return .init(
+                    count: count, maxLength: maxLen,
+                    typicalLength: textView.typicalProseParagraphLength())
+            }
+            parent.controller?.splitLongParagraphs = { [weak textView] in
+                textView?.splitOversizedProseParagraphs() ?? 0
             }
         }
 
@@ -894,6 +907,104 @@ final class BlockTextView: NSTextView {
         var line = serializedLine(of: para)
         line.text.makeContiguousUTF8()
         serialLines[idx] = line
+    }
+
+    // MARK: 긴 문단 나누기 (docs/editor-paragraph-split.md)
+
+    /// `trigger`를 넘는 산문(`.p`) 문단의 개수·최대 크기. UI 설명문의 실제 수치.
+    /// O(문서)지만 키 입력 경로가 아니다 — 사용자가 표시를 누를 때만 계산한다.
+    /// 산문만 대상 — 헤딩·코드·수식·목록·인용은 이 크기가 되지 않고, 나누면
+    /// 의미가 깨진다(코드 펜스 등).
+    func oversizedProseParagraphs() -> (count: Int, maxLength: Int) {
+        let ns = string as NSString
+        var count = 0
+        var maxLength = 0
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            if para.length > ParagraphSplitter.trigger,
+                storageBlockInfo(in: para).block == .p
+            {
+                count += 1
+                maxLength = max(maxLength, para.length)
+            }
+            location = para.upperBound
+        }
+        return (count, maxLength)
+    }
+
+    /// 산문 문단 중 가장 흔한 크기(중앙값 근사) — "보통 문단의 N배" 설명용.
+    /// 대략치면 충분하므로 앞쪽 산문 문단들만 표본한다.
+    func typicalProseParagraphLength() -> Int {
+        let ns = string as NSString
+        var lengths: [Int] = []
+        var location = 0
+        while location < ns.length, lengths.count < 200 {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            let len = para.length
+            if len > 20, len <= ParagraphSplitter.trigger,
+                storageBlockInfo(in: para).block == .p
+            {
+                lengths.append(len)
+            }
+            location = para.upperBound
+        }
+        guard !lengths.isEmpty else { return 0 }
+        lengths.sort()
+        return lengths[lengths.count / 2]
+    }
+
+    /// 긴 산문 문단을 문장 경계에서 `\n\n`으로 나눈다 — **단일 undo 그룹**.
+    ///
+    /// 글자는 하나도 바꾸지 않고 문단 구분 개행만 삽입한다(ParagraphSplitter가
+    /// 오프셋을 계산, 검증은 텍스트 보존 테스트). 뒤 문단부터 처리해 앞 오프셋이
+    /// 밀리지 않게 한다. `\n\n` 삽입은 `insertText`로 — 네이티브 undo에 잡히고
+    /// typingAttributes(주변 산문 속성)를 물려받아 새 문단도 `.p`가 된다.
+    /// 나눈 문단 수를 돌려준다(0이면 대상 없음).
+    @discardableResult
+    func splitOversizedProseParagraphs() -> Int {
+        let ns = string as NSString
+        // 대상 문단을 먼저 모은다(문서 순서) — 편집 중 순회하면 오프셋이 흔들린다.
+        var targets: [NSRange] = []
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            if para.length > ParagraphSplitter.trigger,
+                storageBlockInfo(in: para).block == .p
+            {
+                targets.append(para)
+            }
+            location = para.upperBound
+        }
+        guard !targets.isEmpty else { return 0 }
+
+        undoManager?.beginUndoGrouping()
+        undoManager?.setActionName("긴 문단 나누기")
+        var splitCount = 0
+        // 뒤 문단부터 → 앞 문단의 절대 오프셋이 보존된다.
+        for para in targets.reversed() {
+            // 문단 평문(끝 개행 제외)에서 나눌 위치를 구한다.
+            let content = paragraphContent(para)
+            let offsets = ParagraphSplitter.breakOffsetsUTF16(in: content)
+            guard !offsets.isEmpty else { continue }
+            splitCount += 1
+            // 한 문단 안에서도 뒤 오프셋부터 삽입해 앞 오프셋을 지킨다.
+            for offset in offsets.reversed() {
+                let at = para.location + offset
+                if shouldChangeText(
+                    in: NSRange(location: at, length: 0), replacementString: "\n\n")
+                {
+                    textStorage?.replaceCharacters(
+                        in: NSRange(location: at, length: 0), with: "\n\n")
+                    didChangeText()
+                }
+            }
+        }
+        undoManager?.endUndoGrouping()
+        // 구조가 크게 바뀌었으니 직렬화 캐시·렌더를 새로 잡는다.
+        invalidateSerialCache()
+        refreshRenderedBlocks()
+        return splitCount
     }
 
     /// 편집이 캐시를 어떻게 바꾸는지 판정한다 (델리게이트에서 호출).

@@ -198,6 +198,7 @@ struct EditorToolbar: View {
     @State private var dateHovered = false
     @State private var bibleOpen = false
     @State private var timelineOpen = false
+    @State private var longParagraphOpen = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -255,6 +256,28 @@ struct EditorToolbar: View {
                     .popover(isPresented: $timelineOpen, arrowEdge: .bottom) {
                         KnowledgeTimelineView(indexer: indexer, store: store, theme: theme)
                     }
+                }
+            }
+
+            // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
+            // 조용히 나타난다. 누르면 설명·확인. 원문 수정은 사용자 확인이 필수.
+            if completion.longParagraph.count > 0 {
+                Button {
+                    longParagraphOpen.toggle()
+                } label: {
+                    Image(systemName: "bolt.horizontal")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundStyle(theme.ink3C)
+                        .padding(.vertical, 3)
+                        .padding(.horizontal, 6)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("긴 문단이 있어 입력이 느려질 수 있어요")
+                .popover(isPresented: $longParagraphOpen, arrowEdge: .bottom) {
+                    LongParagraphNotice(
+                        completion: completion, theme: theme,
+                        onDismiss: { longParagraphOpen = false })
                 }
             }
             Spacer()
@@ -979,6 +1002,101 @@ struct EditorStatusBar: View {
         let minutes = Double(charCount) / 500
         if minutes < 1 { return "1분 미만" }
         return "약 \(Int(minutes.rounded()))분"
+    }
+}
+
+/// 긴 문단 안내·확인 팝오버 (docs/editor-paragraph-split.md).
+///
+/// 원문을 수정하는 기능이라 **설명이 핵심**이다 — 왜 원고에 손을 대는지, 무엇이
+/// 바뀌는지(글자 불변, 개행만), 되돌릴 수 있는지를 알려 사용자가 동의하게 한다.
+/// 숫자는 감지 결과의 실제 수치라 막연한 안내가 아니다.
+struct LongParagraphNotice: View {
+    @ObservedObject var completion: CompletionController
+    let theme: MintTheme
+    let onDismiss: () -> Void
+    @State private var detailShown = false
+    @State private var splitResult: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "bolt.horizontal")
+                    .font(.system(size: 11))
+                    .foregroundStyle(theme.novelC)
+                Text("아주 긴 문단이 있어요")
+                    .font(MintFonts.uiFont(13, .semibold))
+                    .foregroundStyle(theme.inkC)
+                Spacer()
+            }
+
+            if let result = splitResult {
+                // 실행 후 조용한 확인.
+                Text(result > 0
+                    ? "긴 문단 \(result)개를 문장 경계에서 나눴어요. ⌘Z로 되돌릴 수 있어요."
+                    : "나눌 문단을 찾지 못했어요.")
+                    .font(MintFonts.uiFont(11.5))
+                    .foregroundStyle(theme.ink2C)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button("닫기") { onDismiss() }
+                    .font(MintFonts.uiFont(12, .medium))
+            } else {
+                Text("빠르게 입력하면 끊길 수 있어요.")
+                    .font(MintFonts.uiFont(11.5))
+                    .foregroundStyle(theme.ink2C)
+
+                if detailShown {
+                    Text(detailText)
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(theme.ink2C)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 2)
+                }
+
+                HStack(spacing: 8) {
+                    Button {
+                        // 감지 count는 실행 후 0으로 갱신되므로 먼저 확보한다.
+                        let before = completion.longParagraph.count
+                        completion.performLongParagraphSplit()
+                        splitResult = before
+                    } label: {
+                        Text("문단 나누기")
+                            .font(MintFonts.uiFont(12, .semibold))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 4)
+                            .padding(.horizontal, 12)
+                            .background(Capsule().fill(theme.novelC))
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(detailShown ? "접기" : "자세히") { detailShown.toggle() }
+                        .font(MintFonts.uiFont(12, .medium))
+                    Spacer()
+                    Button("그대로 두기") { onDismiss() }
+                        .font(MintFonts.uiFont(12))
+                        .foregroundStyle(theme.ink3C)
+                }
+                .padding(.top, 2)
+            }
+        }
+        .padding(14)
+        .frame(width: 320)
+    }
+
+    private var detailText: String {
+        let info = completion.longParagraph
+        let ratio = info.ratio
+        let ratioText = ratio > 1 ? "보통 문단의 \(ratio)배가 넘어요" : "아주 길어요"
+        return """
+            에디터는 문단 하나를 통째로 다시 배치하기 때문에, 문단이 길수록 글자 하나 \
+            입력에 드는 비용이 커져요. 이 문서에서 가장 긴 문단은 약 \
+            \(info.maxLength.formatted())자로, \(ratioText).
+
+            문장 경계에서 이 문단을 몇 개로 나누면 입력이 다시 매끄러워져요. 글자는 \
+            하나도 바뀌지 않고, 문단 사이에 빈 줄만 들어가요. 마음에 안 들면 ⌘Z 한 \
+            번으로 되돌릴 수 있어요.
+
+            나눌 문단: \(info.count)개 · 문장 중간은 자르지 않아요.
+            """
     }
 }
 

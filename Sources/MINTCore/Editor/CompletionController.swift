@@ -36,6 +36,38 @@ public final class CompletionController: ObservableObject {
     /// 고스트 렌더 뷰로의 직통 알림 — `MintTextView.Coordinator`가 연결한다.
     public var suggestionDidChange: ((String?) -> Void)?
 
+    // MARK: 긴 문단 나누기 (docs/editor-paragraph-split.md)
+
+    /// 현재 문서의 긴 산문 문단 감지 결과 — 툴바의 조용한 표시가 관찰한다.
+    /// `count > 0`일 때만 표시가 나타난다(대상 없으면 아무 UI도 없음).
+    /// 문서 로드 때 1회 계산 → 키 입력 경로에 O(문서)를 넣지 않는다.
+    @Published public private(set) var longParagraph: LongParagraphInfo = .none
+
+    public struct LongParagraphInfo: Equatable, Sendable {
+        public var count: Int
+        public var maxLength: Int
+        public var typicalLength: Int
+        public static let none = LongParagraphInfo(count: 0, maxLength: 0, typicalLength: 0)
+        /// "보통 문단의 N배" — 0으로 나눔 방지, 최소 1배.
+        public var ratio: Int { typicalLength > 0 ? max(1, maxLength / typicalLength) : 0 }
+    }
+
+    /// 에디터가 배선하는 감지·실행 다리 (`knowledgeProvider`와 같은 패턴).
+    public var detectLongParagraphs: (() -> LongParagraphInfo)?
+    /// 실행 → 나눈 문단 수. 성공 후 감지를 갱신한다.
+    public var splitLongParagraphs: (() -> Int)?
+
+    /// 감지를 다시 계산해 발행한다 — 문서 로드·분할 직후 에디터가 호출.
+    public func refreshLongParagraphDetection() {
+        longParagraph = detectLongParagraphs?() ?? .none
+    }
+
+    /// 툴바의 "문단 나누기" 실행 → 감지 갱신(대상이 사라져 표시가 숨는다).
+    public func performLongParagraphSplit() {
+        _ = splitLongParagraphs?()
+        refreshLongParagraphDetection()
+    }
+
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
