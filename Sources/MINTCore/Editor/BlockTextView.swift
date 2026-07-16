@@ -80,6 +80,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
+        // 편집 범위를 알아야 수식·이미지 마커 검사를 증분으로 할 수 있다
+        // (전체 문자열 검색은 30만 자에서 16.9ms — docs/editor-perf.md).
+        storage.delegate = textView
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
@@ -717,6 +720,9 @@ final class BlockTextView: NSTextView {
         selectedImageLocation = nil
         hideImageToolbar()
         hideSelectionToolbar()
+        // 새 문서의 마커 캐시를 실측으로 초기화 — 로드는 드물어 전체 스캔이 싸다.
+        // (이전 문서의 플래그를 물려받으면 빠른 경로 판정이 틀린다.)
+        syncMarkerFlag()
         // 커서가 어느 문단에 있든(수식·이미지 포함) 로드 직후엔 전부 렌더로 강제한다 —
         // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
@@ -1102,6 +1108,26 @@ final class BlockTextView: NSTextView {
     }
 
     // MARK: 마커 소비 (transformMarkdown)
+
+    /// 문서에 아직 소비되지 않은 수식·이미지 마커(`$$`·`![`)가 있을 수 있는가.
+    ///
+    /// `refreshRenderedBlocks`의 빠른 경로가 원래 매 키 입력마다 문서 전체를
+    /// `range(of:)`로 두 번 훑었다 — 30만 자에서 **16.9ms**로 프레임 예산을
+    /// 혼자 먹었다 (docs/editor-perf.md). 이제 편집 범위만 보고 증분으로 판정한다.
+    ///
+    /// **보수적으로 틀린다**: 확실하지 않으면 true로 두어 전체 경로를 타게 한다.
+    /// 마커를 놓쳐 수식이 영영 렌더되지 않는 쪽이, 가끔 헛도는 쪽보다 나쁘다.
+    /// 전체 경로가 한 번 돌면 스스로 정확한 값으로 되돌린다(`syncMarkerFlag`).
+    var mayHaveMarkers = true
+
+    /// 전체 경로에서 마커 유무를 실측해 캐시를 되돌린다. 이 경로는 이미 O(문서)라
+    /// 스캔 한 번이 복잡도를 바꾸지 않는다 — 마커를 지운 뒤 빠른 경로로 복귀하는 길.
+    private func syncMarkerFlag() {
+        let ns = string as NSString
+        mayHaveMarkers =
+            ns.range(of: "$$").location != NSNotFound
+            || ns.range(of: "![").location != NSNotFound
+    }
 
     override func didChangeText() {
         super.didChangeText()
@@ -1993,14 +2019,13 @@ final class BlockTextView: NSTextView {
         // 주의: 수식/이미지 블록은 마커("$$"·"![")가 이미 **소비**돼 storage 텍스트에
         // 남아 있지 않다 — 커서 문단이 수식/이미지면 마커 검사와 무관하게 전체
         // 경로를 타야 한다 (안 그러면 편집 후 렌더로 영영 못 돌아가는 버그).
-        if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil {
+        if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil,
+            !mayHaveMarkers {
             let source = storage.string as NSString
             let caretPara = source.paragraphRange(
                 for: NSRange(location: min(selectedRange().location, source.length), length: 0))
             let caretBlock = blockInfo(in: caretPara).block
-            if caretBlock != .math, caretBlock != .image,
-                source.range(of: "$$").location == NSNotFound,
-                source.range(of: "![").location == NSNotFound {
+            if caretBlock != .math, caretBlock != .image {
                 hideMathPreview()
                 return
             }
@@ -2088,6 +2113,10 @@ final class BlockTextView: NSTextView {
         }
         mathRenders = maths
         imageRenders = images
+        // 여기까지 왔다는 건 이미 O(문서)를 지불했다는 뜻 — 스캔 한 번을 더 해
+        // 마커 캐시를 실측으로 되돌린다. 마커를 지운 뒤 빠른 경로로 복귀하는 길이자,
+        // 델리게이트가 보수적으로 true를 켠 오탐을 정리하는 자리다.
+        syncMarkerFlag()
         repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
         // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다.
         if let (para, source) = editingMath {
@@ -2935,6 +2964,38 @@ final class BlockTextView: NSTextView {
 
 /// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·이미지를 그린다.
 /// 전부 text storage 밖 — 문서·undo·IME에 흔적이 없다.
+// MARK: - 마커 증분 감지 (NSTextStorageDelegate)
+
+// storage 편집은 실제로 메인 스레드에서만 일어난다 (에디터 조작 경로뿐) —
+// SidebarDragDrop의 DropDelegate와 같은 관용구로 격리를 넘긴다.
+extension BlockTextView: @preconcurrency NSTextStorageDelegate {
+
+    /// 편집된 범위에 수식·이미지 마커가 들어왔는지만 본다 — 문서 길이와 무관.
+    ///
+    /// 범위를 **양옆 1글자 넓혀** 검사하는 이유: `$`를 치고 다음 키에 `$`를 치면
+    /// 각 편집 범위엔 `$`가 하나뿐이라 `$$`를 놓친다. 넓히면 두 번째 키에서 잡힌다.
+    /// 같은 이유로 `!` 다음 `[`도 잡힌다.
+    ///
+    /// 삭제로 마커가 사라지는 경우는 여기서 알 수 없다 — 플래그가 true인 채 남아
+    /// 전체 경로를 한 번 더 타고, 거기서 `syncMarkerFlag`가 정확히 되돌린다.
+    public func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        guard editedMask.contains(.editedCharacters), !mayHaveMarkers else { return }
+        let ns = textStorage.string as NSString
+        let start = max(0, editedRange.location - 1)
+        let end = min(ns.length, editedRange.upperBound + 1)
+        guard end > start else { return }
+        let touched = ns.substring(with: NSRange(location: start, length: end - start))
+        if touched.contains("$$") || touched.contains("![") {
+            mayHaveMarkers = true
+        }
+    }
+}
+
 final class MintLayoutManager: NSLayoutManager {
 
     private var view: BlockTextView? {
@@ -2958,25 +3019,51 @@ final class MintLayoutManager: NSLayoutManager {
         )
     }
 
+    /// 배경(코드·수식 블록) 그리기 — **보이는 문단만** 훑는다.
+    ///
+    /// 예전엔 `glyphsToShow`를 인자로 받아놓고 무시한 채 문서 전체 문단을 돌았다.
+    /// 그리기는 키 입력마다 일어나므로 그대로 키 입력당 O(문서)였다 —
+    /// 30만 자에서 5.15ms (측정: docs/editor-perf.md). 이제 문서 길이와 무관하다.
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let view, let storage = textStorage else { return }
         let theme = view.palette
         let ns = storage.string as NSString
-        guard ns.length > 0 else { return }
+        guard ns.length > 0, glyphsToShow.length > 0 else { return }
 
-        // 코드 블록 배경 — 연속 블록은 하나의 라운드 사각형으로 병합 (디자인).
-        var location = 0
+        let shown = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        let firstPara = ns.paragraphRange(
+            for: NSRange(location: min(shown.location, ns.length - 1), length: 0))
+        let lastPara = ns.paragraphRange(
+            for: NSRange(location: min(shown.upperBound, ns.length - 1), length: 0))
+
+        // 코드 런은 여러 문단을 하나의 라운드 사각형으로 병합해 그린다 (디자인).
+        // 화면 위/아래로 이어지는 런은 잘린 배경이 되므로 런의 시작·끝까지만
+        // 넓힌다 — 넓히는 비용은 **런 길이**에 비례하지 문서 길이가 아니다.
+        var start = firstPara.location
+        while start > 0 {
+            let prev = ns.paragraphRange(for: NSRange(location: start - 1, length: 0))
+            guard blockInfo(storage, in: prev, view: view).block == .code else { break }
+            start = prev.location
+        }
+        var end = lastPara.upperBound
+        while end < ns.length {
+            let next = ns.paragraphRange(for: NSRange(location: end, length: 0))
+            guard blockInfo(storage, in: next, view: view).block == .code else { break }
+            end = next.upperBound
+        }
+
+        var location = start
         var codeStart: Int? = nil
-        while location < ns.length {
+        while location < end {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             let block = blockInfo(storage, in: para, view: view).block
             if block == .code {
                 if codeStart == nil { codeStart = para.location }
             } else {
-                if let start = codeStart {
+                if let runStart = codeStart {
                     drawGroupBackground(
-                        charRange: NSRange(location: start, length: para.location - start),
+                        charRange: NSRange(location: runStart, length: para.location - runStart),
                         origin: origin, color: theme.codeBg)
                     codeStart = nil
                 }
@@ -2994,9 +3081,10 @@ final class MintLayoutManager: NSLayoutManager {
             }
             location = para.upperBound
         }
-        if let start = codeStart {
+        if let runStart = codeStart {
+            // end까지 넓혀 둔 덕에 여기가 곧 런의 끝이다.
             drawGroupBackground(
-                charRange: NSRange(location: start, length: ns.length - start),
+                charRange: NSRange(location: runStart, length: end - runStart),
                 origin: origin, color: theme.codeBg)
         }
     }
