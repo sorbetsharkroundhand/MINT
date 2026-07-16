@@ -266,11 +266,21 @@ struct EditorToolbar: View {
                     longParagraphOpen.toggle()
                 } label: {
                     Image(systemName: "bolt.horizontal")
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundStyle(theme.ink3C)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.novelC)
                         .padding(.vertical, 3)
-                        .padding(.horizontal, 6)
-                        .contentShape(Rectangle())
+                        .padding(.horizontal, 7)
+                        .background(Capsule().fill(theme.novelBgC))
+                        // 알림 점 — 눈에 띄게 (조용한 아이콘만으론 놓치기 쉬움).
+                        // 툴바색 링으로 배경 알약과 분리한다.
+                        .overlay(alignment: .topTrailing) {
+                            Circle()
+                                .fill(theme.novelC)
+                                .frame(width: 6, height: 6)
+                                .overlay(Circle().stroke(theme.toolbarC, lineWidth: 1.5))
+                                .offset(x: 3, y: -3)
+                        }
+                        .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
                 .help("긴 문단이 있어 입력이 느려질 수 있어요")
