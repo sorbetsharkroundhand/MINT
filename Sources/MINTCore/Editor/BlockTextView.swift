@@ -723,6 +723,8 @@ final class BlockTextView: NSTextView {
         // 새 문서의 마커 캐시를 실측으로 초기화 — 로드는 드물어 전체 스캔이 싸다.
         // (이전 문서의 플래그를 물려받으면 빠른 경로 판정이 틀린다.)
         syncMarkerFlag()
+        // 직렬화 캐시도 새 문서 기준으로 — 다음 serialize()가 전체 재구축한다.
+        invalidateSerialCache()
         // 커서가 어느 문단에 있든(수식·이미지 포함) 로드 직후엔 전부 렌더로 강제한다 —
         // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
@@ -767,46 +769,71 @@ final class BlockTextView: NSTextView {
     private static let alignWrapper = try! NSRegularExpression(
         pattern: #"^<p align="(center|right)">(.*)</p>$"#)
 
-    /// storage를 순수 마크다운으로 되돌린다 (serialize).
+    /// storage를 순수 마크다운으로 되돌린다 (저장 경로).
+    ///
+    /// **문단별 증분 캐시**로 매 키 입력의 O(문서)를 O(편집)으로 줄인다
+    /// (docs/editor-perf.md): 전체 비용의 정체는 NSTextStorage 조각(UTF-16 백업)을
+    /// Swift 문자열로 브리지·이어붙이는 것이라(300k에서 17ms), 바뀐 문단만 다시
+    /// 브리지하고 나머지는 캐시된 네이티브 줄을 재사용해 join한다(0.14ms).
+    ///
+    /// **불변조건**: `serialize(증분 상태) == serialize(전체 문서)`. 캐시가 조금이라도
+    /// 불확실하면(`serialLinesValid == false`) 전체 재구축으로 떨어진다 — 그 경로는
+    /// 예전 코드와 동일한 결과라 정답이 보장된다. 안전 판정은 델리게이트가 한다
+    /// (`updateSerialCacheState`). 등식은 `SerializationFuzzTests`가 검증한다.
     func serialize() -> String {
-        let ns = string as NSString
-        var out: [String] = []
-        var inCode = false
-        var location = 0
-        repeat {
-            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
-            // 직렬화는 storage 속성만 신뢰한다 — typingAttributes 폴백을 쓰면
-            // "빈 문서 + 블록 typingAttributes" 상태에서 저장 텍스트가 실제
-            // 내용과 어긋나 reload 루프를 만든다 (r1 버그).
-            let info = storageBlockInfo(in: para)
-            let text = serializedContent(of: para, block: info.block)
-            switch info.block {
-            case .code:
-                if !inCode { out.append("```"); inCode = true }
-                out.append(text)
-            default:
-                if inCode { out.append("```"); inCode = false }
-                switch info.block {
-                case .h1: out.append("# " + text)
-                case .h2: out.append("## " + text)
-                case .h3: out.append("### " + text)
-                case .quote: out.append("> " + text)
-                case .bullet: out.append("- " + text)
-                case .number: out.append((info.marker ?? "1.") + " " + text)
-                case .todo: out.append("- [" + (info.checked ? "x" : " ") + "] " + text)
-                case .math: out.append("$$" + text + "$$")
-                case .divider: out.append("---")
-                case .image: out.append(text)  // text = 원문 ![](src)
-                default:
-                    if let align = alignValue(at: para) {
-                        out.append("<p align=\"\(align)\">\(text)</p>")
-                    } else {
-                        out.append(text)
-                    }
-                }
+        if !serialLinesValid {
+            rebuildSerialCache()
+        } else if serialFastDirty {
+            applyFastSerialUpdate()
+        }
+        return assembleSerialized(serialLines)
+    }
+
+    /// 문단 하나가 직렬화에 기여하는 줄과 코드 여부. 전체 재구축·증분 갱신이
+    /// **같은 코드**를 쓰므로 두 경로의 출력이 구조적으로 일치한다.
+    private func serializedLine(of para: NSRange) -> (text: String, isCode: Bool) {
+        // 직렬화는 storage 속성만 신뢰한다 — typingAttributes 폴백을 쓰면
+        // "빈 문서 + 블록 typingAttributes" 상태에서 저장 텍스트가 실제 내용과
+        // 어긋나 reload 루프를 만든다 (r1 버그).
+        let info = storageBlockInfo(in: para)
+        let content = serializedContent(of: para, block: info.block)
+        switch info.block {
+        case .code: return (content, true)
+        case .h1: return ("# " + content, false)
+        case .h2: return ("## " + content, false)
+        case .h3: return ("### " + content, false)
+        case .quote: return ("> " + content, false)
+        case .bullet: return ("- " + content, false)
+        case .number: return ((info.marker ?? "1.") + " " + content, false)
+        case .todo: return ("- [" + (info.checked ? "x" : " ") + "] " + content, false)
+        case .math: return ("$$" + content + "$$", false)
+        case .divider: return ("---", false)
+        case .image: return (content, false)  // content = 원문 ![](src)
+        default:
+            if let align = alignValue(at: para) {
+                return ("<p align=\"\(align)\">\(content)</p>", false)
             }
-            location = para.upperBound
-        } while location < ns.length
+            return (content, false)
+        }
+    }
+
+    /// 캐시된 문단 줄들 → 최종 마크다운. 코드 펜스 상태 기계와 문서 끝 개행
+    /// 규칙은 **문단 간 조립 로직**이라 캐시에 넣지 않고 여기서 매번 계산한다
+    /// (네이티브 문자열 join이라 300k에서도 0.1ms).
+    private func assembleSerialized(_ lines: [(text: String, isCode: Bool)]) -> String {
+        var out: [String] = []
+        out.reserveCapacity(lines.count + 2)
+        var inCode = false
+        for line in lines {
+            if line.isCode {
+                if !inCode { out.append("```"); inCode = true }
+                out.append(line.text)
+            } else {
+                if inCode { out.append("```"); inCode = false }
+                out.append(line.text)
+            }
+        }
+        let ns = string as NSString
         // 문서가 개행으로 끝나면 마지막 빈 문단도 한 줄이다.
         if ns.length > 0, ns.character(at: ns.length - 1) == 0x0A {
             if inCode { out.append("```"); inCode = false }
@@ -814,6 +841,106 @@ final class BlockTextView: NSTextView {
         }
         if inCode { out.append("```") }
         return out.joined(separator: "\n")
+    }
+
+    /// 전체 재구축 — 예전 serialize의 전체 순회. `serialLinesValid`가 false일 때만
+    /// 돈다(첫 호출·구조 변화·불확실). 이후 증분 갱신의 기준선이 된다.
+    private func rebuildSerialCache() {
+        let ns = string as NSString
+        var lines: [(text: String, isCode: Bool)] = []
+        let selLoc = min(selectedRange().location, ns.length)
+        var fastIdx: Int?
+        var fastStart = 0
+        var location = 0
+        repeat {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            var line = serializedLine(of: para)
+            // 네이티브 UTF-8로 강제 — join에서 문자 단위 재변환을 없앤다(핵심).
+            line.text.makeContiguousUTF8()
+            lines.append(line)
+            // 커서가 든 문단을 빠른 경로의 시작점으로 삼는다(타이핑은 여기서 이어진다).
+            if fastIdx == nil, para.lowerBound <= selLoc, selLoc <= para.upperBound {
+                fastIdx = lines.count - 1
+                fastStart = para.location
+            }
+            location = para.upperBound
+        } while location < ns.length
+        serialLines = lines
+        serialLinesValid = true
+        serialFastDirty = false
+        serialFastIndex = fastIdx
+        serialFastStart = fastStart
+    }
+
+    /// 빠른 경로: 추적 중인 문단 하나만 다시 브리지해 캐시에 splice.
+    private func applyFastSerialUpdate() {
+        serialFastDirty = false
+        guard let idx = serialFastIndex, idx < serialLines.count else {
+            rebuildSerialCache()
+            return
+        }
+        let ns = string as NSString
+        guard serialFastStart <= ns.length else {
+            rebuildSerialCache()
+            return
+        }
+        let anchor = min(serialFastStart, max(0, ns.length - 1))
+        let para = ns.paragraphRange(for: NSRange(location: anchor, length: 0))
+        // 추적하던 문단의 시작이 어긋났으면(예상 못 한 구조 변화) 전체로 후퇴.
+        guard para.location == serialFastStart else {
+            rebuildSerialCache()
+            return
+        }
+        var line = serializedLine(of: para)
+        line.text.makeContiguousUTF8()
+        serialLines[idx] = line
+    }
+
+    /// 편집이 캐시를 어떻게 바꾸는지 판정한다 (델리게이트에서 호출).
+    ///
+    /// **안전한 빠른 경로**: 문단 경계를 바꾸지 않는 단일 문단 내 편집.
+    /// - 개행이 삭제되지 않았다(문단 병합 없음) — `shouldChangeText`가 편집 전에
+    ///   삭제될 텍스트의 개행을 세어 알려준다(`serialPendingRemovedNewlines`).
+    /// - 개행이 삽입되지 않았다(문단 분할 없음) — 편집된 새 범위를 직접 스캔.
+    /// - 편집이 추적 중인 문단 안이다 — 아니면 인덱스가 어긋나므로 전체로 후퇴.
+    ///
+    /// 위 조건이 하나라도 불확실하면 `serialLinesValid = false`로 전체 재구축을
+    /// 예약한다. `shouldChangeText`를 거치지 않는 프로그래matic 편집(마커 변환 등)은
+    /// `serialPendingTracked == false`라 자동으로 전체 재구축된다.
+    fileprivate func updateSerialCacheState(
+        editedMask: NSTextStorageEditActions, editedRange: NSRange, delta: Int
+    ) {
+        let tracked = serialPendingTracked
+        let removedNewlines = serialPendingRemovedNewlines
+        serialPendingTracked = false
+        serialPendingRemovedNewlines = 0
+
+        guard serialLinesValid else { return }  // 이미 재구축 예약됨
+
+        let ns = string as NSString
+        // 안전 조건 ①: 이 편집이 shouldChangeText를 거쳤고, 개행을 지우지 않았다.
+        guard editedMask.contains(.editedCharacters), tracked, removedNewlines == 0 else {
+            serialLinesValid = false
+            return
+        }
+        // 안전 조건 ②: 삽입된 새 텍스트에 개행이 없다(문단 분할 없음).
+        let clamped = NSRange(
+            location: min(editedRange.location, ns.length),
+            length: min(editedRange.length, max(0, ns.length - editedRange.location)))
+        if clamped.length > 0,
+            ns.rangeOfCharacter(from: .newlines, options: [], range: clamped).location != NSNotFound
+        {
+            serialLinesValid = false
+            return
+        }
+        // 안전 조건 ③: 편집이 추적 중인 문단 안이다.
+        let para = ns.paragraphRange(
+            for: NSRange(location: min(editedRange.location, max(0, ns.length)), length: 0))
+        if para.location == serialFastStart {
+            serialFastDirty = true
+        } else {
+            serialLinesValid = false  // 다른 문단 — 재구축이 새 커서 문단으로 재조준
+        }
     }
 
     /// storage 속성만으로 읽는 블록 정보 — 직렬화 전용 (문자 없는 문단은 항상 p).
@@ -1127,6 +1254,50 @@ final class BlockTextView: NSTextView {
         mayHaveMarkers =
             ns.range(of: "$$").location != NSNotFound
             || ns.range(of: "![").location != NSNotFound
+    }
+
+    // MARK: 직렬화 증분 캐시 (docs/editor-perf.md)
+
+    /// 문단별 직렬화 줄 캐시 — 네이티브 문자열. `assembleSerialized`가 join한다.
+    /// 메모리는 대략 문서 크기의 사본 하나(600k자 ≈ 1.2MB) — 지연을 위한 거래.
+    fileprivate var serialLines: [(text: String, isCode: Bool)] = []
+    /// false면 다음 `serialize()`가 전체 재구축한다 — 정답이 보장되는 폴백.
+    fileprivate var serialLinesValid = false
+    /// 추적 중인 문단만 다시 브리지하면 되는 상태.
+    fileprivate var serialFastDirty = false
+    /// 빠른 경로가 갱신할 `serialLines`의 인덱스 (커서 문단).
+    fileprivate var serialFastIndex: Int?
+    /// 그 문단의 시작 오프셋 — 편집이 같은 문단인지 확인하는 키.
+    fileprivate var serialFastStart = 0
+    /// `shouldChangeText`가 이 편집을 가로챘는가 — 못 가로챈 편집(프로그래matic)은
+    /// 삭제 개행 수를 알 수 없어 안전하게 전체 재구축한다.
+    fileprivate var serialPendingTracked = false
+    /// `shouldChangeText`가 편집 전에 센 "삭제될 텍스트의 개행 수". 0이 아니면
+    /// 문단이 병합되므로 빠른 경로를 쓰지 않는다.
+    fileprivate var serialPendingRemovedNewlines = 0
+
+    /// 직렬화 캐시를 강제로 무효화한다 — 문서 로드 등 대량 교체 후.
+    func invalidateSerialCache() {
+        serialLinesValid = false
+        serialFastDirty = false
+    }
+
+    /// 편집 **직전**에 삭제될 텍스트의 개행을 센다 — 직렬화 증분 캐시의 안전
+    /// 판정에 필요하다(`updateSerialCacheState`). `didProcessEditing`은 이미 바뀐
+    /// storage만 보므로 "무엇이 지워졌는지"를 알 수 없다. 이 훅은 타이핑·IME·
+    /// 붙여넣기·삭제·undo 등 NSText 경로 전부에서 편집 전에 불린다.
+    override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?)
+        -> Bool
+    {
+        let ns = string as NSString
+        if affectedCharRange.length > 0, affectedCharRange.upperBound <= ns.length {
+            let old = ns.substring(with: affectedCharRange)
+            serialPendingRemovedNewlines = old.reduce(0) { $1 == "\n" ? $0 + 1 : $0 }
+        } else {
+            serialPendingRemovedNewlines = 0
+        }
+        serialPendingTracked = true
+        return super.shouldChangeText(in: affectedCharRange, replacementString: replacementString)
     }
 
     override func didChangeText() {
@@ -2984,6 +3155,9 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
+        // 직렬화 증분 캐시 판정 — 모든 편집에 대해 먼저(마커 조기 반환에 가리지 않게).
+        updateSerialCacheState(editedMask: editedMask, editedRange: editedRange, delta: delta)
+
         guard editedMask.contains(.editedCharacters), !mayHaveMarkers else { return }
         let ns = textStorage.string as NSString
         let start = max(0, editedRange.location - 1)
