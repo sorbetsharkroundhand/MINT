@@ -53,5 +53,12 @@ let package = Package(
             dependencies: ["MINTCore"],
             path: "Sources/MINTBench"
         ),
+        // 결정적 로직 회귀 테스트 (`swift test`). 모델·Metal을 건드리지 않는
+        // 순수 로직만 — 원고 무결성(직렬화 왕복)이 첫 대상이다.
+        .testTarget(
+            name: "MINTCoreTests",
+            dependencies: ["MINTCore"],
+            path: "Tests/MINTCoreTests"
+        ),
     ]
 )
