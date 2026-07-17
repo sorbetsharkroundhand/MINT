@@ -19,30 +19,52 @@ public enum PromptStyle: String, CaseIterable, Codable, Sendable {
 
 /// 모델 프리셋 (PLAN §3).
 public enum ModelPresets {
-    /// PLAN 기본 모델 — MoE(활성 ~3B)로 한국어 품질과 지연의 균형.
-    /// ⚠️ 약 20GB. 저장소 id는 Mac 첫 다운로드 때 검증되며, 없거나 무거우면
-    /// Settings(⌘,) 또는 MINTBench `--model`로 아래 대안으로 교체한다.
-    public static let qwen3_6_35B_A3B = "mlx-community/Qwen3.6-35B-A3B-4bit"
-    /// mlx-swift-lm LLMRegistry에 수록된 검증된 MoE 대안 (활성 ~3B, ~17GB).
-    public static let qwen3_30B_A3B = "mlx-community/Qwen3-30B-A3B-4bit"
-    /// air 모델 — MoE(총 30B, 활성 ~3B: 라우팅 전문가 64개 중 4개 + 공유 1개), ~16.9GB.
+    /// **MINT** — Ternary-Bonsai-27B (Qwen3.5-27B dense, 2비트 삼진 ~1.71bpw), ~8.5GB.
+    /// 27B **밀집** 모델이라 토큰마다 전 가중치를 읽는다 — 파일은 셋 중 가장 작지만
+    /// 토큰당 대역폭은 MoE(활성 ~3B)보다 크다. 즉 "작다 = 빠르다"가 성립하지 않는
+    /// 체급이다 (지연은 MINTBench로 재기 전까지 표기하지 않는다, CLAUDE.md §2-7).
+    /// 저장소 config는 VLM(`Qwen3_5ForConditionalGeneration` + vision_config)이지만
+    /// `model_type: "qwen3_5"`가 mlx-swift-lm LLMModelFactory에 등록되어 있고,
+    /// `Qwen35Model`이 `textConfig`만 취해 언어 모델로 로드한다 (비전 타워는 미사용).
+    /// ⚠️ 한국어 지원이 모델 카드에 명시되지 않았고 1.71bpw는 공격적 양자화다 —
+    /// 한국어 장편 품질은 **실사용·벤치로 판정 대기** (PLAN §16 열린 질문).
+    public static let ternaryBonsai27B = "prism-ml/Ternary-Bonsai-27B-mlx-2bit"
+    /// **Basil** — MoE(총 30B, 활성 ~3B: 라우팅 전문가 64개 중 4개 + 공유 1개), ~16.9GB.
     /// 활성 파라미터가 3B대라 디코딩은 3B 밀집 모델급이면서 30B의 이해를 쓴다.
     /// `glm4_moe_lite` 아키텍처는 mlx-swift-lm 3.31.3 LLMModelFactory에 등록되어 있다.
     public static let glm4_7_flash = "mlx-community/GLM-4.7-Flash-4bit"
-    /// 더 가벼운 대안 (~1.9GB) — PLAN 실험 대안. air가 안 올라가는 기기의 대체재.
+    /// **Peppermint** — MoE(활성 ~3B), 약 20GB. 저장소 id는 Mac 첫 다운로드 때
+    /// 검증되며, 없거나 무거우면 Settings(⌘,)·MINTBench `--model`로 대안 교체.
+    public static let qwen3_6_35B_A3B = "mlx-community/Qwen3.6-35B-A3B-4bit"
+
+    // MARK: 대안 (피커 미노출 — Settings 직접 입력·벤치 `--model` 전용)
+
+    /// mlx-swift-lm LLMRegistry에 수록된 검증된 MoE 대안 (활성 ~3B, ~17GB).
+    public static let qwen3_30B_A3B = "mlx-community/Qwen3-30B-A3B-4bit"
+    /// 가벼운 대안 (~1.9GB) — 위 셋이 안 올라가는 기기의 대체재.
     public static let qwen2_5_3B = "mlx-community/Qwen2.5-3B-Instruct-4bit"
-    /// 가장 빠른 대안 (~1GB) — PLAN 실험 대안.
+    /// 가장 가벼운 대안 (~1GB).
     public static let qwen2_5_1_5B = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
 
     public static let all: [String] = [
-        qwen3_6_35B_A3B, qwen3_30B_A3B, glm4_7_flash, qwen2_5_3B, qwen2_5_1_5B,
+        ternaryBonsai27B, glm4_7_flash, qwen3_6_35B_A3B,
+        qwen3_30B_A3B, qwen2_5_3B, qwen2_5_1_5B,
     ]
 }
 
-/// 툴바 모델 스위처에 보여줄 MINT 이름의 프리셋 (에디터 v3).
+/// 툴바 모델 스위처에 보여줄 MINT 이름의 프리셋 (에디터 v3 · 라인업 v2).
 ///
-/// 실제 가중치는 `ModelPresets`의 Hugging Face 저장소를 쓰고,
-/// UI에는 nano/air/pro 라는 제품 이름으로 노출한다.
+/// 실제 가중치는 `ModelPresets`의 Hugging Face 저장소를 쓰고, UI에는 허브 이름
+/// (mint/basil/peppermint)으로 노출한다.
+///
+/// **왜 nano/air/pro를 버렸나**: 그 이름은 *체급 사다리*(작다→크다 = 빠르다→좋다)를
+/// 약속한다. 새 라인업은 8.5·16.9·20GB로 체급이 좁고, 셋 다 27~35B급 이해를 쓴다 —
+/// 다른 것은 크기가 아니라 **성격**이다. 특히 MINT는 파일이 가장 작지만 밀집
+/// 모델이라 디코딩이 가장 느릴 수 있어, "nano = 가장 빠름"은 사실과 어긋난다.
+/// 이름이 거짓 약속을 하지 않도록 사다리를 버리고 허브 이름을 쓴다.
+///
+/// ⚠️ `detail`은 **아키텍처에서 곧바로 따라오는 사실**만 적는다. 품질·지연 서열은
+/// MINTBench 수치가 나오기 전엔 쓰지 않는다 (CLAUDE.md §2-7 측정 없이 튜닝 없음).
 public struct ModelChoice: Identifiable, Sendable {
     /// Hugging Face 저장소 id — `CompletionSettings.modelID`와 일치.
     public let id: String
@@ -52,19 +74,17 @@ public struct ModelChoice: Identifiable, Sendable {
     /// 드롭다운 우측의 대략적 지연 표기 (디자인 v3).
     public let latencyLabel: String
 
-    public static let nano = ModelChoice(
-        id: ModelPresets.qwen2_5_1_5B, name: "MINT nano", sizeLabel: "1.5B",
-        detail: "가장 빠른 응답", latencyLabel: "~60ms")
-    /// 지연 표기는 아직 MINTBench로 재지 않았다 (CLAUDE.md §2-7 — 측정 없이 튜닝 없음).
-    /// Qwen2.5-3B의 ~180ms는 다른 모델의 수치이므로 물려쓰지 않는다.
-    public static let air = ModelChoice(
-        id: ModelPresets.glm4_7_flash, name: "MINT air", sizeLabel: "30B·A3B",
-        detail: "속도와 품질의 균형", latencyLabel: "측정 전")
-    public static let pro = ModelChoice(
-        id: ModelPresets.qwen3_6_35B_A3B, name: "MINT pro", sizeLabel: "35B·A3B",
-        detail: "가장 자연스러운 문장", latencyLabel: "~420ms")
+    public static let mint = ModelChoice(
+        id: ModelPresets.ternaryBonsai27B, name: "MINT", sizeLabel: "27B·2bit",
+        detail: "27B 밀집 · 가장 작은 설치(8.5GB)", latencyLabel: "측정 전")
+    public static let basil = ModelChoice(
+        id: ModelPresets.glm4_7_flash, name: "Basil", sizeLabel: "30B·A3B",
+        detail: "MoE · 활성 3B로 가벼운 디코딩", latencyLabel: "측정 전")
+    public static let peppermint = ModelChoice(
+        id: ModelPresets.qwen3_6_35B_A3B, name: "Peppermint", sizeLabel: "35B·A3B",
+        detail: "MoE · 가장 큰 이해(20GB)", latencyLabel: "~420ms")
 
-    public static let all: [ModelChoice] = [nano, air, pro]
+    public static let all: [ModelChoice] = [mint, basil, peppermint]
 
     public static func matching(_ modelID: String) -> ModelChoice? {
         all.first(where: { $0.id == modelID })
@@ -73,9 +93,13 @@ public struct ModelChoice: Identifiable, Sendable {
 
 /// 추론 엔진(actor)에 넘기는 값 스냅샷.
 /// MainActor의 `CompletionSettings`에서 복사해 격리 경계를 넘긴다.
-/// 기본 모델은 첫 실행 부담을 줄이려 가장 가벼운 nano(~1GB)로 둔다 — 예전 기본값인
-/// pro(35B·A3B)는 ~20GB라, 앱을 켜자마자 조용히 대용량을 내려받아 사용자를 놀라게 했다.
-/// 더 자연스러운 문장을 원하면 툴바 모델 스위처나 Settings(⌘,)에서 air/pro로 올린다.
+///
+/// 기본 모델은 라인업에서 가장 가벼운 **MINT**(~8.5GB)다 — 첫 실행에 그만큼을
+/// 내려받는다. 예전 기본값 nano(~1GB)를 고른 이유가 "pro 20GB를 앱 켜자마자
+/// 조용히 받아 사용자를 놀라게 했다"였으므로, 8.5GB는 그 우려를 완전히 없애지는
+/// 못한다 (라인업 v2에서 1GB급이 피커에서 빠진 결과 — 사용자 결정, 2026-07-17).
+/// 첫 실행 부담이 문제가 되면 `ModelPresets`의 경량 대안(qwen2_5_1_5B)으로
+/// 되돌리거나 "모델 선택 전 대기" 흐름을 도입한다 (PLAN §16).
 public struct CompletionParameters: Sendable, Equatable {
     public var modelID: String
     public var promptStyle: PromptStyle
@@ -96,7 +120,7 @@ public struct CompletionParameters: Sendable, Equatable {
     public var stopAtUtteranceEnd: Bool
 
     public init(
-        modelID: String = ModelPresets.qwen2_5_1_5B,
+        modelID: String = ModelPresets.ternaryBonsai27B,
         promptStyle: PromptStyle = .continuation,
         maxTokens: Int = 12,
         temperature: Double = 0.3,

@@ -431,7 +431,7 @@ private struct CandidateDot: View {
     }
 }
 
-/// 모델 상태 칩 + 디자인형 드롭다운 (264px 카드, nano/air/pro).
+/// 모델 상태 칩 + 디자인형 드롭다운 (264px 카드, mint/basil/peppermint).
 struct ModelChip: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings

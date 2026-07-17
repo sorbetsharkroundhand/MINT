@@ -379,7 +379,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     parameters.temperature = options.temperature
 
     // B 블록 지식 (M6) — 인덱서와 같은 프롬프트·규격으로 사전 요약해 스냅샷을
-    // 만든다. 출력을 그대로 찍는다 — nano 요약 품질 수동 검수가 M6 선결정 사항.
+    // 만든다. 출력을 그대로 찍는다 — 요약 품질 수동 검수가 M6 선결정 사항.
     var knowledge: KnowledgeSnapshot?
     if options.knowledge {
         guard document != nil else {
