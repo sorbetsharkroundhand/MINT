@@ -31,6 +31,11 @@ public final class BackgroundIndexer: ObservableObject {
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
     /// 후보가 어느 문서 것인지 — 문서 전환 시 낡은 후보를 보여주지 않기 위한 짝.
     @Published public private(set) var candidatesEntryID: UUID?
+    /// 패스 **완주** 신호 (MainActor) — 이해 경로의 마지막 단계인 A+B KV 프리웜을
+    /// 여기 배선한다 (PLAN §12-1, ContentView → CompletionController.prewarmPrefix).
+    /// 선점·게이트로 중단된 패스에는 쏘지 않는다 — 타이핑이 재개됐다는 뜻이므로
+    /// 프리웜 GPU를 태울 자리가 아니다.
+    public var onPassDidComplete: (() -> Void)?
 
     /// 빠른 패스 유휴 대기 — 예측 디바운스(수백 ms)와 별도 타이머 (PLAN §9).
     nonisolated static let fastPassIdle: Duration = .seconds(5)
@@ -137,7 +142,7 @@ public final class BackgroundIndexer: ObservableObject {
                 self.characterCandidates = candidates
                 self.candidatesEntryID = entryID
             }
-            await Self.runPass(
+            let completed = await Self.runPass(
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
                 liveEntryIDs: liveEntryIDs, characters: characters
@@ -147,6 +152,7 @@ public final class BackgroundIndexer: ObservableObject {
             await MainActor.run {
                 self.passTask = nil
                 self.isIndexing = false
+                if completed { self.onPassDidComplete?() }
             }
         }
     }
@@ -225,6 +231,8 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 한 번의 이해 패스 — 값 입력만 받아 detached에서 돈다.
+    /// 반환값은 **완주 여부** — 선점·게이트로 중단되면 false. 완주 시에만
+    /// 호출부가 KV 프리웜을 쏜다 (PLAN §12-1).
     nonisolated private static func runPass(
         deep: Bool,
         entryID: UUID,
@@ -234,11 +242,11 @@ public final class BackgroundIndexer: ObservableObject {
         liveEntryIDs: Set<UUID>,
         characters: [CharacterCard],
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void
-    ) async {
-        guard gateAllows(deep: deep) else { return }
+    ) async -> Bool {
+        guard gateAllows(deep: deep) else { return false }
 
         let outline = DocumentOutline.parse(body)
-        guard !outline.scenes.isEmpty else { return }
+        guard !outline.scenes.isEmpty else { return false }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
 
@@ -247,7 +255,7 @@ public final class BackgroundIndexer: ObservableObject {
         for scene in outline.scenes {
             guard callBudget > 0 else { break }
             guard sidecar.sceneSummaries[scene.contentHash] == nil else { continue }
-            guard !Task.isCancelled, gateAllows(deep: deep) else { return }
+            guard !Task.isCancelled, gateAllows(deep: deep) else { return false }
 
             let sceneText = String(
                 text.substring(
@@ -279,7 +287,7 @@ public final class BackgroundIndexer: ObservableObject {
         if deep, !Task.isCancelled {
             relinkParticipants(sidecar: &sidecar, characters: characters)
             for scene in outline.scenes {
-                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                guard !Task.isCancelled, gateAllows(deep: true) else { return false }
                 // 키 존재 = 추출 완료(빈 배열이면 "사건 없음") — 메모 적중은 건너뛴다.
                 guard sidecar.events[scene.contentHash] == nil else { continue }
                 let sceneText = String(
@@ -306,9 +314,10 @@ public final class BackgroundIndexer: ObservableObject {
             pruneOrphans(keeping: liveEntryIDs)
         }
 
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
         sidecar.save(pruningTo: Set(outline.scenes.map(\.contentHash)))
         publish(makeSnapshot(entryID: entryID, outline: outline, sidecar: sidecar))
+        return true
     }
 
     /// 장·작품 요약 상향 전파 — 하위 요약이 전부 준비된 노드만, 결합 해시가

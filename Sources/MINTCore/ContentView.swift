@@ -40,8 +40,20 @@ public struct ContentView: View {
                 // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
                 if let indexer {
                     indexer.attach(store: store)
-                    store.documentDidChange = { [weak indexer] id in
+                    // 편집과 전환이 같은 훅으로 온다 — id가 바뀌었을 때만 예측
+                    // 창을 리셋한다 (남의 문서 본문으로 프리웜하지 않기 위해).
+                    var lastEntryID = store.activeID
+                    store.documentDidChange = { [weak indexer, weak completion] id in
+                        if id != lastEntryID {
+                            lastEntryID = id
+                            completion?.noteDocumentSwitch()
+                        }
                         indexer?.noteChange(entryID: id)
+                    }
+                    // 이해 경로의 마지막 단계 — 패스가 만든 새 A+B를 백그라운드에서
+                    // 프리웜해, 지식 세대 교체 직후의 첫 예측도 웜으로 만든다 (PLAN §12-1).
+                    indexer.onPassDidComplete = { [weak completion] in
+                        completion?.prewarmPrefix()
                     }
                     completion.knowledgeProvider = { [weak indexer, weak store] in
                         guard let snapshot = indexer?.snapshot,

@@ -99,6 +99,12 @@ public final class CompletionController: ObservableObject {
     private var failedModelID: String?
     /// `→` 한 단어 수락 직후의 편집 이벤트에서 남은 고스트를 지우지 않기 위한 플래그.
     private var retainSuggestionOnNextEdit = false
+    /// 마지막 편집의 예측 창 (prefix·커서) — KV 프리웜이 **예측과 같은 창**으로
+    /// 조립하기 위한 기록 (PLAN §12-1). 편집이 5s+ 멈춘 유휴에 패스가 돌므로,
+    /// 이 값이 곧 "다음 예측이 쓸 창"이다.
+    private var lastWindow: (prefix: String, caret: Int)?
+    /// 진행 중 프리웜 — 타이핑 재개 시 즉시 취소된다 (예측이 항상 이긴다, CLAUDE.md §2-6).
+    private var prewarmTask: Task<Void, Never>?
 
     public init(
         settings: CompletionSettings = .shared,
@@ -206,6 +212,9 @@ public final class CompletionController: ObservableObject {
 
         guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
+        // 조합 확정 이후의 창만 기록 — 프리웜용. 문단 끝 게이트보다 앞에 두는
+        // 이유: 문단 중간을 고치다 멈춰도 그 자리가 다음 예측의 창이다.
+        lastWindow = (prefix, caretLocation)
         guard caretAtParagraphEnd else { return }
         // 같은 모델로 실패했으면 재시도 폭주 방지. 모델을 바꿨으면 다시 허용.
         if case .failed = engineState, settings.modelID == failedModelID { return }
@@ -286,6 +295,60 @@ public final class CompletionController: ObservableObject {
         invalidate()
     }
 
+    // MARK: - A+B 프리픽스 KV 프리웜 (M6, PLAN §12-1)
+
+    /// 문서 전환 — 이전 문서의 창을 버린다. 남겨 두면 새 문서의 헤더에 남의
+    /// 문서 본문을 붙인 쓰레기 프롬프트를 프리웜하게 된다 (ContentView가 배선).
+    public func noteDocumentSwitch() {
+        lastWindow = nil
+        prewarmTask?.cancel()
+        prewarmTask = nil
+    }
+
+    /// 이해 패스 완주 직후(인덱서 신호) — 새 지식이 반영된 프롬프트로 KV를
+    /// 미리 데운다. 지식 세대가 바뀌면 헤더 첫 글자부터 LCP가 죽어 다음 예측이
+    /// 통째로 콜드인데, 그 프리필을 유휴 시간으로 옮기는 것이 이 호출이다 —
+    /// "백그라운드가 이해를 준비하고, 예측은 조립만 한다" (CLAUDE.md §2-2).
+    ///
+    /// 조립은 `runCompletion`과 **완전히 같은 경로** — 프리웜된 캐시가 다음
+    /// 예측과 어긋날 방법을 없앤다. 지식이 안 바뀌었으면 LCP가 전부라 1토큰
+    /// 프리필로 끝난다 (호출이 공짜에 가깝다).
+    public func prewarmPrefix() {
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        guard settings.autocompleteEnabled else { return }
+        guard case .ready = engineState else { return }  // 로드 유발 금지
+        // 예측이 걸려 있으면 그쪽이 데운다 — 엔진 경합을 만들지 않는다.
+        guard !isPredicting else { return }
+        guard let (prefix, caret) = lastWindow else { return }
+        let parameters = settings.parameters
+        guard parameters.promptStyle == .continuation, parameters.kvCacheEnabled
+        else { return }  // instruct는 KV 재사용이 없다 (PLAN §12 M5 범위)
+        // 열 시민의식 — 프리웜은 최적화일 뿐, 뜨거운 기기에서 할 일이 아니다.
+        switch ProcessInfo.processInfo.thermalState {
+        case .serious, .critical: return
+        default: break
+        }
+
+        let prompt = ContextAssembler.assemble(
+            prefix: prefix,
+            document: documentContextProvider?(),
+            knowledge: knowledgeProvider?(),
+            prefixStartUTF16: max(0, caret - (prefix as NSString).length),
+            style: .continuation
+        )
+        prewarmTask = Task { [engine] in
+            // 취소는 **시작 전**에만 듣는다. 시작한 프리필을 중간에 취소하면
+            // 엔진이 캐시를 통째로 버려(abandon) 웜 캐시까지 잃는다 — 이 프리필은
+            // 다음 예측이 어차피 해야 할 일이라, 완주가 취소보다 항상 이득이다.
+            // (프리필 자체도 청크 단위라 중간 인터럽트가 안 된다 — PLAN §9와 동일.)
+            guard !Task.isCancelled else { return }
+            await Task.detached(priority: .utility) {
+                await engine.prewarm(prompt: prompt, parameters: parameters)
+            }.value
+        }
+    }
+
     // MARK: - 폴더 이름 생성 (사이드바 DnD)
 
     /// AI 이름 생성이 진행 중인 폴더들 — 사이드바 행의 로딩 점 표시용.
@@ -328,6 +391,9 @@ public final class CompletionController: ObservableObject {
         generation += 1
         pendingTask?.cancel()
         pendingTask = nil
+        // 타이핑 재개 = 프리웜 선점 — 예측(과 그 앞의 타이핑)이 항상 이긴다.
+        prewarmTask?.cancel()
+        prewarmTask = nil
         pendingCaret = nil
         suggestionAnchor = nil
         isPredicting = false
