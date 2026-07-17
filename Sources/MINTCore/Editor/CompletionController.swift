@@ -99,6 +99,10 @@ public final class CompletionController: ObservableObject {
     private var failedModelID: String?
     /// `→` 한 단어 수락 직후의 편집 이벤트에서 남은 고스트를 지우지 않기 위한 플래그.
     private var retainSuggestionOnNextEdit = false
+    /// 마지막으로 본 커서 위치 (UTF-16) — 인덱서의 **커서 거리순 순회**용
+    /// (docs/m6-scene-split.md §5: 씬이 수십 개면 쓰고 있는 장부터 이해해야
+    /// 한다). Int 하나 저장 — 키 입력 경로 비용 없음.
+    public private(set) var lastCaretLocation: Int?
 
     public init(
         settings: CompletionSettings = .shared,
@@ -192,6 +196,7 @@ public final class CompletionController: ObservableObject {
         isComposing: Bool,
         caretAtParagraphEnd: Bool
     ) {
+        lastCaretLocation = caretLocation
         // `→` 한 단어 수락이 만든 편집 — 남은 고스트를 유지하고 새 요청도 걸지 않는다.
         if retainSuggestionOnNextEdit {
             retainSuggestionOnNextEdit = false
@@ -236,6 +241,7 @@ public final class CompletionController: ObservableObject {
     /// 타이핑도 커서를 움직이지만, 그 경우 `noteEdit`가 같은 커서 위치로
     /// 재예약하므로(위치 일치 → no-op) 알림 순서와 무관하게 안전하다.
     public func noteSelectionChange(caretLocation: Int) {
+        lastCaretLocation = caretLocation
         if suggestion != nil {
             if suggestionAnchor != caretLocation { invalidate() }
         } else if pendingTask != nil {

@@ -43,6 +43,11 @@ public struct ContentView: View {
                     store.documentDidChange = { [weak indexer] id in
                         indexer?.noteChange(entryID: id)
                     }
+                    // 커서 거리순 이해 (docs/m6-scene-split.md §5) — 쓰고 있는
+                    // 자리 근처부터 읽는다. 값 pull이라 키 입력 비용 없음.
+                    indexer.caretProvider = { [weak completion] in
+                        completion?.lastCaretLocation
+                    }
                     completion.knowledgeProvider = { [weak indexer, weak store] in
                         guard let snapshot = indexer?.snapshot,
                             snapshot.entryID == store?.activeID

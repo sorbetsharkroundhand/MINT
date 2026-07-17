@@ -120,14 +120,25 @@ enum TimelineRow: Identifiable {
             eventsByScene[event.sceneHash, default: []].append(event)
         }
 
+        // 세그먼트 수 — 같은 헤딩 경로가 몇 조각으로 쪼개졌는지 (라벨 "1장 (3/14)").
+        var segmentCounts: [[String]: Int] = [:]
+        for scene in snapshot.outline.scenes {
+            segmentCounts[scene.headingPath, default: 0] += 1
+        }
+
         var rows: [TimelineRow] = []
         for (index, scene) in snapshot.outline.scenes.enumerated() {
-            let path = scene.headingPath.filter { !$0.isEmpty }.joined(separator: " › ")
+            var path = scene.headingPath.filter { !$0.isEmpty }.joined(separator: " › ")
+            if path.isEmpty { path = "서두" }
+            // 상한 초과로 쪼개진 씬은 순번을 붙인다 (docs/m6-scene-split.md §4).
+            if let count = segmentCounts[scene.headingPath], count > 1 {
+                path += " (\(scene.segmentIndex + 1)/\(count))"
+            }
             let events = eventsByScene[scene.contentHash] ?? []
             rows.append(
                 .scene(
                     id: scene.contentHash,
-                    path: path.isEmpty ? "서두" : path,
+                    path: path,
                     summary: snapshot.summariesByHash[scene.contentHash],
                     characters: min(scene.utf16Range.count, max(0, text.length - scene.utf16Range.lowerBound))
                 ))

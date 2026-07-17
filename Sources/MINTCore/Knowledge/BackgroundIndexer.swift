@@ -40,7 +40,15 @@ public final class BackgroundIndexer: ObservableObject {
     nonisolated static let fastPassCallBudget = 2
     /// 요약에 넣는 씬 원문 상한 — 프리필은 취소 불가 구간이라, 이 길이가
     /// "타이핑 재개 → 예측이 엔진을 기다리는" 최악 지연을 결정한다 (짧게 유지).
-    nonisolated public static let maxSceneCharacters = 1_500
+    /// 씬 분할(docs/m6-scene-split.md)이 같은 값을 상한으로 쪼개므로, 이제
+    /// `.prefix`는 안전망일 뿐 실제로 자르지 않는다 — 이해 범위 100%.
+    nonisolated public static let maxSceneCharacters = DocumentOutline.maxSegmentUTF16
+
+    /// 커서 위치 제공자 (ContentView가 배선) — 씬 분할 후 씬이 수십 개가
+    /// 되므로, 깊은 패스는 **커서에서 가까운 씬부터** 이해한다. 6장을 쓰는
+    /// 동안 1장부터 읽으면 정작 필요한 지식이 마지막에 온다
+    /// (docs/m6-scene-split.md §5 — 분할 설계의 일부).
+    public var caretProvider: (() -> Int?)?
 
     private let engine: CompletionEngine
     private let settings: CompletionSettings
@@ -138,6 +146,7 @@ public final class BackgroundIndexer: ObservableObject {
                 }
             }.filter { !$0.isEmpty })
         let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
+        let caret = caretProvider?()
 
         isIndexing = true
         // 파싱·디스크 IO·프롬프트 준비를 메인에서 떼어낸다 — 생성 자체는 엔진
@@ -156,7 +165,8 @@ public final class BackgroundIndexer: ObservableObject {
             await Self.runPass(
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
-                liveEntryIDs: liveEntryIDs, characters: characters
+                liveEntryIDs: liveEntryIDs, characters: characters,
+                caretUTF16: caret
             ) { snapshot in
                 Task { @MainActor in self.snapshot = snapshot }
             }
@@ -250,21 +260,33 @@ public final class BackgroundIndexer: ObservableObject {
         engine: CompletionEngine,
         liveEntryIDs: Set<UUID>,
         characters: [CharacterCard],
+        caretUTF16: Int?,
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void
     ) async {
         guard gateAllows(deep: deep) else { return }
 
         let outline = DocumentOutline.parse(body)
         guard !outline.scenes.isEmpty else { return }
+        // 커서 거리순 순회 — 씬 분할로 씬이 수십 개가 되면, 쓰고 있는 자리
+        // 근처의 이해가 먼저 준비돼야 한다. 스냅샷·저장은 해시 키라 처리
+        // 순서와 무관하고, 선점당해도 "가까운 것부터 남는" 성질이 생긴다.
+        let orderedScenes: [DocumentOutline.Scene]
+        if let caretUTF16 {
+            orderedScenes = outline.scenes.sorted {
+                distance(from: $0, to: caretUTF16) < distance(from: $1, to: caretUTF16)
+            }
+        } else {
+            orderedScenes = outline.scenes
+        }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
         // 대화 귀속 (PLAN §7·§6.4) — 결정적·LLM 없음이라 패스마다 재계산.
         // 사이드카에 저장하지 않는 파생 — 스냅샷에만 실린다.
         let utterances = DialogueAttribution.utterances(in: body, cards: characters)
 
-        // ① 더티 씬 요약 — 해시 메모에 없는 씬만, 문서 순서대로.
+        // ① 더티 씬 요약 — 해시 메모에 없는 씬만, 커서에서 가까운 순.
         var callBudget = deep ? Int.max : fastPassCallBudget
-        for scene in outline.scenes {
+        for scene in orderedScenes {
             guard callBudget > 0 else { break }
             guard sidecar.sceneSummaries[scene.contentHash] == nil else { continue }
             guard !Task.isCancelled, gateAllows(deep: deep) else { return }
@@ -301,7 +323,7 @@ public final class BackgroundIndexer: ObservableObject {
         // (docs/m6-events.md 결정 3).
         if deep, !Task.isCancelled {
             relinkParticipants(sidecar: &sidecar, characters: characters)
-            for scene in outline.scenes {
+            for scene in orderedScenes {
                 guard !Task.isCancelled, gateAllows(deep: true) else { return }
                 // 키 존재 = 추출 완료(빈 배열이면 "사건 없음") — 메모 적중은 건너뛴다.
                 guard sidecar.events[scene.contentHash] == nil else { continue }
@@ -499,6 +521,16 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     // MARK: - 보조
+
+    /// 커서와 씬의 UTF-16 거리 — 커서가 씬 안이면 0.
+    nonisolated private static func distance(
+        from scene: DocumentOutline.Scene, to caret: Int
+    ) -> Int {
+        if scene.utf16Range.contains(caret) { return 0 }
+        return caret < scene.utf16Range.lowerBound
+            ? scene.utf16Range.lowerBound - caret
+            : caret - scene.utf16Range.upperBound
+    }
 
     /// 열·전력 시민의식 (PLAN §9) — `.serious` 이상이면 전부, 저전력이면 깊은
     /// 패스만 보류한다.
