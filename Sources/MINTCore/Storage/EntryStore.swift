@@ -198,9 +198,24 @@ public final class EntryStore: ObservableObject {
     @Published public private(set) var searchJump: SearchJump?
 
     /// 검색 결과 선택 — 저널을 열고 본문 매치 위치로 이동을 요청한다.
+    /// 타임라인의 씬·사건·경고 클릭(M7)도 이 통로를 쓴다: 본문 스니펫을
+    /// 질의로 넘기면 마크다운 오프셋 ↔ 에디터 스토리지 오프셋의 좌표 불일치를
+    /// 구조적으로 피한다 (에디터는 자기 텍스트에서 스니펫을 찾아 이동).
     public func requestSearchJump(_ id: UUID, query: String) {
         select(id)
         searchJump = SearchJump(entryID: id, query: query, seq: (searchJump?.seq ?? 0) + 1)
+    }
+
+    /// 문서 종류 전환 (저널⇄소설) — 원문은 그대로, 메타만 바뀐다.
+    /// 소설로 바꾸면 다음 유휴부터 이해 파이프라인이 돌기 시작한다.
+    public func setKind(_ kind: EntryKind, for id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            entries[index].resolvedKind != kind
+        else { return }
+        entries[index].kind = kind
+        scheduleSave()
+        // 전환도 인덱서에겐 신호 — 소설이 됐으면 유휴 타이머를 감는다.
+        documentDidChange?(id)
     }
 
     /// 제목·본문에서 질의어를 포함하는 저널 (대소문자 무시). 전역 검색용.

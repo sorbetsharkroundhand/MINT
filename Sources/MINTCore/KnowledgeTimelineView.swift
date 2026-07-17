@@ -28,25 +28,33 @@ struct KnowledgeTimelineView: View {
             if indexer.snapshot?.entryID == store.activeID, !indexer.warnings.isEmpty {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(indexer.warnings) { warning in
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Image(systemName: "exclamationmark.triangle")
-                                .font(.system(size: 10))
-                                .foregroundStyle(theme.novelC)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(warning.kind.rawValue)
-                                    .font(MintFonts.uiFont(10.5, .semibold))
-                                    .foregroundStyle(theme.inkC)
-                                Text(warning.message)
-                                    .font(MintFonts.uiFont(10.5))
-                                    .foregroundStyle(theme.ink2C)
-                                    .fixedSize(horizontal: false, vertical: true)
+                        // 클릭 → 해당 본문 위치로 이동 (M7 점프).
+                        Button {
+                            jump(toUTF16: warning.utf16Position)
+                        } label: {
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .font(.system(size: 10))
+                                    .foregroundStyle(theme.novelC)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(warning.kind.rawValue)
+                                        .font(MintFonts.uiFont(10.5, .semibold))
+                                        .foregroundStyle(theme.inkC)
+                                    Text(warning.message)
+                                        .font(MintFonts.uiFont(10.5))
+                                        .foregroundStyle(theme.ink2C)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
+                            .padding(6)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                    .fill(theme.novelBgC))
+                            .contentShape(Rectangle())
                         }
-                        .padding(6)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(theme.novelBgC))
+                        .buttonStyle(.plain)
+                        .help("본문의 해당 위치로 이동")
                     }
                 }
             }
@@ -62,7 +70,8 @@ struct KnowledgeTimelineView: View {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
                             TimelineRowView(
                                 row: row, theme: theme, characterNames: names,
-                                isFirst: offset == 0, isLast: offset == rows.count - 1)
+                                isFirst: offset == 0, isLast: offset == rows.count - 1,
+                                onJump: { jump(toUTF16: $0) })
                         }
                     }
                     .padding(.vertical, 2)
@@ -75,6 +84,42 @@ struct KnowledgeTimelineView: View {
         }
         .padding(14)
         .frame(width: embedded ? nil : 460)
+    }
+
+    /// 본문 위치 클릭 → 에디터 이동 (M7 점프).
+    ///
+    /// 위치를 직접 넘기지 않고 **그 자리의 본문 스니펫을 검색어로** 넘긴다 —
+    /// 지식의 오프셋은 마크다운 좌표, 에디터 스토리지는 렌더된 텍스트라 좌표가
+    /// 어긋날 수 있다. 에디터가 자기 텍스트에서 스니펫을 찾아 이동하면(기존
+    /// 전역 검색 통로 `requestSearchJump`) 그 불일치를 구조적으로 피한다.
+    private func jump(toUTF16 offset: Int) {
+        guard let body = store.activeEntry?.body,
+            let snippet = Self.jumpSnippet(in: body, atUTF16: offset)
+        else { return }
+        store.requestSearchJump(store.activeID, query: snippet)
+    }
+
+    /// 오프셋 자리에서 검색 가능한 스니펫을 뽑는다 — 마크다운 마커·공백을
+    /// 건너뛰고 산문 한 토막(≤40 UTF-16)을 취한다. 줄이 짧으면 그 줄까지만
+    /// (개행 넘어 이어붙이면 스토리지에 없는 문자열이 된다).
+    static func jumpSnippet(in body: String, atUTF16 offset: Int) -> String? {
+        let ns = body as NSString
+        var start = min(max(0, offset), ns.length)
+        // 마커·공백 건너뛰기 — "# 1장"의 "#·공백"은 에디터 스토리지에 없다.
+        while start < ns.length,
+            "#>*- \t\n".unicodeScalars.map({ UInt16($0.value) })
+                .contains(ns.character(at: start))
+        {
+            start += 1
+        }
+        guard start < ns.length else { return nil }
+        let end = min(start + 40, ns.length)
+        var snippet = ns.substring(with: NSRange(location: start, length: end - start))
+        if let newline = snippet.firstIndex(of: "\n") {
+            snippet = String(snippet[..<newline])
+        }
+        snippet = snippet.trimmingCharacters(in: .whitespaces)
+        return snippet.count >= 2 ? snippet : nil
     }
 
     private var header: some View {
@@ -124,19 +169,28 @@ struct KnowledgeTimelineView: View {
 /// 레일 위의 한 행 — 씬·사건·경고를 한 줄로 편다. 레일 연속성(위/아래 선)을
 /// 계산하려면 중첩 구조보다 평평한 배열이 낫다.
 enum TimelineRow: Identifiable {
-    case scene(id: String, path: String, summary: String?, characters: Int)
+    case scene(id: String, path: String, summary: String?, characters: Int, start: Int)
     /// 씬 원문이 이해 상한을 넘어 잘린 구간 — 지식에 존재하지 않는 본문이다.
     case truncated(id: String, total: Int, read: Int)
-    case event(id: String, event: StoryEvent)
+    case event(id: String, event: StoryEvent, start: Int)
     /// 씬은 있는데 아직 요약·사건이 없는 상태 (다음 패스 대기).
     case pending(id: String)
 
     var id: String {
         switch self {
-        case .scene(let id, _, _, _): "s-\(id)"
+        case .scene(let id, _, _, _, _): "s-\(id)"
         case .truncated(let id, _, _): "t-\(id)"
-        case .event(let id, _): "e-\(id)"
+        case .event(let id, _, _): "e-\(id)"
         case .pending(let id): "p-\(id)"
+        }
+    }
+
+    /// 클릭 시 에디터가 이동할 본문 위치 (UTF-16) — 씬·사건만 (M7 점프).
+    var jumpTargetUTF16: Int? {
+        switch self {
+        case .scene(_, _, _, _, let start): start
+        case .event(_, _, let start): start
+        case .truncated, .pending: nil
         }
     }
 
@@ -168,7 +222,8 @@ enum TimelineRow: Identifiable {
                     id: scene.contentHash,
                     path: path,
                     summary: snapshot.summariesByHash[scene.contentHash],
-                    characters: min(scene.utf16Range.count, max(0, text.length - scene.utf16Range.lowerBound))
+                    characters: min(scene.utf16Range.count, max(0, text.length - scene.utf16Range.lowerBound)),
+                    start: scene.utf16Range.lowerBound
                 ))
             // 이해 상한 초과 — 뒷부분은 요약에도 사건에도 반영되지 않았다.
             if scene.utf16Range.count > BackgroundIndexer.maxSceneCharacters {
@@ -178,7 +233,10 @@ enum TimelineRow: Identifiable {
                         read: BackgroundIndexer.maxSceneCharacters))
             }
             for (offset, event) in events.enumerated() {
-                rows.append(.event(id: "\(scene.contentHash)-\(offset)", event: event))
+                rows.append(
+                    .event(
+                        id: "\(scene.contentHash)-\(offset)", event: event,
+                        start: scene.utf16Range.lowerBound))
             }
             if events.isEmpty, snapshot.summariesByHash[scene.contentHash] == nil {
                 rows.append(.pending(id: "\(scene.contentHash)-\(index)"))
@@ -197,6 +255,8 @@ private struct TimelineRowView: View {
     let characterNames: [UUID: String]
     let isFirst: Bool
     let isLast: Bool
+    /// 씬·사건 클릭 → 본문 이동 (M7 점프).
+    var onJump: ((Int) -> Void)?
 
     var body: some View {
         HStack(alignment: .top, spacing: 9) {
@@ -205,6 +265,11 @@ private struct TimelineRowView: View {
                 .padding(.bottom, isSceneRow ? 6 : 3)
             Spacer(minLength: 0)
         }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let target = row.jumpTargetUTF16 { onJump?(target) }
+        }
+        .help(row.jumpTargetUTF16 != nil ? "본문의 해당 위치로 이동" : "")
     }
 
     private var isSceneRow: Bool {
@@ -275,7 +340,7 @@ private struct TimelineRowView: View {
 
     @ViewBuilder private var content: some View {
         switch row {
-        case .scene(_, let path, let summary, let characters):
+        case .scene(_, let path, let summary, let characters, _):
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 5) {
                     Text(path)
@@ -298,7 +363,7 @@ private struct TimelineRowView: View {
                 .font(MintFonts.uiFont(10.5))
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
-        case .event(_, let event):
+        case .event(_, let event, _):
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(event.summary)

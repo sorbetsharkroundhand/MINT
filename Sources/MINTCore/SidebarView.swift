@@ -183,13 +183,30 @@ struct SidebarView: View {
     }
 
     /// 바이블 섹션 — 팝오버와 같은 뷰를 임베드 모드로 (M6-8 패널 승격).
+    /// 저널이면 안내 + **소설 전환 버튼** — 여기서 막힌 사용자가 바로 풀 수 있게
+    /// (M7 요청: 기존 문서를 소설로 바꾸는 통로가 없었다).
     @ViewBuilder private var bibleSection: some View {
         if store.activeEntry?.resolvedKind == .novel {
             CharacterBibleView(store: store, theme: theme, indexer: indexer, embedded: true)
         } else {
-            SidebarSectionHint(
-                theme: theme,
-                text: "소설 종류의 문서에서 인물·장르를 관리해요. 사이드바의 책 아이콘(새 소설)으로 만들 수 있어요.")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("이 문서는 일반 저널이에요. 소설로 전환하면 인물·장르 관리와 백그라운드 이해(요약·사건·타임라인)가 켜져요.")
+                    .font(MintFonts.uiFont(11))
+                    .foregroundStyle(theme.ink3C)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button {
+                    store.setKind(.novel, for: store.activeID)
+                } label: {
+                    Label("소설로 전환", systemImage: "book.closed")
+                        .font(MintFonts.uiFont(12, .medium))
+                }
+                Text("원문은 그대로예요 — 언제든 우클릭 메뉴에서 일반 저널로 되돌릴 수 있어요.")
+                    .font(MintFonts.uiFont(10))
+                    .foregroundStyle(theme.ink3C)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(14)
         }
     }
 
@@ -683,6 +700,13 @@ struct SidebarView: View {
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
             moveMenu(for: entry)
+            // 종류 전환 (M7 요청) — 원문 불변, 소설이 되면 이해 파이프라인이
+            // 돌기 시작하고 저널이 되면 멈춘다 (지식은 파생이라 안전).
+            if entry.resolvedKind == .novel {
+                Button("일반 저널로 전환") { store.setKind(.journal, for: entry.id) }
+            } else {
+                Button("소설로 전환") { store.setKind(.novel, for: entry.id) }
+            }
             // 소설만 — 전자책(EPUB)으로 내보내기 (요구 7).
             if entry.resolvedKind == .novel {
                 Button("EPUB으로 내보내기…") { EpubExporter.exportWithPanel(entry) }
