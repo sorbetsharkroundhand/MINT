@@ -2,16 +2,53 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 좌측 저널 사이드바 (에디터 v3 — 디자인 이식, 파일시스템 v1).
+/// 사이드바 섹션 (M6-8) — VSCode의 활동 바처럼 사이드바가 여러 패널을 담는다.
+/// 문자열 raw값은 `@AppStorage("mint.sidebarSection")` 키의 값 — 툴바(소설 배지)와
+/// 사이드바가 같은 키로 섹션을 전환한다.
+enum SidebarSection: String {
+    case files  // 문서(폴더 트리) — 기존 사이드바
+    case bible  // 스토리 바이블 (PLAN §7)
+    case timeline  // 이해 타임라인 (PLAN §6.3·§8)
+}
+
+/// 섹션이 보여줄 내용이 없을 때의 안내 문구 한 장.
+private struct SidebarSectionHint: View {
+    let theme: MintTheme
+    let text: String
+
+    var body: some View {
+        VStack {
+            Text(text)
+                .font(MintFonts.uiFont(11))
+                .foregroundStyle(theme.ink3C)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(14)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// 좌측 사이드바 (에디터 v3 — 디자인 이식, 파일시스템 v1 · 섹션화 M6-8).
 ///
 /// 상단: 신호등 옆을 채우는 52px 헤더(우측 날짜 툴바와 같은 높이) —
 /// "MINT"(세리프) + 새 폴더(폴더＋) + 새 저널(＋).
-/// 목록: 폴더 트리(펼침/접힘, hover 시 하위 폴더·저널 추가) + 저널 행.
+/// 그 아래 섹션 탭(문서·바이블·타임라인) — 팝오버였던 바이블·타임라인을
+/// 상시 패널로 승격한다 (열람이 잦아졌다 — 팝오버는 열 때마다 닫힌다).
+/// 목록(문서 섹션): 폴더 트리(펼침/접힘) + 저널 행.
 struct SidebarView: View {
     @ObservedObject var store: EntryStore
     /// AI 폴더 명명(requestFolderName)과 진행 표시(namingFolderIDs)에 쓴다.
     @ObservedObject var completion: CompletionController
     let theme: MintTheme
+    /// 바이블·타임라인 섹션의 데이터 소스 — nil이면 문서 섹션만 (프리뷰 등).
+    var indexer: BackgroundIndexer?
+
+    /// 현재 섹션 — 툴바의 소설 배지도 이 키를 써서 바이블 섹션을 연다.
+    @AppStorage("mint.sidebarSection") private var sectionRaw = SidebarSection.files.rawValue
+    private var section: SidebarSection {
+        SidebarSection(rawValue: sectionRaw) ?? .files
+    }
 
     /// 드래그&드롭 세션 상태 — 드래그 원본·드롭 표시 위치.
     @StateObject private var dragModel = SidebarDragModel()
@@ -37,6 +74,112 @@ struct SidebarView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
             theme.sepC.frame(height: 1)
+            sectionStrip
+            theme.sepC.frame(height: 1)
+            switch section {
+            case .files: filesSection
+            case .bible: bibleSection
+            case .timeline: timelineSection
+            }
+        }
+        .background(theme.sidebarTintC)
+        .overlay(alignment: .trailing) { theme.sepC.frame(width: 1) }
+        .onChange(of: renameFieldFocused) { _, focused in
+            // Enter(onSubmit) 외에 포커스를 잃어도 커밋 — Esc는 editingID를
+            // 먼저 비우므로 여기 걸리지 않는다.
+            if !focused, let id = editingID { commitRename(id) }
+        }
+        .onChange(of: store.searchFocusRequests) { _, _ in
+            // ⌘⇧F — 검색 필드로 포커스 (문서 섹션으로 전환해서).
+            sectionRaw = SidebarSection.files.rawValue
+            searchFieldFocused = true
+        }
+        .onChange(of: store.renameRequests) { _, _ in
+            // 메뉴 "저널 이름 바꾸기" — 현재 저널의 인라인 편집을 시작한다.
+            sectionRaw = SidebarSection.files.rawValue
+            if let entry = store.activeEntry { startRename(entry) }
+        }
+        .alert(
+            "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
+            isPresented: Binding(
+                get: { deleteCandidate != nil },
+                set: { if !$0 { deleteCandidate = nil } }
+            ),
+            presenting: deleteCandidate
+        ) { entry in
+            Button("삭제", role: .destructive) { store.delete(entry.id) }
+            Button("취소", role: .cancel) {}
+        } message: { _ in
+            Text("작성한 내용이 함께 삭제되며 되돌릴 수 없어요.")
+        }
+        .alert(
+            "‘\(folderDeleteCandidate?.name ?? "")’ 폴더를 삭제할까요?",
+            isPresented: Binding(
+                get: { folderDeleteCandidate != nil },
+                set: { if !$0 { folderDeleteCandidate = nil } }
+            ),
+            presenting: folderDeleteCandidate
+        ) { folder in
+            Button("삭제", role: .destructive) { store.deleteFolder(folder.id) }
+            Button("취소", role: .cancel) {}
+        } message: { _ in
+            Text("폴더 안의 하위 폴더와 저널이 함께 삭제되며 되돌릴 수 없어요.")
+        }
+    }
+
+    /// 섹션 탭 — VSCode 활동 바의 수평 축소판. 아이콘 셋: 문서·바이블·타임라인.
+    private var sectionStrip: some View {
+        HStack(spacing: 4) {
+            sectionTab(.files, icon: "doc.text", help: "문서")
+            sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
+            sectionTab(.timeline, icon: "arrow.triangle.branch", help: "이해 타임라인")
+            Spacer()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+    }
+
+    private func sectionTab(_ target: SidebarSection, icon: String, help: String) -> some View {
+        Button {
+            sectionRaw = target.rawValue
+        } label: {
+            Image(systemName: icon)
+                .font(.system(size: 11.5, weight: .medium))
+                .foregroundStyle(section == target ? theme.novelC : theme.ink3C)
+                .frame(width: 30, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(section == target ? theme.novelBgC : .clear)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+    }
+
+    /// 바이블 섹션 — 팝오버와 같은 뷰를 임베드 모드로 (M6-8 패널 승격).
+    @ViewBuilder private var bibleSection: some View {
+        if store.activeEntry?.resolvedKind == .novel {
+            CharacterBibleView(store: store, theme: theme, indexer: indexer, embedded: true)
+        } else {
+            SidebarSectionHint(
+                theme: theme,
+                text: "소설 종류의 문서에서 인물·장르를 관리해요. 사이드바의 책 아이콘(새 소설)으로 만들 수 있어요.")
+        }
+    }
+
+    /// 타임라인 섹션 — 뷰 자체가 비소설 안내를 갖고 있다.
+    @ViewBuilder private var timelineSection: some View {
+        if let indexer {
+            KnowledgeTimelineView(indexer: indexer, store: store, theme: theme, embedded: true)
+        } else {
+            SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
+        }
+    }
+
+    /// 문서(폴더 트리) 섹션 — 기존 사이드바 본문 그대로.
+    private var filesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
             searchField
             theme.sepC.frame(height: 1)
             ScrollView {
@@ -77,47 +220,6 @@ struct SidebarView: View {
             .onDrop(
                 of: [.plainText],
                 delegate: RootAreaDropDelegate(store: store, model: dragModel))
-        }
-        .background(theme.sidebarTintC)
-        .overlay(alignment: .trailing) { theme.sepC.frame(width: 1) }
-        .onChange(of: renameFieldFocused) { _, focused in
-            // Enter(onSubmit) 외에 포커스를 잃어도 커밋 — Esc는 editingID를
-            // 먼저 비우므로 여기 걸리지 않는다.
-            if !focused, let id = editingID { commitRename(id) }
-        }
-        .onChange(of: store.searchFocusRequests) { _, _ in
-            // ⌘⇧F — 검색 필드로 포커스.
-            searchFieldFocused = true
-        }
-        .onChange(of: store.renameRequests) { _, _ in
-            // 메뉴 "저널 이름 바꾸기" — 현재 저널의 인라인 편집을 시작한다.
-            if let entry = store.activeEntry { startRename(entry) }
-        }
-        .alert(
-            "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
-            isPresented: Binding(
-                get: { deleteCandidate != nil },
-                set: { if !$0 { deleteCandidate = nil } }
-            ),
-            presenting: deleteCandidate
-        ) { entry in
-            Button("삭제", role: .destructive) { store.delete(entry.id) }
-            Button("취소", role: .cancel) {}
-        } message: { _ in
-            Text("작성한 내용이 함께 삭제되며 되돌릴 수 없어요.")
-        }
-        .alert(
-            "‘\(folderDeleteCandidate?.name ?? "")’ 폴더를 삭제할까요?",
-            isPresented: Binding(
-                get: { folderDeleteCandidate != nil },
-                set: { if !$0 { folderDeleteCandidate = nil } }
-            ),
-            presenting: folderDeleteCandidate
-        ) { folder in
-            Button("삭제", role: .destructive) { store.deleteFolder(folder.id) }
-            Button("취소", role: .cancel) {}
-        } message: { _ in
-            Text("폴더 안의 하위 폴더와 저널이 함께 삭제되며 되돌릴 수 없어요.")
         }
     }
 

@@ -88,38 +88,6 @@ public actor CompletionEngine {
             promptCache: promptCache)
     }
 
-    /// A+B 프리픽스 KV 프리웜 (M6, PLAN §12-1) — 이해 경로의 마지막 단계.
-    ///
-    /// 지식 세대가 바뀌면 다음 예측의 프롬프트는 헤더 첫 글자부터 어긋나 LCP가
-    /// 죽는다 — 그 콜드 프리필을 예측 시점이 아니라 **유휴의 패스 직후**로
-    /// 옮긴다 ("백그라운드가 준비하고 예측은 조립만"의 KV 레벨 구현).
-    ///
-    /// 구현은 1토큰 생성 — 별도 프리필 API 대신 예측과 **완전히 같은 경로**
-    /// (`runGeneration`: 클램프·begin/commit/abandon)를 태워, 프리웜된 캐시가
-    /// 다음 예측의 LCP와 어긋날 방법을 없앤다. 프롬프트가 이미 따뜻하면
-    /// LCP가 전부라 1토큰 프리필로 끝난다 — 무조건 호출해도 싸다.
-    ///
-    /// 규율: continuation + KV 켜짐에서만 의미가 있고(instruct는 재사용 없음,
-    /// PLAN §12 M5 범위), **모델이 이미 상주할 때만** 돈다 — 백그라운드 프리웜이
-    /// 대용량 모델 로드를 유발해서는 안 된다 (인덱서·폴더 명명과 같은 규칙).
-    public func prewarm(
-        prompt: AssembledPrompt,
-        parameters: CompletionParameters
-    ) async {
-        guard case .continuation(let text) = prompt,
-            parameters.kvCacheEnabled,
-            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return }
-        guard let container, loadedModelID == parameters.modelID else { return }
-
-        var warmParameters = parameters
-        warmParameters.maxTokens = 1
-        // 실패는 버린다 — 프리웜은 최적화일 뿐, 다음 예측이 콜드로 가면 그만이다.
-        _ = try? await Self.runGeneration(
-            in: container, prompt: prompt, parameters: warmParameters,
-            promptCache: promptCache)
-    }
-
     /// 구 API 호환(MINTBench 단발 측정 등) — 조립기 없이 prefix만으로 생성.
     /// 앱 경로는 컨트롤러가 조립기를 거쳐 `complete(prompt:)`를 쓴다.
     public func complete(

@@ -31,11 +31,6 @@ public final class BackgroundIndexer: ObservableObject {
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
     /// 후보가 어느 문서 것인지 — 문서 전환 시 낡은 후보를 보여주지 않기 위한 짝.
     @Published public private(set) var candidatesEntryID: UUID?
-    /// 패스 **완주** 신호 (MainActor) — 이해 경로의 마지막 단계인 A+B KV 프리웜을
-    /// 여기 배선한다 (PLAN §12-1, ContentView → CompletionController.prewarmPrefix).
-    /// 선점·게이트로 중단된 패스에는 쏘지 않는다 — 타이핑이 재개됐다는 뜻이므로
-    /// 프리웜 GPU를 태울 자리가 아니다.
-    public var onPassDidComplete: (() -> Void)?
 
     /// 빠른 패스 유휴 대기 — 예측 디바운스(수백 ms)와 별도 타이머 (PLAN §9).
     nonisolated static let fastPassIdle: Duration = .seconds(5)
@@ -88,6 +83,10 @@ public final class BackgroundIndexer: ObservableObject {
 
         fastTimer?.cancel()
         deepTimer?.cancel()
+        // 자동완성이 꺼져 있으면 타이머조차 감지 않는다 — 어차피 패스가 거부되고,
+        // 키 입력 경로에 태스크 생성 비용을 남길 이유가 없다 (랙 진단의 대조군:
+        // 스위치를 끄면 백그라운드 이해 관련 작업이 문자 그대로 0이어야 한다).
+        guard settings.autocompleteEnabled else { return }
         fastTimer = Task { [weak self] in
             try? await Task.sleep(for: Self.fastPassIdle)
             guard !Task.isCancelled else { return }
@@ -102,11 +101,23 @@ public final class BackgroundIndexer: ObservableObject {
 
     // MARK: - 패스 실행
 
-    private func startPass(deep: Bool) {
+    /// 사용자 명시 요청 — 바이블·타임라인 패널의 "지금 읽기" 버튼 (M6-8).
+    ///
+    /// 자동완성 스위치와 **무관하게** 깊은 패스를 1회 돈다: 버튼을 눌렀다는
+    /// 것 자체가 "지금 이해를 만들어 달라"는 동의라, 자동 게이트(모델 로드
+    /// 방지)를 우회한다. 열·저전력 게이트는 그대로 존중한다 (CLAUDE.md §4).
+    public func requestPass() {
+        // 자동 패스가 이미 돌고 있으면 그걸로 충분하다 — 중복 금지.
+        guard passTask == nil else { return }
+        startPass(deep: true, userInitiated: true)
+    }
+
+    private func startPass(deep: Bool, userInitiated: Bool = false) {
         guard passTask == nil else { return }  // 이미 도는 중 — 중복 금지
         // 자동완성이 꺼져 있으면 지식도 만들지 않는다 — 백그라운드 이해가
         // 대용량 모델 다운로드를 유발해서는 안 된다 (폴더 명명과 같은 규칙).
-        guard settings.autocompleteEnabled else { return }
+        // 단 사용자 명시 요청(requestPass)은 예외 — 누른 것이 곧 동의다.
+        guard settings.autocompleteEnabled || userInitiated else { return }
         guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
         let body = entry.body
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -142,7 +153,7 @@ public final class BackgroundIndexer: ObservableObject {
                 self.characterCandidates = candidates
                 self.candidatesEntryID = entryID
             }
-            let completed = await Self.runPass(
+            await Self.runPass(
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
                 liveEntryIDs: liveEntryIDs, characters: characters
@@ -152,7 +163,6 @@ public final class BackgroundIndexer: ObservableObject {
             await MainActor.run {
                 self.passTask = nil
                 self.isIndexing = false
-                if completed { self.onPassDidComplete?() }
             }
         }
     }
@@ -232,8 +242,6 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 한 번의 이해 패스 — 값 입력만 받아 detached에서 돈다.
-    /// 반환값은 **완주 여부** — 선점·게이트로 중단되면 false. 완주 시에만
-    /// 호출부가 KV 프리웜을 쏜다 (PLAN §12-1).
     nonisolated private static func runPass(
         deep: Bool,
         entryID: UUID,
@@ -243,11 +251,11 @@ public final class BackgroundIndexer: ObservableObject {
         liveEntryIDs: Set<UUID>,
         characters: [CharacterCard],
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void
-    ) async -> Bool {
-        guard gateAllows(deep: deep) else { return false }
+    ) async {
+        guard gateAllows(deep: deep) else { return }
 
         let outline = DocumentOutline.parse(body)
-        guard !outline.scenes.isEmpty else { return false }
+        guard !outline.scenes.isEmpty else { return }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
         // 대화 귀속 (PLAN §7·§6.4) — 결정적·LLM 없음이라 패스마다 재계산.
@@ -259,7 +267,7 @@ public final class BackgroundIndexer: ObservableObject {
         for scene in outline.scenes {
             guard callBudget > 0 else { break }
             guard sidecar.sceneSummaries[scene.contentHash] == nil else { continue }
-            guard !Task.isCancelled, gateAllows(deep: deep) else { return false }
+            guard !Task.isCancelled, gateAllows(deep: deep) else { return }
 
             let sceneText = String(
                 text.substring(
@@ -294,7 +302,7 @@ public final class BackgroundIndexer: ObservableObject {
         if deep, !Task.isCancelled {
             relinkParticipants(sidecar: &sidecar, characters: characters)
             for scene in outline.scenes {
-                guard !Task.isCancelled, gateAllows(deep: true) else { return false }
+                guard !Task.isCancelled, gateAllows(deep: true) else { return }
                 // 키 존재 = 추출 완료(빈 배열이면 "사건 없음") — 메모 적중은 건너뛴다.
                 guard sidecar.events[scene.contentHash] == nil else { continue }
                 let sceneText = String(
@@ -321,13 +329,12 @@ public final class BackgroundIndexer: ObservableObject {
             pruneOrphans(keeping: liveEntryIDs)
         }
 
-        guard !Task.isCancelled else { return false }
+        guard !Task.isCancelled else { return }
         sidecar.save(pruningTo: Set(outline.scenes.map(\.contentHash)))
         publish(
                 makeSnapshot(
                     entryID: entryID, outline: outline, sidecar: sidecar,
                     utterances: utterances))
-        return true
     }
 
     /// 장·작품 요약 상향 전파 — 하위 요약이 전부 준비된 노드만, 결합 해시가

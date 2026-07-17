@@ -16,6 +16,8 @@ struct KnowledgeTimelineView: View {
     @ObservedObject var indexer: BackgroundIndexer
     @ObservedObject var store: EntryStore
     let theme: MintTheme
+    /// 사이드바 섹션에 임베드됐는가 — 고정 폭·높이 상한을 풀고 공간을 채운다.
+    var embedded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -37,13 +39,14 @@ struct KnowledgeTimelineView: View {
                     }
                     .padding(.vertical, 2)
                 }
-                .frame(maxHeight: 380)
+                .frame(maxHeight: embedded ? .infinity : 380)
             } else {
                 placeholder
+                if embedded { Spacer(minLength: 0) }
             }
         }
         .padding(14)
-        .frame(width: 460)
+        .frame(width: embedded ? nil : 460)
     }
 
     private var header: some View {
@@ -60,11 +63,8 @@ struct KnowledgeTimelineView: View {
                     .font(MintFonts.monoUI(10))
                     .foregroundStyle(theme.ink3C)
             }
-            if indexer.isIndexing {
-                Text("읽는 중")
-                    .font(MintFonts.uiFont(10))
-                    .foregroundStyle(theme.ink3C)
-            }
+            // 수동 이해 트리거 (M6-8) — 유휴 자동만이 아니라 원할 때 바로.
+            ManualIndexButton(indexer: indexer, theme: theme)
         }
     }
 

@@ -15,6 +15,8 @@ struct CharacterBibleView: View {
     let theme: MintTheme
     /// 인물 감지 깔때기 + 자동 이해 열람 (M6) — nil이면 수동 카드만 (프리뷰 등).
     var indexer: BackgroundIndexer?
+    /// 사이드바 섹션에 임베드됐는가 — 고정 폭·높이 상한을 풀고 공간을 채운다.
+    var embedded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -26,6 +28,11 @@ struct CharacterBibleView: View {
                     .font(MintFonts.uiFont(13, .semibold))
                     .foregroundStyle(theme.inkC)
                 Spacer()
+                // 수동 이해 트리거 (M6-8) — 자동(유휴)만이 아니라 사용자가
+                // 원할 때도 이해를 만든다. 자동완성이 꺼져 있어도 동작한다.
+                if let indexer {
+                    ManualIndexButton(indexer: indexer, theme: theme)
+                }
             }
 
             // 인물 후보 검토 — 비모달, 감지된 후보 전부 (PLAN §7 깔때기 2단).
@@ -63,7 +70,7 @@ struct CharacterBibleView: View {
                     }
                 }
             }
-            .frame(maxHeight: 320)
+            .frame(maxHeight: embedded ? .infinity : 320)
 
             Button {
                 addCard()
@@ -73,7 +80,7 @@ struct CharacterBibleView: View {
             }
         }
         .padding(14)
-        .frame(width: 400)
+        .frame(width: embedded ? nil : 400)
     }
 
     private var cards: [CharacterCard] {
@@ -144,6 +151,31 @@ struct CharacterBibleView: View {
     private func remove(_ card: CharacterCard) {
         guard let id = store.activeEntry?.id else { return }
         store.removeCharacter(card.id, from: id)
+    }
+}
+
+/// 수동 이해 트리거 (M6-8) — "지금 읽기". 진행 중이면 상태만 보여준다.
+/// 바이블·타임라인 패널이 공용한다.
+struct ManualIndexButton: View {
+    @ObservedObject var indexer: BackgroundIndexer
+    let theme: MintTheme
+
+    var body: some View {
+        if indexer.isIndexing {
+            Text("읽는 중…")
+                .font(MintFonts.uiFont(10.5))
+                .foregroundStyle(theme.ink3C)
+        } else {
+            Button {
+                indexer.requestPass()
+            } label: {
+                Label("지금 읽기", systemImage: "sparkles")
+                    .font(MintFonts.uiFont(10.5, .medium))
+                    .foregroundStyle(theme.novelC)
+            }
+            .buttonStyle(.plain)
+            .help("본문을 지금 읽어 요약·사건·인물 이해를 갱신해요 (자동완성이 꺼져 있어도 동작)")
+        }
     }
 }
 

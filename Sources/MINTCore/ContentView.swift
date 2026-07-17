@@ -40,20 +40,8 @@ public struct ContentView: View {
                 // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
                 if let indexer {
                     indexer.attach(store: store)
-                    // 편집과 전환이 같은 훅으로 온다 — id가 바뀌었을 때만 예측
-                    // 창을 리셋한다 (남의 문서 본문으로 프리웜하지 않기 위해).
-                    var lastEntryID = store.activeID
-                    store.documentDidChange = { [weak indexer, weak completion] id in
-                        if id != lastEntryID {
-                            lastEntryID = id
-                            completion?.noteDocumentSwitch()
-                        }
+                    store.documentDidChange = { [weak indexer] id in
                         indexer?.noteChange(entryID: id)
-                    }
-                    // 이해 경로의 마지막 단계 — 패스가 만든 새 A+B를 백그라운드에서
-                    // 프리웜해, 지식 세대 교체 직후의 첫 예측도 웜으로 만든다 (PLAN §12-1).
-                    indexer.onPassDidComplete = { [weak completion] in
-                        completion?.prewarmPrefix()
                     }
                     completion.knowledgeProvider = { [weak indexer, weak store] in
                         guard let snapshot = indexer?.snapshot,
@@ -96,8 +84,11 @@ private struct MainSurface: View {
             // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
             HSplitView {
                 if sidebarVisible {
-                    SidebarView(store: store, completion: completion, theme: theme)
-                        .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
+                    SidebarView(
+                        store: store, completion: completion, theme: theme,
+                        indexer: indexer
+                    )
+                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
                 }
                 EditorPane(
                     store: store, completion: completion,
@@ -208,18 +199,20 @@ struct EditorToolbar: View {
     @State private var helpOpen = false
     @State private var dateOpen = false
     @State private var dateHovered = false
-    @State private var bibleOpen = false
-    @State private var timelineOpen = false
     @State private var longParagraphOpen = false
+    /// 사이드바 섹션 (M6-8) — 배지 클릭이 팝오버 대신 사이드바 패널을 연다.
+    @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
         HStack(spacing: 12) {
             sidebarToggle
             dateButton
             // 소설 저널이면 날짜 옆에 종류 배지 = 스토리 바이블 입구 (PLAN §7).
+            // M6-8: 팝오버 → 사이드바 패널 승격. 배지는 바이블 섹션을 연다.
             if store.activeEntry?.resolvedKind == .novel {
                 Button {
-                    bibleOpen.toggle()
+                    sidebarVisible = true
+                    sidebarSection = SidebarSection.bible.rawValue
                 } label: {
                     HStack(spacing: 4) {
                         Image(systemName: "book.closed.fill")
@@ -243,32 +236,7 @@ struct EditorToolbar: View {
                     .contentShape(Capsule())
                 }
                 .buttonStyle(.plain)
-                .help("스토리 바이블 — 장르·인물 카드")
-                .popover(isPresented: $bibleOpen, arrowEdge: .bottom) {
-                    CharacterBibleView(store: store, theme: theme, indexer: indexer)
-                }
-
-                // 이해 타임라인 입구 (M6-5) — 백그라운드가 문서를 어떻게 쪼갰고
-                // 무엇을 사건으로 봤는지. 지식은 사용자가 볼 수 있어야 한다
-                // (CLAUDE.md §1-5).
-                if let indexer {
-                    Button {
-                        timelineOpen.toggle()
-                    } label: {
-                        Image(systemName: "arrow.triangle.branch")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundStyle(theme.novelC)
-                            .padding(.vertical, 3)
-                            .padding(.horizontal, 6)
-                            .background(Capsule().fill(theme.novelBgC))
-                            .contentShape(Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .help("이해 타임라인 — 장면 분할과 사건")
-                    .popover(isPresented: $timelineOpen, arrowEdge: .bottom) {
-                        KnowledgeTimelineView(indexer: indexer, store: store, theme: theme)
-                    }
-                }
+                .help("스토리 바이블 — 사이드바에서 장르·인물·자동 이해")
             }
 
             // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
