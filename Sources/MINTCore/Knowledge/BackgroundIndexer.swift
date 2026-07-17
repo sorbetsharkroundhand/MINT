@@ -89,11 +89,18 @@ public final class BackgroundIndexer: ObservableObject {
         passTask = nil
         isIndexing = false
 
+        // 저장된 지식의 웜 로드 — 앱 시작·문서 전환 직후 사이드카를 읽어 즉시
+        // 발행한다 (LLM 없음). 이게 없으면 껐다 켠 뒤 패스가 돌 때까지(자동완성
+        // 꺼짐이면 영영) 타임라인·카드가 비어 "지식이 사라진" 것처럼 보인다 —
+        // 디스크엔 있는데 UI가 못 본 것. 스냅샷 entryID 비교라 타이핑 중엔 O(1).
+        hydrateIfNeeded(entryID: entryID)
+
         fastTimer?.cancel()
         deepTimer?.cancel()
         // 자동완성이 꺼져 있으면 타이머조차 감지 않는다 — 어차피 패스가 거부되고,
         // 키 입력 경로에 태스크 생성 비용을 남길 이유가 없다 (랙 진단의 대조군:
         // 스위치를 끄면 백그라운드 이해 관련 작업이 문자 그대로 0이어야 한다).
+        // (웜 로드는 위에서 이미 했다 — 읽기 전용이라 스위치와 무관.)
         guard settings.autocompleteEnabled else { return }
         fastTimer = Task { [weak self] in
             try? await Task.sleep(for: Self.fastPassIdle)
@@ -104,6 +111,41 @@ public final class BackgroundIndexer: ObservableObject {
             try? await Task.sleep(for: Self.deepPassIdle)
             guard !Task.isCancelled else { return }
             self?.startPass(deep: true)
+        }
+    }
+
+    // MARK: - 웜 로드 (저장된 지식 → 스냅샷, LLM 없음)
+
+    private var hydrateTask: Task<Void, Never>?
+
+    /// 활성 문서의 스냅샷이 없으면 사이드카에서 만든다 — 결정적·읽기 전용이라
+    /// 게이트(열·저전력·자동완성) 대상이 아니다. 사이드카가 비어 있어도
+    /// 발행한다: 씬 분할·"아직 안 읽음" 상태가 즉시 보이는 것 자체가 가치다.
+    private func hydrateIfNeeded(entryID: UUID) {
+        guard snapshot?.entryID != entryID else { return }  // 이미 있음 — O(1) 탈출
+        guard let entry = store?.activeEntry, entry.id == entryID,
+            entry.resolvedKind == .novel
+        else { return }
+        let body = entry.body
+        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let characters = entry.characters ?? []
+
+        hydrateTask?.cancel()
+        // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
+        hydrateTask = Task.detached(priority: .utility) { [weak self] in
+            let outline = DocumentOutline.parse(body)
+            guard !outline.scenes.isEmpty, !Task.isCancelled else { return }
+            let sidecar = KnowledgeSidecar.load(entryID: entryID)
+            let utterances = DialogueAttribution.utterances(in: body, cards: characters)
+            let snapshot = Self.makeSnapshot(
+                entryID: entryID, outline: outline, sidecar: sidecar,
+                utterances: utterances)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
+                guard self.snapshot?.entryID != entryID else { return }
+                self.snapshot = snapshot
+            }
         }
     }
 
