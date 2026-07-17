@@ -58,6 +58,7 @@ struct CharacterBibleView: View {
                             card: binding(for: card),
                             theme: theme,
                             understanding: understanding(of: card),
+                            chronicle: chronicle(of: card),
                             onDelete: { remove(card) }
                         )
                     }
@@ -112,6 +113,27 @@ struct CharacterBibleView: View {
             if !speech.isEmpty { lines.append("말투: \(speech.joined(separator: " · "))") }
         }
         return lines
+    }
+
+    /// 인물 연대기 (M7, PLAN §14) — 그 인물이 겪은 사건과 상태 변화를 담화
+    /// 순서로 편다. StateDelta가 append-only인 덕에 이 UI가 "공짜로" 나온다
+    /// (PLAN §7 — 상태를 덮어썼다면 역사가 없어 연대기도 없다).
+    private func chronicle(of card: CharacterCard) -> [String] {
+        guard let snapshot = indexer?.snapshot,
+            snapshot.entryID == store.activeID,
+            let offsets = snapshot.eventIndexByCharacter[card.id]
+        else { return [] }
+        return offsets.map { offset in
+            let event = snapshot.events[offset]
+            var line = event.summary
+            let changes = event.deltas
+                .filter { $0.characterID == card.id }
+                .map { "\($0.field.rawValue) \($0.value)" }
+            if !changes.isEmpty {
+                line += " → \(changes.joined(separator: " · "))"
+            }
+            return line
+        }
     }
 
     private var genreBinding: Binding<String> {
@@ -227,14 +249,18 @@ private struct CandidateReviewList: View {
     }
 }
 
-/// 인물 카드 한 장 — 이름·별칭·소개(편집 가능) + 자동 이해(열람 전용) + 잠금.
+/// 인물 카드 한 장 — 이름·별칭·소개(편집 가능) + 자동 이해(열람 전용) + 잠금 +
+/// 연대기(M7 — 사건·상태 변화 담화 순서 열람).
 private struct CharacterCardRow: View {
     @Binding var card: CharacterCard
     let theme: MintTheme
     /// 백그라운드가 이해한 것 — 읽기 전용 표시 (빈 배열이면 숨김).
     let understanding: [String]
+    /// 인물 연대기 — 사건 요약(+델타) 담화 순서 (빈 배열이면 숨김).
+    let chronicle: [String]
     let onDelete: () -> Void
     @State private var deleteHovered = false
+    @State private var chronicleExpanded = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -291,6 +317,39 @@ private struct CharacterCardRow: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.top, 2)
+            }
+            // 연대기 (M7) — 접힌 채 시작, 사건 수만 보인다 (조용한 UI).
+            if !chronicle.isEmpty {
+                Button {
+                    chronicleExpanded.toggle()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: chronicleExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("연대기 · 사건 \(chronicle.count)")
+                            .font(MintFonts.uiFont(10.5, .medium))
+                    }
+                    .foregroundStyle(theme.ink3C)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                if chronicleExpanded {
+                    VStack(alignment: .leading, spacing: 3) {
+                        ForEach(Array(chronicle.enumerated()), id: \.offset) { index, line in
+                            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                                Text("\(index + 1)")
+                                    .font(MintFonts.monoUI(9))
+                                    .foregroundStyle(theme.ink3C)
+                                Text(line)
+                                    .font(MintFonts.uiFont(10.5))
+                                    .foregroundStyle(theme.ink2C)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 4)
+                }
             }
         }
         .padding(8)

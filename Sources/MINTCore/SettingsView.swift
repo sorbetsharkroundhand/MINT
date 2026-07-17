@@ -6,6 +6,8 @@ import SwiftUI
 /// 변경은 **다음 제안부터** 적용되며, 새 모델은 첫 사용 시 다운로드된다.
 public struct SettingsView: View {
     @ObservedObject private var settings: CompletionSettings
+    /// 실사용 품질 지표 집계 (M7) — .task에서 백그라운드 로드.
+    @State private var metrics = AcceptanceMetrics.Summary()
 
     public init(settings: CompletionSettings = .shared) {
         self._settings = ObservedObject(wrappedValue: settings)
@@ -102,10 +104,45 @@ public struct SettingsView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+
+            // 실사용 품질 지표 (M7, PLAN §13) — 로컬 파일에만, 원격 전송 절대 금지.
+            Section("품질 지표 (로컬 전용)") {
+                if metrics.shown == 0 {
+                    Text("아직 기록이 없어요 — 제안이 뜨고 수락/거절될 때마다 이 Mac에만 기록돼요.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    LabeledContent("제안 노출", value: "\(metrics.shown)회")
+                    LabeledContent(
+                        "전체 수락 (Tab)",
+                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
+                    LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
+                    ForEach(metrics.byMode.keys.sorted(), id: \.self) { mode in
+                        let stats = metrics.byMode[mode] ?? (0, 0)
+                        LabeledContent(
+                            "· \(mode)",
+                            value: "노출 \(stats.shown) · 수락 \(stats.accepted)")
+                        .font(.caption)
+                    }
+                }
+                Button("지표 삭제") {
+                    AcceptanceMetrics.reset()
+                    metrics = .init()
+                }
+                Text("어떤 지표도 기기 밖으로 나가지 않아요 (~/Documents/MINT/metrics.jsonl).")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
         .formStyle(.grouped)
         .frame(width: 440)
         .fixedSize(horizontal: false, vertical: true)
+        .task {
+            // 파일 집계는 백그라운드에서 — 설정 창이 뜨는 프레임을 안 막는다.
+            metrics = await Task.detached(priority: .utility) {
+                AcceptanceMetrics.summarize()
+            }.value
+        }
     }
 }
 

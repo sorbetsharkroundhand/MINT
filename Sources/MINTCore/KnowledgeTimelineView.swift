@@ -23,6 +23,34 @@ struct KnowledgeTimelineView: View {
         VStack(alignment: .leading, spacing: 10) {
             header
             Divider()
+            // 일관성 경고 (M7) — 비침습: 본문엔 아무것도 긋지 않고 여기서만.
+            // 단정이 아니라 "확인해 보세요"의 어조 (회상·의도적 전환일 수 있다).
+            if indexer.snapshot?.entryID == store.activeID, !indexer.warnings.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(indexer.warnings) { warning in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle")
+                                .font(.system(size: 10))
+                                .foregroundStyle(theme.novelC)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(warning.kind.rawValue)
+                                    .font(MintFonts.uiFont(10.5, .semibold))
+                                    .foregroundStyle(theme.inkC)
+                                Text(warning.message)
+                                    .font(MintFonts.uiFont(10.5))
+                                    .foregroundStyle(theme.ink2C)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .padding(6)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(theme.novelBgC))
+                    }
+                }
+            }
+
             if let snapshot = liveSnapshot {
                 let rows = TimelineRow.rows(from: snapshot, body: store.activeEntry?.body ?? "")
                 // 델타의 characterID → 이름 — 사용자에게 UUID를 보여줄 수는 없다.

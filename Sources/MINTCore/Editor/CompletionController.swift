@@ -103,6 +103,12 @@ public final class CompletionController: ObservableObject {
     /// (docs/m6-scene-split.md §5: 씬이 수십 개면 쓰고 있는 장부터 이해해야
     /// 한다). Int 하나 저장 — 키 입력 경로 비용 없음.
     public private(set) var lastCaretLocation: Int?
+    /// 현재 고스트가 만들어진 모드 (fast/smart/story[-dialogue]) — 수락률
+    /// 로그의 축 (M7, PLAN §13). 제안과 함께 세팅·소멸한다.
+    private var currentSuggestionMode: String?
+    /// 수락이 곧 invalidate를 부르므로, 그 invalidate가 "거절"로 기록되지
+    /// 않게 하는 1회용 플래그.
+    private var suppressDismissLog = false
 
     // MARK: - 입력 지연 계측 (로컬 전용 진단 — PLAN §13 온라인 지표)
 
@@ -296,6 +302,8 @@ public final class CompletionController: ObservableObject {
     /// `Tab` 수락 — 뷰가 본문에 삽입할 텍스트를 반환. 제안이 없으면 nil.
     public func acceptSuggestion() -> String? {
         guard let text = suggestion, !text.isEmpty else { return nil }
+        AcceptanceMetrics.log(.acceptedFull, mode: currentSuggestionMode ?? "?")
+        suppressDismissLog = true
         invalidate()
         return text
     }
@@ -318,6 +326,7 @@ public final class CompletionController: ObservableObject {
             rest = rest.dropFirst()
         }
         guard !word.isEmpty else { return nil }
+        AcceptanceMetrics.log(.acceptedWord, mode: currentSuggestionMode ?? "?")
 
         let remainder = String(rest)
         retainSuggestionOnNextEdit = true
@@ -378,9 +387,15 @@ public final class CompletionController: ObservableObject {
         suggestionAnchor = nil
         isPredicting = false
         if suggestion != nil {
+            // 수락 경로가 아니면 이 소멸은 거절이다 (편집·Esc·커서 이동).
+            if !suppressDismissLog {
+                AcceptanceMetrics.log(.dismissed, mode: currentSuggestionMode ?? "?")
+            }
             suggestion = nil
             suggestionDidChange?(nil)
         }
+        suppressDismissLog = false
+        currentSuggestionMode = nil
     }
 
     private func runCompletion(
@@ -394,10 +409,11 @@ public final class CompletionController: ObservableObject {
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let document = documentContextProvider?()
+        let knowledge = knowledgeProvider?()
         let prompt = ContextAssembler.assemble(
             prefix: prefix,
             document: document,
-            knowledge: knowledgeProvider?(),
+            knowledge: knowledge,
             // C 창이 본문 어디서 시작하는지 — 이 앞에서 끝난 씬만 B로 들어간다.
             prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
             style: parameters.promptStyle
@@ -408,6 +424,12 @@ public final class CompletionController: ObservableObject {
         if document?.kind == .novel, ContextAssembler.isInsideUtterance(prefix) {
             parameters.stopAtUtteranceEnd = true
         }
+        // 수락률 로그의 모드 축 (M7, PLAN §13·§10 모드 표).
+        let mode: String = {
+            guard document?.kind == .novel else { return "fast" }
+            let base = knowledge != nil ? "story" : "smart"
+            return parameters.stopAtUtteranceEnd ? base + "-dialogue" : base
+        }()
         do {
             let completion = try await engine.complete(prompt: prompt, parameters: parameters) {
                 fraction in
@@ -421,6 +443,10 @@ public final class CompletionController: ObservableObject {
             guard !completion.text.isEmpty else { return }
             suggestion = completion.text
             suggestionAnchor = caretLocation
+            currentSuggestionMode = mode
+            AcceptanceMetrics.log(
+                .shown, mode: mode,
+                latencyMs: Int(completion.totalTime * 1000))
             suggestionDidChange?(completion.text)
         } catch is CancellationError {
             // 새 입력으로 취소됨 — 정상 흐름.

@@ -11,6 +11,22 @@ enum SidebarSection: String {
     case timeline  // 이해 타임라인 (PLAN §6.3·§8)
 }
 
+/// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
+private struct WarningDot: View {
+    @ObservedObject var indexer: BackgroundIndexer
+    @ObservedObject var store: EntryStore
+    let theme: MintTheme
+
+    var body: some View {
+        if indexer.snapshot?.entryID == store.activeID, !indexer.warnings.isEmpty {
+            Circle()
+                .fill(theme.novelC)
+                .frame(width: 5, height: 5)
+                .offset(x: -3, y: 3)
+        }
+    }
+}
+
 /// 섹션이 보여줄 내용이 없을 때의 안내 문구 한 장.
 private struct SidebarSectionHint: View {
     let theme: MintTheme
@@ -139,7 +155,9 @@ struct SidebarView: View {
         .padding(.vertical, 6)
     }
 
-    private func sectionTab(_ target: SidebarSection, icon: String, help: String) -> some View {
+    private func sectionTab(
+        _ target: SidebarSection, icon: String, help: String
+    ) -> some View {
         Button {
             sectionRaw = target.rawValue
         } label: {
@@ -151,6 +169,13 @@ struct SidebarView: View {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(section == target ? theme.novelBgC : .clear)
                 )
+                .overlay(alignment: .topTrailing) {
+                    // 일관성 경고(M7) 점 — 비침습 배지 (CLAUDE.md §3). 관찰
+                    // 서브뷰라 패스가 끝나는 즉시 나타난다.
+                    if target == .timeline, let indexer {
+                        WarningDot(indexer: indexer, store: store, theme: theme)
+                    }
+                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)

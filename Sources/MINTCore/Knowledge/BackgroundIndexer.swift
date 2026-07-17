@@ -31,6 +31,9 @@ public final class BackgroundIndexer: ObservableObject {
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
     /// 후보가 어느 문서 것인지 — 문서 전환 시 낡은 후보를 보여주지 않기 위한 짝.
     @Published public private(set) var candidatesEntryID: UUID?
+    /// 일관성 경고 (M7) — 스냅샷과 같은 주기로 갱신. **비침습**: 사이드바
+    /// 배지·목록만, 본문엔 아무것도 긋지 않는다 (ConsistencyChecker 참조).
+    @Published public private(set) var warnings: [ConsistencyWarning] = []
 
     /// 빠른 패스 유휴 대기 — 예측 디바운스(수백 ms)와 별도 타이머 (PLAN §9).
     nonisolated static let fastPassIdle: Duration = .seconds(5)
@@ -140,11 +143,14 @@ public final class BackgroundIndexer: ObservableObject {
             let snapshot = Self.makeSnapshot(
                 entryID: entryID, outline: outline, sidecar: sidecar,
                 utterances: utterances)
+            let warnings = ConsistencyChecker.check(
+                snapshot: snapshot, characters: characters)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
                 guard self.snapshot?.entryID != entryID else { return }
                 self.snapshot = snapshot
+                self.warnings = warnings
             }
         }
     }
@@ -210,7 +216,14 @@ public final class BackgroundIndexer: ObservableObject {
                 liveEntryIDs: liveEntryIDs, characters: characters,
                 caretUTF16: caret
             ) { snapshot in
-                Task { @MainActor in self.snapshot = snapshot }
+                // 일관성 검사는 스냅샷과 같은 주기 — 백그라운드에서 계산하고
+                // 결과만 메인으로 (렌더 경로 재계산 금지, docs/editor-perf.md 4차).
+                let warnings = ConsistencyChecker.check(
+                    snapshot: snapshot, characters: characters)
+                Task { @MainActor in
+                    self.snapshot = snapshot
+                    self.warnings = warnings
+                }
             }
             await MainActor.run {
                 self.passTask = nil
