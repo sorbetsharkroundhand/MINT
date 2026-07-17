@@ -18,9 +18,8 @@ public struct StoryEvent: Codable, Equatable, Sendable {
     public var summary: String
     /// 1–5 — B 블록 예산이 모자랄 때 버리는 순서를 정한다 (PLAN §11).
     public var importance: Int
-    /// 상태 효과 (PLAN §6.3 `상태 효과 [StateDelta 참조]`) — **5b에서 채운다**.
-    /// 지금 필드만 두는 이유: 5b에 다시 스키마 버전을 올리면 그때 또 전 요약을
-    /// 폐기·재생성해야 한다 (결정 5의 비용을 두 번 내지 않는다).
+    /// 상태 효과 (PLAN §6.3 `상태 효과 [StateDelta 참조]`) — 사건 추출이 같은
+    /// 줄의 `상태:` 필드에서 함께 채운다 (5b, docs/m6-events.md).
     public var deltas: [StateDelta]
     public var updatedAt: Date
 
@@ -38,8 +37,8 @@ public struct StoryEvent: Codable, Equatable, Sendable {
 }
 
 /// 인물 상태 변화 한 조각 (PLAN §6.2) — 상태는 덮어쓰지 않고 append하며,
-/// `state_at(pos)`가 pos 이하 델타를 접어 그 시점 상태를 만든다.
-/// **5b 단계에서 추출을 붙인다** — 지금은 스키마 자리만 잡는다.
+/// `state_at(pos)`(`KnowledgeSnapshot.stateAt`)가 pos 이하 델타를 접어
+/// 그 시점 상태를 만든다.
 public struct StateDelta: Codable, Equatable, Sendable {
     /// 닫힌 필드 집합 — 소형 모델의 자유 서술을 막는 장치 (docs/m6-events.md 5b).
     public enum Field: String, Codable, Equatable, Sendable, CaseIterable {
@@ -79,6 +78,11 @@ public enum EventParser {
     /// 씬 하나에서 받아들이는 사건 수 상한 — 모델이 문장마다 사건을 만들면
     /// B 블록 예산이 한 씬에 잠식된다 (품질 > 적극성, CLAUDE.md §1-2).
     static let maxEventsPerScene = 3
+    /// 델타 값 상한 (PLAN §6.2 `value ≤40자`).
+    static let maxDeltaValueCharacters = 40
+    /// 사건 하나가 만드는 델타 수 상한 — 모델이 문장마다 상태를 갱신하면
+    /// 진짜 변화가 소음에 묻힌다 (사건 상한과 같은 품질 > 적극성 규율).
+    static let maxDeltasPerEvent = 4
 
     /// 인물 이름·별칭 → 카드 id. 조립기와 같은 별칭 규격(쉼표 구분)을 쓴다.
     public static func nameIndex(_ cards: [CharacterCard]) -> [String: UUID] {
@@ -127,17 +131,23 @@ public enum EventParser {
 
             var participants: [UUID] = []
             var importance = 3  // 표기가 없거나 깨졌으면 중간값
+            var deltas: [StateDelta] = []
             for field in fields.dropFirst() {
                 if let value = value(of: field, keys: ["참여", "인물"]) {
                     participants = resolve(value, nameIndex: nameIndex)
                 } else if let value = value(of: field, keys: ["중요도", "중요"]) {
                     importance = min(5, max(1, Int(value.filter(\.isNumber)) ?? 3))
+                } else if let value = value(of: field, keys: ["상태", "상태변화"]) {
+                    deltas = parseDeltas(value, sceneHash: sceneHash, nameIndex: nameIndex)
                 }
             }
+            // 상태가 바뀐 인물은 그 사건의 참여자다 — 델타만 있고 참여 표기가
+            // 빠진 사건도 역색인(§6.3)에 걸려야 `state_at`이 그 인물을 찾는다.
+            let holders = deltas.map(\.characterID).filter { !participants.contains($0) }
             events.append(
                 StoryEvent(
-                    sceneHash: sceneHash, participants: participants,
-                    summary: summary, importance: importance))
+                    sceneHash: sceneHash, participants: participants + holders,
+                    summary: summary, importance: importance, deltas: deltas))
         }
         return events
     }
@@ -163,6 +173,49 @@ public enum EventParser {
         return String(after.drop(while: { $0 == " " }))
     }
 
+    /// `상태:` 필드 원문 → 검증된 델타들 (5b, docs/m6-events.md).
+    ///
+    /// 기대 형식 — `;` 구분 조각들, 조각 하나가 델타 하나:
+    /// ```
+    /// 상태: 서연 위치=병원 앞; 민준 감정=불안
+    /// ```
+    /// 사건과 같은 규율(파싱은 관대, 검증은 엄격)로:
+    /// - 이름은 등록 카드 매칭 실패 시 조각째 버린다 (환각 인물 차단).
+    /// - 필드는 **닫힌 집합**(위치·감정·관계·목표·생사) 밖이면 버린다 —
+    ///   소형 모델의 자유 서술("서연 기분=…")이 상태 스키마를 오염시키지 않는다.
+    /// - 값은 40자 clamp. 못 읽는 조각은 조용히 버린다 — 한 조각의 실패가
+    ///   사건 전체를 죽이지 않는다 (실패 격리, 결정 3과 같은 이유).
+    static func parseDeltas(
+        _ raw: String, sceneHash: String, nameIndex: [String: UUID]
+    ) -> [StateDelta] {
+        var deltas: [StateDelta] = []
+        // 모델이 `;` 대신 `,`를 쓰는 경우까지 받아준다 — 값에 쉼표가 든 델타는
+        // 앞이 잘리지만, 값은 짧은 명사구(≤40자)라 비용이 작다.
+        for fragment in raw.split(whereSeparator: { $0 == ";" || $0 == "," }) {
+            guard deltas.count < maxDeltasPerEvent else { break }
+            let piece = fragment.trimmingCharacters(in: .whitespaces)
+            guard let equals = piece.firstIndex(of: "=") else { continue }
+
+            // `=` 왼쪽은 "이름 필드" — 마지막 공백 토큰이 필드, 앞이 이름이다.
+            let head = piece[..<equals].trimmingCharacters(in: .whitespaces)
+            guard let split = head.lastIndex(of: " ") else { continue }
+            let name = head[..<split].trimmingCharacters(in: .whitespaces)
+            let fieldName = head[head.index(after: split)...]
+                .trimmingCharacters(in: .whitespaces)
+
+            guard let field = StateDelta.Field(rawValue: fieldName) else { continue }
+            guard let id = resolveOne(name, nameIndex: nameIndex) else { continue }
+            let value = String(
+                piece[piece.index(after: equals)...]
+                    .trimmingCharacters(in: .whitespaces)
+                    .prefix(maxDeltaValueCharacters))
+            guard !value.isEmpty else { continue }
+            deltas.append(
+                StateDelta(characterID: id, field: field, value: value, sceneHash: sceneHash))
+        }
+        return deltas
+    }
+
     /// `키: 값` 조각에서 값만 — 키가 목록에 없으면 nil.
     private static func value(of field: String, keys: [String]) -> String? {
         guard let separator = field.firstIndex(of: ":") else { return nil }
@@ -178,15 +231,20 @@ public enum EventParser {
         var ids: [UUID] = []
         for raw in names.split(separator: ",") {
             let name = raw.trimmingCharacters(in: .whitespaces)
-            guard !name.isEmpty else { continue }
-            // 모델이 조사를 붙여 오는 경우("서연이")까지 받아준다 — 등록 이름이
-            // 접두인 가장 긴 매칭. 감지기(CharacterLexicon)와 같은 교착어 대응.
-            if let id = nameIndex[name] {
-                ids.append(id)
-            } else if let match = nameIndex.first(where: { name.hasPrefix($0.key) }) {
-                ids.append(match.value)
-            }
+            guard !name.isEmpty, let id = resolveOne(name, nameIndex: nameIndex)
+            else { continue }
+            ids.append(id)
         }
         return Array(Set(ids))  // 같은 인물 중복 표기 제거
+    }
+
+    /// 이름 하나 → 카드 id. 모델이 조사를 붙여 오는 경우("서연이")까지 받아준다 —
+    /// 등록 이름이 접두인 매칭. 감지기(CharacterLexicon)와 같은 교착어 대응.
+    private static func resolveOne(
+        _ name: any StringProtocol, nameIndex: [String: UUID]
+    ) -> UUID? {
+        let key = String(name)
+        if let id = nameIndex[key] { return id }
+        return nameIndex.first(where: { key.hasPrefix($0.key) })?.value
     }
 }

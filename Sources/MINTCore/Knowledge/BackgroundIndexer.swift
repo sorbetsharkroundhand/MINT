@@ -448,7 +448,9 @@ public final class BackgroundIndexer: ObservableObject {
             (try? await engine.generateOneShot(
                 system: Prompts.eventSystem,
                 user: Prompts.eventUser(text, names: nameIndex.keys.sorted()),
-                maxTokens: 160,
+                // 5b에서 줄마다 `상태:` 필드가 붙어 길어졌다 — 마지막 줄이
+                // 중간에서 잘리면 그 사건·델타를 통째로 잃는다.
+                maxTokens: 256,
                 parameters: parameters)) ?? ""
         guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
         return EventParser.parse(output, sceneHash: sceneHash, nameIndex: nameIndex)
@@ -572,10 +574,14 @@ public final class BackgroundIndexer: ObservableObject {
             너는 소설 장면에서 사건을 뽑는 도우미다. 장면에서 실제로 일어난 일만 \
             중요한 순서로 최대 3개까지, 한 줄에 하나씩 아래 형식으로 출력한다.
 
-            사건요약(최대 80자) | 참여: 인물이름들 | 중요도: 1~5
+            사건요약(최대 80자) | 참여: 인물이름들 | 중요도: 1~5 | 상태: 인물 필드=값; 인물 필드=값
 
-            규칙: 주어진 인물 목록에 있는 이름만 참여에 쓴다. 장면에 없는 일을 \
-            지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
+            상태는 이 사건으로 실제로 **바뀐** 인물 상태만 쓴다. 필드는 위치, 감정, \
+            관계, 목표, 생사 다섯 가지만 쓴다. 값은 40자 이내로 짧게 쓴다. \
+            바뀐 상태가 없으면 상태 항목을 통째로 생략한다.
+
+            규칙: 주어진 인물 목록에 있는 이름만 참여와 상태에 쓴다. 장면에 없는 \
+            일을 지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
             """
 
         /// 등록 인물 목록을 함께 준다 — 모델이 지어낸 인물은 파서가 버리지만

@@ -13,9 +13,13 @@ import Foundation
 public struct KnowledgeSidecar: Codable, Equatable, Sendable {
 
     /// 지식 스키마 버전 — 구조가 바뀌면 올린다. 다른 버전 파일은 로드 시 폐기.
-    /// v2 (M6-5): 사건 로그 추가 — 기존 요약도 함께 폐기·재구축된다
-    /// (마이그레이션 코드를 쌓지 않는 값, docs/m6-events.md 결정 5).
-    public static let currentSchemaVersion = 2
+    /// v2 (M6-5a): 사건 로그 추가. v3 (M6-5b): 사건 추출이 StateDelta까지 뽑는다 —
+    /// 디코딩 모양은 같지만 `events` 메모의 **의미**가 바뀌었다 (키 존재 = 델타
+    /// 포함 추출 완료). v2 파일을 살리면 5a 시절 사건들이 델타 없이 영영 남아
+    /// `상태@커서`에 구멍이 뚫린다 — 폐기·재구축이 정답이다 (CLAUDE.md §2-1,
+    /// 마이그레이션 코드를 쌓지 않는 값. 결정 5가 피하려던 두 번째 비용이지만,
+    /// 추출 형식 자체가 바뀌어 피할 수 없었다 — docs/m6-events.md 5b).
+    public static let currentSchemaVersion = 3
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -223,5 +227,30 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             if (sceneEndByHash[event.sceneHash] ?? .max) <= utf16Offset { return event }
         }
         return nil
+    }
+
+    /// 그 위치 시점의 인물 상태 — PLAN §8 `state_at`, §6.2의 fold.
+    ///
+    /// 커서 이전에 끝난 씬의 델타를 **담화 순서로 접는다**: 같은 필드는 나중
+    /// 델타가 이긴다 (상태는 덮어쓰지 않고 append, 질의가 최신을 뽑는다).
+    /// 시점 차단·톰스톤 제외는 `events(before:)`와 같은 씬 위치 비교라 여기서도
+    /// 결정적으로 성립한다 — 9장에서 죽은 인물이 3장 수정 중에 "사망"으로
+    /// 주입되지 않는다 (CLAUDE.md §2-4).
+    ///
+    /// 역색인이 담화 순서 오름차순이므로 앞에서부터 그대로 접으면 된다 —
+    /// 인물 하나의 사건 수는 작아 예측 경로 예산 안이다 (조립은 조립만).
+    public func stateAt(
+        of characterID: UUID, before utf16Offset: Int
+    ) -> [StateDelta.Field: String] {
+        guard let offsets = eventIndexByCharacter[characterID] else { return [:] }
+        var state: [StateDelta.Field: String] = [:]
+        for offset in offsets {
+            let event = events[offset]
+            guard (sceneEndByHash[event.sceneHash] ?? .max) <= utf16Offset else { continue }
+            for delta in event.deltas where delta.characterID == characterID {
+                state[delta.field] = delta.value
+            }
+        }
+        return state
     }
 }

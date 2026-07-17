@@ -133,6 +133,9 @@ public enum ContextAssembler {
 
     /// 인물 한 명의 "최근" 줄 상한 — 사건 요약(≤80자)을 그대로 쓴다.
     static let maxRecentEventCharacters = 80
+    /// 인물 한 명의 "상태@커서" 조각 상한 — 필드 5개 × 값 40자를 다 붙이면
+    /// 카드 하나가 헤더 예산(700자)을 잠식한다 (토큰당 품질, CLAUDE.md §5-1).
+    static let maxStateCharacters = 100
 
     /// A 고정 헤더 + B 인물 카드. 소설 전용 — 저널은 빈 문자열(Fast = C만).
     ///
@@ -175,6 +178,20 @@ public enum ContextAssembler {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .prefix(maxCardNoteCharacters))
             var line = note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)"
+            // 상태@커서 (PLAN §7 카드 스키마, §8 `state_at`) — 창 시작 시점까지의
+            // 델타를 접은 결과. 일관성 > 유창성(CLAUDE.md §3)의 실탄이다:
+            // "생사=사망"이 든 카드가 죽은 인물의 등장을 프롬프트 수준에서 막는다.
+            if let knowledge {
+                let state = knowledge.stateAt(of: card.id, before: windowStart)
+                if !state.isEmpty {
+                    // CaseIterable 순서로 고정 렌더링 — 같은 상태가 패스마다 다른
+                    // 순서로 찍히면 KV 프리픽스가 식는다 (PLAN §12).
+                    let rendered = StateDelta.Field.allCases
+                        .compactMap { field in state[field].map { "\(field.rawValue)=\($0)" } }
+                        .joined(separator: " · ")
+                    line += " · 상태@커서: \(rendered.prefix(maxStateCharacters))"
+                }
+            }
             // 커서가 이미 보고 있는 사건은 붙이지 않는다 — C 창에 원문이 그대로
             // 있는데 요약을 겹쳐 넣으면 토큰만 쓴다 (`lastAppearance`가 창 밖
             // 사건만 돌려주므로 이 조건은 질의에서 이미 성립).

@@ -362,7 +362,9 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
       (결정적 후보 정밀도 한계는 docs/m6-knowledge.md — 대화 인접 가중은 대화 모드와 함께)
 - [x] 사건 로그 + 인물 역색인 (5a) — 앵커는 Pos가 아닌 씬 해시, 톰스톤은 기존
       GC에 얹힘. 설계·근거: [docs/m6-events.md](docs/m6-events.md)
-- [ ] StateDelta 버전 상태 + `state_at` fold (5b) — 카드의 `상태@커서` 줄
+- [x] StateDelta 버전 상태 + `state_at` fold (5b) — 카드의 `상태@커서` 줄.
+      추출은 사건 줄의 `상태:` 필드(닫힌 집합 검증), fold는 스냅샷 질의 —
+      시점 차단·톰스톤은 사건과 같은 규율. 스키마 v3 (docs/m6-events.md 5b)
 - [ ] 대화 모드 (화자 추정 · 말투 카드 승격 · 발화 끝 정지) + 존대 매트릭스 v1
 - [ ] A+B 프리픽스 KV 프리웜 (이해 경로 마지막 단계)
 - [ ] 바이블 패널 UI (열람·수정·`locked`·미확인 검토) — v0: 팝오버에 후보 확인 배너

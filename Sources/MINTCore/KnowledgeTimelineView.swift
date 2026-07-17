@@ -23,11 +23,15 @@ struct KnowledgeTimelineView: View {
             Divider()
             if let snapshot = liveSnapshot {
                 let rows = TimelineRow.rows(from: snapshot, body: store.activeEntry?.body ?? "")
+                // 델타의 characterID → 이름 — 사용자에게 UUID를 보여줄 수는 없다.
+                let names = Dictionary(
+                    uniqueKeysWithValues: (store.activeEntry?.characters ?? [])
+                        .map { ($0.id, $0.name) })
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { offset, row in
                             TimelineRowView(
-                                row: row, theme: theme,
+                                row: row, theme: theme, characterNames: names,
                                 isFirst: offset == 0, isLast: offset == rows.count - 1)
                         }
                     }
@@ -150,6 +154,8 @@ enum TimelineRow: Identifiable {
 private struct TimelineRowView: View {
     let row: TimelineRow
     let theme: MintTheme
+    /// 델타 렌더링용 인물 id → 이름. 카드가 지워져 못 찾는 델타는 표시하지 않는다.
+    let characterNames: [UUID: String]
     let isFirst: Bool
     let isLast: Bool
 
@@ -165,6 +171,16 @@ private struct TimelineRowView: View {
     private var isSceneRow: Bool {
         if case .scene = row { return true }
         return false
+    }
+
+    /// 사건의 델타들 → "상태: 서연 위치=병원 앞 · 민준 감정=불안" 한 줄.
+    /// 이름을 못 찾는 델타(카드 삭제)는 조용히 뺀다 — 없으면 nil.
+    private func deltaLine(_ event: StoryEvent) -> String? {
+        let pieces = event.deltas.compactMap { delta -> String? in
+            guard let name = characterNames[delta.characterID] else { return nil }
+            return "\(name) \(delta.field.rawValue)=\(delta.value)"
+        }
+        return pieces.isEmpty ? nil : "상태: \(pieces.joined(separator: " · "))"
     }
 
     /// 레일 — 행 높이만큼 세로선을 채우고 그 위에 노드를 얹는다. 행마다 자기
@@ -244,12 +260,22 @@ private struct TimelineRowView: View {
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
         case .event(_, let event):
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(event.summary)
-                    .font(MintFonts.uiFont(11))
-                    .foregroundStyle(theme.inkC)
-                    .fixedSize(horizontal: false, vertical: true)
-                ImportanceDots(importance: event.importance, theme: theme)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(event.summary)
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(theme.inkC)
+                        .fixedSize(horizontal: false, vertical: true)
+                    ImportanceDots(importance: event.importance, theme: theme)
+                }
+                // 상태 델타 (M6-5b) — 이해한 것은 전부 보여준다 (CLAUDE.md §1-5).
+                // 이 줄이 곧 인물 카드 `상태@커서`의 재료다.
+                if let rendered = deltaLine(event) {
+                    Text(rendered)
+                        .font(MintFonts.uiFont(10))
+                        .foregroundStyle(theme.ink3C)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
         case .pending:
             Text("아직 안 읽음")
