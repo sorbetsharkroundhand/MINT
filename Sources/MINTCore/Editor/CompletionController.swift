@@ -104,6 +104,46 @@ public final class CompletionController: ObservableObject {
     /// 한다). Int 하나 저장 — 키 입력 경로 비용 없음.
     public private(set) var lastCaretLocation: Int?
 
+    // MARK: - 입력 지연 계측 (로컬 전용 진단 — PLAN §13 온라인 지표)
+
+    /// 최근 키 입력 처리 시간 통계 — 상태 바가 표시한다. **원격 전송 절대 금지.**
+    /// 랙 보고를 "느려요"가 아니라 숫자로 만들기 위한 장비: 핸들러(우리 코드)와
+    /// 총 시간(렌더 포함)을 나눠 재므로, 랙의 소재가 어느 쪽인지 갈린다.
+    public struct KeystrokeStats: Equatable, Sendable {
+        /// 에디터 핸들러(직렬화·저장 전달)만의 p95 (ms).
+        public var handlerP95: Double = 0
+        /// 키 입력 → 메인 스레드가 한가해질 때까지 (SwiftUI 갱신·레이아웃 포함) p95.
+        public var totalP95: Double = 0
+        /// 최근 표본 중 최대 총 시간 (ms) — 간헐 스파이크 포착용.
+        public var totalMax: Double = 0
+        public var samples: Int = 0
+    }
+
+    @Published public private(set) var keystrokeStats = KeystrokeStats()
+    private var handlerSamples: [Double] = []
+    private var totalSamples: [Double] = []
+
+    /// 에디터가 키 입력 하나를 처리할 때마다 호출 (BlockTextView Coordinator).
+    /// 발행은 20표본마다 — 계측이 제 관찰 비용을 만들지 않게 한다.
+    public func noteKeystroke(handlerMs: Double, totalMs: Double) {
+        handlerSamples.append(handlerMs)
+        totalSamples.append(totalMs)
+        if handlerSamples.count > 120 {
+            handlerSamples.removeFirst(handlerSamples.count - 120)
+            totalSamples.removeFirst(totalSamples.count - 120)
+        }
+        guard totalSamples.count % 20 == 0 else { return }
+        func p95(_ values: [Double]) -> Double {
+            let sorted = values.sorted()
+            return sorted[min(sorted.count - 1, Int(Double(sorted.count) * 0.95))]
+        }
+        keystrokeStats = KeystrokeStats(
+            handlerP95: p95(handlerSamples),
+            totalP95: p95(totalSamples),
+            totalMax: totalSamples.max() ?? 0,
+            samples: totalSamples.count)
+    }
+
     public init(
         settings: CompletionSettings = .shared,
         engine: CompletionEngine = CompletionEngine()

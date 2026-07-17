@@ -964,6 +964,13 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
+            // 입력 지연 계측 (로컬 전용 진단) — 핸들러(우리 코드) vs 총(렌더 포함).
+            // 랙 제보를 숫자로 받기 위한 장비. 표본이 쌓여야 나타난다.
+            if completion.keystrokeStats.samples > 0 {
+                Text(keystrokeLabel)
+                    .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
+                separator
+            }
             Text(store.isSaving ? "저장 중…" : "저장됨")
             separator
             Text("Markdown")
@@ -973,6 +980,13 @@ struct EditorStatusBar: View {
         .padding(.horizontal, 22)
         .frame(height: 34)
         .background(theme.statusbarC)
+    }
+
+    private var keystrokeLabel: String {
+        let stats = completion.keystrokeStats
+        return String(
+            format: "입력 %.1f/%.0fms·max %.0f",
+            stats.handlerP95, stats.totalP95, stats.totalMax)
     }
 
     private var separator: some View {

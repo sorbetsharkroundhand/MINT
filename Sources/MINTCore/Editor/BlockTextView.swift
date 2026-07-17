@@ -240,10 +240,20 @@ public struct MintBlockEditor: NSViewRepresentable {
 
         public func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? BlockTextView else { return }
+            // 입력 지연 계측 (로컬 진단) — 핸들러 구간과, 이 런루프 턴에 쌓인
+            // 후속 작업(SwiftUI 갱신·레이아웃)까지의 총 구간을 나눠 잰다.
+            // 랙 보고를 숫자로 만들기 위한 장비 — 측정 없이 튜닝 없음 (CLAUDE.md §2-7).
+            let start = CFAbsoluteTimeGetCurrent()
             let serialized = textView.serialize()
             lastSyncedText = serialized
             parent.text = serialized
             forwardEditEvent(textView)
+            let handlerMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+            let controller = parent.controller
+            DispatchQueue.main.async {
+                let totalMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
+                controller?.noteKeystroke(handlerMs: handlerMs, totalMs: totalMs)
+            }
         }
 
         public func textViewDidChangeSelection(_ notification: Notification) {
