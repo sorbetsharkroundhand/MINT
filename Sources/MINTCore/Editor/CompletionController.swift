@@ -413,14 +413,21 @@ public final class CompletionController: ObservableObject {
         defer { if expected == generation { isPredicting = false } }
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
+        let document = documentContextProvider?()
         let prompt = ContextAssembler.assemble(
             prefix: prefix,
-            document: documentContextProvider?(),
+            document: document,
             knowledge: knowledgeProvider?(),
             // C 창이 본문 어디서 시작하는지 — 이 앞에서 끝난 씬만 B로 들어간다.
             prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
             style: parameters.promptStyle
         )
+        // 대화 모드 (PLAN §10) — 커서가 열린 따옴표 안이면 정지 사다리를 발화
+        // 끝으로 확장한다. 조립기의 말투 승격과 같은 감지를 써서 어긋나지 않는다.
+        var parameters = parameters
+        if document?.kind == .novel, ContextAssembler.isInsideUtterance(prefix) {
+            parameters.stopAtUtteranceEnd = true
+        }
         do {
             let completion = try await engine.complete(prompt: prompt, parameters: parameters) {
                 fraction in

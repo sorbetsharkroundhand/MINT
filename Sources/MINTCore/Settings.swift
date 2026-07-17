@@ -90,6 +90,10 @@ public struct CompletionParameters: Sendable, Equatable {
     public var maxPromptTokens: Int
     /// 이어쓰기 프리필 KV 재사용 (PLAN §12) — 문제 시 끌 수 있는 킬 스위치.
     public var kvCacheEnabled: Bool
+    /// 대화 모드의 정지 사다리 확장 (PLAN §10) — 문장 경계 대신 발화 끝(닫는
+    /// 따옴표)에서 멈춘다. 설정이 아니라 **요청별 런타임 값** — 컨트롤러가
+    /// 커서의 따옴표 상태로 매 요청 결정한다 (UserDefaults 저장 안 함).
+    public var stopAtUtteranceEnd: Bool
 
     public init(
         modelID: String = ModelPresets.qwen2_5_1_5B,
@@ -98,7 +102,8 @@ public struct CompletionParameters: Sendable, Equatable {
         temperature: Double = 0.3,
         topP: Double = 0.9,
         maxPromptTokens: Int = 3_072,
-        kvCacheEnabled: Bool = true
+        kvCacheEnabled: Bool = true,
+        stopAtUtteranceEnd: Bool = false
     ) {
         self.modelID = modelID
         self.promptStyle = promptStyle
@@ -107,6 +112,7 @@ public struct CompletionParameters: Sendable, Equatable {
         self.topP = topP
         self.maxPromptTokens = maxPromptTokens
         self.kvCacheEnabled = kvCacheEnabled
+        self.stopAtUtteranceEnd = stopAtUtteranceEnd
     }
 }
 

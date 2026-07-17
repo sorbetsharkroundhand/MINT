@@ -390,7 +390,12 @@ public actor CompletionEngine {
                             timeToFirstChunk = Date().timeIntervalSince(start)
                         }
                         text += chunk
-                        if let cut = cutAtSentenceBoundary(text) {
+                        // 정지 사다리 (PLAN §10): 기본 = 문장 경계, 대화 모드 =
+                        // 발화 끝(닫는 따옴표) — 대사 중간의 마침표에서 끊지 않는다.
+                        let cut =
+                            parameters.stopAtUtteranceEnd
+                            ? cutAtUtteranceEnd(text) : cutAtSentenceBoundary(text)
+                        if let cut {
                             text = cut
                             stoppedAtBoundary = true
                         }
@@ -453,6 +458,18 @@ public actor CompletionEngine {
 
     private static func cutAtSentenceBoundary(_ text: String) -> String? {
         guard let index = text.firstIndex(where: { sentenceBoundaries.contains($0) })
+        else { return nil }
+        return String(text[...index])
+    }
+
+    /// 발화 끝 문자 — 대화 모드의 정지 조건 (PLAN §10). 닫는 따옴표(포함)까지
+    /// 자른다. 개행은 안전 바닥 — 모델이 따옴표를 안 닫고 문단을 넘어가면 끊는다.
+    private static let utteranceBoundaries: Set<Character> = [
+        "”", "\"", "」", "』", "\n",
+    ]
+
+    private static func cutAtUtteranceEnd(_ text: String) -> String? {
+        guard let index = text.firstIndex(where: { utteranceBoundaries.contains($0) })
         else { return nil }
         return String(text[...index])
     }

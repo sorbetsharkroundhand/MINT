@@ -167,6 +167,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// 인물 id → `events` 인덱스 목록 — PLAN §6.3의 역색인.
     /// §11 엔티티 앵커 검색의 기반이자 `lastAppearance` 질의의 실체다.
     public let eventIndexByCharacter: [UUID: [Int]]
+    /// 귀속된 발화들 (담화 순서, PLAN §6.4·§7 대화 귀속) — 결정적 추출이라
+    /// 사이드카에 저장하지 않고 패스마다 재계산해 스냅샷에만 싣는다.
+    public let utterances: [Utterance]
     /// 씬 해시 → 그 씬이 끝나는 UTF-16 위치. 시점 차단 질의를 예측 경로에서
     /// O(1)로 하기 위해 미리 접어 둔다 (조립은 조립만 — CLAUDE.md §2-2).
     private let sceneEndByHash: [String: Int]
@@ -177,13 +180,15 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         summariesByHash: [String: String],
         chapterSummariesByPath: [String: String] = [:],
         workSummary: String? = nil,
-        events: [String: [StoryEvent]] = [:]
+        events: [String: [StoryEvent]] = [:],
+        utterances: [Utterance] = []
     ) {
         self.entryID = entryID
         self.outline = outline
         self.summariesByHash = summariesByHash
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
+        self.utterances = utterances
 
         // 사건을 담화 순서로 편다 — 저장은 해시 키(삽입에 불변), 순서는 여기서
         // 아웃라인으로부터 파생한다 (docs/m6-events.md 결정 1).
@@ -252,5 +257,89 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             }
         }
         return state
+    }
+
+    // MARK: - 대화 질의 (PLAN §6.4·§10 대화 모드)
+
+    /// 인물 말투 프로필 — 기본 존대 수준 + 최근 대사 예문 (PLAN §6.4).
+    public struct SpeechProfile: Equatable, Sendable {
+        /// 그 인물 발화 다수결 — 갈리면 nil (섣부른 신호보다 침묵).
+        public let defaultPoliteness: Politeness?
+        /// 최근 우선 예문, 문서 순서 (PLAN §6.4 "최근 우선, 결정적 수집").
+        public let examples: [String]
+    }
+
+    /// (A→B) 방향 존대 사용 — 한국어 대화 예측의 핵심 신호 (PLAN §6.4 매트릭스).
+    public enum HonorificUsage: String, Equatable, Sendable {
+        case honorific = "존댓말"
+        case plain = "반말"
+        case mixed = "혼재"
+    }
+
+    /// 커서 이전 발화로 만드는 말투 프로필. 발화가 없으면 nil.
+    public func speechProfile(
+        of characterID: UUID, before utf16Offset: Int, maxExamples: Int = 2
+    ) -> SpeechProfile? {
+        let mine = utterances.filter {
+            $0.speakerID == characterID && $0.utf16Start < utf16Offset
+        }
+        guard !mine.isEmpty else { return nil }
+        var honorific = 0
+        var plain = 0
+        for utterance in mine {
+            switch utterance.politeness {
+            case .honorific: honorific += 1
+            case .plain: plain += 1
+            case nil: break
+            }
+        }
+        let base: Politeness? =
+            honorific > plain ? .honorific : plain > honorific ? .plain : nil
+        let examples = mine.suffix(maxExamples).map {
+            String($0.text.prefix(DialogueAttribution.maxExampleCharacters))
+        }
+        return SpeechProfile(defaultPoliteness: base, examples: examples)
+    }
+
+    /// (from → to) 방향의 존대 사용 — 커서 이전 발화만 fold (시점 차단).
+    /// 어색한 존대가 반말로 무너지는 시점이 있다면 커서 위치가 그걸 반영한다.
+    public func honorific(
+        from speakerID: UUID, to listenerID: UUID, before utf16Offset: Int
+    ) -> HonorificUsage? {
+        var honorific = 0
+        var plain = 0
+        for utterance in utterances {
+            guard utterance.utf16Start < utf16Offset,
+                utterance.speakerID == speakerID,
+                utterance.listenerID == listenerID
+            else { continue }
+            switch utterance.politeness {
+            case .honorific: honorific += 1
+            case .plain: plain += 1
+            case nil: break
+            }
+        }
+        if honorific == 0, plain == 0 { return nil }
+        if plain == 0 { return .honorific }
+        if honorific == 0 { return .plain }
+        return .mixed
+    }
+
+    /// 다음 화자 추정 (PLAN §10 대화 모드 ①) — 직전 발화의 청자가 1순위,
+    /// 없으면 직전 두 발화의 교대. 추정 불가면 nil (침묵이 정답).
+    /// 반환: (다음 화자, 그 상대 = 직전 화자).
+    public func expectedSpeaker(
+        before utf16Offset: Int
+    ) -> (speakerID: UUID, addresseeID: UUID)? {
+        let prior = utterances.filter { $0.utf16Start < utf16Offset }
+        guard let last = prior.last else { return nil }
+        if let listener = last.listenerID {
+            return (listener, last.speakerID)
+        }
+        // 청자 미상(3인 런 등) — 마지막과 다른 직전 화자로 교대 추정.
+        if let previous = prior.last(where: { $0.speakerID != last.speakerID }) {
+            return (previous.speakerID, last.speakerID)
+        }
+        return nil
     }
 }

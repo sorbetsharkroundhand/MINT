@@ -69,6 +69,18 @@ public enum ContextAssembler {
         {
             header = header.isEmpty ? block : header + "\n" + block
         }
+        // 대화 모드 (PLAN §10, 모드와 직교) — 커서가 열린 따옴표 안이면 다음
+        // 화자의 말투·예문·존대쌍을 승격한다. 헤더 맨 뒤에 붙는 이유: 이 블록은
+        // 커서 위치에 따라 변하므로, 앞에 두면 A+B의 KV 프리픽스까지 식힌다.
+        if document?.kind == .novel, let knowledge, let document,
+            isInsideUtterance(prefix)
+        {
+            let cursor = prefixStartUTF16 + (prefix as NSString).length
+            let block = dialogueText(knowledge, document: document, cursor: cursor)
+            if !block.isEmpty {
+                header = header.isEmpty ? block : header + "\n" + block
+            }
+        }
         switch style {
         case .continuation:
             // 헤더와 본문은 빈 줄 하나로만 구분 — 이어쓰기 흐름을 깨지 않는 최소 구조.
@@ -129,6 +141,58 @@ public enum ContextAssembler {
         }
         lines.append(contentsOf: picked.reversed())
         return lines.joined(separator: "\n")
+    }
+
+    // MARK: - 대화 모드 (PLAN §10 — 화자 추정·말투 승격·발화 끝 정지)
+
+    /// 커서(프리픽스 끝)가 열린 따옴표 안인가 — 대화 모드 게이트 (결정적).
+    /// 마지막 문단만 본다: 대사는 문단을 넘지 않는 것이 한국어 소설의 관례고,
+    /// 앞 문단의 짝 안 맞는 따옴표(오탈자)가 온 문서를 대화 모드로 만들면 안 된다.
+    public static func isInsideUtterance(_ prefix: String) -> Bool {
+        let paragraph = prefix.suffix(from: prefix.lastIndex(of: "\n").map {
+            prefix.index(after: $0)
+        } ?? prefix.startIndex)
+        var asciiOpen = false
+        var depth = 0
+        for char in paragraph {
+            switch char {
+            case "“", "「", "『": depth += 1
+            case "”", "」", "』": depth = max(0, depth - 1)
+            case "\"": asciiOpen.toggle()
+            default: break
+            }
+        }
+        return depth > 0 || asciiOpen
+    }
+
+    /// 대화 블록 — 다음 화자 추정(§10 ①) + 그 인물의 말투 카드 승격(②).
+    /// 추정이 안 서면 빈 문자열 — 틀린 화자 지목은 대사를 통째로 망친다
+    /// (품질 > 적극성, CLAUDE.md §1-2).
+    static func dialogueText(
+        _ knowledge: KnowledgeSnapshot, document: DocumentContext, cursor: Int
+    ) -> String {
+        guard let (speakerID, addresseeID) = knowledge.expectedSpeaker(before: cursor)
+        else { return "" }
+        let name = { (id: UUID) in document.characters.first(where: { $0.id == id })?.name }
+        guard let speaker = name(speakerID) else { return "" }
+
+        var line = "지금 대화 중 — 다음 발화: \(speaker)"
+        if let addressee = name(addresseeID),
+            let usage = knowledge.honorific(from: speakerID, to: addresseeID, before: cursor)
+        {
+            line += " (\(addressee)에게 \(usage.rawValue))"
+        } else if let profile = knowledge.speechProfile(of: speakerID, before: cursor),
+            let base = profile.defaultPoliteness
+        {
+            line += " (\(base.rawValue) 기본)"
+        }
+        if let profile = knowledge.speechProfile(of: speakerID, before: cursor),
+            !profile.examples.isEmpty
+        {
+            let examples = profile.examples.map { "\"\($0)\"" }.joined(separator: " ")
+            line += " · \(speaker) 말투 예: \(examples)"
+        }
+        return line
     }
 
     /// 인물 한 명의 "최근" 줄 상한 — 사건 요약(≤80자)을 그대로 쓴다.

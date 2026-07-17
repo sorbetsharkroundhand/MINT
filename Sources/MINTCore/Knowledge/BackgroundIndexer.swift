@@ -27,7 +27,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 진행 중 패스 표시 (툴바 칩 등 UI 관찰용 — 조용한 UI 원칙상 필수는 아니다).
     @Published public private(set) var isIndexing = false
     /// 인물 감지 후보 (M6, PLAN §7) — 감지는 자동, **등록은 사용자 확인**
-    /// (CLAUDE.md §3). 바이블 팝오버가 맨 앞 하나씩만 묻는다.
+    /// (CLAUDE.md §3). 바이블 팝오버가 전부 나열해 검토받는다 (M6-8).
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
     /// 후보가 어느 문서 것인지 — 문서 전환 시 낡은 후보를 보여주지 않기 위한 짝.
     @Published public private(set) var candidatesEntryID: UUID?
@@ -176,11 +176,12 @@ public final class BackgroundIndexer: ObservableObject {
                 named: candidate.name, in: body,
                 engine: engine, parameters: parameters)
             guard let note, let store else { return }
-            // 그 사이 사용자가 직접 소개를 썼다면 그쪽이 이긴다 (CLAUDE.md §1-5).
+            // 그 사이 사용자가 직접 소개를 썼거나 카드를 잠갔다면 그쪽이 이긴다
+            // (CLAUDE.md §1-5 — locked는 자동 추출이 덮지 못한다, PLAN §6.2).
             guard
                 var current = store.entries.first(where: { $0.id == entryID })?
                     .characters?.first(where: { $0.id == card.id }),
-                current.note.isEmpty
+                current.note.isEmpty, current.locked != true
             else { return }
             current.note = note
             store.upsertCharacter(current, in: entryID)
@@ -249,6 +250,9 @@ public final class BackgroundIndexer: ObservableObject {
         guard !outline.scenes.isEmpty else { return false }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
+        // 대화 귀속 (PLAN §7·§6.4) — 결정적·LLM 없음이라 패스마다 재계산.
+        // 사이드카에 저장하지 않는 파생 — 스냅샷에만 실린다.
+        let utterances = DialogueAttribution.utterances(in: body, cards: characters)
 
         // ① 더티 씬 요약 — 해시 메모에 없는 씬만, 문서 순서대로.
         var callBudget = deep ? Int.max : fastPassCallBudget
@@ -278,7 +282,10 @@ public final class BackgroundIndexer: ObservableObject {
                 updatedAt: .now)
             // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
             sidecar.save()
-            publish(makeSnapshot(entryID: entryID, outline: outline, sidecar: sidecar))
+            publish(
+                makeSnapshot(
+                    entryID: entryID, outline: outline, sidecar: sidecar,
+                    utterances: utterances))
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -316,7 +323,10 @@ public final class BackgroundIndexer: ObservableObject {
 
         guard !Task.isCancelled else { return false }
         sidecar.save(pruningTo: Set(outline.scenes.map(\.contentHash)))
-        publish(makeSnapshot(entryID: entryID, outline: outline, sidecar: sidecar))
+        publish(
+                makeSnapshot(
+                    entryID: entryID, outline: outline, sidecar: sidecar,
+                    utterances: utterances))
         return true
     }
 
@@ -496,7 +506,8 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     nonisolated private static func makeSnapshot(
-        entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar
+        entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
+        utterances: [Utterance]
     ) -> KnowledgeSnapshot {
         KnowledgeSnapshot(
             entryID: entryID,
@@ -507,7 +518,8 @@ public final class BackgroundIndexer: ObservableObject {
                     ($0.headingPath.joined(separator: " > "), $0.summary)
                 }),
             workSummary: sidecar.workSummary?.summary,
-            events: sidecar.events
+            events: sidecar.events,
+            utterances: utterances
         )
     }
 

@@ -30,17 +30,24 @@ public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
     public var aliases: String
     /// 성격·말투·관계 자유 기술 — 프롬프트 A 헤더에 그대로 실린다 (짧을수록 좋다).
     public var note: String
+    /// 사용자 편집 잠금 (PLAN §6.2, CLAUDE.md §1-5 "사용자 수정이 자동 추출을
+    /// 이긴다") — true면 백그라운드 프로파일링이 소개를 채우지 않는다.
+    /// 소개를 직접 고치면 UI가 자동으로 잠근다. 옵셔널인 이유: 이전 저장
+    /// 파일엔 키가 없어 nil(잠기지 않음)로 로드된다 (`folderID`와 같은 패턴).
+    public var locked: Bool?
 
     public init(
         id: UUID = UUID(),
         name: String = "",
         aliases: String = "",
-        note: String = ""
+        note: String = "",
+        locked: Bool? = nil
     ) {
         self.id = id
         self.name = name
         self.aliases = aliases
         self.note = note
+        self.locked = locked
     }
 }
 
