@@ -939,20 +939,26 @@ struct ShortcutHintPill: View {
 /// 예전엔 모델명·지연·토큰 같은 개발용 텔레메트리를 늘어놨는데, 글쓰기 앱에선
 /// 개발 콘솔처럼 보여 몰입을 깼다. 작가가 흘끗 보고 싶은 값(단어·글자·읽는 시간)만
 /// 남기고, 모델 상태는 툴바의 ModelChip이 담당한다.
+///
+/// ⚠️ 통계는 **디바운스 + 백그라운드**로 센다 — 렌더마다 세면 키 입력마다
+/// 문서 전체를 3번 훑어 88k자에서 ~18ms·300k에서 ~62ms가 매 타에 든다
+/// (릴리즈 실측 — 대형 문서 타이핑 랙의 주범이었다, docs/editor-perf.md).
+/// 값이 최대 ~0.3s 낡을 수 있지만 단어 수는 그래도 된다. 랙은 안 된다.
 struct EditorStatusBar: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    @State private var stats = TextStats.empty
 
     var body: some View {
         HStack(spacing: 16) {
-            Text("\(wordCount) 단어")
+            Text("\(stats.words) 단어")
             separator
-            Text("\(charCount) 자")
-            if !readingLabel.isEmpty {
+            Text("\(stats.characters) 자")
+            if !stats.readingLabel.isEmpty {
                 separator
-                Text("읽기 \(readingLabel)")
+                Text("읽기 \(stats.readingLabel)")
             }
             if case .failed = completion.engineState {
                 separator
@@ -980,6 +986,23 @@ struct EditorStatusBar: View {
         .padding(.horizontal, 22)
         .frame(height: 34)
         .background(theme.statusbarC)
+        // 통계 재계산 — 키가 바뀌고(편집·문서 전환) 0.25s 조용해진 뒤에만.
+        // 그 사이 새 키 입력이 오면 이 task가 취소되고 새로 걸린다(디바운스).
+        // 계산은 detached — 88k자 한 패스가 메인 프레임을 막지 않는다.
+        .task(id: statsKey) {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            let text = store.activeEntry?.body ?? ""
+            stats = await Task.detached(priority: .utility) {
+                TextStats.compute(text)
+            }.value
+        }
+    }
+
+    /// 디바운스 키 — 본문 변경 카운터 + 활성 문서. 문자열 비교(O(n))가 아니라
+    /// 카운터 비교(O(1))로 변경을 감지한다.
+    private var statsKey: String {
+        "\(store.activeID.uuidString)-\(store.bodyVersion)"
     }
 
     private var keystrokeLabel: String {
@@ -991,26 +1014,6 @@ struct EditorStatusBar: View {
 
     private var separator: some View {
         theme.sepC.frame(width: 1, height: 12)
-    }
-
-    private var text: String { store.activeEntry?.body ?? "" }
-
-    /// 공백을 제외한 글자 수 (국문 글자 수 관례).
-    private var charCount: Int {
-        text.filter { !$0.isWhitespace }.count
-    }
-
-    /// 공백으로 나뉜 어절/단어 수 — 한글 어절·영문 단어 모두에 자연스럽다.
-    private var wordCount: Int {
-        text.split(whereSeparator: { $0.isWhitespace }).count
-    }
-
-    /// 읽는 데 걸리는 대략 시간 — 한글 기준 분당 약 500자.
-    private var readingLabel: String {
-        guard charCount > 0 else { return "" }
-        let minutes = Double(charCount) / 500
-        if minutes < 1 { return "1분 미만" }
-        return "약 \(Int(minutes.rounded()))분"
     }
 }
 

@@ -776,14 +776,22 @@ public final class EntryStore: ObservableObject {
         saveNow()
     }
 
+    /// 활성 본문 변경 카운터 — 상태 바의 디바운스 통계가 `.task(id:)` 키로
+    /// 쓴다. @Published가 아니어도 된다: entries 변이가 이미 objectWillChange를
+    /// 쏘고, 뷰는 다시 그려질 때 이 값을 읽는다.
+    public private(set) var bodyVersion = 0
+
     /// 에디터 바인딩이 매 키 입력마다 호출 — 본문 갱신 + 디바운스 autosave.
     /// 제목이 사용자 지정이 아니면 첫 줄에서 자동 파생한다 — 사이드바가 "새 저널"
     /// 무더기가 되지 않도록 (자동 저널링의 기본 기대).
     public func updateActiveBody(_ text: String) {
-        guard let index = entries.firstIndex(where: { $0.id == activeID }),
-            entries[index].body != text
-        else { return }
+        guard let index = entries.firstIndex(where: { $0.id == activeID }) else { return }
+        // 무변경 가드 — 길이(UTF-8, O(1))가 다르면 전체 비교(O(n))를 건너뛴다.
+        // 타이핑은 길이가 항상 변하므로 키 입력 경로에서 전체 비교가 사라진다.
+        let current = entries[index].body
+        if current.utf8.count == text.utf8.count, current == text { return }
         entries[index].body = text
+        bodyVersion &+= 1
         if entries[index].allowsAutoTitle {
             let derived = Self.derivedTitle(from: text)
             let fallback = entries[index].resolvedKind == .novel ? "새 소설" : "새 저널"
