@@ -163,11 +163,16 @@ public actor CompletionEngine {
     /// (예측의 프리픽스가 식지 않는다), 협조 취소(타이핑 재개 → 인덱서가 태스크를
     /// 취소하면 다음 청크에서 멈춘다). 실패·빈 결과는 호출부가 무시한다 —
     /// 백그라운드 실패는 다음 패스가 다시 시도하면 그만이다.
+    /// `stopAtBlankLine`: 기본 true — 요약처럼 한 문단만 받을 때 빈 줄(문단
+    /// 경계)에서 조기 종료한다. 씬 분석·심화 추출처럼 **여러 줄** 형식을 받는
+    /// 호출은 false로 넘긴다 — 모델이 항목 사이에 빈 줄을 넣어도 출력이 중간에
+    /// 끊기지 않는다 (이해 타임라인 텍스트 잘림의 원인 중 하나였다).
     public func generateOneShot(
         system: String,
         user: String,
         maxTokens: Int,
-        parameters: CompletionParameters
+        parameters: CompletionParameters,
+        stopAtBlankLine: Bool = true
     ) async throws -> String {
         guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
@@ -197,7 +202,8 @@ public actor CompletionEngine {
                     text += chunk
                     // 요약은 한 문단 — 내용이 생긴 뒤 빈 줄(문단 경계)이 나오면
                     // 그만 받는다 (설명·부연이 이어지는 걸 끊는다).
-                    if text.contains("\n\n"),
+                    if stopAtBlankLine,
+                        text.contains("\n\n"),
                         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                     {
                         break

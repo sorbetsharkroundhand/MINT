@@ -59,6 +59,12 @@ struct CharacterBibleView: View {
                             theme: theme,
                             understanding: understanding(of: card),
                             chronicle: chronicle(of: card),
+                            knowledge: knowledgeLines(of: card),
+                            relations: relationLines(of: card),
+                            conversations: conversationLines(of: card),
+                            onJump: { query in
+                                store.requestSearchJump(store.activeID, query: query)
+                            },
                             onDelete: { remove(card) }
                         )
                     }
@@ -136,6 +142,67 @@ struct CharacterBibleView: View {
         }
     }
 
+    /// 활성 문서의 스냅샷 (문서 일치 확인 포함).
+    private var snapshot: KnowledgeSnapshot? {
+        guard let snapshot = indexer?.snapshot, snapshot.entryID == store.activeID
+        else { return nil }
+        return snapshot
+    }
+
+    /// 인물의 앎 (v4, 요구사항 §11) — 문서 끝 기준으로 접은 현재 앎.
+    /// (text, 점프 질의) — 질의는 근거 인용, 없으면 nil (추론).
+    private func knowledgeLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
+        guard let snapshot else { return [] }
+        return snapshot.knowledge(of: card.id, before: .max).map { delta in
+            ("\(delta.stance.rawValue): \(delta.fact)", delta.quote)
+        }
+    }
+
+    /// 인물이 얽힌 관계들의 변화 이력 (v4, 요구사항 §12) — 방향 쌍별로
+    /// "남편→아내: 사랑 → 의심 → 적대" 한 줄.
+    private func relationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
+        guard let snapshot else { return [] }
+        let names = Dictionary(
+            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
+        // 방향 쌍별 그룹 (담화 순서 유지).
+        var order: [String] = []
+        var grouped: [String: [RelationDelta]] = [:]
+        for delta in snapshot.relationDeltas
+        where delta.fromID == card.id || delta.toID == card.id {
+            let key = "\(delta.fromID.uuidString)>\(delta.toID.uuidString)"
+            if grouped[key] == nil { order.append(key) }
+            grouped[key, default: []].append(delta)
+        }
+        return order.compactMap { key in
+            guard let deltas = grouped[key], let first = deltas.first,
+                let from = names[first.fromID], let to = names[first.toID]
+            else { return nil }
+            let evolution = deltas.map(\.value).joined(separator: " → ")
+            return ("\(from)→\(to): \(evolution)", deltas.last?.quote)
+        }
+    }
+
+    /// 인물의 대화 인덱스 (v4, 요구사항 §13) — 원문 복제 없이 위치 참조.
+    /// 점프 질의 = 첫 대사 (본문 부분 문자열이라 그대로 검색된다).
+    private func conversationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
+        guard let snapshot else { return [] }
+        let names = Dictionary(
+            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
+        return snapshot.conversations(involving: card.id).map { conversation in
+            let others = conversation.participants
+                .filter { $0 != card.id }
+                .compactMap { names[$0] }
+            let with = others.isEmpty ? "" : " ↔ \(others.joined(separator: "·"))"
+            let scene = conversation.sceneHash
+                .flatMap { snapshot.sceneMetaByHash[$0]?.title }
+                .map { "[\($0)] " } ?? ""
+            return (
+                "\(scene)\(card.name)\(with) · 발화 \(conversation.utteranceCount) — “\(conversation.firstLine)”",
+                conversation.firstLine
+            )
+        }
+    }
+
     private var genreBinding: Binding<String> {
         Binding(
             get: { store.activeEntry?.genre ?? "" },
@@ -173,31 +240,6 @@ struct CharacterBibleView: View {
     private func remove(_ card: CharacterCard) {
         guard let id = store.activeEntry?.id else { return }
         store.removeCharacter(card.id, from: id)
-    }
-}
-
-/// 수동 이해 트리거 (M6-8) — "지금 읽기". 진행 중이면 상태만 보여준다.
-/// 바이블·타임라인 패널이 공용한다.
-struct ManualIndexButton: View {
-    @ObservedObject var indexer: BackgroundIndexer
-    let theme: MintTheme
-
-    var body: some View {
-        if indexer.isIndexing {
-            Text("읽는 중…")
-                .font(MintFonts.uiFont(10.5))
-                .foregroundStyle(theme.ink3C)
-        } else {
-            Button {
-                indexer.requestPass()
-            } label: {
-                Label("지금 읽기", systemImage: "sparkles")
-                    .font(MintFonts.uiFont(10.5, .medium))
-                    .foregroundStyle(theme.novelC)
-            }
-            .buttonStyle(.plain)
-            .help("본문을 지금 읽어 요약·사건·인물 이해를 갱신해요 (자동완성이 꺼져 있어도 동작)")
-        }
     }
 }
 
@@ -258,9 +300,20 @@ private struct CharacterCardRow: View {
     let understanding: [String]
     /// 인물 연대기 — 사건 요약(+델타) 담화 순서 (빈 배열이면 숨김).
     let chronicle: [String]
+    /// 앎 — 이 인물이 아는/의심하는/오해하는/숨기는 것 (v4, 요구사항 §11).
+    let knowledge: [(text: String, jump: String?)]
+    /// 관계 변화 이력 (v4, 요구사항 §12).
+    let relations: [(text: String, jump: String?)]
+    /// 대화 인덱스 (v4, 요구사항 §13) — 클릭 → 원문 대화로 이동.
+    let conversations: [(text: String, jump: String?)]
+    /// 원문 점프 (requestSearchJump 통로).
+    var onJump: ((String) -> Void)?
     let onDelete: () -> Void
     @State private var deleteHovered = false
     @State private var chronicleExpanded = false
+    @State private var knowledgeExpanded = false
+    @State private var relationsExpanded = false
+    @State private var conversationsExpanded = false
 
     var body: some View {
         VStack(spacing: 6) {
@@ -351,6 +404,18 @@ private struct CharacterCardRow: View {
                     .padding(.leading, 4)
                 }
             }
+            // 앎 (v4) — 이 인물이 아는 것만이 예측 대사에 실린다 (§11).
+            jumpSection(
+                title: "앎", count: knowledge.count,
+                expanded: $knowledgeExpanded, entries: knowledge)
+            // 관계 변화 (v4, §12) — 방향 쌍별 변화 이력.
+            jumpSection(
+                title: "관계", count: relations.count,
+                expanded: $relationsExpanded, entries: relations)
+            // 대화 인덱스 (v4, §13) — 클릭하면 원문 대화로 이동.
+            jumpSection(
+                title: "대화", count: conversations.count,
+                expanded: $conversationsExpanded, entries: conversations)
         }
         .padding(8)
         .background(
@@ -361,5 +426,62 @@ private struct CharacterCardRow: View {
             RoundedRectangle(cornerRadius: 8, style: .continuous)
                 .strokeBorder(theme.chipBorderC, lineWidth: 1)
         )
+    }
+
+    /// 접힘 섹션 공용 — 연대기와 같은 조용한 UI 문법 (제목 · 개수, 접힌 채 시작).
+    /// 항목에 점프 질의가 있으면 클릭 → 원문 이동.
+    @ViewBuilder private func jumpSection(
+        title: String, count: Int,
+        expanded: Binding<Bool>, entries: [(text: String, jump: String?)]
+    ) -> some View {
+        if count > 0 {
+            Button {
+                expanded.wrappedValue.toggle()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(
+                        systemName: expanded.wrappedValue ? "chevron.down" : "chevron.right"
+                    )
+                    .font(.system(size: 8, weight: .semibold))
+                    Text("\(title) · \(count)")
+                        .font(MintFonts.uiFont(10.5, .medium))
+                }
+                .foregroundStyle(theme.ink3C)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if expanded.wrappedValue {
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
+                        if let jump = entry.jump, let onJump {
+                            Button {
+                                onJump(jump)
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                                    Image(systemName: "arrow.right.circle")
+                                        .font(.system(size: 8))
+                                        .foregroundStyle(theme.blueC)
+                                    Text(entry.text)
+                                        .font(MintFonts.uiFont(10.5))
+                                        .foregroundStyle(theme.ink2C)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .multilineTextAlignment(.leading)
+                                }
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("원문으로 이동")
+                        } else {
+                            Text(entry.text)
+                                .font(MintFonts.uiFont(10.5))
+                                .foregroundStyle(theme.ink2C)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 4)
+            }
+        }
     }
 }

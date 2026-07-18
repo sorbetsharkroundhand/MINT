@@ -19,7 +19,11 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// `상태@커서`에 구멍이 뚫린다 — 폐기·재구축이 정답이다 (CLAUDE.md §2-1,
     /// 마이그레이션 코드를 쌓지 않는 값. 결정 5가 피하려던 두 번째 비용이지만,
     /// 추출 형식 자체가 바뀌어 피할 수 없었다 — docs/m6-events.md 5b).
-    public static let currentSchemaVersion = 3
+    /// v4 (Narrative Intelligence): 씬 분석이 제목·유형·시점·장소를 함께 뽑고
+    /// (`SceneSummary` 확장), 심화 추출(`insights`)·충돌 후보(`factConflicts`)가
+    /// 붙었다. **사용자 수정은 여기 없다** — entries.json의 NarrativeOverride에
+    /// 살므로 이 폐기·재구축이 사용자 데이터를 건드리지 않는다.
+    public static let currentSchemaVersion = 4
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -30,7 +34,31 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         public var headingPath: [String]
         /// 1–2문장, ≤120자 (PLAN §6.1).
         public var summary: String
+        /// 내용 기반 씬 제목 (≤24자, v4) — "날개 (1/22)" 대신 "아내의 외출과
+        /// 남편의 불안". 없으면(구 분석) UI가 헤딩 경로로 폴백.
+        public var title: String?
+        /// 서사 유형 원문 (v4) — SceneNarrativeType.normalize로 해석한다.
+        public var narrativeType: String?
+        /// 시점(POV) 인물 이름 (v4) — 등록 카드와 무관한 자유 문자열.
+        public var pov: String?
+        /// 장소 (v4).
+        public var location: String?
         public var updatedAt: Date
+
+        public init(
+            contentHash: String, headingPath: [String], summary: String,
+            title: String? = nil, narrativeType: String? = nil,
+            pov: String? = nil, location: String? = nil, updatedAt: Date = .now
+        ) {
+            self.contentHash = contentHash
+            self.headingPath = headingPath
+            self.summary = summary
+            self.title = title
+            self.narrativeType = narrativeType
+            self.pov = pov
+            self.location = location
+            self.updatedAt = updatedAt
+        }
     }
 
     /// 장 요약 노드 — 앵커는 하위 씬 해시들의 결합 해시.
@@ -67,6 +95,12 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 부재는 "아직 안 뽑았다"다. 이 구분이 없으면 사건 없는 씬을 깊은 패스마다
     /// 다시 뽑는다 (CLAUDE.md §4 메모이제이션).
     public var events: [String: [StoryEvent]]
+    /// 씬 해시 → 심화 추출 (앎·관계·사실·복선, v4) — events와 같은 메모 규약.
+    public var insights: [String: SceneInsights]
+    /// 설정 충돌 후보 (v4) — 깊은 패스 끝의 LLM 검사 결과.
+    public var factConflicts: [FactConflict]
+    /// 충돌 검사 메모 키 — 검사에 넣은 사실 집합의 결합 해시. 같으면 재검사 금지.
+    public var conflictsMemoHash: String?
 
     public init(entryID: UUID) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -76,6 +110,9 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         self.chapterSummaries = []
         self.workSummary = nil
         self.events = [:]
+        self.insights = [:]
+        self.factConflicts = []
+        self.conflictsMemoHash = nil
     }
 
     // MARK: - 디스크 IO (인덱서 전용)
@@ -132,6 +169,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
                 liveHashes.contains($0.key)
             }
             snapshot.events = snapshot.events.filter { liveHashes.contains($0.key) }
+            snapshot.insights = snapshot.insights.filter { liveHashes.contains($0.key) }
         }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -174,6 +212,46 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// O(1)로 하기 위해 미리 접어 둔다 (조립은 조립만 — CLAUDE.md §2-2).
     private let sceneEndByHash: [String: Int]
 
+    // MARK: Narrative Intelligence (v4, PLAN §6.5)
+
+    /// 씬 해시 → 씬 메타 (제목·유형·시점·장소) — **오버라이드 적용 후** 값.
+    public let sceneMetaByHash: [String: SceneMeta]
+    /// 서사 브랜치 (담화 순서) — 씬 유형에서 결정적으로 파생.
+    public let branches: [NarrativeBranch]
+    /// 대화 인덱스 (담화 순서) — 발화에서 결정적으로 파생.
+    public let conversations: [Conversation]
+    /// 앎 델타 (담화 순서) — `knowledge(of:before:)`가 접는다.
+    public let knowledgeDeltas: [KnowledgeDelta]
+    /// 관계 델타 (담화 순서).
+    public let relationDeltas: [RelationDelta]
+    /// 설정 사실 (담화 순서).
+    public let facts: [ContinuityFact]
+    /// 충돌 후보 + 사용자 판정 (nil = 미판정).
+    public struct ResolvedConflict: Equatable, Sendable, Identifiable {
+        public var conflict: FactConflict
+        public var resolution: ConflictResolution?
+        public var id: String { conflict.id }
+    }
+    public let factConflicts: [ResolvedConflict]
+    /// 복선 — 라벨로 접힌 스레드 (상태는 오버라이드에서).
+    public let foreshadows: [ForeshadowThread]
+    /// 재앵커에 실패한 사용자 수정 — UI가 "근거를 잃은 수정"으로 보여준다.
+    public let staleOverrides: [NarrativeOverride]
+    /// 스냅샷에 적용된 오버라이드 — UI의 userEdited 표시가 이걸 본다.
+    public let overrides: NarrativeOverrides
+
+    /// 씬 메타 한 장 — 사이드카 SceneSummary의 파생 + 오버라이드 적용 결과.
+    public struct SceneMeta: Equatable, Sendable {
+        public var title: String?
+        public var type: SceneNarrativeType
+        public var pov: String?
+        public var location: String?
+        /// 제목이 사용자 수정인가 (오버라이드 존재).
+        public var titleUserEdited: Bool
+        /// 유형이 사용자 수정인가.
+        public var typeUserEdited: Bool
+    }
+
     public init(
         entryID: UUID,
         outline: DocumentOutline,
@@ -181,7 +259,12 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         chapterSummariesByPath: [String: String] = [:],
         workSummary: String? = nil,
         events: [String: [StoryEvent]] = [:],
-        utterances: [Utterance] = []
+        utterances: [Utterance] = [],
+        sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
+        insights: [String: SceneInsights] = [:],
+        factConflicts: [FactConflict] = [],
+        overrides: NarrativeOverrides = .empty,
+        staleOverrides: [NarrativeOverride] = []
     ) {
         self.entryID = entryID
         self.outline = outline
@@ -189,9 +272,13 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
         self.utterances = utterances
+        self.overrides = overrides
+        self.staleOverrides = staleOverrides
 
         // 사건을 담화 순서로 편다 — 저장은 해시 키(삽입에 불변), 순서는 여기서
         // 아웃라인으로부터 파생한다 (docs/m6-events.md 결정 1).
+        // 사용자 수정(요약·중요도)은 여기서 얹는다 — 재분석이 원본 캐시를
+        // 갱신해도 오버라이드는 entries.json에 있어 항상 다시 이긴다 (§1-5).
         var ends: [String: Int] = [:]
         var ordered: [StoryEvent] = []
         for scene in outline.scenes {
@@ -199,6 +286,19 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             // 같은 씬 안에서는 중요도 높은 사건이 먼저 — 예산 삭감이 뒤에서
             // 잘리므로 중요한 것이 살아남는다 (PLAN §11).
             let sceneEvents = (events[scene.contentHash] ?? [])
+                .map { event in
+                    var event = event
+                    let key = event.stableKey
+                    if let importance = overrides.value(.eventImportance, key: key),
+                        let value = Int(importance)
+                    {
+                        event.importance = min(5, max(1, value))
+                    }
+                    if let summary = overrides.value(.eventSummary, key: key) {
+                        event.summary = summary
+                    }
+                    return event
+                }
                 .sorted { $0.importance > $1.importance }
             ordered.append(contentsOf: sceneEvents)
         }
@@ -212,6 +312,94 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             }
         }
         self.eventIndexByCharacter = index
+
+        // 씬 메타 — 사이드카 값 위에 오버라이드를 얹는다.
+        var metaByHash: [String: SceneMeta] = [:]
+        var types: [SceneNarrativeType] = []
+        var anchorHashes: [String] = []
+        for scene in outline.scenes {
+            let hash = scene.contentHash
+            let stored = sceneSummaries[hash]
+            let titleOverride = overrides.value(.sceneTitle, key: hash)
+            let typeOverride = overrides.value(.sceneType, key: hash)
+            let type =
+                typeOverride.map { SceneNarrativeType.normalize($0) }
+                ?? stored?.narrativeType.map { SceneNarrativeType.normalize($0) }
+                ?? .present
+            metaByHash[hash] = SceneMeta(
+                title: titleOverride ?? stored?.title,
+                type: type,
+                pov: stored?.pov,
+                location: stored?.location,
+                titleUserEdited: titleOverride != nil,
+                typeUserEdited: typeOverride != nil)
+            types.append(type)
+            anchorHashes.append(hash)
+        }
+        self.sceneMetaByHash = metaByHash
+
+        // 브랜치 — 씬 유형에서 파생, 이름·시간 관계 오버라이드 적용.
+        var chronoOverrides: [String: ChronoRelation] = [:]
+        for (key, raw) in overrides.map(of: .branchChrono) {
+            if let relation = ChronoRelation(rawValue: raw) { chronoOverrides[key] = relation }
+        }
+        self.branches = NarrativeBranch.derive(
+            types: types, anchorHashes: anchorHashes,
+            nameOverrides: overrides.map(of: .branchName),
+            chronoOverrides: chronoOverrides)
+
+        // 대화 인덱스 — 발화에서 결정적으로.
+        self.conversations = Conversation.index(utterances: utterances, outline: outline)
+
+        // 심화 추출을 담화 순서로 편다 (사건과 같은 파생).
+        var knowledge: [KnowledgeDelta] = []
+        var relations: [RelationDelta] = []
+        var facts: [ContinuityFact] = []
+        var foreshadowCandidates: [ForeshadowCandidate] = []
+        for scene in outline.scenes {
+            guard let insight = insights[scene.contentHash] else { continue }
+            knowledge.append(contentsOf: insight.knowledge)
+            relations.append(contentsOf: insight.relations)
+            facts.append(contentsOf: insight.facts)
+            foreshadowCandidates.append(contentsOf: insight.foreshadows)
+        }
+        self.knowledgeDeltas = knowledge
+        self.relationDeltas = relations
+        self.facts = facts
+
+        // 충돌 — 살아있는 사실만 + 사용자 판정.
+        let liveFactIDs = Set(facts.map(\.id))
+        self.factConflicts = factConflicts
+            .filter { liveFactIDs.contains($0.aID) && liveFactIDs.contains($0.bID) }
+            .map { conflict in
+                ResolvedConflict(
+                    conflict: conflict,
+                    resolution: overrides.value(.conflictResolution, key: conflict.id)
+                        .flatMap { ConflictResolution(rawValue: $0) })
+            }
+
+        // 복선 — 라벨로 접고, 상태 오버라이드 적용 (기본 candidate).
+        var threadOrder: [String] = []
+        var threads: [String: ForeshadowThread] = [:]
+        for candidate in foreshadowCandidates {
+            if var existing = threads[candidate.label] {
+                existing.sceneHashes.append(candidate.sceneHash)
+                if let quote = candidate.quote { existing.quotes.append(quote) }
+                threads[candidate.label] = existing
+            } else {
+                threadOrder.append(candidate.label)
+                let statusOverride = overrides.value(.foreshadowStatus, key: candidate.label)
+                    .flatMap { ForeshadowStatus(rawValue: $0) }
+                threads[candidate.label] = ForeshadowThread(
+                    label: candidate.label,
+                    detail: candidate.detail,
+                    sceneHashes: [candidate.sceneHash],
+                    quotes: candidate.quote.map { [$0] } ?? [],
+                    status: statusOverride ?? .candidate,
+                    userEdited: statusOverride != nil)
+            }
+        }
+        self.foreshadows = threadOrder.compactMap { threads[$0] }
     }
 
     // MARK: - 표준 질의 (PLAN §8) — ContextAssembler는 이것만 쓴다
@@ -323,6 +511,78 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         if plain == 0 { return .honorific }
         if honorific == 0 { return .plain }
         return .mixed
+    }
+
+    // MARK: - Narrative Intelligence 질의 (v4, PLAN §6.5·§8)
+
+    /// 그 위치 시점에 인물이 가진 앎 — 커서 이전 씬의 앎 델타를 접는다.
+    /// 같은 사실(fact)에 대한 나중 델타(태도 변화: 의심 → 안다)가 이긴다.
+    /// 시점 차단은 사건 질의와 같은 씬 위치 비교 — 9장의 비밀이 3장 수정 중에
+    /// 새지 않는다 (CLAUDE.md §2-4). 요구사항 §11 "그 시점에 아는 것만"의 실체.
+    public func knowledge(
+        of characterID: UUID, before utf16Offset: Int
+    ) -> [KnowledgeDelta] {
+        var order: [String] = []
+        var latest: [String: KnowledgeDelta] = [:]
+        for delta in knowledgeDeltas {
+            guard delta.characterID == characterID,
+                (sceneEndByHash[delta.sceneHash] ?? .max) <= utf16Offset
+            else { continue }
+            if latest[delta.fact] == nil { order.append(delta.fact) }
+            latest[delta.fact] = delta
+        }
+        return order.compactMap { latest[$0] }
+    }
+
+    /// (from → to) 방향의 현재 관계 — 커서 이전 마지막 관계 델타.
+    public func relation(
+        from fromID: UUID, to toID: UUID, before utf16Offset: Int
+    ) -> RelationDelta? {
+        relationDeltas.last {
+            $0.fromID == fromID && $0.toID == toID
+                && (sceneEndByHash[$0.sceneHash] ?? .max) <= utf16Offset
+        }
+    }
+
+    /// (from → to) 관계의 전체 변화 이력 (담화 순서) — 바이블 관계 화면용.
+    public func relationHistory(from fromID: UUID, to toID: UUID) -> [RelationDelta] {
+        relationDeltas.filter { $0.fromID == fromID && $0.toID == toID }
+    }
+
+    /// 인물이 참여한 대화들 (담화 순서) — 바이블 대화 인덱스용.
+    public func conversations(involving characterID: UUID) -> [Conversation] {
+        conversations.filter { $0.participants.contains(characterID) }
+    }
+
+    /// 씬의 대표 중요도 — 그 씬 사건들의 최대 중요도 (사건 없으면 nil).
+    /// 타임라인의 시각적 계층(노드 크기·요약 밀도)이 이 값을 쓴다.
+    public func sceneImportance(of sceneHash: String) -> Int? {
+        events.filter { $0.sceneHash == sceneHash }.map(\.importance).max()
+    }
+
+    /// 아직 회수되지 않은 복선 (후보·확정) — "미회수" 열람 + 컨텍스트 주입용.
+    public var unresolvedForeshadows: [ForeshadowThread] {
+        foreshadows.filter { $0.status == .candidate || $0.status == .confirmed }
+    }
+
+    /// 작품 세계 시간 순서의 씬 인덱스 배열 (근사) — `과거` 브랜치 블록을 맨
+    /// 앞으로(브랜치 등장 순서 유지), `미래` 블록을 맨 뒤로 옮기고, 나머지는
+    /// 담화 순서를 유지한다. 절대 시각이 없는 한 완전한 정렬은 불가능하다 —
+    /// 상대 관계(ChronoRelation)의 표시가 목적이지 정밀 연표가 아니다
+    /// (요구사항 §7의 상대 시간 표현: before/after/simultaneous/unknown).
+    public func chronologicalSceneOrder() -> [Int] {
+        var past: [Int] = []
+        var future: [Int] = []
+        for branch in branches {
+            switch branch.chrono {
+            case .before: past.append(contentsOf: branch.sceneRange)
+            case .after: future.append(contentsOf: branch.sceneRange)
+            case .simultaneous, .unknown: break
+            }
+        }
+        let moved = Set(past + future)
+        let middle = outline.scenes.indices.filter { !moved.contains($0) }
+        return past + middle + future
     }
 
     /// 다음 화자 추정 (PLAN §10 대화 모드 ①) — 직전 발화의 청자가 1순위,

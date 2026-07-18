@@ -9,6 +9,7 @@ enum SidebarSection: String {
     case files  // 문서(폴더 트리) — 기존 사이드바
     case bible  // 스토리 바이블 (PLAN §7)
     case timeline  // 이해 타임라인 (PLAN §6.3·§8)
+    case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
 }
 
 /// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
@@ -18,7 +19,12 @@ private struct WarningDot: View {
     let theme: MintTheme
 
     var body: some View {
-        if indexer.snapshot?.entryID == store.activeID, !indexer.warnings.isEmpty {
+        // 일관성 경고 + 미판정 설정 충돌(v4) — 둘 다 "확인해 보세요" 신호다.
+        if indexer.snapshot?.entryID == store.activeID,
+            !indexer.warnings.isEmpty
+                || indexer.snapshot?.factConflicts.contains(where: { $0.resolution == nil })
+                    == true
+        {
             Circle()
                 .fill(theme.novelC)
                 .frame(width: 5, height: 5)
@@ -96,6 +102,7 @@ struct SidebarView: View {
             case .files: filesSection
             case .bible: bibleSection
             case .timeline: timelineSection
+            case .context: contextSection
             }
         }
         .background(theme.sidebarTintC)
@@ -149,6 +156,7 @@ struct SidebarView: View {
             sectionTab(.files, icon: "doc.text", help: "문서")
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
             sectionTab(.timeline, icon: "arrow.triangle.branch", help: "이해 타임라인")
+            sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
             Spacer()
         }
         .padding(.horizontal, 10)
@@ -217,6 +225,11 @@ struct SidebarView: View {
         } else {
             SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
         }
+    }
+
+    /// AI 컨텍스트 섹션 (v4) — 최근 예측이 실제로 참고한 정보의 열람.
+    private var contextSection: some View {
+        ContextInspectorView(completion: completion, store: store, theme: theme)
     }
 
     /// 문서(폴더 트리) 섹션 — 기존 사이드바 본문 그대로.

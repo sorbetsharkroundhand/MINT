@@ -21,19 +21,30 @@ public struct StoryEvent: Codable, Equatable, Sendable {
     /// 상태 효과 (PLAN §6.3 `상태 효과 [StateDelta 참조]`) — 사건 추출이 같은
     /// 줄의 `상태:` 필드에서 함께 채운다 (5b, docs/m6-events.md).
     public var deltas: [StateDelta]
+    /// 근거 인용 (≤60자) — 이 사건 판단의 원문 앵커. 씬 원문에서 검증 실패한
+    /// 인용은 저장하지 않는다 (nil = 추론 근거, EvidenceKind.inferred).
+    public var quote: String?
     public var updatedAt: Date
 
     public init(
         sceneHash: String, participants: [UUID], summary: String,
-        importance: Int, deltas: [StateDelta] = [], updatedAt: Date = .now
+        importance: Int, deltas: [StateDelta] = [], quote: String? = nil,
+        updatedAt: Date = .now
     ) {
         self.sceneHash = sceneHash
         self.participants = participants
         self.summary = summary
         self.importance = importance
         self.deltas = deltas
+        self.quote = quote
         self.updatedAt = updatedAt
     }
+
+    /// 사용자 수정(중요도·요약 오버라이드)의 안정 키 — 요약문 해시라 씬이
+    /// 재해시돼도 같은 요약이면 살아남는다. 요약이 바뀌면 오버라이드는 stale.
+    public var stableKey: String { DocumentOutline.stableHash("evt|\(summary)") }
+
+    public var evidenceKind: EvidenceKind { quote == nil ? .inferred : .direct }
 }
 
 /// 인물 상태 변화 한 조각 (PLAN §6.2) — 상태는 덮어쓰지 않고 append하며,
@@ -99,16 +110,22 @@ public enum EventParser {
         return index
     }
 
+    /// 근거 인용 상한 — 짧아야 본문 검색 앵커로 안정적이다 (개행 없는 한 구절).
+    static let maxQuoteCharacters = 60
+
     /// 모델 출력 → 검증된 사건 배열.
     ///
     /// 기대 형식 (한 줄에 사건 하나):
     /// ```
-    /// 서연이 병원에서 퇴원했다 | 참여: 서연, 민준 | 중요도: 3
+    /// 서연이 병원에서 퇴원했다 | 참여: 서연, 민준 | 중요도: 3 | 근거: "…"
     /// ```
     /// 형식을 벗어난 줄은 조용히 버린다 — 한 줄도 못 건지면 빈 배열이고,
     /// 호출부는 "사건 없음"으로 기록한다 (다음 패스가 재시도하지 않도록).
+    /// `sceneText`가 주어지면 근거 인용을 원문 대조로 검증한다 — 원문에 없는
+    /// 인용(환각)은 버리고 추론 근거(nil)로 강등한다.
     public static func parse(
-        _ output: String, sceneHash: String, nameIndex: [String: UUID]
+        _ output: String, sceneHash: String, nameIndex: [String: UUID],
+        sceneText: String? = nil
     ) -> [StoryEvent] {
         var events: [StoryEvent] = []
         for rawLine in output.split(separator: "\n") {
@@ -132,6 +149,7 @@ public enum EventParser {
             var participants: [UUID] = []
             var importance = 3  // 표기가 없거나 깨졌으면 중간값
             var deltas: [StateDelta] = []
+            var quote: String?
             for field in fields.dropFirst() {
                 if let value = value(of: field, keys: ["참여", "인물"]) {
                     participants = resolve(value, nameIndex: nameIndex)
@@ -139,6 +157,8 @@ public enum EventParser {
                     importance = min(5, max(1, Int(value.filter(\.isNumber)) ?? 3))
                 } else if let value = value(of: field, keys: ["상태", "상태변화"]) {
                     deltas = parseDeltas(value, sceneHash: sceneHash, nameIndex: nameIndex)
+                } else if let value = value(of: field, keys: ["근거", "인용"]) {
+                    quote = validatedQuote(value, in: sceneText)
                 }
             }
             // 상태가 바뀐 인물은 그 사건의 참여자다 — 델타만 있고 참여 표기가
@@ -147,9 +167,34 @@ public enum EventParser {
             events.append(
                 StoryEvent(
                     sceneHash: sceneHash, participants: participants + holders,
-                    summary: summary, importance: importance, deltas: deltas))
+                    summary: summary, importance: importance, deltas: deltas,
+                    quote: quote))
         }
         return events
+    }
+
+    /// 근거 인용 검증 — 따옴표를 벗기고 상한으로 자른 뒤, 씬 원문에 실제로
+    /// 존재할 때만 받는다 (환각 인용은 점프 앵커로 쓸 수 없다 — 없느니만 못하다).
+    /// `sceneText`가 nil이면(검증 불가 컨텍스트) 형식 정리만 하고 받아들인다.
+    static func validatedQuote(_ raw: String, in sceneText: String?) -> String? {
+        var cleaned = raw.trimmingCharacters(in: .whitespaces)
+        let wrappers: Set<Character> = ["\"", "“", "”", "'", "‘", "’", "「", "」", "『", "』"]
+        while let first = cleaned.first, wrappers.contains(first) {
+            cleaned.removeFirst()
+        }
+        while let last = cleaned.last, wrappers.contains(last) {
+            cleaned.removeLast()
+        }
+        cleaned = cleaned.trimmingCharacters(in: .whitespaces)
+        guard cleaned.count >= 4 else { return nil }
+        // 상한 초과 인용은 앞부분만 — 접두가 원문에 있으면 앵커로 충분하다.
+        cleaned = String(cleaned.prefix(maxQuoteCharacters))
+        if let sceneText, !sceneText.contains(cleaned) {
+            // 모델이 끝을 다듬었을 수 있다 — 앞 20자만으로 한 번 더.
+            let head = String(cleaned.prefix(20))
+            return sceneText.contains(head) ? head : nil
+        }
+        return cleaned
     }
 
     /// 모델이 붙이는 목록 기호만 벗긴다 — `- `·`* `·`• `·`1. `·`2) `.
@@ -240,11 +285,119 @@ public enum EventParser {
 
     /// 이름 하나 → 카드 id. 모델이 조사를 붙여 오는 경우("서연이")까지 받아준다 —
     /// 등록 이름이 접두인 매칭. 감지기(CharacterLexicon)와 같은 교착어 대응.
-    private static func resolveOne(
+    static func resolveOne(
         _ name: any StringProtocol, nameIndex: [String: UUID]
     ) -> UUID? {
         let key = String(name)
         if let id = nameIndex[key] { return id }
         return nameIndex.first(where: { key.hasPrefix($0.key) })?.value
+    }
+}
+
+// MARK: - 심화 추출 파싱 (앎·관계·사실·복선 — PLAN §6.5)
+
+/// 심화 추출 출력의 파서 — EventParser와 같은 규율 (파싱은 관대, 검증은 엄격).
+///
+/// 기대 형식 (한 줄에 항목 하나, 머리 키워드가 종류를 정한다):
+/// ```
+/// 앎: 아내 의심=남편이 약을 바꿨다 | 근거: "…"
+/// 관계: 남편→아내=의심과 통제 | 근거: "…"
+/// 사실: 아내=운전을 못 한다 | 근거: "…"
+/// 복선: 향수 냄새=낯선 향수 냄새가 반복 등장 | 근거: "…"
+/// ```
+public enum InsightParser {
+
+    static let maxFactCharacters = 60
+    static let maxForeshadowLabelCharacters = 30
+    static let maxForeshadowDetailCharacters = 80
+    /// 씬 하나에서 받는 항목 수 상한 (종류별) — 소음 방지 (품질 > 적극성).
+    static let maxItemsPerKind = 4
+
+    public static func parse(
+        _ output: String, sceneHash: String, nameIndex: [String: UUID],
+        sceneText: String? = nil
+    ) -> SceneInsights {
+        var insights = SceneInsights()
+        for rawLine in output.split(separator: "\n") {
+            let line = EventParser.stripListMarker(
+                rawLine.trimmingCharacters(in: .whitespaces))
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let keyword = line[..<colon].trimmingCharacters(in: .whitespaces)
+            let rest = line[line.index(after: colon)...]
+            // `| 근거:` 분리 — 본문에 `|`가 들어간 항목은 앞이 잘리지만 값이
+            // 짧은 명사구라 비용이 작다 (parseDeltas의 쉼표와 같은 트레이드오프).
+            let fields = rest.split(separator: "|").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            guard let head = fields.first, let equals = head.firstIndex(of: "=") else {
+                continue
+            }
+            let lhs = head[..<equals].trimmingCharacters(in: .whitespaces)
+            let rhs = head[head.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            guard !lhs.isEmpty, !rhs.isEmpty else { continue }
+            var quote: String?
+            for field in fields.dropFirst() {
+                if let colon2 = field.firstIndex(of: ":"),
+                    ["근거", "인용"].contains(
+                        field[..<colon2].trimmingCharacters(in: .whitespaces))
+                {
+                    quote = EventParser.validatedQuote(
+                        String(field[field.index(after: colon2)...]), in: sceneText)
+                }
+            }
+
+            switch keyword {
+            case "앎", "지식", "인지":
+                guard insights.knowledge.count < maxItemsPerKind else { continue }
+                // lhs = "이름 태도" — 마지막 공백 토큰이 태도 (parseDeltas와 동형).
+                guard let split = lhs.lastIndex(of: " ") else { continue }
+                let name = lhs[..<split].trimmingCharacters(in: .whitespaces)
+                let stanceName = lhs[lhs.index(after: split)...]
+                    .trimmingCharacters(in: .whitespaces)
+                guard let stance = KnowledgeDelta.Stance(rawValue: stanceName),
+                    let id = EventParser.resolveOne(name, nameIndex: nameIndex)
+                else { continue }
+                insights.knowledge.append(
+                    KnowledgeDelta(
+                        characterID: id, stance: stance,
+                        fact: String(rhs.prefix(maxFactCharacters)),
+                        sceneHash: sceneHash, quote: quote))
+            case "관계":
+                guard insights.relations.count < maxItemsPerKind else { continue }
+                // lhs = "A→B" (→·->·> 허용).
+                let pair = lhs
+                    .replacingOccurrences(of: "->", with: "→")
+                    .replacingOccurrences(of: ">", with: "→")
+                    .split(separator: "→")
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                guard pair.count == 2,
+                    let from = EventParser.resolveOne(pair[0], nameIndex: nameIndex),
+                    let to = EventParser.resolveOne(pair[1], nameIndex: nameIndex),
+                    from != to
+                else { continue }
+                insights.relations.append(
+                    RelationDelta(
+                        fromID: from, toID: to,
+                        value: String(rhs.prefix(EventParser.maxDeltaValueCharacters)),
+                        sceneHash: sceneHash, quote: quote))
+            case "사실", "설정":
+                guard insights.facts.count < maxItemsPerKind else { continue }
+                insights.facts.append(
+                    ContinuityFact(
+                        subject: String(lhs.prefix(30)),
+                        statement: String(rhs.prefix(maxFactCharacters)),
+                        sceneHash: sceneHash, quote: quote))
+            case "복선":
+                guard insights.foreshadows.count < maxItemsPerKind else { continue }
+                insights.foreshadows.append(
+                    ForeshadowCandidate(
+                        label: String(lhs.prefix(maxForeshadowLabelCharacters)),
+                        detail: String(rhs.prefix(maxForeshadowDetailCharacters)),
+                        sceneHash: sceneHash, quote: quote))
+            default:
+                continue
+            }
+        }
+        return insights
     }
 }

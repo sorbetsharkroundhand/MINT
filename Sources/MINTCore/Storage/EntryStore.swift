@@ -76,6 +76,11 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     /// 폴더 안 표시 순서 (사이드바 DnD 재정렬). 레거시 파일엔 없는 키 —
     /// nil이면 로드 시 기존 표시 순서(작성일 내림차순)로 시드된다.
     public var sortOrder: Double?
+    /// AI 분석 결과에 대한 사용자 수정 (Narrative Intelligence, PLAN §6.5).
+    /// **사용자 결정이라 파생 캐시(사이드카)가 아니라 여기 산다** — 사이드카는
+    /// 스키마 변경 시 통째로 버려지지만 이 목록은 살아남아, 재분석·재구축이
+    /// 사용자 수정을 절대 덮지 못한다 (CLAUDE.md §1-5). 레거시 파일엔 없는 키.
+    public var narrativeOverrides: [NarrativeOverride]?
 
     public init(
         id: UUID = UUID(),
@@ -88,7 +93,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         genre: String? = nil,
         characters: [CharacterCard]? = nil,
         rejectedCharacterNames: [String]? = nil,
-        sortOrder: Double? = nil
+        sortOrder: Double? = nil,
+        narrativeOverrides: [NarrativeOverride]? = nil
     ) {
         self.id = id
         self.title = title
@@ -101,6 +107,7 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.characters = characters
         self.rejectedCharacterNames = rejectedCharacterNames
         self.sortOrder = sortOrder
+        self.narrativeOverrides = narrativeOverrides
     }
 
     /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
@@ -778,6 +785,38 @@ public final class EntryStore: ObservableObject {
         rejected.append(name)
         entries[index].rejectedCharacterNames = rejected
         saveNow()
+    }
+
+    // MARK: - Narrative 사용자 수정 (PLAN §6.5, CLAUDE.md §1-5)
+
+    /// 오버라이드 변경 알림 — ContentView가 인덱서의 오버레이 재적용
+    /// (`rehydrate`)에 배선한다. LLM 없이 스냅샷만 다시 조립하는 신호다.
+    public var narrativeOverridesDidChange: ((UUID) -> Void)?
+
+    /// AI 분석 결과 수정 저장 — 같은 (kind, key)는 최신 값으로 대체된다.
+    /// 사용자 결정 = 구조 변경이라 즉시 저장 (rejectCharacterName과 같은 규칙).
+    public func setNarrativeOverride(_ override: NarrativeOverride, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var overrides = entries[index].narrativeOverrides ?? []
+        overrides.removeAll { $0.kind == override.kind && $0.key == override.key }
+        overrides.append(override)
+        entries[index].narrativeOverrides = overrides
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    /// 오버라이드 제거 — "AI 분석으로 되돌리기".
+    public func removeNarrativeOverride(
+        kind: NarrativeOverride.Kind, key: String, in id: UUID
+    ) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            var overrides = entries[index].narrativeOverrides,
+            overrides.contains(where: { $0.kind == kind && $0.key == key })
+        else { return }
+        overrides.removeAll { $0.kind == kind && $0.key == key }
+        entries[index].narrativeOverrides = overrides.isEmpty ? nil : overrides
+        saveNow()
+        narrativeOverridesDidChange?(id)
     }
 
     /// 인물 카드 삭제 — 구조 변경은 즉시 저장 (스토어의 기존 규칙).

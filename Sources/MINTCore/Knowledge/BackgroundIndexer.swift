@@ -124,14 +124,17 @@ public final class BackgroundIndexer: ObservableObject {
     /// 활성 문서의 스냅샷이 없으면 사이드카에서 만든다 — 결정적·읽기 전용이라
     /// 게이트(열·저전력·자동완성) 대상이 아니다. 사이드카가 비어 있어도
     /// 발행한다: 씬 분할·"아직 안 읽음" 상태가 즉시 보이는 것 자체가 가치다.
-    private func hydrateIfNeeded(entryID: UUID) {
-        guard snapshot?.entryID != entryID else { return }  // 이미 있음 — O(1) 탈출
+    /// `force`: 사용자 수정(오버라이드) 변경 시 — 이미 스냅샷이 있어도 다시
+    /// 조립해 수정이 즉시 보이게 한다 (LLM 없음, 결정적 재조립).
+    private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
+        guard force || snapshot?.entryID != entryID else { return }  // 이미 있음 — O(1) 탈출
         guard let entry = store?.activeEntry, entry.id == entryID,
             entry.resolvedKind == .novel
         else { return }
         let body = entry.body
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let characters = entry.characters ?? []
+        let overrides = entry.narrativeOverrides ?? []
 
         hydrateTask?.cancel()
         // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
@@ -142,17 +145,23 @@ public final class BackgroundIndexer: ObservableObject {
             let utterances = DialogueAttribution.utterances(in: body, cards: characters)
             let snapshot = Self.makeSnapshot(
                 entryID: entryID, outline: outline, sidecar: sidecar,
-                utterances: utterances)
+                utterances: utterances, overrides: overrides, body: body)
             let warnings = ConsistencyChecker.check(
                 snapshot: snapshot, characters: characters)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
-                guard self.snapshot?.entryID != entryID else { return }
+                guard force || self.snapshot?.entryID != entryID else { return }
                 self.snapshot = snapshot
                 self.warnings = warnings
             }
         }
+    }
+
+    /// 사용자 수정 반영 재조립 — EntryStore.narrativeOverridesDidChange가 부른다.
+    /// LLM 없이 사이드카 + 새 오버라이드로 스냅샷만 다시 만든다.
+    public func rehydrate(entryID: UUID) {
+        hydrateIfNeeded(entryID: entryID, force: true)
     }
 
     // MARK: - 패스 실행
@@ -162,9 +171,32 @@ public final class BackgroundIndexer: ObservableObject {
     /// 자동완성 스위치와 **무관하게** 깊은 패스를 1회 돈다: 버튼을 눌렀다는
     /// 것 자체가 "지금 이해를 만들어 달라"는 동의라, 자동 게이트(모델 로드
     /// 방지)를 우회한다. 열·저전력 게이트는 그대로 존중한다 (CLAUDE.md §4).
+    ///
+    /// **증분이다** — 해시 메모에 없는(바뀐·새) 씬만 읽는다. 전부 최신이면
+    /// 즉시 끝난다. 이미 분석된 문서를 강제로 다시 읽으려면 `requestFullPass`.
     public func requestPass() {
         // 자동 패스가 이미 돌고 있으면 그걸로 충분하다 — 중복 금지.
         guard passTask == nil else { return }
+        startPass(deep: true, userInitiated: true)
+    }
+
+    /// 전체 다시 읽기 — 파생 캐시(사이드카)를 버리고 처음부터 깊은 패스를 돈다.
+    ///
+    /// "이미 분석된 내용이 있으면 다시 읽을 방법이 없다"는 문제의 해법:
+    /// 증분(requestPass)은 메모 적중 씬을 건너뛰므로, 분석 품질이 불만이거나
+    /// 프롬프트가 개선된 뒤에는 이 통로로 강제 재분석한다. **사용자 수정은
+    /// 안전하다** — 오버라이드는 entries.json에 살고, 여기서 지우는 것은
+    /// 파생 캐시뿐이다 (CLAUDE.md §5-5: 실패해도 원문이 안전).
+    public func requestFullPass() {
+        guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
+        // 진행 중 패스 선점 — 낡은 사이드카에 체크포인트를 덧쓰지 않게 먼저 멈춘다.
+        passTask?.cancel()
+        passTask = nil
+        isIndexing = false
+        let entryID = entry.id
+        var fresh = KnowledgeSidecar(entryID: entryID)
+        fresh.generation = KnowledgeSidecar.load(entryID: entryID).generation + 1
+        fresh.save()
         startPass(deep: true, userInitiated: true)
     }
 
@@ -194,6 +226,7 @@ public final class BackgroundIndexer: ObservableObject {
                 }
             }.filter { !$0.isEmpty })
         let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
+        let overrides = entry.narrativeOverrides ?? []
         let caret = caretProvider?()
 
         isIndexing = true
@@ -214,7 +247,7 @@ public final class BackgroundIndexer: ObservableObject {
                 deep: deep, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
                 liveEntryIDs: liveEntryIDs, characters: characters,
-                caretUTF16: caret
+                overrides: overrides, caretUTF16: caret
             ) { snapshot in
                 // 일관성 검사는 스냅샷과 같은 주기 — 백그라운드에서 계산하고
                 // 결과만 메인으로 (렌더 경로 재계산 금지, docs/editor-perf.md 4차).
@@ -315,6 +348,7 @@ public final class BackgroundIndexer: ObservableObject {
         engine: CompletionEngine,
         liveEntryIDs: Set<UUID>,
         characters: [CharacterCard],
+        overrides: [NarrativeOverride],
         caretUTF16: Int?,
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void
     ) async {
@@ -355,22 +389,26 @@ public final class BackgroundIndexer: ObservableObject {
             guard sceneText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40
             else { continue }  // 요약할 내용이 없는 토막은 건너뛴다
 
-            let summary = await summarizeScene(
+            let analysis = await analyzeScene(
                 sceneText, engine: engine, parameters: parameters)
             callBudget -= 1
-            guard let summary else { continue }  // 실패는 다음 패스가 재시도
+            guard let analysis else { continue }  // 실패는 다음 패스가 재시도
 
             sidecar.sceneSummaries[scene.contentHash] = .init(
                 contentHash: scene.contentHash,
                 headingPath: scene.headingPath,
-                summary: summary,
+                summary: analysis.summary,
+                title: analysis.title,
+                narrativeType: analysis.narrativeType,
+                pov: analysis.pov,
+                location: analysis.location,
                 updatedAt: .now)
             // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
             sidecar.save()
             publish(
                 makeSnapshot(
                     entryID: entryID, outline: outline, sidecar: sidecar,
-                    utterances: utterances))
+                    utterances: utterances, overrides: overrides, body: body))
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -397,6 +435,31 @@ public final class BackgroundIndexer: ObservableObject {
             }
         }
 
+        // ②b 심화 추출 (깊은 패스 전용, v4 — 앎·관계·사실·복선). 사건과 별도
+        // 메모 키(insights) — 한쪽 실패가 다른 쪽을 지우지 않는다 (실패 격리).
+        if deep, !Task.isCancelled {
+            for scene in orderedScenes {
+                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                guard sidecar.insights[scene.contentHash] == nil else { continue }
+                let sceneText = String(
+                    text.substring(
+                        with: NSRange(
+                            location: scene.utf16Range.lowerBound,
+                            length: scene.utf16Range.count)
+                    ).prefix(maxSceneCharacters))
+                let insights = await extractInsights(
+                    sceneText, sceneHash: scene.contentHash,
+                    characters: characters, engine: engine, parameters: parameters)
+                guard let insights else { continue }  // 실패 — 다음 패스가 재시도
+                sidecar.insights[scene.contentHash] = insights
+                sidecar.save()
+                publish(
+                    makeSnapshot(
+                        entryID: entryID, outline: outline, sidecar: sidecar,
+                        utterances: utterances, overrides: overrides, body: body))
+            }
+        }
+
         // ③ 상향 전파 (깊은 패스 전용) — 장 → 작품, 더티 경로만 (PLAN §6.1).
         if deep, !Task.isCancelled {
             await propagate(
@@ -406,12 +469,31 @@ public final class BackgroundIndexer: ObservableObject {
             pruneOrphans(keeping: liveEntryIDs)
         }
 
+        // ④ 설정 충돌 검사 (깊은 패스 전용, v4) — 살아있는 씬의 사실 전체를
+        // 담화 순서로 모아 한 번 호출. 메모 키 = 사실 집합의 결합 해시 —
+        // 사실이 안 바뀌면 재검사하지 않는다 (CLAUDE.md §4 메모이제이션).
+        if deep, !Task.isCancelled, gateAllows(deep: true) {
+            var facts: [ContinuityFact] = []
+            for scene in outline.scenes {
+                facts.append(contentsOf: sidecar.insights[scene.contentHash]?.facts ?? [])
+            }
+            let memoHash = combinedHash(facts.map(\.id))
+            if sidecar.conflictsMemoHash != memoHash {
+                if let conflicts = await detectConflicts(
+                    facts: facts, engine: engine, parameters: parameters)
+                {
+                    sidecar.factConflicts = conflicts
+                    sidecar.conflictsMemoHash = memoHash
+                }
+            }
+        }
+
         guard !Task.isCancelled else { return }
         sidecar.save(pruningTo: Set(outline.scenes.map(\.contentHash)))
         publish(
                 makeSnapshot(
                     entryID: entryID, outline: outline, sidecar: sidecar,
-                    utterances: utterances))
+                    utterances: utterances, overrides: overrides, body: body))
     }
 
     /// 장·작품 요약 상향 전파 — 하위 요약이 전부 준비된 노드만, 결합 해시가
@@ -477,26 +559,165 @@ public final class BackgroundIndexer: ObservableObject {
             childrenHash: childrenHash, summary: summary, updatedAt: .now)
     }
 
-    // MARK: - 요약 호출 (공용 — 인덱서 본 경로 + MINTBench 리플레이 측정)
+    // MARK: - 씬 분석 호출 (공용 — 인덱서 본 경로 + MINTBench 리플레이 측정)
 
-    /// 씬 하나를 요약한다. 실패·빈 결과는 nil — 호출부가 무시한다 (PLAN §9).
+    /// 씬 분석 결과 — 요약 + 내용 기반 제목 + 서사 메타 (v4, 요구사항 §6·§7).
+    public struct SceneAnalysis: Equatable, Sendable {
+        public var title: String?
+        public var summary: String
+        public var narrativeType: String?
+        public var pov: String?
+        public var location: String?
+    }
+
+    /// 씬 요약 길이 상한 — 기존 120자에서 상향. **문장 경계에서만 자른다**
+    /// (SentenceClamp) — "감정조차 포즈로 여"처럼 중간에서 끊긴 요약이 저장되던
+    /// 문제의 근본 수정 절반 (나머지 절반은 생성 토큰 예산 64→192 상향).
+    nonisolated public static let maxSummaryCharacters = 160
+
+    /// 씬 하나를 분석한다 (제목·요약·유형·시점·장소 — 한 번의 호출).
+    /// 실패·빈 결과는 nil — 호출부가 무시한다 (PLAN §9).
     /// public인 이유: 벤치가 **완전히 같은 프롬프트·규격**으로 지식을 만들어야
     /// 측정이 본 경로를 대표한다 (CLAUDE.md §2-7).
-    nonisolated public static func summarizeScene(
+    nonisolated public static func analyzeScene(
         _ text: String, engine: CompletionEngine, parameters: CompletionParameters
-    ) async -> String? {
+    ) async -> SceneAnalysis? {
         // 헤딩 한 줄뿐인 초미니 씬은 요약할 내용이 없다 — 모델에 넣으면 환각
         // 요약이 생긴다 (벤치에서 확인). 인덱서·벤치 공용 가드.
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
             return nil
         }
-        let summary =
+        let output =
             (try? await engine.generateOneShot(
                 system: Prompts.sceneSystem,
                 user: Prompts.sceneUser(text),
-                maxTokens: 64,
-                parameters: parameters)) ?? ""
-        return summary.isEmpty ? nil : clamp(summary, to: 120)
+                // 다섯 줄 형식 — 빈 줄 조기 종료를 끄고 토큰 예산으로만 제한한다.
+                // 64토큰이 한국어 120자를 못 채워 요약이 중간에서 잘리던 원인.
+                maxTokens: 192,
+                parameters: parameters,
+                stopAtBlankLine: false)) ?? ""
+        guard !output.isEmpty else { return nil }
+        return parseSceneAnalysis(output)
+    }
+
+    /// 벤치 호환 래퍼 — 분석에서 요약만 취한다 (같은 프롬프트·같은 경로).
+    nonisolated public static func summarizeScene(
+        _ text: String, engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> String? {
+        await analyzeScene(text, engine: engine, parameters: parameters)?.summary
+    }
+
+    /// 씬 분석 출력 파싱 — `키: 값` 줄 형식 (EventParser와 같은 관대한 파싱).
+    /// 요약 줄이 없으면 nil — 제목만으로는 지식이 아니다.
+    nonisolated static func parseSceneAnalysis(_ output: String) -> SceneAnalysis? {
+        var title: String?
+        var summary: String?
+        var type: String?
+        var pov: String?
+        var location: String?
+        for rawLine in output.split(separator: "\n") {
+            let line = EventParser.stripListMarker(
+                rawLine.trimmingCharacters(in: .whitespaces))
+            guard let colon = line.firstIndex(of: ":") else {
+                // 키 없는 첫 산문 줄 — 구형 응답(요약만 출력)의 폴백.
+                if summary == nil, line.count >= 10 { summary = line }
+                continue
+            }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+            let value = line[line.index(after: colon)...]
+                .trimmingCharacters(in: .whitespaces)
+            guard !value.isEmpty else { continue }
+            switch key {
+            case "제목": title = SentenceClamp.clamp(value, to: 24)
+            case "요약": summary = SentenceClamp.clamp(value, to: maxSummaryCharacters)
+            case "유형", "종류": type = value
+            case "시점", "시점인물": pov = String(value.prefix(20))
+            case "장소": location = String(value.prefix(30))
+            default: break
+            }
+        }
+        guard let summary, !summary.isEmpty else { return nil }
+        return SceneAnalysis(
+            title: title, summary: summary, narrativeType: type,
+            pov: pov, location: location)
+    }
+
+    /// 심화 추출 (v4, PLAN §6.5) — 앎·관계·설정 사실·복선 후보. 깊은 패스 전용.
+    /// 사건 추출과 별도 호출인 이유: 필드 7종을 한 프롬프트에 욱여넣으면 소형
+    /// 모델의 형식 준수가 무너진다 (요약/사건 분리와 같은 실패 격리).
+    nonisolated public static func extractInsights(
+        _ text: String, sceneHash: String, characters: [CharacterCard],
+        engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> SceneInsights? {
+        guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
+            return SceneInsights()  // 초미니 씬 — 뽑을 것이 없다 (환각 방지)
+        }
+        let nameIndex = EventParser.nameIndex(characters)
+        let output =
+            (try? await engine.generateOneShot(
+                system: Prompts.insightSystem,
+                user: Prompts.insightUser(text, names: nameIndex.keys.sorted()),
+                maxTokens: 384,
+                parameters: parameters,
+                stopAtBlankLine: false)) ?? ""
+        guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
+        return InsightParser.parse(
+            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text)
+    }
+
+    /// 설정 충돌 후보 검사 (v4, 요구사항 §14) — 누적된 사실 목록 전체를 한 번의
+    /// 호출로 대조한다. 사실은 짧은 명제(≤60자)라 수십 개여도 프롬프트가 작다.
+    /// 자동 수정은 없다 — 후보 제안뿐, 판정은 사용자 (CLAUDE.md §1-5).
+    nonisolated public static func detectConflicts(
+        facts: [ContinuityFact],
+        engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> [FactConflict]? {
+        let capped = Array(facts.prefix(40))
+        guard capped.count >= 2 else { return [] }
+        let listing = capped.enumerated()
+            .map { "\($0.offset + 1). \($0.element.subject): \($0.element.statement)" }
+            .joined(separator: "\n")
+        let output =
+            (try? await engine.generateOneShot(
+                system: Prompts.conflictSystem,
+                user: "설정 목록:\n\(listing)",
+                maxTokens: 256,
+                parameters: parameters,
+                stopAtBlankLine: false)) ?? ""
+        guard !output.isEmpty else { return nil }
+        var conflicts: [FactConflict] = []
+        for rawLine in output.split(separator: "\n") {
+            let line = EventParser.stripListMarker(
+                rawLine.trimmingCharacters(in: .whitespaces))
+            // 형식: `충돌: 3 & 7 | 이유: …`
+            guard line.hasPrefix("충돌") else { continue }
+            let fields = line.split(separator: "|").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            guard let head = fields.first else { continue }
+            let numbers = head.split(whereSeparator: { !$0.isNumber })
+                .compactMap { Int($0) }
+            guard numbers.count >= 2,
+                let a = numbers.first, let b = numbers.dropFirst().first,
+                a != b, (1...capped.count).contains(a), (1...capped.count).contains(b)
+            else { continue }
+            var reason = ""
+            for field in fields.dropFirst() {
+                if let colon = field.firstIndex(of: ":"),
+                    field[..<colon].trimmingCharacters(in: .whitespaces) == "이유"
+                {
+                    reason = field[field.index(after: colon)...]
+                        .trimmingCharacters(in: .whitespaces)
+                }
+            }
+            conflicts.append(
+                FactConflict(
+                    aID: capped[a - 1].id, bID: capped[b - 1].id,
+                    reason: String(reason.prefix(80))))
+        }
+        // 같은 쌍 중복 제거 (순서 무관 id).
+        var seen: Set<String> = []
+        return conflicts.filter { seen.insert($0.id).inserted }
     }
 
     /// 등록 인물 ↔ 과거 사건 참여자 소급 연결 (결정적·LLM 없음, CLAUDE.md §2-5).
@@ -551,12 +772,14 @@ public final class BackgroundIndexer: ObservableObject {
             (try? await engine.generateOneShot(
                 system: Prompts.eventSystem,
                 user: Prompts.eventUser(text, names: nameIndex.keys.sorted()),
-                // 5b에서 줄마다 `상태:` 필드가 붙어 길어졌다 — 마지막 줄이
-                // 중간에서 잘리면 그 사건·델타를 통째로 잃는다.
-                maxTokens: 256,
-                parameters: parameters)) ?? ""
+                // 5b에서 줄마다 `상태:` 필드가, v4에서 `근거:`가 붙어 길어졌다 —
+                // 마지막 줄이 중간에서 잘리면 그 사건·델타를 통째로 잃는다.
+                maxTokens: 384,
+                parameters: parameters,
+                stopAtBlankLine: false)) ?? ""
         guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
-        return EventParser.parse(output, sceneHash: sceneHash, nameIndex: nameIndex)
+        return EventParser.parse(
+            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text)
     }
 
     /// 하위 요약 묶음 → 상위 요약 (장 ≤300자 · 작품 ≤500자).
@@ -601,9 +824,14 @@ public final class BackgroundIndexer: ObservableObject {
 
     nonisolated private static func makeSnapshot(
         entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
-        utterances: [Utterance]
+        utterances: [Utterance], overrides: [NarrativeOverride] = [],
+        body: String = ""
     ) -> KnowledgeSnapshot {
-        KnowledgeSnapshot(
+        // 사용자 수정 재앵커 — 씬 원문이 바뀌어 해시가 바뀐 오버라이드를 앵커
+        // 스니펫으로 잇는다. 실패분은 stale로 스냅샷에 실려 UI가 알린다 (§1-5).
+        let (rekeyed, stale) = NarrativeOverrides(overrides)
+            .rekeyedForScenes(outline: outline, body: body)
+        return KnowledgeSnapshot(
             entryID: entryID,
             outline: outline,
             summariesByHash: sidecar.sceneSummaries.mapValues(\.summary),
@@ -613,7 +841,12 @@ public final class BackgroundIndexer: ObservableObject {
                 }),
             workSummary: sidecar.workSummary?.summary,
             events: sidecar.events,
-            utterances: utterances
+            utterances: utterances,
+            sceneSummaries: sidecar.sceneSummaries,
+            insights: sidecar.insights,
+            factConflicts: sidecar.factConflicts,
+            overrides: rekeyed,
+            staleOverrides: stale
         )
     }
 
@@ -623,11 +856,10 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 요약 길이 상한 (PLAN §6.1) — 모델이 상한을 어겨도 저장은 규격대로.
+    /// **문장 경계 절단** — prefix로 문장 중간을 자르던 것이 타임라인 텍스트
+    /// 잘림의 저장 단계 원인이었다 (SentenceClamp 참조).
     nonisolated private static func clamp(_ text: String, to limit: Int) -> String {
-        let collapsed = text
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return String(collapsed.prefix(limit))
+        SentenceClamp.clamp(text, to: limit)
     }
 
     /// 삭제된 저널의 사이드카 정리 — 깊은 패스 끝에서만 (디렉터리 스캔은 싸지만
@@ -650,18 +882,71 @@ public final class BackgroundIndexer: ObservableObject {
 
     nonisolated private enum Prompts {
         static let sceneSystem = """
-            너는 소설 장면을 요약하는 도우미다. 주어진 장면에서 일어난 일을 \
-            인물 이름을 유지한 채 한국어 1~2문장(최대 120자)으로 요약한다. \
-            설명·머리말·따옴표 없이 요약문만 출력한다.
+            너는 소설 장면을 분석하는 도우미다. 주어진 장면을 읽고 아래 형식으로 \
+            한 줄씩 출력한다. 인물 이름을 유지하고, 장면에 없는 내용은 지어내지 \
+            않는다. 설명·머리말 없이 아래 줄들만 출력한다.
+
+            제목: 장면 내용을 한눈에 알 수 있는 제목 (최대 20자, 번호·작품명 금지)
+            요약: 일어난 일 1~2문장 (최대 150자, 문장을 끝까지 완성할 것)
+            유형: 현재/회상/꿈/예상/병렬/삽입 중 하나 (기본은 현재. 장면 전체가 \
+            과거 회상일 때만 회상)
+            시점: 시점 인물 이름 (모르면 이 줄 생략)
+            장소: 장면의 장소 (모르면 이 줄 생략)
             """
 
         static func sceneUser(_ text: String) -> String {
             """
-            다음 장면을 요약하라.
+            다음 장면을 분석하라.
 
             \(text)
             """
         }
+
+        // MARK: 심화 추출 (v4, PLAN §6.5) — 앎·관계·설정 사실·복선
+
+        static let insightSystem = """
+            너는 소설 장면에서 서사 정보를 뽑는 도우미다. 장면에 실제로 근거가 \
+            있는 것만, 한 줄에 하나씩 아래 네 형식 중 맞는 것으로 출력한다. \
+            해당 사항이 없는 종류는 출력하지 않는다. 종류마다 최대 3개.
+
+            앎: 인물 태도=사실 | 근거: 원문 짧은 인용
+            관계: 인물A→인물B=관계 상태 | 근거: 원문 짧은 인용
+            사실: 대상=변하지 않는 설정 명제 | 근거: 원문 짧은 인용
+            복선: 짧은 라벨=반복되거나 미해결인 요소 설명 | 근거: 원문 짧은 인용
+
+            규칙:
+            - 앎의 태도는 안다/의심/오해/숨김 네 가지만 쓴다. "인물이 이 장면에서 \
+            새로 알게 되거나 의심하게 된 것"만 쓴다.
+            - 앎과 관계의 인물은 주어진 인물 목록에 있는 이름만 쓴다.
+            - 사실은 세계 설정("운전을 못 한다", "총알은 6발")처럼 이후 장면과 \
+            충돌할 수 있는 명제만 쓴다. 일시적 감정·행동은 사실이 아니다.
+            - 복선은 사물·비밀·질문·약속처럼 나중에 회수될 법한 요소만 쓴다.
+            - 근거 인용은 장면 원문에서 그대로 복사한 30자 이내 구절이다.
+            - 설명·머리말 없이 위 형식의 줄만 출력한다.
+            """
+
+        static func insightUser(_ text: String, names: [String]) -> String {
+            """
+            인물 목록: \(names.isEmpty ? "(등록된 인물 없음 — 앎·관계는 출력하지 않는다)" : names.joined(separator: ", "))
+
+            다음 장면에서 서사 정보를 뽑아라.
+
+            \(text)
+            """
+        }
+
+        // MARK: 설정 충돌 검사 (v4, 요구사항 §14)
+
+        static let conflictSystem = """
+            너는 소설의 설정 목록에서 서로 모순될 가능성이 있는 쌍을 찾는 \
+            도우미다. 번호가 붙은 설정 목록을 읽고, 양립하기 어려운 쌍만 아래 \
+            형식으로 한 줄씩 출력한다. 없으면 "없음"만 출력한다. 최대 5쌍.
+
+            충돌: 번호 & 번호 | 이유: 왜 모순인지 한 문장 (최대 60자)
+
+            주의: 시간이 지나 자연스럽게 변한 상태(감정·위치)는 모순이 아니다. \
+            같은 대상에 대한 양립 불가능한 규칙·능력·수치만 충돌이다.
+            """
 
         static let chapterSystem = """
             너는 소설의 장(章)을 요약하는 도우미다. 주어진 장면 요약들을 묶어 \
@@ -689,11 +974,21 @@ public final class BackgroundIndexer: ObservableObject {
             너는 소설 장면에서 사건을 뽑는 도우미다. 장면에서 실제로 일어난 일만 \
             중요한 순서로 최대 3개까지, 한 줄에 하나씩 아래 형식으로 출력한다.
 
-            사건요약(최대 80자) | 참여: 인물이름들 | 중요도: 1~5 | 상태: 인물 필드=값; 인물 필드=값
+            사건요약(최대 80자, 문장을 끝까지 완성) | 참여: 인물이름들 | 중요도: 1~5 | \
+            상태: 인물 필드=값; 인물 필드=값 | 근거: 원문 짧은 인용
+
+            중요도 기준 (요구사항: 숫자를 감으로 매기지 않는다):
+            5 = 갈등·관계·목표가 뒤집히거나, 비밀·죽음처럼 이후 이야기의 방향을 \
+            바꾸는 사건
+            4 = 중요한 결정, 새로운 정보의 공개, 이후 사건의 직접 원인
+            3 = 이야기가 앞으로 나아가는 보통 사건
+            2 = 분위기·일상 묘사 속의 작은 일
+            1 = 스쳐 가는 사소한 일
 
             상태는 이 사건으로 실제로 **바뀐** 인물 상태만 쓴다. 필드는 위치, 감정, \
             관계, 목표, 생사 다섯 가지만 쓴다. 값은 40자 이내로 짧게 쓴다. \
-            바뀐 상태가 없으면 상태 항목을 통째로 생략한다.
+            바뀐 상태가 없으면 상태 항목을 통째로 생략한다. \
+            근거는 장면 원문에서 그대로 복사한 30자 이내 구절이다.
 
             규칙: 주어진 인물 목록에 있는 이름만 참여와 상태에 쓴다. 장면에 없는 \
             일을 지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.

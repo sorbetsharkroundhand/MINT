@@ -30,6 +30,10 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var engineState: EngineState = .idle
     /// 최근 제안의 생성 지연(디바운스 제외) — 상태 바 표시용.
     @Published public private(set) var lastLatency: TimeInterval?
+    /// 최근 예측이 실제로 참고한 컨텍스트 (요구사항 §17 인스펙터) — 조립기가
+    /// 프롬프트를 만들며 남긴 기록이라 프롬프트와 항상 일치한다. 별도 프리뷰
+    /// 데이터가 아니다.
+    @Published public private(set) var lastContextReport: ContextReport?
     /// 제안 요청이 예약·진행 중인가 — 툴바 칩의 "예측 중" 표시용 (에디터 v3).
     @Published public private(set) var isPredicting = false
 
@@ -410,7 +414,7 @@ public final class CompletionController: ObservableObject {
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let document = documentContextProvider?()
         let knowledge = knowledgeProvider?()
-        let prompt = ContextAssembler.assemble(
+        let (prompt, report) = ContextAssembler.assembleWithReport(
             prefix: prefix,
             document: document,
             knowledge: knowledge,
@@ -418,6 +422,9 @@ public final class CompletionController: ObservableObject {
             prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
             style: parameters.promptStyle
         )
+        // 인스펙터 갱신 — 이 요청이 실제로 쓰는 컨텍스트다 (생성 성패와 무관:
+        // 무엇이 주입됐는지가 관심사다).
+        lastContextReport = report
         // 대화 모드 (PLAN §10) — 커서가 열린 따옴표 안이면 정지 사다리를 발화
         // 끝으로 확장한다. 조립기의 말투 승격과 같은 감지를 써서 어긋나지 않는다.
         var parameters = parameters
