@@ -294,6 +294,10 @@ public struct EventPerspective: Equatable, Sendable, Identifiable {
     /// 이 관점에서의 서술 (그 씬 StoryEvent의 요약).
     public var summary: String
     public var quote: String?
+    /// 이 관점의 맥락이 된 서사 구간 ID — 조립이 viewpoint·source를 파생할 때
+    /// 쓴 구간을 기록해 정본 사건 → Segment 역추적을 가능하게 한다 (통합 UI의
+    /// 사건 상세가 Scene/Segment를 보여주는 근거). 파생 전용이라 저장 안 함.
+    public var segmentID: String?
 
     public var id: String { eventKey }
 }

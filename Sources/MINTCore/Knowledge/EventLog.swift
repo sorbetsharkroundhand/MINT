@@ -294,7 +294,7 @@ public enum EventParser {
     }
 }
 
-// MARK: - 심화 추출 파싱 (앎·관계·사실·복선 — PLAN §6.5)
+// MARK: - 심화 추출 파싱 (앎·관계 — PLAN §6.5)
 
 /// 심화 추출 출력의 파서 — EventParser와 같은 규율 (파싱은 관대, 검증은 엄격).
 ///
@@ -302,14 +302,10 @@ public enum EventParser {
 /// ```
 /// 앎: 아내 의심=남편이 약을 바꿨다 | 근거: "…"
 /// 관계: 남편→아내=의심과 통제 | 근거: "…"
-/// 사실: 아내=운전을 못 한다 | 근거: "…"
-/// 복선: 향수 냄새=낯선 향수 냄새가 반복 등장 | 근거: "…"
 /// ```
 public enum InsightParser {
 
     static let maxFactCharacters = 60
-    static let maxForeshadowLabelCharacters = 30
-    static let maxForeshadowDetailCharacters = 80
     /// 씬 하나에서 받는 항목 수 상한 (종류별) — 소음 방지 (품질 > 적극성).
     static let maxItemsPerKind = 4
 
@@ -379,20 +375,6 @@ public enum InsightParser {
                     RelationDelta(
                         fromID: from, toID: to,
                         value: String(rhs.prefix(EventParser.maxDeltaValueCharacters)),
-                        sceneHash: sceneHash, quote: quote))
-            case "사실", "설정":
-                guard insights.facts.count < maxItemsPerKind else { continue }
-                insights.facts.append(
-                    ContinuityFact(
-                        subject: String(lhs.prefix(30)),
-                        statement: String(rhs.prefix(maxFactCharacters)),
-                        sceneHash: sceneHash, quote: quote))
-            case "복선":
-                guard insights.foreshadows.count < maxItemsPerKind else { continue }
-                insights.foreshadows.append(
-                    ForeshadowCandidate(
-                        label: String(lhs.prefix(maxForeshadowLabelCharacters)),
-                        detail: String(rhs.prefix(maxForeshadowDetailCharacters)),
                         sceneHash: sceneHash, quote: quote))
             default:
                 continue

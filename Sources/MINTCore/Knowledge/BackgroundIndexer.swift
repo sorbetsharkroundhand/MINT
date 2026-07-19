@@ -541,7 +541,7 @@ public final class BackgroundIndexer: ObservableObject {
             }
         }
 
-        // ②b 심화 추출 (깊은 패스 전용, v4 — 앎·관계·사실·복선). 사건과 별도
+        // ②b 심화 추출 (깊은 패스 전용, v4 — 앎·관계). 사건과 별도
         // 메모 키(insights) — 한쪽 실패가 다른 쪽을 지우지 않는다 (실패 격리).
         if deep, !Task.isCancelled {
             for scene in orderedScenes {
@@ -615,26 +615,7 @@ public final class BackgroundIndexer: ObservableObject {
             pruneOrphans(keeping: liveEntryIDs)
         }
 
-        // ④ 설정 충돌 검사 (깊은 패스 전용, v4) — 살아있는 씬의 사실 전체를
-        // 담화 순서로 모아 한 번 호출. 메모 키 = 사실 집합의 결합 해시 —
-        // 사실이 안 바뀌면 재검사하지 않는다 (CLAUDE.md §4 메모이제이션).
-        if deep, !Task.isCancelled, gateAllows(deep: true) {
-            var facts: [ContinuityFact] = []
-            for scene in outline.scenes {
-                facts.append(contentsOf: sidecar.insights[scene.contentHash]?.facts ?? [])
-            }
-            let memoHash = combinedHash(facts.map(\.id))
-            if sidecar.conflictsMemoHash != memoHash {
-                if let conflicts = await detectConflicts(
-                    facts: facts, engine: engine, parameters: parameters)
-                {
-                    sidecar.factConflicts = conflicts
-                    sidecar.conflictsMemoHash = memoHash
-                }
-            }
-        }
-
-        // ⑤ 사건 그래프 분석 (깊은 패스 전용, v5 — 요구사항 §3·§6·§12·§29).
+        // ④ 사건 그래프 분석 (깊은 패스 전용, v5 — 요구사항 §3·§6·§12·§29).
         // 살아있는 씬의 사건 전체를 담화 순서로 모아 한 번의 호출로 인과·동일
         // 사건·시간 관계 후보를 뽑는다. 메모 키 = 사건 키 집합의 결합 해시.
         if deep, !Task.isCancelled, gateAllows(deep: true) {
@@ -652,6 +633,32 @@ public final class BackgroundIndexer: ObservableObject {
                         causalLinks: analysis.causalLinks,
                         identities: analysis.identities,
                         chronoEdges: analysis.chronoEdges,
+                        memoHash: memoHash)
+                    sidecar.save()
+                }
+            }
+        }
+
+        // ⑤b 플롯 스레드 추론 (깊은 패스 전용, v6). 사건 목록 + 인과 힌트를
+        // 한 번의 호출로 플롯 라인으로 묶는다. 메모 키 = 사건 키 집합 해시.
+        // 재분석 결과는 이전 스레드에 멤버 겹침으로 이어(reconcile) stableID가
+        // 유지된다 — 오버라이드·색·레인의 앵커가 흔들리지 않는다 (요구사항 §10).
+        if deep, !Task.isCancelled, gateAllows(deep: true) {
+            var orderedEvents: [StoryEvent] = []
+            for scene in outline.scenes {
+                orderedEvents.append(contentsOf: sidecar.events[scene.contentHash] ?? [])
+            }
+            let memoHash = combinedHash(orderedEvents.map(\.stableKey) + ["plot"])
+            if orderedEvents.count >= 3, sidecar.plotThreads?.memoHash != memoHash {
+                if let threads = await analyzePlotThreads(
+                    events: orderedEvents, characters: characters,
+                    causalLinks: sidecar.eventGraph?.causalLinks ?? [],
+                    engine: engine, parameters: parameters)
+                {
+                    sidecar.plotThreads = PlotThreadAnalysis(
+                        threads: PlotThreadParser.reconcile(
+                            new: threads,
+                            previous: sidecar.plotThreads?.threads ?? []),
                         memoHash: memoHash)
                     sidecar.save()
                 }
@@ -852,8 +859,8 @@ public final class BackgroundIndexer: ObservableObject {
             pov: pov, location: location)
     }
 
-    /// 심화 추출 (v4, PLAN §6.5) — 앎·관계·설정 사실·복선 후보. 깊은 패스 전용.
-    /// 사건 추출과 별도 호출인 이유: 필드 7종을 한 프롬프트에 욱여넣으면 소형
+    /// 심화 추출 (v4, PLAN §6.5) — 앎·관계. 깊은 패스 전용.
+    /// 사건 추출과 별도 호출인 이유: 여러 필드를 한 프롬프트에 욱여넣으면 소형
     /// 모델의 형식 준수가 무너진다 (요약/사건 분리와 같은 실패 격리).
     nonisolated public static func extractInsights(
         _ text: String, sceneHash: String, characters: [CharacterCard],
@@ -903,8 +910,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 사건 그래프 분석 (v5, 요구사항 §3·§6·§12·§29) — 사건 목록 전체를 번호로
     /// 제시하고 인과·동일 사건·시간 관계 후보를 한 번의 호출로 받는다.
-    /// 사건은 짧은 요약(≤80자)이라 수십 개여도 프롬프트가 작다 (충돌 검사와
-    /// 같은 예산 구조). 실패는 nil.
+    /// 사건은 짧은 요약(≤80자)이라 수십 개여도 프롬프트가 작다. 실패는 nil.
     nonisolated public static func analyzeEventGraph(
         events: [StoryEvent], characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
@@ -929,6 +935,47 @@ public final class BackgroundIndexer: ObservableObject {
                 stopAtBlankLine: false)) ?? ""
         guard !output.isEmpty else { return nil }
         return EventGraphParser.parse(output, keys: capped.map(\.stableKey))
+    }
+
+    /// 플롯 스레드 추론 (v6) — 사건 목록을 플롯 라인으로 묶는다. 인물 겹침이
+    /// 아니라 목표·갈등·질문의 연속성으로 묶으라는 규칙이 프롬프트의 핵심이다
+    /// (Branch ≠ Character). 인과 후보를 힌트로 함께 준다 — 인과 사슬은 같은
+    /// 플롯일 강한 신호다. 실패는 nil (기존 분석 유지).
+    nonisolated public static func analyzePlotThreads(
+        events: [StoryEvent], characters: [CharacterCard],
+        causalLinks: [CausalLink],
+        engine: CompletionEngine, parameters: CompletionParameters
+    ) async -> [PlotThread]? {
+        let capped = Array(events.prefix(40))
+        guard capped.count >= 3 else { return [] }
+        let names = Dictionary(uniqueKeysWithValues: characters.map { ($0.id, $0.name) })
+        let listing = capped.enumerated()
+            .map { offset, event in
+                let who = event.participants.compactMap { names[$0] }.joined(separator: "·")
+                return "\(offset + 1). \(event.summary)\(who.isEmpty ? "" : " [\(who)]")"
+            }
+            .joined(separator: "\n")
+        // 인과 힌트 — 번호로 환산 가능한 것만 (같은 40개 상한 안).
+        let numberByKey = Dictionary(
+            uniqueKeysWithValues: capped.enumerated().map { ($0.element.stableKey, $0.offset + 1) })
+        let hints = causalLinks.compactMap { link -> String? in
+            guard let from = numberByKey[link.fromKey], let to = numberByKey[link.toKey]
+            else { return nil }
+            return "\(from) → \(to) (\(link.kind.rawValue))"
+        }
+        let hintBlock = hints.isEmpty ? "" : "\n\n인과 관계 힌트:\n\(hints.joined(separator: "\n"))"
+        let output =
+            (try? await engine.generateOneShot(
+                system: Prompts.plotThreadSystem,
+                user: "사건 목록 (본문 등장 순서):\n\(listing)\(hintBlock)",
+                maxTokens: 384,
+                parameters: parameters,
+                stopAtBlankLine: false)) ?? ""
+        guard !output.isEmpty else { return nil }
+        if output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("없음") {
+            return []
+        }
+        return PlotThreadParser.parse(output, keys: capped.map(\.stableKey))
     }
 
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 주제·어조·핵심 발언을 뽑는다.
@@ -972,61 +1019,6 @@ public final class BackgroundIndexer: ObservableObject {
         }
         return ConversationMeta(
             contentHash: contentHash, topic: topic, tone: tone, keyStatements: statements)
-    }
-
-    /// 설정 충돌 후보 검사 (v4, 요구사항 §14) — 누적된 사실 목록 전체를 한 번의
-    /// 호출로 대조한다. 사실은 짧은 명제(≤60자)라 수십 개여도 프롬프트가 작다.
-    /// 자동 수정은 없다 — 후보 제안뿐, 판정은 사용자 (CLAUDE.md §1-5).
-    nonisolated public static func detectConflicts(
-        facts: [ContinuityFact],
-        engine: CompletionEngine, parameters: CompletionParameters
-    ) async -> [FactConflict]? {
-        let capped = Array(facts.prefix(40))
-        guard capped.count >= 2 else { return [] }
-        let listing = capped.enumerated()
-            .map { "\($0.offset + 1). \($0.element.subject): \($0.element.statement)" }
-            .joined(separator: "\n")
-        let output =
-            (try? await engine.generateOneShot(
-                system: Prompts.conflictSystem,
-                user: "설정 목록:\n\(listing)",
-                maxTokens: 256,
-                parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
-        guard !output.isEmpty else { return nil }
-        var conflicts: [FactConflict] = []
-        for rawLine in output.split(separator: "\n") {
-            let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
-            // 형식: `충돌: 3 & 7 | 이유: …`
-            guard line.hasPrefix("충돌") else { continue }
-            let fields = line.split(separator: "|").map {
-                $0.trimmingCharacters(in: .whitespaces)
-            }
-            guard let head = fields.first else { continue }
-            let numbers = head.split(whereSeparator: { !$0.isNumber })
-                .compactMap { Int($0) }
-            guard numbers.count >= 2,
-                let a = numbers.first, let b = numbers.dropFirst().first,
-                a != b, (1...capped.count).contains(a), (1...capped.count).contains(b)
-            else { continue }
-            var reason = ""
-            for field in fields.dropFirst() {
-                if let colon = field.firstIndex(of: ":"),
-                    field[..<colon].trimmingCharacters(in: .whitespaces) == "이유"
-                {
-                    reason = field[field.index(after: colon)...]
-                        .trimmingCharacters(in: .whitespaces)
-                }
-            }
-            conflicts.append(
-                FactConflict(
-                    aID: capped[a - 1].id, bID: capped[b - 1].id,
-                    reason: String(reason.prefix(80))))
-        }
-        // 같은 쌍 중복 제거 (순서 무관 id).
-        var seen: Set<String> = []
-        return conflicts.filter { seen.insert($0.id).inserted }
     }
 
     /// 등록 인물 ↔ 과거 사건 참여자 소급 연결 (결정적·LLM 없음, CLAUDE.md §2-5).
@@ -1163,9 +1155,9 @@ public final class BackgroundIndexer: ObservableObject {
             utterances: utterances,
             sceneSummaries: sidecar.sceneSummaries,
             insights: sidecar.insights,
-            factConflicts: sidecar.factConflicts,
             segments: boundedSegments,
             eventGraph: sidecar.eventGraph,
+            plotThreadAnalysis: sidecar.plotThreads,
             recordedConversations: anchoredRecords,
             conversationMeta: sidecar.conversationMeta,
             characters: characters,
@@ -1226,25 +1218,20 @@ public final class BackgroundIndexer: ObservableObject {
             """
         }
 
-        // MARK: 심화 추출 (v4, PLAN §6.5) — 앎·관계·설정 사실·복선
+        // MARK: 심화 추출 (v4, PLAN §6.5) — 앎·관계
 
         static let insightSystem = """
             너는 소설 장면에서 서사 정보를 뽑는 도우미다. 장면에 실제로 근거가 \
-            있는 것만, 한 줄에 하나씩 아래 네 형식 중 맞는 것으로 출력한다. \
+            있는 것만, 한 줄에 하나씩 아래 두 형식 중 맞는 것으로 출력한다. \
             해당 사항이 없는 종류는 출력하지 않는다. 종류마다 최대 3개.
 
             앎: 인물 태도=사실 | 근거: 원문 짧은 인용
             관계: 인물A→인물B=관계 상태 | 근거: 원문 짧은 인용
-            사실: 대상=변하지 않는 설정 명제 | 근거: 원문 짧은 인용
-            복선: 짧은 라벨=반복되거나 미해결인 요소 설명 | 근거: 원문 짧은 인용
 
             규칙:
             - 앎의 태도는 안다/의심/오해/숨김 네 가지만 쓴다. "인물이 이 장면에서 \
             새로 알게 되거나 의심하게 된 것"만 쓴다.
             - 앎과 관계의 인물은 주어진 인물 목록에 있는 이름만 쓴다.
-            - 사실은 세계 설정("운전을 못 한다", "총알은 6발")처럼 이후 장면과 \
-            충돌할 수 있는 명제만 쓴다. 일시적 감정·행동은 사실이 아니다.
-            - 복선은 사물·비밀·질문·약속처럼 나중에 회수될 법한 요소만 쓴다.
             - 근거 인용은 장면 원문에서 그대로 복사한 30자 이내 구절이다.
             - 설명·머리말 없이 위 형식의 줄만 출력한다.
             """
@@ -1315,6 +1302,27 @@ public final class BackgroundIndexer: ObservableObject {
             - 설명·머리말 없이 위 형식의 줄만 출력한다.
             """
 
+        // MARK: 플롯 스레드 추론 (v6 — Branch = PlotThread)
+
+        static let plotThreadSystem = """
+            너는 소설의 사건 목록에서 플롯 라인(이야기 갈래)을 찾는 도우미다. \
+            플롯 라인 하나는 하나의 지속적인 문제·목표·갈등·미스터리·관계 변화를 \
+            추적하는 사건들의 묶음이다. 번호가 붙은 사건 목록을 읽고 아래 형식으로 \
+            한 줄에 플롯 하나씩 출력한다. 없으면 "없음"만 출력한다.
+
+            플롯: 1,3,5,8 | 제목: 플롯 이름 (최대 15자) | 요약: 무엇을 추적하는지 한 문장 (최대 50자) | 해결: 8
+
+            규칙:
+            - 같은 인물이 나온다는 이유로 묶지 않는다. 같은 목표·갈등·질문을 \
+            잇는 사건만 같은 플롯이다. 인물이 달라도 같은 문제를 이으면 같은 플롯이다.
+            - 회상·시간 이동은 플롯 구분의 근거가 아니다.
+            - 앞 사건의 결과를 뒤 사건이 이어받으면(인과) 같은 플롯일 가능성이 높다.
+            - 한 사건이 여러 플롯에 속할 수 있다 — 두 이야기가 만나는 사건이다.
+            - "해결"은 그 플롯의 질문·갈등이 실제로 끝난 사건 번호만 쓴다. 없으면 생략.
+            - 사건 2개 이상인 플롯만 출력한다. 확실하지 않으면 출력하지 않는다. 최대 5개.
+            - 설명·머리말 없이 위 형식의 줄만 출력한다.
+            """
+
         // MARK: 기록된 대화 보완 (v5, 요구사항 §19)
 
         static let conversationSystem = """
@@ -1324,19 +1332,6 @@ public final class BackgroundIndexer: ObservableObject {
             주제: 대화의 주제 (최대 25자)
             어조: 대화의 정서적 분위기 (최대 15자)
             핵심: 가장 중요한 대사 하나를 원문 그대로 복사 (최대 40자)
-            """
-
-        // MARK: 설정 충돌 검사 (v4, 요구사항 §14)
-
-        static let conflictSystem = """
-            너는 소설의 설정 목록에서 서로 모순될 가능성이 있는 쌍을 찾는 \
-            도우미다. 번호가 붙은 설정 목록을 읽고, 양립하기 어려운 쌍만 아래 \
-            형식으로 한 줄씩 출력한다. 없으면 "없음"만 출력한다. 최대 5쌍.
-
-            충돌: 번호 & 번호 | 이유: 왜 모순인지 한 문장 (최대 60자)
-
-            주의: 시간이 지나 자연스럽게 변한 상태(감정·위치)는 모순이 아니다. \
-            같은 대상에 대한 양립 불가능한 규칙·능력·수치만 충돌이다.
             """
 
         static let chapterSystem = """

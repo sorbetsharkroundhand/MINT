@@ -1,6 +1,6 @@
 import Foundation
 
-// Narrative Intelligence 공통 타입 (PLAN §6.5·§8) — 씬 메타·앎·관계·사실·복선·
+// Narrative Intelligence 공통 타입 (PLAN §6.5·§8) — 씬 메타·앎·관계·
 // 브랜치·대화 인덱스. 원문을 복제하지 않고 씬 해시 + 짧은 인용(quote)으로
 // 원문을 참조한다 (원문이 유일한 진실, CLAUDE.md §2-1). 인용은 본문 검색으로
 // 위치를 되찾는 앵커라 문서 편집 후에도 안정적이다 (기존 requestSearchJump 통로).
@@ -77,123 +77,29 @@ public struct RelationDelta: Codable, Equatable, Sendable {
     }
 }
 
-// MARK: - 설정 사실 (Continuity Fact)
-
-/// 작품 세계의 확정적 설정 하나 — "아내는 운전을 못 한다", "총알은 6발".
-/// 충돌 감지(FactConflict)의 재료다 (PLAN §6.5).
-public struct ContinuityFact: Codable, Equatable, Sendable, Identifiable {
-    /// 대상 — 인물 이름·사물 등 자유 문자열 (등록 카드 강제 아님: 사물도 설정이다).
-    public var subject: String
-    /// ≤60자 명제.
-    public var statement: String
-    public var sceneHash: String
-    public var quote: String?
-
-    public init(subject: String, statement: String, sceneHash: String, quote: String? = nil) {
-        self.subject = subject
-        self.statement = statement
-        self.sceneHash = sceneHash
-        self.quote = quote
-    }
-
-    /// 안정 키 — 같은 대상·명제면 재추출 후에도 같다 (사용자 결정의 앵커).
-    public var id: String { DocumentOutline.stableHash("\(subject)|\(statement)") }
-}
-
-/// 두 설정 사실의 충돌 후보 — 깊은 패스의 LLM 검사가 제안하고, 판정은 사용자가
-/// 한다 (실제 충돌/의도된 설정/무시 — 자동 수정 절대 금지, CLAUDE.md §1-5).
-public struct FactConflict: Codable, Equatable, Sendable, Identifiable {
-    public var aID: String
-    public var bID: String
-    /// ≤80자 — 왜 충돌로 보이는지.
-    public var reason: String
-
-    public init(aID: String, bID: String, reason: String) {
-        self.aID = aID
-        self.bID = bID
-        self.reason = reason
-    }
-
-    /// 순서 무관 안정 키 — (a,b)와 (b,a)는 같은 충돌이다.
-    public var id: String {
-        DocumentOutline.stableHash([aID, bID].sorted().joined(separator: "|"))
-    }
-}
-
-// MARK: - 복선 (Foreshadowing)
-
-/// 복선 후보 하나 — AI는 candidate만 제안하고, 확정·무시·회수는 사용자의 몫이다.
-public struct ForeshadowCandidate: Codable, Equatable, Sendable, Identifiable {
-    /// ≤30자 라벨 — "향수 냄새"·"열리지 않는 서랍". 같은 라벨은 같은 복선으로
-    /// 묶인다 (여러 씬에 걸친 reinforced 판정의 키).
-    public var label: String
-    /// ≤80자 — 무엇이 심어졌는지.
-    public var detail: String
-    public var sceneHash: String
-    public var quote: String?
-
-    public init(label: String, detail: String, sceneHash: String, quote: String? = nil) {
-        self.label = label
-        self.detail = detail
-        self.sceneHash = sceneHash
-        self.quote = quote
-    }
-
-    public var id: String { DocumentOutline.stableHash("\(label)|\(sceneHash)") }
-}
-
-/// 복선 생애 상태 — AI 제안은 항상 candidate, 나머지 전이는 사용자 결정
-/// (NarrativeOverride로 저장).
-public enum ForeshadowStatus: String, Codable, Equatable, Sendable, CaseIterable {
-    case candidate = "후보"
-    case confirmed = "확정"
-    case resolved = "회수"
-    case ignored = "무시"
-}
-
-/// 라벨 하나로 묶인 복선 — 스냅샷이 씬별 후보를 라벨로 접어 만든다.
-public struct ForeshadowThread: Equatable, Sendable, Identifiable {
-    public var label: String
-    public var detail: String
-    /// 등장 씬 해시들 (담화 순서) — 2곳 이상이면 reinforced.
-    public var sceneHashes: [String]
-    public var quotes: [String]
-    public var status: ForeshadowStatus
-    public var userEdited: Bool
-
-    public var id: String { label }
-    public var isReinforced: Bool { sceneHashes.count >= 2 }
-}
-
 // MARK: - 씬 심화 추출 묶음 (사이드카 저장 단위)
 
-/// 씬 하나의 심화 추출 결과 — 앎·관계·설정 사실·복선 후보 (PLAN §6.5).
-/// 사건 추출과 **별도 호출**로 뽑는다: 필드 7종을 한 프롬프트에 욱여넣으면
+/// 씬 하나의 심화 추출 결과 — 앎·관계 (PLAN §6.5).
+/// 사건 추출과 **별도 호출**로 뽑는다: 여러 필드를 한 프롬프트에 욱여넣으면
 /// 소형 모델의 형식 준수가 무너진다 (사건/요약 분리와 같은 실패 격리 규율).
 /// 키 존재 = 추출 완료 메모 (`KnowledgeSidecar.events`와 같은 규약).
 public struct SceneInsights: Codable, Equatable, Sendable {
     public var knowledge: [KnowledgeDelta]
     public var relations: [RelationDelta]
-    public var facts: [ContinuityFact]
-    public var foreshadows: [ForeshadowCandidate]
     public var updatedAt: Date
 
     public init(
         knowledge: [KnowledgeDelta] = [],
         relations: [RelationDelta] = [],
-        facts: [ContinuityFact] = [],
-        foreshadows: [ForeshadowCandidate] = [],
         updatedAt: Date = .now
     ) {
         self.knowledge = knowledge
         self.relations = relations
-        self.facts = facts
-        self.foreshadows = foreshadows
         self.updatedAt = updatedAt
     }
 
     public var isEmpty: Bool {
-        knowledge.isEmpty && relations.isEmpty && facts.isEmpty && foreshadows.isEmpty
+        knowledge.isEmpty && relations.isEmpty
     }
 }
 
@@ -393,10 +299,6 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         case eventImportance
         /// 사건 요약 (키 = 사건 키).
         case eventSummary
-        /// 복선 상태 (키 = 복선 라벨, 값 = ForeshadowStatus rawValue).
-        case foreshadowStatus
-        /// 설정 충돌 판정 (키 = FactConflict.id, 값 = 충돌/의도됨/무시).
-        case conflictResolution
         /// 브랜치 이름 (키 = 브랜치 anchorHash).
         case branchName
         /// 브랜치 시간 관계 (키 = anchorHash, 값 = ChronoRelation rawValue).
@@ -435,6 +337,14 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         case chronoEdge
         /// 흐름 이름 (키 = NarrativeFlow.id).
         case flowName
+        /// 플롯 스레드 제목 (키 = PlotThread.stableID).
+        case threadTitle
+        /// 플롯 스레드 상태 (키 = stableID, 값 = ThreadStatus rawValue) —
+        /// "이 플롯은 해결됐다/아직 열려 있다"의 사용자 판정.
+        case threadStatus
+        /// 플롯 멤버십 (키 = "stableID|정본 사건 키", 값 = ThreadRole rawValue
+        /// 또는 "제외") — 사건을 플롯에 넣고 빼고 역할을 고친다.
+        case threadMembership
         /// 컨텍스트 고정 (키 = ContextReport.Item.stableKey, 값 = "고정") —
         /// 관련성이 낮아져도 조립에 유지 (요구사항 §31).
         case contextPin
@@ -463,13 +373,6 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
     }
 
     public var id: String { "\(kind.rawValue)|\(key)" }
-}
-
-/// 충돌 판정 값 (conflictResolution 오버라이드의 닫힌 값 집합).
-public enum ConflictResolution: String, Codable, Equatable, Sendable {
-    case confirmed = "충돌"
-    case intended = "의도됨"
-    case ignored = "무시"
 }
 
 /// 오버라이드 목록의 질의 헬퍼 — 스냅샷 조립·UI가 같은 해석을 쓴다.

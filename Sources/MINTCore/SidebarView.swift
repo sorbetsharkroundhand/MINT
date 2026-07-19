@@ -8,8 +8,9 @@ import UniformTypeIdentifiers
 enum SidebarSection: String {
     case files  // 문서(폴더 트리) — 기존 사이드바
     case bible  // 스토리 바이블 (PLAN §7)
-    case timeline  // 이해 타임라인 (PLAN §6.3·§8)
-    case graph  // 서사 그래프 (v5, 요구사항 §22–§26)
+    /// 서사 (v5 통합) — 이해 타임라인 + 서사 그래프가 하나의 화면이 됐다
+    /// (PLAN §6.6). raw값 "timeline" 유지 — 기존 사용자의 저장된 섹션이 살아남는다.
+    case narrative = "timeline"
     case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
 }
 
@@ -20,11 +21,9 @@ private struct WarningDot: View {
     let theme: MintTheme
 
     var body: some View {
-        // 일관성 경고 + 미판정 설정 충돌(v4) — 둘 다 "확인해 보세요" 신호다.
+        // 일관성 경고 — "확인해 보세요" 신호.
         if indexer.snapshot?.entryID == store.activeID,
             !indexer.warnings.isEmpty
-                || indexer.snapshot?.factConflicts.contains(where: { $0.resolution == nil })
-                    == true
         {
             Circle()
                 .fill(theme.novelC)
@@ -102,8 +101,7 @@ struct SidebarView: View {
             switch section {
             case .files: filesSection
             case .bible: bibleSection
-            case .timeline: timelineSection
-            case .graph: graphSection
+            case .narrative: narrativeSection
             case .context: contextSection
             }
         }
@@ -157,10 +155,9 @@ struct SidebarView: View {
         HStack(spacing: 4) {
             sectionTab(.files, icon: "doc.text", help: "문서")
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
-            sectionTab(.timeline, icon: "arrow.triangle.branch", help: "이해 타임라인")
             sectionTab(
-                .graph, icon: "point.3.connected.trianglepath.dotted",
-                help: "서사 그래프 — 사건·흐름·인과")
+                .narrative, icon: "arrow.triangle.branch",
+                help: "서사 — 씬·사건·흐름·시간")
             sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
             Spacer()
         }
@@ -185,7 +182,7 @@ struct SidebarView: View {
                 .overlay(alignment: .topTrailing) {
                     // 일관성 경고(M7) 점 — 비침습 배지 (CLAUDE.md §3). 관찰
                     // 서브뷰라 패스가 끝나는 즉시 나타난다.
-                    if target == .timeline, let indexer {
+                    if target == .narrative, let indexer {
                         WarningDot(indexer: indexer, store: store, theme: theme)
                     }
                 }
@@ -223,19 +220,10 @@ struct SidebarView: View {
         }
     }
 
-    /// 타임라인 섹션 — 뷰 자체가 비소설 안내를 갖고 있다.
-    @ViewBuilder private var timelineSection: some View {
+    /// 서사 섹션 (v5 통합) — 뷰 자체가 비소설 안내를 갖고 있다.
+    @ViewBuilder private var narrativeSection: some View {
         if let indexer {
-            KnowledgeTimelineView(indexer: indexer, store: store, theme: theme, embedded: true)
-        } else {
-            SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
-        }
-    }
-
-    /// 서사 그래프 섹션 (v5) — 사건 중심 흐름 그래프.
-    @ViewBuilder private var graphSection: some View {
-        if let indexer {
-            NarrativeGraphView(indexer: indexer, store: store, theme: theme, embedded: true)
+            NarrativeView(indexer: indexer, store: store, theme: theme, embedded: true)
         } else {
             SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
         }

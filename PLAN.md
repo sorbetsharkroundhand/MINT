@@ -177,7 +177,11 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   핵심 구조 — A가 B에게 반말, B가 A에게 존댓말인 비대칭은 관계에 새겨진 강한
   예측 신호인데, 범용 아키텍처엔 이 자리가 없다. MINT의 차별점.
 
-### 6.5 Narrative Intelligence (v4) — 근거·앎·관계·브랜치·복선
+### 6.5 Narrative Intelligence (v4) — 근거·앎·관계·브랜치
+
+> 2026-07-19: **설정 충돌·복선 기능 제거** (사용자 지시). 고아가 된 설정 사실
+> (`ContinuityFact`)도 함께 삭제 — 사이드카 schemaVersion 6→7. 아래에서 그 두
+> 기능 항목은 삭제됐다.
 
 씬 이해가 요약을 넘어 **검증·수정 가능한 세계 모델**이 되는 층. 원칙:
 원문을 복제하지 않고 씬 해시 + 짧은 인용(quote)으로 참조하며, 인용은 씬 원문
@@ -186,7 +190,7 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 - **씬 메타**: 씬 분석이 요약과 함께 내용 기반 제목·서사 유형(현재/회상/꿈/예상/
   병렬/삽입)·시점 인물·장소를 뽑는다 (`SceneSummary` v4 확장).
 - **심화 추출** (`SceneInsights`, 씬당 1회·깊은 패스): 앎 델타(인물×태도
-  안다/의심/오해/숨김×사실), 방향 관계 델타(A→B=값), 설정 사실, 복선 후보.
+  안다/의심/오해/숨김×사실), 방향 관계 델타(A→B=값).
   전부 append-only — `knowledge(of:before:)`·`relation(from:to:before:)`가
   시점 차단 fold로 그 시점 값을 만든다 (StateDelta와 같은 문법).
 - **브랜치**: 연속된 비(非)현재 씬 묶음에서 **결정적으로 파생** (저장 안 함).
@@ -194,11 +198,6 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   (과거/미래/동시/불명)만 표현한다 — 절대 연표는 소설에서 대개 알 수 없다.
 - **대화 인덱스**: 발화(§6.4)에서 결정적 파생 — 씬 경계·간격으로 묶고 원문
   위치만 참조한다 (대사 복제 금지).
-- **충돌 후보**: 누적 사실 목록을 깊은 패스 끝에 1회 LLM 대조 (사실 집합 해시로
-  메모). 판정(충돌/의도됨/무시)은 항상 사용자 — 자동 수정 금지.
-- **복선 스레드**: 같은 라벨의 후보를 접어 lifecycle(후보→확정→회수/무시)을
-  관리. 전이는 사용자만. **확정 복선만** 예측 컨텍스트에 주입한다 — AI 추측을
-  AI 입력으로 되먹이지 않는다.
 - **사용자 수정** (`NarrativeOverride`): 파생 캐시가 아니라 **entries.json**에
   산다 — 사이드카 스키마 폐기·재분석이 사용자 결정을 못 건드리는 구조적 보장.
   씬 키 오버라이드는 원문 수정으로 해시가 바뀌면 앵커 스니펫으로 재키하고,
@@ -247,10 +246,32 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   기록할까요?」 인라인 제안 → Enter 기록(개행은 정상 진행). 기록은 자동 감지
   인덱스에 겹쳐 하나의 목록이 되고, 주제·어조 보완만 깊은 패스가 채운다
   (`ConversationMeta`, contentHash 메모).
-- **그래프 UI** (`NarrativeGraphView`): git graph 문법 — 레인·안정 색·원형
-  노드·3차 Bézier 분화/합류. 레이아웃(`NarrativeGraphLayout`)은 Main 레인 0
-  고정, 나머지는 (구간 시작, ID) 순 그리디 + 닫힌 레인 회수. 노드 클릭 =
-  상세(관점·인과·근거 원문), 흐름 선택 = 경로 강조.
+- **Plot Thread** (`PlotThread`·`ResolvedPlotThread`, v6): Narrative Graph의
+  **branch 단위 = 플롯 라인** (인물·POV·씬·회상이 아니다). 하나의 지속적인
+  문제·목표·갈등을 추적하는 사건 묶음으로, 깊은 패스가 사건 목록 + 인과 힌트를
+  1회 호출로 군집화한다 (`PlotThreadParser`, 멤버 ≥2, 최대 6개). **stable
+  identity**: ID는 여는 사건 키에서 파생·저장되고, 재분석 결과는 멤버 과반
+  겹침으로 이전 스레드에 잇는다(reconcile) — 문서가 자라도 오버라이드·색·
+  레인이 유지된다. 생명주기 OPEN/ACTIVE/DORMANT/RESOLVED는 담화 위치에서
+  결정적으로 파생 (해결 사건만 저장 근거) — **DORMANT는 레인을 닫지 않는다**.
+  어느 플롯에도 안 속한 사건은 본줄기로 접힌다 — 분석 전·직선 소설은 자연히
+  레인 하나짜리 직선 그래프. 사용자 수정: `threadTitle`·`threadStatus`·
+  `threadMembership`(역할/제외) 오버라이드.
+- **통합 서사 UI** (`NarrativeView`): 이해 타임라인과 서사 그래프를 **하나의
+  화면**으로 통합 — 둘은 같은 파이프라인의 다른 Projection이었다. 기본 단위는
+  정본 사건이고, **흐름**(담화 순서 — 씬은 section marker, 회상·꿈은
+  traversal bracket, 재서술은 관점 참조 행)과 **시간순**(ChronoOrder 해석 —
+  traversal 제거, 회상 속 사건도 발생 시간 위치) 두 Projection을 같은 사건·
+  같은 PlotThread identity로 투영한다. 왼쪽 그래프 레인 = PlotThread
+  (`ThreadGraphLayout` — 본줄기 슬롯 0 고정, 겹침 없는 최저 슬롯, 해결 시
+  merge·슬롯 회수, 미해결 꼬리는 점선, 결정적 배치. **레이아웃은 branch를
+  만들지 않는다** — 분석 결과의 시각화만). 시각 우선순위: 사건 > topology >
+  씬 > traversal > 메타데이터 — 델타·신뢰·관점 상세는 선택 시 상세 패널에서만
+  (Progressive Disclosure: hover = 스레드 강조, 플롯 칩 선택 = 레인 강조,
+  인물 필터는 메뉴). 사건 클릭 = 통합 상세(플롯 멤버십 편집·인물·시간·씬/구간·
+  관점·인과·근거 원문·중요도·시간 관계 편집). 경고·시간 모순은
+  "검토 필요" 접이 영역으로. 정본 → StoryEvent/Scene/Segment 역추적은
+  `storyEvent(forMember:)`·`EventPerspective.segmentID`·`segment(withID:)`.
 - **Pin/Exclude** (§11 조립과 같은 파이프라인): 컨텍스트 항목의 안정 키에
   오버라이드(`contextPin`/`contextExclude`)를 걸면 조립이 강제 포함/제외한다.
   UI 전용 프리뷰 금지 — 인스펙터가 보는 것 = 조립이 하는 것.
@@ -548,6 +569,28 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 - [ ] 구간 추출 품질의 MINTBench 리플레이 측정 — 프롬프트·파서는 벤치에서
       재사용 가능하게 public. 리플레이 코퍼스에 회상 라벨이 필요해 후속.
 
+### M9 — Narrative Graph "Branch = PlotThread" (v6, 2026-07-19)
+
+설계·구현: §6.6 Plot Thread. 사이드카 v6 (`plotThreads`), branch 단위가
+인물에서 **플롯 라인**으로 바뀌었다 — topology가 작품의 서사 지문이 된다.
+
+- [x] PlotThread 모델 — stableID(여는 사건 키 파생)·멤버십(역할 6종)·해결
+      사건·확신. 재분석 reconcile(멤버 과반 겹침 → 이전 ID 유지).
+- [x] 깊은 패스 플롯 추론 — 사건 목록 + 인과 힌트 1회 호출, 사건 키 집합
+      해시 메모. "인물 겹침으로 묶지 마라"가 프롬프트의 제1규칙.
+- [x] 생명주기 파생 — OPEN/ACTIVE/DORMANT/RESOLVED (해결 사건만 저장 근거,
+      나머지는 담화 위치에서 결정적). DORMANT는 레인을 닫지 않는다.
+- [x] ThreadGraphLayout — 본줄기 슬롯 0 고정·겹침 없는 최저 슬롯·해결 시
+      merge+슬롯 회수·미해결 꼬리 점선·junction 노드. 결정적 (같은 데이터 =
+      같은 배치). 레이아웃은 branch를 만들지 않는다.
+- [x] NarrativeView 재설계 — 사건 1급(제목 스캔), 씬 = section marker,
+      회상·꿈 = traversal bracket (플롯 레인과 다른 문법), 플롯 칩 범례
+      (이름·상태 편집), 인물 필터는 메뉴로, 상세 패널에 플롯 멤버십 편집.
+- [x] 오버라이드 3종 (threadTitle·threadStatus·threadMembership) —
+      entries.json, 재분석이 못 덮는다.
+- [ ] 플롯 군집 품질의 실코퍼스 검증 — 서로 다른 구조의 소설에서 서로 다른
+      topology가 나오는지 (요구사항 §14) 라벨 코퍼스 필요, MINTBench 후속.
+
 ## 15. 향후 연구 아이디어
 
 - **개인 문체 LoRA**: 수락/거부 시그널로 온디바이스 미세조정 — 어댑터 로드 지연,
@@ -684,10 +727,11 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 | `Sources/MINTCore/Knowledge/CharacterLexicon.swift` | 조사·품사 부류·유정 신호 + 사용자 확장 불용어 (§7, M6) |
 | `Sources/MINTCore/Knowledge/EventLog.swift` | 사건 파서 + StateDelta 스키마·파싱 (§6.2·§6.3, M6) |
 | `Sources/MINTCore/Knowledge/DialogueAttribution.swift` | 대화 귀속·존대 판정 (결정적, §6.4·§7, M6) |
-| `Sources/MINTCore/KnowledgeTimelineView.swift` | 이해 타임라인 열람 UI — 씬·사건·델타·경고 (§1-5, M6·M7) |
+| `Sources/MINTCore/NarrativeView.swift` | 통합 서사 UI — PlotThread 레인 그래프·흐름/시간순 Projection·사건 상세·검토 영역 (§1-5·§6.6, v6) |
+| `Sources/MINTCore/Knowledge/PlotThread.swift` | 플롯 스레드 — 파서·reconcile·상태 파생 (§6.6, v6) |
 | `Sources/MINTCore/Knowledge/ConsistencyChecker.swift` | 일관성 경고 — 죽은 인물 발화·존대 붕괴 (결정적, M7) |
 | `Sources/MINTCore/Editor/AcceptanceMetrics.swift` | 실사용 수락률 로깅 — 로컬 전용 (§13, M7) |
-| `Sources/MINTCore/Knowledge/Narrative.swift` | Narrative Intelligence 타입 — 앎·관계·사실·복선·브랜치·대화·오버라이드·문장 clamp (§6.5, v4) |
+| `Sources/MINTCore/Knowledge/Narrative.swift` | Narrative Intelligence 타입 — 앎·관계·브랜치·대화·오버라이드·문장 clamp (§6.5, v4) |
 | `Sources/MINTCore/ContextInspectorView.swift` | AI 컨텍스트 인스펙터 — 예측이 실제 참고한 항목 열람·원문 점프 (§6.5, v4) |
 
 ## 부록 C. 기능 카탈로그 — 무엇을 · 왜 그렇게
@@ -839,16 +883,20 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 
 ### C.10 열람 UI (§1-5, M5·M6)
 
-- **사이드바 섹션** (M6-8) — 사이드바 상단 탭으로 문서·바이블·타임라인 전환
-  (VSCode 활동 바꼴). 툴바 "소설" 배지는 바이블 섹션을 연다. *의도*: 열람이
+- **사이드바 섹션** (M6-8) — 사이드바 상단 탭으로 문서·바이블·서사·컨텍스트
+  전환 (VSCode 활동 바꼴). 툴바 "소설" 배지는 바이블 섹션을 연다. *의도*: 열람이
   잦은 패널을 팝오버로 두면 열 때마다 닫힌다 — 상시 패널로 승격.
 - **스토리 바이블 섹션** — 장르·인물 카드 편집 + 후보 검토 + **자동 이해 열람**
   (상태·최근 사건·말투, 예측과 같은 질의). *의도*: AI가 이해한 모든 것을
   사용자가 보고 고칠 수 있어야 한다 (§1-5). 파생 지식 직접 수정은 안 연다 —
   원문과 어긋난 채 다음 패스가 덮는다 (§2-1).
-- **이해 타임라인 섹션** (`KnowledgeTimelineView`) — 씬 분할·사건·델타·미이해
-  구간을 gitgraph꼴로 담화 순서 열람. *의도*: 지식이 JSON에만 있으면 §1-5가
-  깨진다. "헤딩 없는 장편이 씬 하나로 잘리는" 결함도 여기서 드러난다.
+- **서사 섹션** (`NarrativeView`, v6 Narrative Graph) — 이해 타임라인·서사
+  그래프 두 탭을 하나로 합친 통합 서사 화면 (§6.6). 왼쪽 레인 = PlotThread
+  (branch = 플롯, 인물 아님), 오른쪽 = 사건 제목 — 담화 순서(흐름)와 작중
+  시간순 두 Projection으로 열람. topology가 작품의 서사 지문이다: 직선 소설은
+  직선, 서브플롯은 시작점 branch·합류 사건 merge. *의도*: 지식이 JSON에만
+  있으면 §1-5가 깨진다. "헤딩 없는 장편이 씬 하나로 잘리는" 결함도 여기서
+  드러난다.
 - **수동 이해 트리거** ("지금 읽기", 두 섹션 공용) — `requestPass()`가 깊은 패스
   1회. 자동완성 스위치와 무관(누른 것이 곧 동의), 열·저전력 게이트는 존중.
   *의도*: 완전 자동만 두면 "지금 당장 이해를 갱신해 달라"는 의사를 표현할 곳이

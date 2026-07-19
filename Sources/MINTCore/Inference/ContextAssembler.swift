@@ -46,7 +46,6 @@ public struct ContextReport: Sendable, Equatable {
             case currentScene = "지금 장면"
             case narrative = "서사 위치"
             case flowEvent = "흐름 사건"
-            case foreshadow = "미회수 복선"
             case dialogue = "대화 모드"
             case relation = "관계"
         }
@@ -327,26 +326,6 @@ public enum ContextAssembler {
                     kind: .workSummary, text: line,
                     stableKey: "work", pinned: controls.pinned("work")))
             budget -= work.count + 12
-        }
-
-        // 미회수 복선 (v4, 요구사항 §16) — 사용자 **확정** 복선만, 최대 2줄.
-        // 후보(candidate)는 넣지 않는다: AI 추측을 AI 입력으로 되먹이면 소음이
-        // 자가 증폭한다 (품질 > 적극성). 씬 위치와 무관하게 안정적이라 KV에 안전.
-        // Pin된 복선은 상태와 무관하게 실린다 (§31).
-        let injectable = knowledge.foreshadows.filter {
-            ($0.status == .confirmed || controls.pinned("foreshadow|\($0.label)"))
-                && controls.allows("foreshadow|\($0.label)")
-        }
-        for thread in injectable.prefix(2) {
-            let line = "미회수 복선: \(thread.label) — \(thread.detail)"
-            guard line.count <= budget else { break }
-            lines.append(line)
-            reported.append(
-                ContextReport.Item(
-                    kind: .foreshadow, text: line, jumpQuery: thread.quotes.first,
-                    stableKey: "foreshadow|\(thread.label)",
-                    pinned: controls.pinned("foreshadow|\(thread.label)")))
-            budget -= line.count
         }
 
         // 흐름 사건 (v5, 요구사항 §30) — 회상 집필 중이면 그 인물 흐름의 이전

@@ -20,13 +20,17 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 마이그레이션 코드를 쌓지 않는 값. 결정 5가 피하려던 두 번째 비용이지만,
     /// 추출 형식 자체가 바뀌어 피할 수 없었다 — docs/m6-events.md 5b).
     /// v4 (Narrative Intelligence): 씬 분석이 제목·유형·시점·장소를 함께 뽑고
-    /// (`SceneSummary` 확장), 심화 추출(`insights`)·충돌 후보(`factConflicts`)가
-    /// 붙었다. **사용자 수정은 여기 없다** — entries.json의 NarrativeOverride에
-    /// 살므로 이 폐기·재구축이 사용자 데이터를 건드리지 않는다.
+    /// (`SceneSummary` 확장), 심화 추출(`insights`)이 붙었다. **사용자 수정은
+    /// 여기 없다** — entries.json의 NarrativeOverride에 살므로 이 폐기·재구축이
+    /// 사용자 데이터를 건드리지 않는다.
     /// v5 (Narrative Graph): 씬 내부 구간 분석(`segments`)·사건 그래프(인과·
     /// 동일 사건·시간 간선, `eventGraph`)·기록 대화 보완(`conversationMeta`)이
     /// 붙었다. v4 파일은 폐기·재구축 (마이그레이션 코드를 쌓지 않는다, §2-1).
-    public static let currentSchemaVersion = 5
+    /// v6 (Plot Thread): 플롯 스레드 추론(`plotThreads`)이 붙었다 — 그래프의
+    /// branch 단위가 인물이 아니라 플롯이 됐다 (PLAN §6.6).
+    /// v7: 설정 충돌·복선 기능을 제거했다 — `insights`에서 사실·복선 필드,
+    /// 사이드카의 `factConflicts`가 빠졌다. v6 파일은 폐기·재구축.
+    public static let currentSchemaVersion = 7
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -98,17 +102,15 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 부재는 "아직 안 뽑았다"다. 이 구분이 없으면 사건 없는 씬을 깊은 패스마다
     /// 다시 뽑는다 (CLAUDE.md §4 메모이제이션).
     public var events: [String: [StoryEvent]]
-    /// 씬 해시 → 심화 추출 (앎·관계·사실·복선, v4) — events와 같은 메모 규약.
+    /// 씬 해시 → 심화 추출 (앎·관계, v4) — events와 같은 메모 규약.
     public var insights: [String: SceneInsights]
-    /// 설정 충돌 후보 (v4) — 깊은 패스 끝의 LLM 검사 결과.
-    public var factConflicts: [FactConflict]
-    /// 충돌 검사 메모 키 — 검사에 넣은 사실 집합의 결합 해시. 같으면 재검사 금지.
-    public var conflictsMemoHash: String?
     /// 씬 해시 → 서사 구간 분석 (v5, 요구사항 §8) — events와 같은 메모 규약
     /// (키 존재 = 분석 완료, 빈 배열 = 단일 현재 서사).
     public var segments: [String: SceneSegmentation]
     /// 사건 그래프 분석 (v5, 요구사항 §3·§6·§12·§29) — 인과·동일 사건·시간 간선.
     public var eventGraph: EventGraphAnalysis?
+    /// 플롯 스레드 추론 (v6) — Narrative Graph의 branch 단위.
+    public var plotThreads: PlotThreadAnalysis?
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 키 = RecordedConversation.id.
     public var conversationMeta: [String: ConversationMeta]
 
@@ -121,10 +123,9 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         self.workSummary = nil
         self.events = [:]
         self.insights = [:]
-        self.factConflicts = []
-        self.conflictsMemoHash = nil
         self.segments = [:]
         self.eventGraph = nil
+        self.plotThreads = nil
         self.conversationMeta = [:]
     }
 
@@ -238,17 +239,6 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     public let knowledgeDeltas: [KnowledgeDelta]
     /// 관계 델타 (담화 순서).
     public let relationDeltas: [RelationDelta]
-    /// 설정 사실 (담화 순서).
-    public let facts: [ContinuityFact]
-    /// 충돌 후보 + 사용자 판정 (nil = 미판정).
-    public struct ResolvedConflict: Equatable, Sendable, Identifiable {
-        public var conflict: FactConflict
-        public var resolution: ConflictResolution?
-        public var id: String { conflict.id }
-    }
-    public let factConflicts: [ResolvedConflict]
-    /// 복선 — 라벨로 접힌 스레드 (상태는 오버라이드에서).
-    public let foreshadows: [ForeshadowThread]
     /// 재앵커에 실패한 사용자 수정 — UI가 "근거를 잃은 수정"으로 보여준다.
     public let staleOverrides: [NarrativeOverride]
     /// 스냅샷에 적용된 오버라이드 — UI의 userEdited 표시가 이걸 본다.
@@ -264,8 +254,14 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     public let canonicalKeyByMember: [String: String]
     /// 인과 관계 (사용자 추가/삭제 적용 후).
     public let causalLinks: [CausalLink]
-    /// 서사 흐름들 — main + 인물 + 시간 (담화 순서 파생).
+    /// 서사 흐름들 — main + 인물 + 시간 (담화 순서 파생). **그래프 레인이
+    /// 아니다** — 예측 컨텍스트(ContextAssembler의 위치 판정)용 파생물이다.
     public let flows: [NarrativeFlow]
+    /// 플롯 스레드들 (v6) — Narrative Graph의 branch 단위 (본줄기 포함,
+    /// 오버라이드·상태 파생 적용 후).
+    public let plotThreads: [ResolvedPlotThread]
+    /// 정본 사건 키 → 속한 스레드 ID들 (plotThreads 순서).
+    public let threadIDsByEvent: [String: [String]]
     /// 정본 사건의 시간 순서 (부분 순서 해석 결과).
     public let eventChronoOrder: [String]
     /// 시간 관계 모순 간선들 — UI가 Conflict로 표시한다 (요구사항 §29).
@@ -297,9 +293,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         utterances: [Utterance] = [],
         sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
         insights: [String: SceneInsights] = [:],
-        factConflicts: [FactConflict] = [],
         segments: [String: SceneSegmentation] = [:],
         eventGraph: EventGraphAnalysis? = nil,
+        plotThreadAnalysis: PlotThreadAnalysis? = nil,
         recordedConversations: [RecordedConversation] = [],
         conversationMeta: [String: ConversationMeta] = [:],
         characters: [CharacterCard] = [],
@@ -470,7 +466,8 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             let perspective = EventPerspective(
                 eventKey: member, sceneHash: event.sceneHash,
                 viewpoint: viewpoint, source: source, reliability: reliability,
-                summary: event.summary, quote: event.quote)
+                summary: event.summary, quote: event.quote,
+                segmentID: context?.persistentID)
             if var existing = canonicalByKey[canonical] {
                 existing.perspectives.append(perspective)
                 existing.participants = Array(Set(existing.participants + event.participants))
@@ -596,6 +593,22 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             branchCharacterOverrides: branchCharacterOverrides,
             flowNameOverrides: overrides.map(of: .flowName))
 
+        // 플롯 스레드 (v6) — 저장된 추론 + 오버라이드 → 그래프의 branch.
+        // 분석이 아직 없으면 전 사건이 본줄기 하나 = 직선 그래프 (그것이 정답이다).
+        let resolvedThreads = ResolvedPlotThread.derive(
+            analysis: plotThreadAnalysis,
+            canonicalOrder: canonicalOrder,
+            memberMap: memberMap,
+            overrides: overrides)
+        self.plotThreads = resolvedThreads
+        var threadIndex: [String: [String]] = [:]
+        for thread in resolvedThreads {
+            for key in thread.memberKeys {
+                threadIndex[key, default: []].append(thread.id)
+            }
+        }
+        self.threadIDsByEvent = threadIndex
+
         // 대화 인덱스 — 발화에서 결정적으로 + 기록된 대화 겹침 (요구사항 §21).
         // 기록은 자동 감지보다 높은 신뢰: 겹치는 자동 감지 대화에 기록 표식을
         // 달고, 겹치는 것이 없으면 기록 자체가 대화 항목이 된다.
@@ -633,52 +646,13 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         // 심화 추출을 담화 순서로 편다 (사건과 같은 파생).
         var knowledge: [KnowledgeDelta] = []
         var relations: [RelationDelta] = []
-        var facts: [ContinuityFact] = []
-        var foreshadowCandidates: [ForeshadowCandidate] = []
         for scene in outline.scenes {
             guard let insight = insights[scene.contentHash] else { continue }
             knowledge.append(contentsOf: insight.knowledge)
             relations.append(contentsOf: insight.relations)
-            facts.append(contentsOf: insight.facts)
-            foreshadowCandidates.append(contentsOf: insight.foreshadows)
         }
         self.knowledgeDeltas = knowledge
         self.relationDeltas = relations
-        self.facts = facts
-
-        // 충돌 — 살아있는 사실만 + 사용자 판정.
-        let liveFactIDs = Set(facts.map(\.id))
-        self.factConflicts = factConflicts
-            .filter { liveFactIDs.contains($0.aID) && liveFactIDs.contains($0.bID) }
-            .map { conflict in
-                ResolvedConflict(
-                    conflict: conflict,
-                    resolution: overrides.value(.conflictResolution, key: conflict.id)
-                        .flatMap { ConflictResolution(rawValue: $0) })
-            }
-
-        // 복선 — 라벨로 접고, 상태 오버라이드 적용 (기본 candidate).
-        var threadOrder: [String] = []
-        var threads: [String: ForeshadowThread] = [:]
-        for candidate in foreshadowCandidates {
-            if var existing = threads[candidate.label] {
-                existing.sceneHashes.append(candidate.sceneHash)
-                if let quote = candidate.quote { existing.quotes.append(quote) }
-                threads[candidate.label] = existing
-            } else {
-                threadOrder.append(candidate.label)
-                let statusOverride = overrides.value(.foreshadowStatus, key: candidate.label)
-                    .flatMap { ForeshadowStatus(rawValue: $0) }
-                threads[candidate.label] = ForeshadowThread(
-                    label: candidate.label,
-                    detail: candidate.detail,
-                    sceneHashes: [candidate.sceneHash],
-                    quotes: candidate.quote.map { [$0] } ?? [],
-                    status: statusOverride ?? .candidate,
-                    userEdited: statusOverride != nil)
-            }
-        }
-        self.foreshadows = threadOrder.compactMap { threads[$0] }
     }
 
     // MARK: - 표준 질의 (PLAN §8) — ContextAssembler는 이것만 쓴다
@@ -839,11 +813,6 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         events.filter { $0.sceneHash == sceneHash }.map(\.importance).max()
     }
 
-    /// 아직 회수되지 않은 복선 (후보·확정) — "미회수" 열람 + 컨텍스트 주입용.
-    public var unresolvedForeshadows: [ForeshadowThread] {
-        foreshadows.filter { $0.status == .candidate || $0.status == .confirmed }
-    }
-
     /// 작품 세계 시간 순서의 씬 인덱스 배열 (근사) — `과거` 브랜치 블록을 맨
     /// 앞으로(브랜치 등장 순서 유지), `미래` 블록을 맨 뒤로 옮기고, 나머지는
     /// 담화 순서를 유지한다. 절대 시각이 없는 한 완전한 정렬은 불가능하다 —
@@ -949,6 +918,27 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     public func canonicalEvent(for key: String) -> CanonicalEvent? {
         let canonical = canonicalKeyByMember[key] ?? key
         return canonicalEvents.first { $0.canonicalKey == canonical }
+    }
+
+    /// 멤버 키 → 원래 StoryEvent — 정본 사건에서 상태 델타 등 원본 필드로의
+    /// 역추적 통로 (통합 서사 UI). 사건 수는 수백 규모라 선형 탐색로 충분하다.
+    public func storyEvent(forMember key: String) -> StoryEvent? {
+        events.first { $0.stableKey == key }
+    }
+
+    /// 정본 사건이 속한 플롯 스레드들 (plotThreads 순서).
+    public func threads(of canonicalKey: String) -> [ResolvedPlotThread] {
+        (threadIDsByEvent[canonicalKey] ?? []).compactMap { id in
+            plotThreads.first { $0.id == id }
+        }
+    }
+
+    /// 구간 persistent ID → 구간 — EventPerspective.segmentID의 역참조.
+    public func segment(withID id: String) -> NarrativeSegment? {
+        for segments in segmentsByScene.values {
+            if let match = segments.first(where: { $0.persistentID == id }) { return match }
+        }
+        return nil
     }
 
     /// 이 사건의 원인들 — (kind = 원인/영향/설명 …) 방향이 이 사건으로 들어오는

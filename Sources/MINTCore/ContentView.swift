@@ -98,6 +98,18 @@ private struct MainSurface: View {
     @Environment(\.colorScheme) private var colorScheme
     /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
+    /// 사이드바 폭 — 사용자가 divider를 끌어 조절하며 UserDefaults에 보존된다.
+    /// HSplitView를 버리고 폭을 직접 소유하는 이유: 근접 감지·확대 히트영역을
+    /// 가진 커스텀 divider(아래 SidebarResizeDivider)를 붙이기 위함.
+    @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
+
+    /// 사이드바 폭 한계 — 너무 좁으면 섹션 UI가 깨지고, 너무 넓으면 본문 가독 폭을 침범.
+    private let sidebarMin: CGFloat = 200
+    private let sidebarMax: CGFloat = 360
+
+    private var clampedSidebarWidth: CGFloat {
+        min(max(CGFloat(sidebarWidth), sidebarMin), sidebarMax)
+    }
 
     var body: some View {
         let theme = MintTheme.of(colorScheme)
@@ -106,13 +118,13 @@ private struct MainSurface: View {
             theme.glassWinC
             // 콘텐츠는 타이틀바(신호등 줄) 안전영역 아래부터 — 사이드바 헤더가
             // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
-            HSplitView {
+            HStack(spacing: 0) {
                 if sidebarVisible {
                     SidebarView(
                         store: store, completion: completion, theme: theme,
                         indexer: indexer
                     )
-                    .frame(minWidth: 200, idealWidth: 250, maxWidth: 320)
+                    .frame(width: clampedSidebarWidth)
                 }
                 EditorPane(
                     store: store, completion: completion,
@@ -121,8 +133,183 @@ private struct MainSurface: View {
                 )
                 .frame(minWidth: 560, maxWidth: .infinity)
             }
+            // divider는 레이아웃에 폭을 차지하지 않는 overlay다 — 근접 감지존이
+            // 양쪽 패널 위로 넓게 겹치되(±12pt) 평상시엔 클릭을 가로채지 않는다.
+            // 경계선 x = 사이드바 폭. 커스텀 NSView가 hitTest로 idle에선 얇은
+            // 영역만 claim하므로 넓은 존이 다른 UI interaction을 삼키지 않는다.
+            .overlay(alignment: .leading) {
+                if sidebarVisible {
+                    SidebarResizeDivider(
+                        width: Binding(
+                            get: { CGFloat(sidebarWidth) },
+                            set: { sidebarWidth = Double($0) }),
+                        minWidth: sidebarMin, maxWidth: sidebarMax, theme: theme
+                    )
+                    // 폭 24 = 근접 감지존 ±12pt. 경계선 위에 정중앙 정렬하려고
+                    // 절반(12)만큼 좌측 보정한다.
+                    .frame(width: 24)
+                    .frame(maxHeight: .infinity)
+                    .offset(x: clampedSidebarWidth - 12)
+                }
+            }
         }
         .ignoresSafeArea()
+    }
+}
+
+/// 사이드바-에디터 사이 커스텀 분할 divider — 근접 감지·확대 히트영역·리사이즈 커서.
+///
+/// **왜 AppKit(NSViewRepresentable)인가.** SwiftUI의 `.onHover`는 히트테스트에
+/// 참여하는 뷰에서만 발동하므로 "넓은 근접존이 hover는 감지하되 클릭은 가로채지
+/// 않는다"를 표현할 수 없다. NSTrackingArea(마우스 이동 감지)와 hitTest(클릭
+/// 가로채기)는 서로 독립적이라, 이 둘을 분리하면 idle에서 넓은 존이 아무
+/// interaction도 삼키지 않게 만들 수 있다.
+///
+/// 상태: idle(얇은 선 + ±3pt 히트) → pointerNear(굵은 선 + ±9pt 히트 + resize
+/// 커서) → dragging(near 유지 + 실시간 리사이즈). 근접 감지 트래킹 영역(±12pt)은
+/// 상태와 무관하게 고정 크기라, 히트영역이 확대되는 순간 hover가 풀리는
+/// flickering이 생기지 않는다.
+private struct SidebarResizeDivider: NSViewRepresentable {
+    @Binding var width: CGFloat
+    let minWidth: CGFloat
+    let maxWidth: CGFloat
+    let theme: MintTheme
+
+    func makeNSView(context: Context) -> DividerHandleView {
+        let view = DividerHandleView()
+        configure(view)
+        return view
+    }
+
+    func updateNSView(_ view: DividerHandleView, context: Context) {
+        configure(view)
+    }
+
+    private func configure(_ view: DividerHandleView) {
+        view.minWidth = minWidth
+        view.maxWidth = maxWidth
+        // idle 선은 그리지 않는다 — 사이드바가 이미 우측에 1px sep을 그려
+        // 경계에 얇은 선이 있다. near/dragging에서만 굵은 선을 덧그린다.
+        view.idleLineColor = .clear
+        view.nearLineColor = theme.ink3
+        // Binding은 매 업데이트마다 최신값을 읽도록 클로저로 감싼다.
+        view.currentWidth = { width }
+        view.onWidthChange = { newWidth in width = newWidth }
+    }
+}
+
+/// SidebarResizeDivider의 실제 AppKit 뷰. 좌표 x만 다루므로 flipped 여부는 무관.
+final class DividerHandleView: NSView {
+    var onWidthChange: ((CGFloat) -> Void)?
+    var currentWidth: (() -> CGFloat)?
+    var minWidth: CGFloat = 200
+    var maxWidth: CGFloat = 360
+    var idleLineColor: NSColor = .clear { didSet { needsDisplay = true } }
+    var nearLineColor: NSColor = .clear { didSet { needsDisplay = true } }
+
+    /// 확대 히트영역 반폭 — near/dragging에서 여기까지 클릭을 잡고 resize 커서.
+    private let expandedHalf: CGFloat = 9
+    /// idle 히트영역 반폭 — 평상시엔 이 얇은 대역만 claim(나머지는 통과).
+    private let idleHalf: CGFloat = 3
+
+    private enum State { case idle, near, dragging }
+    private var state: State = .idle {
+        didSet { if oldValue != state { needsDisplay = true } }
+    }
+    private var isActive: Bool { state != .idle }
+
+    private var trackingArea: NSTrackingArea?
+    private var dragStartMouseX: CGFloat = 0
+    private var dragStartWidth: CGFloat = 0
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = trackingArea { removeTrackingArea(existing) }
+        // 근접 감지는 뷰 전체(±12pt) 고정 — 상태에 따라 크기가 바뀌지 않으므로
+        // enter/exit이 재발화되며 깜빡이지 않는다.
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.activeInKeyWindow, .mouseEnteredAndExited, .mouseMoved],
+            owner: self, userInfo: nil)
+        addTrackingArea(area)
+        trackingArea = area
+    }
+
+    // idle에선 ±3pt만, near/dragging에선 ±9pt만 claim한다. 그 밖의 점은 nil을
+    // 반환해 아래 패널(사이드바·에디터)로 클릭이 통과한다 — 넓은 존이 평상시
+    // 다른 interaction을 가로채지 않게 하는 핵심.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let local = convert(point, from: superview)
+        guard bounds.contains(local) else { return nil }
+        let half = isActive ? expandedHalf : idleHalf
+        return abs(local.x - bounds.midX) <= half ? self : nil
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        if state != .dragging { state = .near }
+        updateCursor(for: event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        guard state != .dragging else { return }
+        state = .near
+        updateCursor(for: event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        // 드래그 중엔 존을 벗어나도 상태를 유지한다 — mouseUp에서 정리.
+        guard state != .dragging else { return }
+        state = .idle
+        NSCursor.arrow.set()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        state = .dragging
+        dragStartMouseX = event.locationInWindow.x
+        dragStartWidth = currentWidth?() ?? bounds.width
+        NSCursor.resizeLeftRight.set()
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard state == .dragging else { return }
+        // 드래그가 존을 벗어나도 mouseUp까지 이벤트가 이 뷰로 계속 라우팅된다.
+        let dx = event.locationInWindow.x - dragStartMouseX
+        let newWidth = max(minWidth, min(maxWidth, dragStartWidth + dx))
+        NSCursor.resizeLeftRight.set()
+        onWidthChange?(newWidth)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        if bounds.contains(local) {
+            state = .near
+            updateCursor(for: event)
+        } else {
+            state = .idle
+            NSCursor.arrow.set()
+        }
+    }
+
+    /// 확대 히트영역(±9pt) 안에서만 resize 커서 — 감지존 바깥 테두리(9~12pt)는
+    /// 선만 굵어지고 커서는 기본이라 "잡을 수 있는 곳"이 커서로 정직하게 드러난다.
+    private func updateCursor(for event: NSEvent) {
+        let local = convert(event.locationInWindow, from: nil)
+        if abs(local.x - bounds.midX) <= expandedHalf {
+            NSCursor.resizeLeftRight.set()
+        } else {
+            NSCursor.arrow.set()
+        }
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let lineWidth: CGFloat = isActive ? 3 : 1
+        let color = isActive ? nearLineColor : idleLineColor
+        guard color.alphaComponent > 0 else { return }
+        color.setFill()
+        NSRect(
+            x: bounds.midX - lineWidth / 2, y: 0,
+            width: lineWidth, height: bounds.height
+        ).fill()
     }
 }
 

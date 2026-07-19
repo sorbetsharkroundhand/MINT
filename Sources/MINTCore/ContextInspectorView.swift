@@ -185,7 +185,7 @@ struct ContextInspectorView: View {
             store.requestSearchJump(store.activeID, query: query)
         } else if let offset = item.jumpUTF16,
             let body = store.activeEntry?.body,
-            let snippet = KnowledgeTimelineView.jumpSnippet(in: body, atUTF16: offset)
+            let snippet = NarrativeView.jumpSnippet(in: body, atUTF16: offset)
         {
             store.requestSearchJump(store.activeID, query: snippet)
         }

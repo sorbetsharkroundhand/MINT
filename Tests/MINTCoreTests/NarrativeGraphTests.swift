@@ -35,6 +35,7 @@ final class NarrativeGraphTests: XCTestCase {
         insights: [String: SceneInsights] = [:],
         segments: [String: SceneSegmentation] = [:],
         eventGraph: EventGraphAnalysis? = nil,
+        plotThreads: PlotThreadAnalysis? = nil,
         recorded: [RecordedConversation] = [],
         overrides: [NarrativeOverride] = []
     ) -> KnowledgeSnapshot {
@@ -46,6 +47,7 @@ final class NarrativeGraphTests: XCTestCase {
             entryID: UUID(), outline: outline, summariesByHash: [:],
             events: events, insights: insights,
             segments: segments, eventGraph: eventGraph,
+            plotThreadAnalysis: plotThreads,
             recordedConversations: recorded,
             characters: [남편, 아내, 형사],
             overrides: NarrativeOverrides([flashbackOverride] + overrides))
@@ -545,32 +547,52 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertNil(ConversationDetector.reanchor(record, in: "전혀 다른 본문" as NSString))
     }
 
-    // MARK: - Case 18–23: 그래프 레이아웃 (레인·색 안정성)
+    // MARK: - Case 18–23: 통합 서사 화면 — 흐름 Projection 행 모델
 
-    func test_case18_case20_레이아웃_레인과_노드() {
+    func test_case18_case20_흐름행_정본사건과_관점참조() {
         let outline = DocumentOutline.parse(body4)
         let h1 = outline.scenes[0].contentHash
         let h2 = outline.scenes[1].contentHash  // 회상
-        let h3 = outline.scenes[2].contentHash
         let e1 = StoryEvent(sceneHash: h1, participants: [남편.id], summary: "아침", importance: 3)
         let e2 = StoryEvent(sceneHash: h2, participants: [남편.id], summary: "우물가의 기억", importance: 4)
-        let e3 = StoryEvent(sceneHash: h3, participants: [남편.id, 아내.id], summary: "대면", importance: 5)
-        let snapshot = snapshot4(events: [h1: [e1], h2: [e2], h3: [e3]])
-        let layout = NarrativeGraphLayout.compute(snapshot: snapshot)
-        // 인물 = 지속 레인 — 남편 레인은 첫 사건부터 마지막 사건까지 매 행 흐른다.
-        let husbandLane = "lane-chr-\(남편.id.uuidString)"
-        XCTAssertEqual(layout.points[husbandLane]?.map(\.row), [0, 1, 2])
-        // 공동 사건은 junction — 남편·아내 레인이 그 노드에서 만난다 (합류, Case 19).
-        let jointNode = layout.nodes.first { $0.event.canonicalKey == e3.stableKey }!
-        XCTAssertTrue(jointNode.isJunction)
-        XCTAssertTrue(jointNode.laneIDs.contains(husbandLane))
-        XCTAssertTrue(jointNode.laneIDs.contains("lane-chr-\(아내.id.uuidString)"))
-        // junction 행에서 참여 레인의 x는 노드 한 점으로 합류한다.
-        XCTAssertEqual(layout.points[husbandLane]?.last?.x, jointNode.x)
-        XCTAssertEqual(layout.points["lane-chr-\(아내.id.uuidString)"]?.last?.x, jointNode.x)
+        // e1·e2를 같은 사건으로 판정 (2장의 재서술).
+        let graph = EventGraphAnalysis(
+            identities: [
+                EventIdentity(canonicalKey: e1.stableKey, memberKeys: [e1.stableKey, e2.stableKey])
+            ])
+        let snapshot = snapshot4(events: [h1: [e1], h2: [e2]], eventGraph: graph)
+        let rows = GraphRow.flowRows(from: snapshot, expandedMinors: [])
+        // 정본 사건 행은 첫 등장 씬(1장)에 한 번만 — 사건 복제 금지 (요구사항 §3·§12).
+        let eventKeys = rows.compactMap(\.eventKey)
+        XCTAssertEqual(eventKeys.filter { $0 == e1.stableKey }.count, 1)
+        // 2장(회상)에는 관점 참조 행이 정본을 가리킨다.
+        let refKeys = rows.compactMap { row -> String? in
+            if case .perspectiveRef(_, let key, _) = row { return key }
+            return nil
+        }
+        XCTAssertEqual(refKeys, [e1.stableKey])
     }
 
-    func test_case21_case22_색과_레인_안정성() {
+    func test_관점_구간_역추적() {
+        // EventPerspective.segmentID → 구간, storyEvent(forMember:) → 원본 사건.
+        // 정본 사건에서 Scene/Segment/StoryEvent로의 역추적 통로 (통합 상세 패널).
+        let outline = DocumentOutline.parse(body4)
+        let h2 = outline.scenes[1].contentHash
+        let segment = NarrativeSegment(
+            sceneHash: h2, localStart: 0, localEnd: 30,
+            startQuote: "남편이 어린 시절을 떠올렸다", layer: .flashback, depth: 1)
+        let e2 = StoryEvent(
+            sceneHash: h2, participants: [남편.id], summary: "우물가의 기억", importance: 4)
+        let snapshot = snapshot4(
+            events: [h2: [e2]],
+            segments: [h2: SceneSegmentation(segments: [segment])])
+        let canonical = snapshot.canonicalEvent(for: e2.stableKey)
+        XCTAssertEqual(canonical?.perspectives.first?.segmentID, segment.persistentID)
+        XCTAssertEqual(snapshot.segment(withID: segment.persistentID)?.layer, .flashback)
+        XCTAssertEqual(snapshot.storyEvent(forMember: e2.stableKey)?.summary, "우물가의 기억")
+    }
+
+    func test_case21_case22_색_안정성과_행_결정성() {
         let flow1 = NarrativeFlow(id: "flow-chr-ABC", kind: .character, name: "남편")
         let flow2 = NarrativeFlow(id: "flow-chr-ABC", kind: .character, name: "남편(개명)")
         // 색 시드는 persistent ID에서만 나온다 — 이름·재분석과 무관 (요구사항 §24).
@@ -578,16 +600,15 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertNotEqual(
             NarrativeFlow(id: "flow-chr-XYZ", kind: .character, name: "아내").colorSeed,
             flow1.colorSeed)
-        // 레이아웃 재계산 안정성 — 같은 스냅샷이면 같은 배치 (요구사항 §25).
+        // 행 모델 재계산 안정성 — 같은 스냅샷이면 같은 행 (요구사항 §25).
         let outline = DocumentOutline.parse(body4)
         let h1 = outline.scenes[0].contentHash
         let e1 = StoryEvent(sceneHash: h1, participants: [남편.id, 아내.id], summary: "사건", importance: 3)
         let e2 = StoryEvent(sceneHash: h1, participants: [남편.id, 아내.id], summary: "사건2", importance: 3)
         let snapshot = snapshot4(events: [h1: [e1, e2]])
-        let a = NarrativeGraphLayout.compute(snapshot: snapshot)
-        let b = NarrativeGraphLayout.compute(snapshot: snapshot)
-        XCTAssertEqual(a.lanes.map(\.id), b.lanes.map(\.id))
-        XCTAssertEqual(a.nodes.map(\.x), b.nodes.map(\.x))
+        let a = GraphRow.flowRows(from: snapshot, expandedMinors: [])
+        let b = GraphRow.flowRows(from: snapshot, expandedMinors: [])
+        XCTAssertEqual(a.map(\.id), b.map(\.id))
     }
 
     // MARK: - Case 24는 UI 통로(requestSearchJump) — 재앵커 사다리를 검증
@@ -682,29 +703,6 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertFalse(without.contains("아침의 방문"))
     }
 
-    func test_컨텍스트_고정은_후보복선도_싣는다() {
-        let outline = DocumentOutline.parse(body4)
-        let h1 = outline.scenes[0].contentHash
-        let insights: [String: SceneInsights] = [
-            h1: SceneInsights(foreshadows: [
-                ForeshadowCandidate(label: "우물", detail: "우물이 반복 등장", sceneHash: h1)
-            ])
-        ]
-        let snapshot = KnowledgeSnapshot(
-            entryID: UUID(), outline: outline, summariesByHash: [:],
-            insights: insights,
-            overrides: NarrativeOverrides([
-                NarrativeOverride(kind: .contextPin, key: "foreshadow|우물", value: "고정")
-            ]))
-        var report: [ContextReport.Item] = []
-        let block = ContextAssembler.knowledgeText(
-            snapshot, before: outline.scenes[2].utf16Range.lowerBound,
-            controls: .init(snapshot), report: &report)
-        // 후보 상태지만 Pin이 이긴다 (§31).
-        XCTAssertTrue(block.contains("미회수 복선: 우물"))
-        XCTAssertTrue(report.contains { $0.stableKey == "foreshadow|우물" && $0.pinned })
-    }
-
     // MARK: - 사이드카 v5 왕복
 
     func test_사이드카_v5_왕복() throws {
@@ -722,6 +720,17 @@ final class NarrativeGraphTests: XCTestCase {
             identities: [EventIdentity(canonicalKey: "a", memberKeys: ["a", "c"])],
             chronoEdges: [ChronoEdge(aKey: "c", bKey: "a", relation: .before)],
             memoHash: "m", updatedAt: fixed)
+        sidecar.plotThreads = PlotThreadAnalysis(
+            threads: [
+                PlotThread(
+                    title: "살인사건의 진실", summary: "남편의 죽음을 파헤친다",
+                    memberships: [
+                        EventThreadMembership(eventKey: "a", role: .opens),
+                        EventThreadMembership(eventKey: "b", role: .advances),
+                    ],
+                    resolvedAtKey: "b")
+            ],
+            memoHash: "p", updatedAt: fixed)
         sidecar.conversationMeta["id1"] = ConversationMeta(
             contentHash: "ch", topic: "과거 이야기", tone: "긴장",
             keyStatements: ["몇 가지 여쭙겠습니다"], updatedAt: fixed)
@@ -732,7 +741,7 @@ final class NarrativeGraphTests: XCTestCase {
         let decoded = try decoder.decode(
             KnowledgeSidecar.self, from: encoder.encode(sidecar))
         XCTAssertEqual(decoded, sidecar)
-        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 5)
+        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 7)
     }
 
     // MARK: - 의미 경계 분할 (요구사항 §32)

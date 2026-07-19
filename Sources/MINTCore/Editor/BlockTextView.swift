@@ -563,24 +563,22 @@ final class BlockTextView: NSTextView {
 
     // MARK: 커서 효과 (에디터 v3.1 — 글로우 대체)
 
-    /// 마지막으로 그린 커서 줄 하이라이트 rect — 이동 시 이전 줄 무효화용.
-    private var lastActiveLineRect: NSRect?
-
     /// 직전 선택(길이>0) 하이라이트가 걸친 영역 — 더블클릭으로 잡힌 공백·개행
     /// 선택은 글리프 rect 바깥까지 그려져, 선택 해제 시 AppKit의 무효화가
     /// 다 덮지 못하고 잔상이 남는다. 선택이 바뀔 때 이 rect를 직접 지운다.
     private var lastSelectionRect: NSRect?
 
-    /// 커서 줄 하이라이트를 다시 그린다 — 이전 줄과 새 줄만 무효화.
-    /// 선택 변경·포커스 전환마다 불리므로, 선택 잔상 무효화와 캐럿 뷰 동기화도 겸한다.
+    /// 커서 줄 하이라이트·선택 잔상·캐럿 뷰를 현재 커서 상태에 맞춘다.
+    /// 선택 변경·포커스 전환·재배치(layout)마다 불린다.
     ///
-    /// `lastActiveLineRect` 기록은 **오직 여기서만** 갱신한다 — 무효화와 기록이
-    /// 한 트랜잭션이어야 이전 줄 밴드가 빠짐없이 지워진다 (하이라이트 최대 1개 보장).
+    /// 커서 줄 하이라이트는 **단일 서브뷰**(`activeLineView`)로 그린다 — 뷰 하나를
+    /// 옮기면 이전 자리가 원자적으로 지워지므로, 밴드가 여러 줄에 쌓이는 잔상이
+    /// 구조적으로 불가능하다(항상 최대 1개). 예전 draw() 픽셀 밴드 + 부분 무효화
+    /// 방식은 "refresh가 기록한 rect"와 "draw가 실제로 칠한 rect"가 재배치 타이밍에
+    /// 어긋나면(빈 문단 개행 등) 이전 밴드를 못 지워 잔상이 쌓였다 — 캐럿과 같은
+    /// 서브뷰 방식으로 그 레이스를 원천 제거한다.
     func refreshActiveLineHighlight() {
-        let new = activeLineRect()
-        if let old = lastActiveLineRect { setNeedsDisplay(old) }
-        if let new { setNeedsDisplay(new) }
-        lastActiveLineRect = new
+        syncActiveLineView()
         // 직전 선택 하이라이트 영역 무효화 — 공백·개행 선택 잔상 방지.
         if let oldSelection = lastSelectionRect {
             setNeedsDisplay(oldSelection.insetBy(dx: -4, dy: -4))
@@ -2949,6 +2947,37 @@ final class BlockTextView: NSTextView {
     /// 이 오버라이드는 시스템 캐럿을 비활성화하는 스위치 역할만 한다.
     override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {}
 
+    /// 클릭을 통과시키는 장식 뷰 — 줄 하이라이트 밴드는 줄 전체 폭이라, hitTest를
+    /// 막지 않으면 그 줄의 텍스트 클릭·선택이 통째로 밴드에 먹힌다.
+    private final class PassthroughView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+
+    /// 커서 줄 하이라이트 뷰 — 단일 서브뷰라 위치를 옮기면 이전 밴드가 자동
+    /// 소거된다(잔상 구조적 불가, 최대 1개 보장, `syncActiveLineView`). 텍스트보다
+    /// 살짝 위에 얹히지만 activeLine 알파가 매우 낮아(≈0.06) 글자를 가리지 않는다.
+    private lazy var activeLineView: PassthroughView = {
+        let view = PassthroughView(frame: .zero)
+        view.wantsLayer = true
+        view.layer?.cornerRadius = 6
+        view.isHidden = true
+        // 다른 오버레이(캐럿·이미지 박스) 밑으로 — 서브뷰 맨 아래에 깐다.
+        addSubview(view, positioned: .below, relativeTo: nil)
+        return view
+    }()
+
+    /// 커서 줄 하이라이트 뷰를 현재 커서 줄에 맞춘다. 포커스 밖·선택 중·이미지
+    /// 객체 선택 중이면 `activeLineRect()`가 nil → 숨긴다.
+    private func syncActiveLineView() {
+        guard let rect = activeLineRect() else {
+            activeLineView.isHidden = true
+            return
+        }
+        activeLineView.layer?.backgroundColor = palette.activeLine.cgColor
+        activeLineView.frame = rect
+        activeLineView.isHidden = false
+    }
+
     /// 우리가 소유한 캐럿 뷰. 표시 조건·위치는 `syncCaretView()`가 담당.
     private lazy var caretView: NSView = {
         let view = NSView(frame: .zero)
@@ -3135,15 +3164,10 @@ final class BlockTextView: NSTextView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // 커서 줄 하이라이트 — 본문 아래에 깔리도록 텍스트보다 먼저 그린다.
-        // 항상 "현재 커서 줄" 하나만 그린다. lastActiveLineRect 기록은 여기서
-        // 건드리지 않는다 — 부분 재그리기가 커서 이동 직후·refresh 이전에
-        // 끼어들면 이전 줄 rect 기록을 잃어 그 줄 밴드가 잔상으로 남는다.
-        let lineRect = activeLineRect()
-        if let lineRect, lineRect.intersects(dirtyRect) {
-            palette.activeLine.setFill()
-            NSBezierPath(roundedRect: lineRect, xRadius: 6, yRadius: 6).fill()
-        }
+        // 커서 줄 하이라이트는 draw()가 아니라 단일 서브뷰(activeLineView)가
+        // 그린다 — 픽셀 밴드 + 부분 무효화는 재배치 타이밍 레이스로 밴드가 여러
+        // 줄에 쌓였다(잔상). 서브뷰는 옮기면 이전 자리가 원자적으로 지워져
+        // 항상 최대 1개다 (refreshActiveLineHighlight → syncActiveLineView).
 
         // 드래그 선택 영역 — 시스템 사각 하이라이트 대신 줄별 라운드 사각형을
         // 본문 아래에 깔아 그린다 (우리식 드래그 표시, 테마 selection 토큰).

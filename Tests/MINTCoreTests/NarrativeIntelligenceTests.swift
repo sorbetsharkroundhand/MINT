@@ -2,7 +2,7 @@ import XCTest
 
 @testable import MINTCore
 
-/// Narrative Intelligence (v4) — 근거·앎·관계·브랜치·대화 인덱스·복선·충돌·
+/// Narrative Intelligence (v4) — 근거·앎·관계·브랜치·대화 인덱스·
 /// 사용자 수정 보호의 결정적 로직 검증. LLM 호출 없는 파서·질의만 다룬다.
 final class NarrativeIntelligenceTests: XCTestCase {
 
@@ -79,7 +79,7 @@ final class NarrativeIntelligenceTests: XCTestCase {
         XCTAssertEqual(a.stableKey, b.stableKey)  // 씬이 재해시돼도 키 유지
     }
 
-    // MARK: - 심화 파서 (앎·관계·사실·복선)
+    // MARK: - 심화 파서 (앎·관계)
 
     func test_심화_앎_파싱과_태도검증() {
         let output = """
@@ -102,18 +102,6 @@ final class NarrativeIntelligenceTests: XCTestCase {
         XCTAssertEqual(insights.relations[0].fromID, 서연.id)
         XCTAssertEqual(insights.relations[0].toID, 민준.id)
         XCTAssertEqual(insights.relations[0].value, "의심과 경계")
-    }
-
-    func test_심화_사실과_복선() {
-        let output = """
-            사실: 서연=운전을 못 한다
-            복선: 향수 냄새=낯선 향수 냄새가 반복 등장
-            """
-        let insights = InsightParser.parse(output, sceneHash: "h1", nameIndex: nameIndex)
-        XCTAssertEqual(insights.facts.count, 1)
-        XCTAssertEqual(insights.facts[0].subject, "서연")
-        XCTAssertEqual(insights.foreshadows.count, 1)
-        XCTAssertEqual(insights.foreshadows[0].label, "향수 냄새")
     }
 
     // MARK: - 씬 분석 파서 (요구사항 §6)
@@ -314,54 +302,6 @@ final class NarrativeIntelligenceTests: XCTestCase {
         XCTAssertEqual(rekeyed.all.count, 1)
     }
 
-    // MARK: - 복선·충돌 (요구사항 §14·§15)
-
-    func test_복선_라벨묶기와_상태오버라이드() {
-        let outline = DocumentOutline.parse(body3)
-        let scenes = outline.scenes
-        let insights: [String: SceneInsights] = [
-            scenes[0].contentHash: SceneInsights(foreshadows: [
-                ForeshadowCandidate(label: "향수 냄새", detail: "낯선 향수", sceneHash: scenes[0].contentHash)
-            ]),
-            scenes[2].contentHash: SceneInsights(foreshadows: [
-                ForeshadowCandidate(label: "향수 냄새", detail: "또 등장", sceneHash: scenes[2].contentHash)
-            ]),
-        ]
-        let overrides = NarrativeOverrides([
-            NarrativeOverride(kind: .foreshadowStatus, key: "향수 냄새", value: "확정")
-        ])
-        let snapshot = KnowledgeSnapshot(
-            entryID: UUID(), outline: outline, summariesByHash: [:],
-            insights: insights, overrides: overrides)
-        XCTAssertEqual(snapshot.foreshadows.count, 1)
-        XCTAssertTrue(snapshot.foreshadows[0].isReinforced)
-        XCTAssertEqual(snapshot.foreshadows[0].status, .confirmed)
-        XCTAssertEqual(snapshot.unresolvedForeshadows.count, 1)
-    }
-
-    func test_충돌_판정오버라이드와_죽은사실_제외() {
-        let outline = DocumentOutline.parse(body3)
-        let hash = outline.scenes[0].contentHash
-        let factA = ContinuityFact(subject: "서연", statement: "운전을 못 한다", sceneHash: hash)
-        let factB = ContinuityFact(subject: "서연", statement: "차를 몰고 떠났다", sceneHash: hash)
-        let ghost = ContinuityFact(subject: "유령", statement: "지워진 사실", sceneHash: "없는씬")
-        let conflicts = [
-            FactConflict(aID: factA.id, bID: factB.id, reason: "운전 능력 모순"),
-            FactConflict(aID: factA.id, bID: ghost.id, reason: "죽은 사실 참조"),
-        ]
-        let overrides = NarrativeOverrides([
-            NarrativeOverride(
-                kind: .conflictResolution, key: conflicts[0].id, value: "의도됨")
-        ])
-        let snapshot = KnowledgeSnapshot(
-            entryID: UUID(), outline: outline, summariesByHash: [:],
-            insights: [hash: SceneInsights(facts: [factA, factB])],
-            factConflicts: conflicts, overrides: overrides)
-        // 죽은 사실을 참조하는 충돌은 걸러진다.
-        XCTAssertEqual(snapshot.factConflicts.count, 1)
-        XCTAssertEqual(snapshot.factConflicts[0].resolution, .intended)
-    }
-
     // MARK: - 저장 왕복 (요구사항 §5 migration/backward compat)
 
     func test_JournalEntry_오버라이드없는_구파일_디코딩() throws {
@@ -382,7 +322,6 @@ final class NarrativeIntelligenceTests: XCTestCase {
             ],
             // ISO8601 저장은 소수초를 버린다 — 왕복 비교를 위해 초 단위 시각.
             updatedAt: Date(timeIntervalSince1970: 1_750_000_000))
-        sidecar.factConflicts = [FactConflict(aID: "a", bID: "b", reason: "이유")]
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let data = try encoder.encode(sidecar)
@@ -390,8 +329,8 @@ final class NarrativeIntelligenceTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(KnowledgeSidecar.self, from: data)
         XCTAssertEqual(decoded, sidecar)
-        // 구버전(스키마 4 이하)은 로드 시 폐기·재구축 대상이다 (v5: Narrative Graph).
-        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 5)
+        // 구버전은 로드 시 폐기·재구축 대상이다 (v7: 설정 충돌·복선 제거).
+        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 7)
     }
 
     // MARK: - 컨텍스트 조립 (요구사항 §16·§17)
@@ -442,27 +381,4 @@ final class NarrativeIntelligenceTests: XCTestCase {
         }
     }
 
-    func test_조립_확정복선만_주입된다() {
-        let outline = DocumentOutline.parse(body3)
-        let scenes = outline.scenes
-        let h1 = scenes[0].contentHash
-        let insights: [String: SceneInsights] = [
-            h1: SceneInsights(foreshadows: [
-                ForeshadowCandidate(label: "후보 복선", detail: "아직 후보", sceneHash: h1),
-                ForeshadowCandidate(label: "확정 복선", detail: "확정된 것", sceneHash: h1),
-            ])
-        ]
-        let overrides = NarrativeOverrides([
-            NarrativeOverride(kind: .foreshadowStatus, key: "확정 복선", value: "확정")
-        ])
-        let snapshot = KnowledgeSnapshot(
-            entryID: UUID(), outline: outline,
-            summariesByHash: [h1: "퇴원."],
-            insights: insights, overrides: overrides)
-        var report: [ContextReport.Item] = []
-        let block = ContextAssembler.knowledgeText(
-            snapshot, before: scenes[2].utf16Range.lowerBound, report: &report)
-        XCTAssertTrue(block.contains("미회수 복선: 확정 복선"))
-        XCTAssertFalse(block.contains("후보 복선"))
-    }
 }
