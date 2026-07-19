@@ -170,6 +170,8 @@ public struct MintBlockEditor: NSViewRepresentable {
             context.coordinator.lastSyncedText = text
             textView.ghostText = nil
             controller?.dismissSuggestion()
+            textView.showConversationPrompt(nil)
+            controller?.dismissConversationSuggestion(remember: false)
             // 다시 찾은 저널이면 마지막으로 있던 위치로 커서·스크롤을 복원한다.
             // (처음 여는 저널은 저장값이 없어 load의 맨 위 규칙을 그대로 둔다.)
             if entryChanged, let saved = context.coordinator.caretByEntry[entryID] {
@@ -224,6 +226,13 @@ public struct MintBlockEditor: NSViewRepresentable {
         func attach(to textView: BlockTextView) {
             parent.controller?.suggestionDidChange = { [weak textView] suggestion in
                 textView?.ghostText = suggestion
+            }
+            // 대화 기록 제안 (요구사항 §20) — 감지가 스토리지 프리픽스에서 돌아
+            // 범위가 곧 이 뷰의 좌표다. 은은한 하이라이트 + 끝자락 pill.
+            parent.controller?.conversationSuggestionDidChange = { [weak textView] block in
+                textView?.showConversationPrompt(
+                    block.map { NSRange(location: $0.utf16Range.lowerBound,
+                                        length: $0.utf16Range.count) })
             }
             // 긴 문단 감지·나누기 다리 (docs/editor-paragraph-split.md).
             parent.controller?.detectLongParagraphs = { [weak textView] in
@@ -280,7 +289,12 @@ public struct MintBlockEditor: NSViewRepresentable {
             parent.controller?.dismissSuggestion()
         }
 
-        /// Tab 수락 / → 한 단어 / Esc 거부 (PLAN §5, 에디터 v3).
+        /// Tab 수락 / → 한 단어 / Esc 거부 (PLAN §5, 에디터 v3) +
+        /// Enter 대화 기록 (요구사항 §20 — Interaction Priority):
+        /// - Tab·→ 는 고스트 전용 (대화 제안과 무관).
+        /// - Enter: 대화 제안이 떠 있으면 **기록하고 개행도 정상 진행** (false
+        ///   리턴) — 글쓰기 흐름이 끊기지 않는다.
+        /// - Esc: 고스트가 먼저, 다음이 대화 제안 (겹치면 고스트부터 닫는다).
         public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             guard let controller = parent.controller else { return false }
 
@@ -288,6 +302,12 @@ public struct MintBlockEditor: NSViewRepresentable {
                 guard let accepted = controller.acceptSuggestion() else { return false }
                 textView.insertText(accepted, replacementRange: textView.selectedRange())
                 return true
+            }
+
+            if commandSelector == #selector(NSStandardKeyBindingResponding.insertNewline(_:)) {
+                // 기록은 부수 효과 — 개행은 평소처럼 진행된다 (요구사항 §20).
+                controller.acceptConversationSuggestion()
+                return false
             }
 
             if commandSelector == #selector(NSStandardKeyBindingResponding.moveRight(_:)) {
@@ -301,9 +321,15 @@ public struct MintBlockEditor: NSViewRepresentable {
 
             if commandSelector == #selector(NSStandardKeyBindingResponding.cancelOperation(_:))
                 || commandSelector == #selector(NSStandardKeyBindingResponding.complete(_:)) {
-                guard controller.hasSuggestion else { return false }
-                controller.dismissSuggestion()
-                return true
+                if controller.hasSuggestion {
+                    controller.dismissSuggestion()
+                    return true
+                }
+                if controller.hasConversationSuggestion {
+                    controller.dismissConversationSuggestion(remember: true)
+                    return true
+                }
+                return false
             }
 
             return false
@@ -3005,6 +3031,85 @@ final class BlockTextView: NSTextView {
         (typingAttributes[.font] as? NSFont) ?? bodyFont
     }
 
+    // MARK: 대화 기록 제안 렌더 (요구사항 §20)
+
+    /// 제안 중인 대화 블록 범위 (스토리지 좌표) — nil이면 표시 없음.
+    private var conversationPromptRange: NSRange?
+
+    /// 인라인 pill — 「이 대화를 기록할까요?」. 모달·팝업 금지 (요구사항 §20):
+    /// 캐럿 뷰와 같은 자기 소유 서브뷰 하나로, 대화 끝자락에 조용히 놓인다.
+    private lazy var conversationPromptView: NSTextField = {
+        let label = NSTextField(labelWithString: "")
+        label.font = MintFonts.ui(10.5, weight: .medium)
+        label.wantsLayer = true
+        label.layer?.cornerRadius = 9
+        label.layer?.borderWidth = 1
+        label.alignment = .center
+        label.isHidden = true
+        addSubview(label)
+        return label
+    }()
+
+    /// 제안 표시/숨김 — 컨트롤러의 conversationSuggestionDidChange가 부른다.
+    func showConversationPrompt(_ range: NSRange?) {
+        conversationPromptRange = range.flatMap {
+            $0.location + $0.length <= (string as NSString).length ? $0 : nil
+        }
+        layoutConversationPrompt()
+        needsDisplay = true
+    }
+
+    /// pill을 대화 마지막 줄 끝 아래에 놓는다 — 화면을 흔들지 않는다 (§3 조용한 UI).
+    private func layoutConversationPrompt() {
+        guard let range = conversationPromptRange,
+            let layoutManager, let textContainer
+        else {
+            conversationPromptView.isHidden = true
+            return
+        }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else {
+            conversationPromptView.isHidden = true
+            return
+        }
+        let bounding = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+        let origin = textContainerOrigin
+        let label = conversationPromptView
+        label.stringValue = "  이 대화를 기록할까요?  ⏎ 기록 · esc 닫기  "
+        label.textColor = palette.novel
+        label.layer?.backgroundColor = palette.pill.cgColor
+        label.layer?.borderColor = palette.pillBorder.cgColor
+        label.sizeToFit()
+        var frame = label.frame
+        frame.size.height += 6
+        frame.origin.x = min(
+            bounding.maxX + origin.x - frame.width,
+            bounds.width - frame.width - textContainerInset.width)
+        frame.origin.x = max(frame.origin.x, origin.x + 4)
+        frame.origin.y = bounding.maxY + origin.y + 4
+        label.frame = frame
+        label.isHidden = false
+    }
+
+    /// 블록 전체의 아주 약한 배경 하이라이트 — draw(_:)가 본문 아래에 깐다.
+    private func drawConversationHighlight(in dirtyRect: NSRect) {
+        guard let range = conversationPromptRange,
+            let layoutManager, let textContainer
+        else { return }
+        let glyphs = layoutManager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        guard glyphs.length > 0 else { return }
+        let origin = textContainerOrigin
+        layoutManager.enumerateEnclosingRects(
+            forGlyphRange: glyphs, withinSelectedGlyphRange: glyphs, in: textContainer
+        ) { rect, _ in
+            let shifted = rect.offsetBy(dx: origin.x, dy: origin.y)
+                .insetBy(dx: -3, dy: -1)
+            guard shifted.intersects(dirtyRect) else { return }
+            self.palette.novel.withAlphaComponent(0.06).setFill()
+            NSBezierPath(roundedRect: shifted, xRadius: 5, yRadius: 5).fill()
+        }
+    }
+
     // MARK: 고스트 렌더 (M3 그대로)
 
     /// AI 제안이 처음 뜰 때 투명도를 0→1로 올려 부드럽게 스며들게 한다
@@ -3043,6 +3148,9 @@ final class BlockTextView: NSTextView {
         // 드래그 선택 영역 — 시스템 사각 하이라이트 대신 줄별 라운드 사각형을
         // 본문 아래에 깔아 그린다 (우리식 드래그 표시, 테마 selection 토큰).
         drawSelectionHighlight(in: dirtyRect)
+
+        // 대화 기록 제안 중인 블록의 은은한 하이라이트 (요구사항 §20).
+        drawConversationHighlight(in: dirtyRect)
 
         super.draw(dirtyRect)
 

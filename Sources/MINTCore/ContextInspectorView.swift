@@ -39,6 +39,7 @@ struct ContextInspectorView: View {
                         ForEach(Array(report.items.enumerated()), id: \.offset) { _, item in
                             itemRow(item)
                         }
+                        excludedList
                     }
                     .padding(.vertical, 2)
                 }
@@ -66,7 +67,35 @@ struct ContextInspectorView: View {
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(theme.novelBgC))
+                if item.pinned {
+                    Image(systemName: "pin.fill")
+                        .font(.system(size: 8))
+                        .foregroundStyle(theme.novelC)
+                        .help("고정됨 — 관련성이 낮아져도 컨텍스트에 유지돼요")
+                }
                 Spacer()
+                // Pin/Exclude (요구사항 §31) — 오버라이드(entries.json)로 저장돼
+                // 실제 조립 파이프라인이 그대로 읽는다. UI 전용 프리뷰가 아니다.
+                if !item.stableKey.isEmpty {
+                    Button {
+                        togglePin(item)
+                    } label: {
+                        Image(systemName: item.pinned ? "pin.slash" : "pin")
+                            .font(.system(size: 9))
+                            .foregroundStyle(item.pinned ? theme.novelC : theme.ink3C)
+                    }
+                    .buttonStyle(.plain)
+                    .help(item.pinned ? "고정 해제" : "고정 — 항상 컨텍스트에 유지")
+                    Button {
+                        exclude(item)
+                    } label: {
+                        Image(systemName: "eye.slash")
+                            .font(.system(size: 9))
+                            .foregroundStyle(theme.ink3C)
+                    }
+                    .buttonStyle(.plain)
+                    .help("제외 — 자동 컨텍스트에서 빼요 (아래 목록에서 복원 가능)")
+                }
                 if hasJump(item) {
                     Button {
                         jump(item)
@@ -92,6 +121,56 @@ struct ContextInspectorView: View {
                 .fill(theme.chipC))
     }
 
+    // MARK: - Pin / Exclude (요구사항 §31)
+
+    private func togglePin(_ item: ContextReport.Item) {
+        if item.pinned {
+            store.removeNarrativeOverride(
+                kind: .contextPin, key: item.stableKey, in: store.activeID)
+        } else {
+            store.setNarrativeOverride(
+                NarrativeOverride(kind: .contextPin, key: item.stableKey, value: "고정"),
+                in: store.activeID)
+        }
+    }
+
+    private func exclude(_ item: ContextReport.Item) {
+        store.setNarrativeOverride(
+            NarrativeOverride(kind: .contextExclude, key: item.stableKey, value: "제외"),
+            in: store.activeID)
+    }
+
+    /// 제외 중인 항목 목록 — 복원 통로 (조용히 사라진 채 잊히지 않게).
+    @ViewBuilder fileprivate var excludedList: some View {
+        let excluded = (store.activeEntry?.narrativeOverrides ?? [])
+            .filter { $0.kind == .contextExclude }
+        if !excluded.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("제외 중 \(excluded.count)")
+                    .font(MintFonts.uiFont(9.5, .semibold))
+                    .foregroundStyle(theme.ink3C)
+                ForEach(excluded) { override in
+                    HStack(spacing: 5) {
+                        Text(override.key)
+                            .font(MintFonts.monoUI(9))
+                            .foregroundStyle(theme.ink3C)
+                            .lineLimit(1)
+                        Spacer()
+                        Button("복원") {
+                            store.removeNarrativeOverride(
+                                kind: .contextExclude, key: override.key,
+                                in: store.activeID)
+                        }
+                        .font(MintFonts.uiFont(9.5))
+                        .buttonStyle(.bordered)
+                        .controlSize(.mini)
+                    }
+                }
+            }
+            .padding(.top, 6)
+        }
+    }
+
     private func hasJump(_ item: ContextReport.Item) -> Bool {
         item.jumpQuery != nil || item.jumpUTF16 != nil
     }
@@ -100,7 +179,10 @@ struct ContextInspectorView: View {
     /// (타임라인과 같은 requestSearchJump 통로 — 좌표 불일치를 구조적으로 회피).
     private func jump(_ item: ContextReport.Item) {
         if let quote = item.jumpQuery {
-            store.requestSearchJump(store.activeID, query: quote)
+            let query = store.activeEntry.flatMap {
+                SourceAnchor.resilientQuery(for: quote, in: $0.body)
+            } ?? quote
+            store.requestSearchJump(store.activeID, query: query)
         } else if let offset = item.jumpUTF16,
             let body = store.activeEntry?.body,
             let snippet = KnowledgeTimelineView.jumpSnippet(in: body, atUTF16: offset)

@@ -35,19 +35,24 @@ public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
     /// 소개를 직접 고치면 UI가 자동으로 잠근다. 옵셔널인 이유: 이전 저장
     /// 파일엔 키가 없어 nil(잠기지 않음)로 로드된다 (`folderID`와 같은 패턴).
     public var locked: Bool?
+    /// HIGH 신뢰 감지로 자동 등록된 카드 (요구사항 §16) — UI가 표식을 달아
+    /// 사용자가 알아보고 지울 수 있게 한다. 사용자가 카드를 편집하면 해제된다.
+    public var autoRegistered: Bool?
 
     public init(
         id: UUID = UUID(),
         name: String = "",
         aliases: String = "",
         note: String = "",
-        locked: Bool? = nil
+        locked: Bool? = nil,
+        autoRegistered: Bool? = nil
     ) {
         self.id = id
         self.name = name
         self.aliases = aliases
         self.note = note
         self.locked = locked
+        self.autoRegistered = autoRegistered
     }
 }
 
@@ -81,6 +86,9 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     /// 스키마 변경 시 통째로 버려지지만 이 목록은 살아남아, 재분석·재구축이
     /// 사용자 수정을 절대 덮지 못한다 (CLAUDE.md §1-5). 레거시 파일엔 없는 키.
     public var narrativeOverrides: [NarrativeOverride]?
+    /// 사용자가 기록한 대화 (요구사항 §20–§21) — 오버라이드와 같은 이유로
+    /// 여기 산다. 재분석이 지우지 못한다. 레거시 파일엔 없는 키.
+    public var recordedConversations: [RecordedConversation]?
 
     public init(
         id: UUID = UUID(),
@@ -94,7 +102,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         characters: [CharacterCard]? = nil,
         rejectedCharacterNames: [String]? = nil,
         sortOrder: Double? = nil,
-        narrativeOverrides: [NarrativeOverride]? = nil
+        narrativeOverrides: [NarrativeOverride]? = nil,
+        recordedConversations: [RecordedConversation]? = nil
     ) {
         self.id = id
         self.title = title
@@ -108,6 +117,7 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.rejectedCharacterNames = rejectedCharacterNames
         self.sortOrder = sortOrder
         self.narrativeOverrides = narrativeOverrides
+        self.recordedConversations = recordedConversations
     }
 
     /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
@@ -815,6 +825,33 @@ public final class EntryStore: ObservableObject {
         else { return }
         overrides.removeAll { $0.kind == kind && $0.key == key }
         entries[index].narrativeOverrides = overrides.isEmpty ? nil : overrides
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    // MARK: - 기록된 대화 (요구사항 §20–§21)
+
+    /// 대화 기록 승인 — 사용자 결정 = 즉시 저장. 스냅샷 재조립 신호까지 쏜다
+    /// (기록이 대화 인덱스에 바로 보이도록).
+    public func recordConversation(_ record: RecordedConversation, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var records = entries[index].recordedConversations ?? []
+        // 같은 범위의 중복 기록 방지 — 같은 블록을 두 번 기록하지 않는다.
+        guard !records.contains(where: { $0.contentHash == record.contentHash }) else { return }
+        records.append(record)
+        entries[index].recordedConversations = records
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    /// 기록 삭제 — 사용자만 지울 수 있다 (재분석은 절대 지우지 않는다).
+    public func removeRecordedConversation(id recordID: UUID, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            var records = entries[index].recordedConversations,
+            records.contains(where: { $0.id == recordID })
+        else { return }
+        records.removeAll { $0.id == recordID }
+        entries[index].recordedConversations = records.isEmpty ? nil : records
         saveNow()
         narrativeOverridesDidChange?(id)
     }

@@ -36,6 +36,20 @@ public struct ContentView: View {
                 completion.documentContextProvider = { [weak store] in
                     store?.activeDocumentContext
                 }
+                // 대화 기록 (요구사항 §20–§21) — Enter 승인 → 마크다운 본문
+                // 좌표로 재앵커해 entries.json에 저장. 스토어가 재조립 신호를 쏜다.
+                completion.onRecordConversation = { [weak store] record in
+                    guard let store else { return }
+                    var record = record
+                    if let body = store.activeEntry?.body {
+                        record = ConversationDetector.reanchor(record, in: body as NSString)
+                            ?? record
+                    }
+                    store.recordConversation(record, in: store.activeID)
+                }
+                completion.recordedConversationHashesProvider = { [weak store] in
+                    Set((store?.activeEntry?.recordedConversations ?? []).map(\.contentHash))
+                }
                 // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
                 // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
                 if let indexer {

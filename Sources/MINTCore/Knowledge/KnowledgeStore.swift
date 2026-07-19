@@ -23,7 +23,10 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// (`SceneSummary` 확장), 심화 추출(`insights`)·충돌 후보(`factConflicts`)가
     /// 붙었다. **사용자 수정은 여기 없다** — entries.json의 NarrativeOverride에
     /// 살므로 이 폐기·재구축이 사용자 데이터를 건드리지 않는다.
-    public static let currentSchemaVersion = 4
+    /// v5 (Narrative Graph): 씬 내부 구간 분석(`segments`)·사건 그래프(인과·
+    /// 동일 사건·시간 간선, `eventGraph`)·기록 대화 보완(`conversationMeta`)이
+    /// 붙었다. v4 파일은 폐기·재구축 (마이그레이션 코드를 쌓지 않는다, §2-1).
+    public static let currentSchemaVersion = 5
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -101,6 +104,13 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     public var factConflicts: [FactConflict]
     /// 충돌 검사 메모 키 — 검사에 넣은 사실 집합의 결합 해시. 같으면 재검사 금지.
     public var conflictsMemoHash: String?
+    /// 씬 해시 → 서사 구간 분석 (v5, 요구사항 §8) — events와 같은 메모 규약
+    /// (키 존재 = 분석 완료, 빈 배열 = 단일 현재 서사).
+    public var segments: [String: SceneSegmentation]
+    /// 사건 그래프 분석 (v5, 요구사항 §3·§6·§12·§29) — 인과·동일 사건·시간 간선.
+    public var eventGraph: EventGraphAnalysis?
+    /// 기록된 대화 보완 (v5, 요구사항 §19) — 키 = RecordedConversation.id.
+    public var conversationMeta: [String: ConversationMeta]
 
     public init(entryID: UUID) {
         self.schemaVersion = Self.currentSchemaVersion
@@ -113,6 +123,9 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         self.insights = [:]
         self.factConflicts = []
         self.conflictsMemoHash = nil
+        self.segments = [:]
+        self.eventGraph = nil
+        self.conversationMeta = [:]
     }
 
     // MARK: - 디스크 IO (인덱서 전용)
@@ -170,6 +183,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
             }
             snapshot.events = snapshot.events.filter { liveHashes.contains($0.key) }
             snapshot.insights = snapshot.insights.filter { liveHashes.contains($0.key) }
+            snapshot.segments = snapshot.segments.filter { liveHashes.contains($0.key) }
         }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -240,6 +254,27 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// 스냅샷에 적용된 오버라이드 — UI의 userEdited 표시가 이걸 본다.
     public let overrides: NarrativeOverrides
 
+    // MARK: Narrative Graph (v5, PLAN §6.6)
+
+    /// 씬 해시 → 서사 구간들 (오버라이드 적용 후, 구간 시작 위치 순).
+    public let segmentsByScene: [String: [NarrativeSegment]]
+    /// 정본 사건들 (담화 순서) — 동일 사건 묶음 적용 후. 그래프의 노드.
+    public let canonicalEvents: [CanonicalEvent]
+    /// 사건 키(멤버) → 정본 키.
+    public let canonicalKeyByMember: [String: String]
+    /// 인과 관계 (사용자 추가/삭제 적용 후).
+    public let causalLinks: [CausalLink]
+    /// 서사 흐름들 — main + 인물 + 시간 (담화 순서 파생).
+    public let flows: [NarrativeFlow]
+    /// 정본 사건의 시간 순서 (부분 순서 해석 결과).
+    public let eventChronoOrder: [String]
+    /// 시간 관계 모순 간선들 — UI가 Conflict로 표시한다 (요구사항 §29).
+    public let chronoConflicts: [ChronoEdge]
+    /// 스냅샷 조립 시점의 등록 인물 (이름 질의용 값 복사).
+    public let characters: [CharacterCard]
+    /// 씬 해시 → 씬 시작 UTF-16 (구간 절대 좌표 환산용).
+    private let sceneStartByHash: [String: Int]
+
     /// 씬 메타 한 장 — 사이드카 SceneSummary의 파생 + 오버라이드 적용 결과.
     public struct SceneMeta: Equatable, Sendable {
         public var title: String?
@@ -263,6 +298,11 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
         insights: [String: SceneInsights] = [:],
         factConflicts: [FactConflict] = [],
+        segments: [String: SceneSegmentation] = [:],
+        eventGraph: EventGraphAnalysis? = nil,
+        recordedConversations: [RecordedConversation] = [],
+        conversationMeta: [String: ConversationMeta] = [:],
+        characters: [CharacterCard] = [],
         overrides: NarrativeOverrides = .empty,
         staleOverrides: [NarrativeOverride] = []
     ) {
@@ -274,6 +314,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.utterances = utterances
         self.overrides = overrides
         self.staleOverrides = staleOverrides
+        self.characters = characters
 
         // 사건을 담화 순서로 편다 — 저장은 해시 키(삽입에 불변), 순서는 여기서
         // 아웃라인으로부터 파생한다 (docs/m6-events.md 결정 1).
@@ -348,8 +389,246 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             nameOverrides: overrides.map(of: .branchName),
             chronoOverrides: chronoOverrides)
 
-        // 대화 인덱스 — 발화에서 결정적으로.
-        self.conversations = Conversation.index(utterances: utterances, outline: outline)
+        // 씬 시작 위치 맵 — 구간(씬-로컬 좌표)의 절대 좌표 환산용.
+        var starts: [String: Int] = [:]
+        for scene in outline.scenes { starts[scene.contentHash] = scene.utf16Range.lowerBound }
+        self.sceneStartByHash = starts
+
+        // 서사 구간 — 사이드카 값 위에 사용자 오버라이드를 얹는다 (요구사항 §15).
+        var segmentsApplied: [String: [NarrativeSegment]] = [:]
+        for scene in outline.scenes {
+            guard let stored = segments[scene.contentHash] else { continue }
+            let applied = stored.segments.map { segment -> NarrativeSegment in
+                var segment = segment
+                let key = segment.id
+                if let raw = overrides.value(.segmentLayer, key: key) {
+                    segment.layer = NarrativeSegment.Layer.normalize(raw)
+                    segment.chrono = segment.layer.defaultChrono
+                    segment.confidence = 1  // 사용자 판정 = 확정
+                }
+                if let raw = overrides.value(.segmentChrono, key: key),
+                    let relation = ChronoRelation(rawValue: raw)
+                {
+                    segment.chrono = relation
+                }
+                if let pov = overrides.value(.segmentPOV, key: key) { segment.pov = pov }
+                if let narrator = overrides.value(.segmentNarrator, key: key) {
+                    segment.narrator = narrator
+                }
+                if let focal = overrides.value(.segmentFocal, key: key) {
+                    segment.focalCharacter = focal
+                }
+                if let subject = overrides.value(.segmentSubject, key: key) {
+                    segment.subjectCharacter = subject
+                }
+                if let raw = overrides.value(.segmentReliability, key: key) {
+                    segment.reliability = SourceReliability.normalize(raw)
+                }
+                return segment
+            }
+            .sorted { ($0.localStart, $0.depth) < ($1.localStart, $1.depth) }
+            segmentsApplied[scene.contentHash] = applied
+        }
+        self.segmentsByScene = segmentsApplied
+
+        // 동일 사건 묶음 — AI 후보(eventGraph.identities) 위에 사용자 판정
+        // (.eventIdentity — 값 = 정본 키, 빈 값 = 분리)을 얹는다 (요구사항 §12).
+        var memberToCanonical: [String: String] = [:]
+        for identity in eventGraph?.identities ?? [] {
+            for member in identity.memberKeys {
+                memberToCanonical[member] = identity.canonicalKey
+            }
+        }
+        for (member, canonical) in overrides.map(of: .eventIdentity) {
+            if canonical.isEmpty {
+                memberToCanonical[member] = nil  // 사용자 분리
+            } else {
+                memberToCanonical[member] = canonical
+            }
+        }
+
+        // 정본 사건 조립 — 담화 순서로 접되, 같은 정본 키의 뒷 등장은 관점으로만
+        // 붙는다 (사건 복제 금지, 요구사항 §3·§12).
+        let liveKeys = Set(ordered.map(\.stableKey))
+        var canonicalOrder: [String] = []
+        var canonicalByKey: [String: CanonicalEvent] = [:]
+        var memberMap: [String: String] = [:]
+        for event in ordered {
+            let member = event.stableKey
+            // 정본 키가 살아있는 사건을 가리킬 때만 묶는다 (죽은 참조 무시).
+            let canonical =
+                memberToCanonical[member].flatMap { liveKeys.contains($0) ? $0 : nil } ?? member
+            memberMap[member] = canonical
+            // 이 멤버의 관점 — 씬 구간의 층·출처가 관점의 맥락이다.
+            let sceneSegments = segmentsApplied[event.sceneHash] ?? []
+            let context = sceneSegments.first { $0.depth >= 1 && $0.layer.isTemporalShift }
+            let viewpoint = context?.pov ?? metaByHash[event.sceneHash]?.pov
+            let source = context?.source ?? .directlyNarrated
+            let reliability =
+                context.map { $0.reliability == .unknown ? $0.source.defaultReliability : $0.reliability }
+                ?? .confirmed
+            let perspective = EventPerspective(
+                eventKey: member, sceneHash: event.sceneHash,
+                viewpoint: viewpoint, source: source, reliability: reliability,
+                summary: event.summary, quote: event.quote)
+            if var existing = canonicalByKey[canonical] {
+                existing.perspectives.append(perspective)
+                existing.participants = Array(Set(existing.participants + event.participants))
+                canonicalByKey[canonical] = existing
+            } else {
+                canonicalOrder.append(canonical)
+                canonicalByKey[canonical] = CanonicalEvent(
+                    canonicalKey: canonical,
+                    sceneHash: event.sceneHash,
+                    summary: event.summary,
+                    importance: event.importance,
+                    participants: event.participants,
+                    perspectives: [perspective],
+                    quote: event.quote)
+            }
+        }
+        // 관점이 여럿이고 내용이 갈리면 이견(disputed) 표시 — 하나를 진실로
+        // 확정하지 않는다 (요구사항 §12·§13).
+        for key in canonicalOrder {
+            guard var event = canonicalByKey[key], event.perspectives.count >= 2 else { continue }
+            let summaries = Set(event.perspectives.map(\.summary))
+            if summaries.count >= 2 {
+                event.perspectives = event.perspectives.map { perspective in
+                    var perspective = perspective
+                    if perspective.reliability == .confirmed { perspective.reliability = .probable }
+                    return perspective
+                }
+                canonicalByKey[key] = event
+            }
+        }
+        let canonicals = canonicalOrder.compactMap { canonicalByKey[$0] }
+        self.canonicalEvents = canonicals
+        self.canonicalKeyByMember = memberMap
+
+        // 인과 관계 — AI 후보 + 사용자 추가 − 사용자 삭제. 끝점은 정본 키로
+        // 정규화하고, 죽은 사건 참조는 버린다.
+        var links: [CausalLink] = []
+        var linkIDs: Set<String> = []
+        func normalizedLink(_ link: CausalLink) -> CausalLink? {
+            guard let from = memberMap[link.fromKey] ?? (liveKeys.contains(link.fromKey) ? link.fromKey : nil),
+                let to = memberMap[link.toKey] ?? (liveKeys.contains(link.toKey) ? link.toKey : nil),
+                from != to
+            else { return nil }
+            return CausalLink(fromKey: from, toKey: to, kind: link.kind, reason: link.reason)
+        }
+        let causalOverrides = overrides.map(of: .causalLink)
+        func userDecision(_ link: CausalLink) -> String? {
+            causalOverrides["\(link.kind.rawValue)|\(link.fromKey)|\(link.toKey)"]
+        }
+        for raw in eventGraph?.causalLinks ?? [] {
+            guard let link = normalizedLink(raw), userDecision(link) != "삭제",
+                linkIDs.insert(link.id).inserted
+            else { continue }
+            links.append(link)
+        }
+        for (key, decision) in causalOverrides where decision == "추가" {
+            let parts = key.split(separator: "|").map(String.init)
+            guard parts.count == 3, let kind = CausalLink.Kind(rawValue: parts[0]),
+                let link = normalizedLink(
+                    CausalLink(fromKey: parts[1], toKey: parts[2], kind: kind, reason: "직접 연결")),
+                linkIDs.insert(link.id).inserted
+            else { continue }
+            links.append(link)
+        }
+        self.causalLinks = links
+
+        // 시간 부분 순서 — AI 간선 + 사용자 간선 + 층 파생 간선을 해석한다.
+        // 정보가 부족하면 담화 순서를 유지하고, 모순은 Conflict로 남긴다 (§29).
+        var chronoEdges: [ChronoEdge] = []
+        for raw in eventGraph?.chronoEdges ?? [] {
+            guard let a = memberMap[raw.aKey], let b = memberMap[raw.bKey], a != b else { continue }
+            chronoEdges.append(ChronoEdge(aKey: a, bKey: b, relation: raw.relation))
+        }
+        for (key, raw) in overrides.map(of: .chronoEdge) {
+            let parts = key.split(separator: "|").map(String.init)
+            guard parts.count == 2, let relation = ChronoRelation(rawValue: raw) else { continue }
+            let a = memberMap[parts[0]] ?? parts[0]
+            let b = memberMap[parts[1]] ?? parts[1]
+            guard a != b else { continue }
+            // 사용자 간선이 같은 쌍의 AI 간선을 대체한다.
+            chronoEdges.removeAll { ($0.aKey == a && $0.bKey == b) || ($0.aKey == b && $0.bKey == a) }
+            chronoEdges.append(ChronoEdge(aKey: a, bKey: b, relation: relation))
+        }
+        // 층 파생 간선 — '과거' 브랜치 씬의 사건은 그 다음 '현재' 씬 첫 사건보다
+        // 앞이다 (회상은 그 자리에서 이야기되는 과거다). 근사가 아니라 층 정의에서
+        // 나오는 확실한 제약만 넣는다.
+        var branchChrono: [Int: ChronoRelation] = [:]
+        for branch in self.branches {
+            for index in branch.sceneRange { branchChrono[index] = branch.chrono }
+        }
+        let sceneIndexByHash = Dictionary(
+            uniqueKeysWithValues: outline.scenes.enumerated().map { ($0.element.contentHash, $0.offset) })
+        for canonical in canonicals {
+            guard let sceneIndex = sceneIndexByHash[canonical.sceneHash],
+                branchChrono[sceneIndex] == .before
+            else { continue }
+            // 이 회상 사건 → 브랜치 다음의 첫 현재 사건.
+            if let anchor = canonicals.first(where: { other in
+                guard let otherIndex = sceneIndexByHash[other.sceneHash] else { return false }
+                return otherIndex > sceneIndex && branchChrono[otherIndex] == nil
+            }) {
+                let edge = ChronoEdge(
+                    aKey: canonical.canonicalKey, bKey: anchor.canonicalKey, relation: .before)
+                if !chronoEdges.contains(where: { $0.id == edge.id }) {
+                    chronoEdges.append(edge)
+                }
+            }
+        }
+        let resolution = ChronoOrder.resolve(
+            items: canonicalOrder, edges: chronoEdges)
+        self.eventChronoOrder = resolution.ordered
+        self.chronoConflicts = resolution.conflicts
+
+        // 서사 흐름 — main + 인물 + 시간 (요구사항 §1·§2·§4·§5).
+        var branchCharacterOverrides: [String: String] = [:]
+        for (key, value) in overrides.map(of: .branchCharacter) {
+            branchCharacterOverrides[key] = value
+        }
+        self.flows = NarrativeFlow.derive(
+            canonicalEvents: canonicals,
+            characters: characters,
+            branches: self.branches,
+            branchCharacterOverrides: branchCharacterOverrides,
+            flowNameOverrides: overrides.map(of: .flowName))
+
+        // 대화 인덱스 — 발화에서 결정적으로 + 기록된 대화 겹침 (요구사항 §21).
+        // 기록은 자동 감지보다 높은 신뢰: 겹치는 자동 감지 대화에 기록 표식을
+        // 달고, 겹치는 것이 없으면 기록 자체가 대화 항목이 된다.
+        var merged = Conversation.index(utterances: utterances, outline: outline)
+        for record in recordedConversations.sorted(by: { $0.utf16Start < $1.utf16Start }) {
+            let meta = conversationMeta[record.id.uuidString]
+            let enriched = meta?.contentHash == record.contentHash ? meta : nil
+            if let index = merged.firstIndex(where: {
+                $0.utf16Start < record.utf16End && record.utf16Start < $0.utf16End
+            }) {
+                merged[index].recordedID = record.id
+                merged[index].topic = enriched?.topic
+                merged[index].tone = enriched?.tone
+                if merged[index].participants.isEmpty {
+                    merged[index].participants = record.participants
+                }
+            } else {
+                let sceneHash = outline.sceneIndex(at: record.utf16Start)
+                    .map { outline.scenes[$0].contentHash }
+                merged.append(
+                    Conversation(
+                        participants: record.participants,
+                        sceneHash: sceneHash,
+                        utf16Start: record.utf16Start,
+                        utf16End: record.utf16End,
+                        utteranceCount: 0,
+                        firstLine: String(record.firstLine.prefix(40)),
+                        recordedID: record.id,
+                        topic: enriched?.topic,
+                        tone: enriched?.tone))
+            }
+        }
+        self.conversations = merged.sorted { $0.utf16Start < $1.utf16Start }
 
         // 심화 추출을 담화 순서로 편다 (사건과 같은 파생).
         var knowledge: [KnowledgeDelta] = []
@@ -577,12 +856,163 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             switch branch.chrono {
             case .before: past.append(contentsOf: branch.sceneRange)
             case .after: future.append(contentsOf: branch.sceneRange)
-            case .simultaneous, .unknown: break
+            case .simultaneous, .approximate, .unknown: break
             }
         }
         let moved = Set(past + future)
         let middle = outline.scenes.indices.filter { !moved.contains($0) }
         return past + middle + future
+    }
+
+    // MARK: - Narrative Graph 질의 (v5, PLAN §6.6)
+
+    /// 현재 작성 위치의 서사 좌표 — "지금 어떤 이야기 흐름에 있는가"의 답
+    /// (요구사항 §30). 조립기가 Retrieval 축으로 쓴다.
+    public struct NarrativePosition: Equatable, Sendable {
+        /// 현재 흐름 (main / 인물 / 시간).
+        public var flowID: String
+        /// 현재 서사 층 (씬 바탕이면 씬 유형에서, 구간 안이면 구간에서).
+        public var layer: NarrativeSegment.Layer
+        /// 중첩 깊이 (0 = 바탕).
+        public var depth: Int
+        /// 작품 내 시간 관계.
+        public var chrono: ChronoRelation
+        /// 현재 구간 (씬 바탕이면 nil).
+        public var segmentID: String?
+        /// 현재 시점 인물 이름.
+        public var pov: String?
+        /// 현재 구간의 소속 인물 (회상의 주인).
+        public var subjectCharacter: String?
+        /// 커서가 속한 씬 인덱스 — 시간 차단(§30)의 기준 좌표.
+        public var sceneIndex: Int?
+    }
+
+    /// 커서 위치의 구간 — 그 위치를 덮는 **가장 깊은** 구간 (중첩 회상 대응).
+    public func segment(at utf16Offset: Int) -> NarrativeSegment? {
+        guard let index = outline.sceneIndex(at: utf16Offset) else { return nil }
+        let scene = outline.scenes[index]
+        let local = utf16Offset - scene.utf16Range.lowerBound
+        return (segmentsByScene[scene.contentHash] ?? [])
+            .filter { $0.localStart <= local && local < max($0.localEnd, $0.localStart + 1) }
+            .max { $0.depth < $1.depth }
+    }
+
+    /// 커서 위치의 서사 좌표 (요구사항 §30) — 구간 → 씬 브랜치 → main 순 판정.
+    public func position(at utf16Offset: Int) -> NarrativePosition {
+        guard let sceneIndex = outline.sceneIndex(at: utf16Offset) else {
+            return NarrativePosition(
+                flowID: NarrativeFlow.mainID, layer: .present, depth: 0,
+                chrono: .unknown, segmentID: nil, pov: nil, subjectCharacter: nil,
+                sceneIndex: nil)
+        }
+        let scene = outline.scenes[sceneIndex]
+        let meta = sceneMetaByHash[scene.contentHash]
+        // 씬이 속한 시간 브랜치 (씬 전체 유형이 비현재).
+        let branch = branches.first { $0.sceneRange.contains(sceneIndex) }
+
+        if let segment = segment(at: utf16Offset), segment.layer.isTemporalShift {
+            // 구간의 소속 인물이 등록 카드와 이어지면 인물 흐름이 현재 흐름이다.
+            let flowID: String
+            if let subject = segment.subjectCharacter,
+                let card = characters.first(where: {
+                    $0.name == subject || subject.hasPrefix($0.name)
+                }),
+                flows.contains(where: { $0.id == "flow-chr-\(card.id.uuidString)" })
+            {
+                flowID = "flow-chr-\(card.id.uuidString)"
+            } else if let branch {
+                flowID = "flow-tmp-\(branch.anchorHash)"
+            } else {
+                flowID = NarrativeFlow.mainID
+            }
+            return NarrativePosition(
+                flowID: flowID, layer: segment.layer, depth: segment.depth,
+                chrono: segment.chrono, segmentID: segment.id,
+                pov: segment.pov ?? meta?.pov,
+                subjectCharacter: segment.subjectCharacter,
+                sceneIndex: sceneIndex)
+        }
+        if let branch {
+            return NarrativePosition(
+                flowID: "flow-tmp-\(branch.anchorHash)",
+                layer: NarrativeSegment.Layer.normalize(branch.type.rawValue),
+                depth: 1, chrono: branch.chrono, segmentID: nil,
+                pov: meta?.pov, subjectCharacter: nil, sceneIndex: sceneIndex)
+        }
+        return NarrativePosition(
+            flowID: NarrativeFlow.mainID, layer: .present, depth: 0,
+            chrono: .unknown, segmentID: nil, pov: meta?.pov, subjectCharacter: nil,
+            sceneIndex: sceneIndex)
+    }
+
+    /// 사건 키(멤버·정본 모두) → 정본 사건.
+    public func canonicalEvent(for key: String) -> CanonicalEvent? {
+        let canonical = canonicalKeyByMember[key] ?? key
+        return canonicalEvents.first { $0.canonicalKey == canonical }
+    }
+
+    /// 이 사건의 원인들 — (kind = 원인/영향/설명 …) 방향이 이 사건으로 들어오는
+    /// 링크 (요구사항 §6 "이 사건의 원인").
+    public func causes(of canonicalKey: String) -> [CausalLink] {
+        causalLinks.filter { $0.toKey == canonicalKey }
+    }
+
+    /// 이 사건이 영향을 준 사건들.
+    public func effects(of canonicalKey: String) -> [CausalLink] {
+        causalLinks.filter { $0.fromKey == canonicalKey }
+    }
+
+    /// 정본 사건의 시간 순위 — eventChronoOrder에서의 위치 (없으면 nil).
+    public func chronoRank(of canonicalKey: String) -> Int? {
+        eventChronoOrder.firstIndex(of: canonicalKey)
+    }
+
+    /// **독자의 앎** (요구사항 §14) — 담화 순서상 커서 이전에 본문에 공개된
+    /// 모든 앎 델타. 인물 구분 없음: 독자는 회상으로 공개된 범인의 비밀도 안다.
+    public func readerKnowledge(before utf16Offset: Int) -> [KnowledgeDelta] {
+        knowledgeDeltas.filter { delta in
+            (sceneEndByHash[delta.sceneHash] ?? .max) <= utf16Offset
+        }
+    }
+
+    /// **작품 내 시간 기준의 인물 앎** (요구사항 §14·§30) — 회상을 쓰는 중에는
+    /// "그 시점의 인물"이 알던 것만 유효하다. 담화 위치가 아니라 씬의 시간
+    /// 순위(chronologicalSceneOrder)로 접는다: 현재 씬보다 시간상 뒤인 씬의
+    /// 앎은 아직 생기지 않았다 — 미래 지식 누출 차단.
+    public func knowledgeChrono(
+        of characterID: UUID, atSceneContaining utf16Offset: Int
+    ) -> [KnowledgeDelta] {
+        guard let currentScene = outline.sceneIndex(at: utf16Offset) else { return [] }
+        return knowledgeChrono(of: characterID, atSceneIndex: currentScene)
+    }
+
+    /// 씬 인덱스 기준 변형 — 조립기가 커서 씬(NarrativePosition.sceneIndex)으로
+    /// 직접 부른다 (창 시작과 커서가 다른 씬일 수 있다).
+    public func knowledgeChrono(
+        of characterID: UUID, atSceneIndex currentScene: Int
+    ) -> [KnowledgeDelta] {
+        let chronoOrder = chronologicalSceneOrder()
+        guard let currentRank = chronoOrder.firstIndex(of: currentScene) else { return [] }
+        let allowed = Set(chronoOrder.prefix(currentRank + 1).map { outline.scenes[$0].contentHash })
+        var order: [String] = []
+        var latest: [String: KnowledgeDelta] = [:]
+        // 시간 순서로 접는다 — 같은 사실의 시간상 나중 태도가 이긴다.
+        for sceneIndex in chronoOrder.prefix(currentRank + 1) {
+            let hash = outline.scenes[sceneIndex].contentHash
+            for delta in knowledgeDeltas
+            where delta.characterID == characterID && delta.sceneHash == hash && allowed.contains(hash) {
+                if latest[delta.fact] == nil { order.append(delta.fact) }
+                latest[delta.fact] = delta
+            }
+        }
+        return order.compactMap { latest[$0] }
+    }
+
+    /// 인물 흐름의 사건들 (담화 순서) — "이 사건은 누구의 이야기인가"의 역질의.
+    public func flowEvents(of flowID: String) -> [CanonicalEvent] {
+        guard let flow = flows.first(where: { $0.id == flowID }) else { return [] }
+        let keys = Set(flow.eventKeys)
+        return canonicalEvents.filter { keys.contains($0.canonicalKey) }
     }
 
     /// 다음 화자 추정 (PLAN §10 대화 모드 ①) — 직전 발화의 청자가 1순위,

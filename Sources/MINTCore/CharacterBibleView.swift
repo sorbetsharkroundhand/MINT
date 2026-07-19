@@ -63,7 +63,12 @@ struct CharacterBibleView: View {
                             relations: relationLines(of: card),
                             conversations: conversationLines(of: card),
                             onJump: { query in
-                                store.requestSearchJump(store.activeID, query: query)
+                                // 재앵커 사다리 (요구사항 §28) — 인용이 수정됐으면
+                                // 어절 지문으로 되찾는다.
+                                let resolved = store.activeEntry.flatMap {
+                                    SourceAnchor.resilientQuery(for: query, in: $0.body)
+                                } ?? query
+                                store.requestSearchJump(store.activeID, query: resolved)
                             },
                             onDelete: { remove(card) }
                         )
@@ -196,8 +201,12 @@ struct CharacterBibleView: View {
             let scene = conversation.sceneHash
                 .flatMap { snapshot.sceneMetaByHash[$0]?.title }
                 .map { "[\($0)] " } ?? ""
+            // 기록된 대화 표식 + 백그라운드 보완 주제 (요구사항 §21).
+            let recorded = conversation.recordedID != nil ? "📌 " : ""
+            let topic = conversation.topic.map { " · \($0)" } ?? ""
+            let count = conversation.utteranceCount > 0 ? " · 발화 \(conversation.utteranceCount)" : ""
             return (
-                "\(scene)\(card.name)\(with) · 발화 \(conversation.utteranceCount) — “\(conversation.firstLine)”",
+                "\(recorded)\(scene)\(card.name)\(with)\(count)\(topic) — “\(conversation.firstLine)”",
                 conversation.firstLine
             )
         }
@@ -227,6 +236,9 @@ struct CharacterBibleView: View {
                 if let current, updated.note != current.note {
                     updated.locked = true
                 }
+                // 사용자가 손을 대면 자동 등록 표식은 사라진다 — 이제 사용자의
+                // 카드다 (요구사항 §16).
+                if let current, updated != current { updated.autoRegistered = nil }
                 store.upsertCharacter(updated, in: id)
             }
         )
@@ -251,6 +263,16 @@ private struct CandidateReviewList: View {
     @ObservedObject var store: EntryStore
     let theme: MintTheme
 
+    /// 후보 근거 요약 한 줄 — 신뢰도·별칭 변형까지 (요구사항 §16·§17).
+    fileprivate func candidateDetail(_ candidate: CharacterDetector.Candidate) -> String {
+        var pieces = ["언급 \(candidate.mentions)회 · 씬 \(candidate.sceneCount)곳"]
+        pieces.append("신뢰 \(candidate.confidence.rawValue)")
+        if !candidate.aliasForms.isEmpty {
+            pieces.append("표기: \(candidate.aliasForms.joined(separator: "·"))")
+        }
+        return pieces.joined(separator: " · ")
+    }
+
     var body: some View {
         if indexer.candidatesEntryID == store.activeID,
             !indexer.characterCandidates.isEmpty
@@ -262,19 +284,40 @@ private struct CandidateReviewList: View {
                             .font(.system(size: 12))
                             .foregroundStyle(theme.novelC)
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("'\(candidate.name)' — 인물로 등록할까요?")
-                                .font(MintFonts.uiFont(11.5, .medium))
-                                .foregroundStyle(theme.inkC)
-                            Text("언급 \(candidate.mentions)회 · 씬 \(candidate.sceneCount)곳")
+                            Text(
+                                candidate.aliasOfKnown.map {
+                                    "'\(candidate.name)' — '\($0)'의 별칭일까요?"
+                                } ?? "'\(candidate.name)' — 인물로 등록할까요?"
+                            )
+                            .font(MintFonts.uiFont(11.5, .medium))
+                            .foregroundStyle(theme.inkC)
+                            Text(candidateDetail(candidate))
                                 .font(MintFonts.uiFont(10))
                                 .foregroundStyle(theme.ink3C)
                         }
                         Spacer()
-                        Button("등록") { indexer.approveCandidate(candidate) }
+                        // 별칭 후보 (요구사항 §17) — 병합은 사용자 결정.
+                        if let owner = candidate.aliasOfKnown {
+                            Button("별칭으로") {
+                                indexer.approveCandidateAsAlias(candidate, of: owner)
+                            }
                             .font(MintFonts.uiFont(11, .semibold))
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .tint(theme.novelC)
+                        }
+                        if candidate.aliasOfKnown == nil {
+                            Button("등록") { indexer.approveCandidate(candidate) }
+                                .font(MintFonts.uiFont(11, .semibold))
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .tint(theme.novelC)
+                        } else {
+                            Button("새 인물") { indexer.approveCandidate(candidate) }
+                                .font(MintFonts.uiFont(11))
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
                         Button("무시") { indexer.rejectCandidate(candidate) }
                             .font(MintFonts.uiFont(11))
                             .buttonStyle(.bordered)
@@ -325,6 +368,14 @@ private struct CharacterCardRow: View {
                 TextField("별칭·호칭 (쉼표 구분)", text: $card.aliases)
                     .textFieldStyle(.roundedBorder)
                     .font(MintFonts.uiFont(12))
+                // 자동 등록 표식 (요구사항 §16) — HIGH 신뢰 감지로 만들어진 카드.
+                // 편집하면 사라진다. 삭제는 오른쪽 휴지통 한 번이다.
+                if card.autoRegistered == true {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 10))
+                        .foregroundStyle(theme.novelC)
+                        .help("자동 등록된 인물 — 이름·별칭을 고치거나 삭제할 수 있어요")
+                }
                 // 잠금 토글 — 잠기면 자동 프로파일링이 소개를 채우지 않는다.
                 Button {
                     card.locked = card.locked == true ? nil : true

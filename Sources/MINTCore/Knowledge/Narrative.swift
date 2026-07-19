@@ -234,11 +234,13 @@ public enum SceneNarrativeType: String, Codable, Equatable, Sendable, CaseIterab
 }
 
 /// 작품 세계 시간축에서의 상대 관계 — 절대 시각을 알 수 없는 경우가 대부분이라
-/// 상대 관계만 표현한다 (before/after/simultaneous/unknown).
+/// 상대 관계만 표현한다 (before/after/simultaneous/approximate/unknown, 요구사항 §29).
 public enum ChronoRelation: String, Codable, Equatable, Sendable, CaseIterable {
     case before = "과거"
     case after = "미래"
     case simultaneous = "동시"
+    /// 대략 그 무렵 — 확실한 순서 제약으로 쓰지 않는다 (부분 순서에서 제약 없음).
+    case approximate = "근사"
     case unknown = "불명"
 }
 
@@ -307,8 +309,30 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     public var utteranceCount: Int
     /// 첫 대사 앞부분 (≤40자) — 목록 미리보기 + 원문 점프 질의.
     public var firstLine: String
+    /// 사용자가 명시적으로 기록한 대화면 그 기록의 id (요구사항 §20–§21) —
+    /// 자동 감지보다 높은 신뢰, 재분석이 지우지 않는다 (entries.json에 산다).
+    public var recordedID: UUID?
+    /// 백그라운드 보완 주제·어조 (기록된 대화만, ConversationMeta에서).
+    public var topic: String?
+    public var tone: String?
 
     public var id: String { "\(utf16Start)-\(utteranceCount)" }
+
+    public init(
+        participants: [UUID], sceneHash: String?, utf16Start: Int, utf16End: Int,
+        utteranceCount: Int, firstLine: String,
+        recordedID: UUID? = nil, topic: String? = nil, tone: String? = nil
+    ) {
+        self.participants = participants
+        self.sceneHash = sceneHash
+        self.utf16Start = utf16Start
+        self.utf16End = utf16End
+        self.utteranceCount = utteranceCount
+        self.firstLine = firstLine
+        self.recordedID = recordedID
+        self.topic = topic
+        self.tone = tone
+    }
 
     /// 발화 목록 → 대화 묶음. 씬이 바뀌거나 발화 간격이 크면 새 대화다.
     /// O(발화 수) — 패스마다 재계산해도 밀리초 단위 (Utterance와 같은 예산).
@@ -377,6 +401,45 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         case branchName
         /// 브랜치 시간 관계 (키 = anchorHash, 값 = ChronoRelation rawValue).
         case branchChrono
+        /// 브랜치 ↔ 인물 연결 (키 = anchorHash, 값 = CharacterCard.id uuidString) —
+        /// "이 회상은 남편의 과거다" (요구사항 §15).
+        case branchCharacter
+        /// 구간 층 수정 (키 = NarrativeSegment.id, 값 = Layer rawValue —
+        /// "현재"로 바꾸면 "이 부분은 회상이 아님"이 된다, 요구사항 §15).
+        case segmentLayer
+        /// 구간 시점 인물 (키 = 구간 ID).
+        case segmentPOV
+        /// 구간 서술자 (키 = 구간 ID).
+        case segmentNarrator
+        /// 구간 초점 인물 (키 = 구간 ID).
+        case segmentFocal
+        /// 구간 시간 관계 (키 = 구간 ID, 값 = ChronoRelation rawValue).
+        case segmentChrono
+        /// 구간 시작 경계 (키 = 구간 ID, 값 = 새 시작 문장 인용) — 씬 원문에서
+        /// 그 인용을 찾아 경계를 다시 잡는다 (요구사항 §15 "회상 시작 위치").
+        case segmentStart
+        /// 구간 종료 경계 (키 = 구간 ID, 값 = 복귀 직전 문장 인용).
+        case segmentEnd
+        /// 구간 신뢰 상태 (키 = 구간 ID, 값 = SourceReliability rawValue).
+        case segmentReliability
+        /// 구간 소속 인물 (키 = 구간 ID, 값 = 인물 이름) — 어느 Character
+        /// Branch의 과거인지.
+        case segmentSubject
+        /// 동일 사건 판정 (키 = 사건 stableKey, 값 = 정본 사건 키. 빈 값 = 분리).
+        case eventIdentity
+        /// 인과 관계 추가/삭제 (키 = "종류|from|to", 값 = "추가"/"삭제") —
+        /// 사용자가 직접 잇거나 AI 후보를 지운다 (요구사항 §6).
+        case causalLink
+        /// 시간 간선 수정 (키 = "aKey|bKey", 값 = ChronoRelation rawValue) —
+        /// 사용자가 직접 시간 관계를 고친다 (요구사항 §29).
+        case chronoEdge
+        /// 흐름 이름 (키 = NarrativeFlow.id).
+        case flowName
+        /// 컨텍스트 고정 (키 = ContextReport.Item.stableKey, 값 = "고정") —
+        /// 관련성이 낮아져도 조립에 유지 (요구사항 §31).
+        case contextPin
+        /// 컨텍스트 제외 (키 = ContextReport.Item.stableKey, 값 = "제외").
+        case contextExclude
     }
 
     public var kind: Kind

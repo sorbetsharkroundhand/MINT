@@ -1,0 +1,43 @@
+import Foundation
+
+/// Source Evidence 재앵커 (요구사항 §28) — 인용이 원문에서 사라졌을 때의
+/// 회복 사다리.
+///
+/// 우선순위: ① exact match (인용이 그대로 있다 — 대부분) → ② 접두 축약
+/// (모델·사용자가 꼬리만 다듬은 경우) → ③ 어절 지문 fuzzy (문장이 소폭
+/// 수정된 경우 — 인용의 어절 다수를 담은 줄을 찾는다).
+///
+/// ③까지 실패하면 nil — **엉뚱한 위치로 조용히 잇는 것보다 stale이 낫다**
+/// (요구사항 §28). 호출부는 nil이면 점프를 포기하거나 씬 시작으로 폴백한다.
+public enum SourceAnchor {
+
+    /// 인용 → 에디터 점프에 쓸 검색 질의. 원문에 exact가 있으면 인용 그대로,
+    /// 소폭 수정됐으면 재앵커된 줄의 앞부분(본문 부분 문자열이라 exact 검색
+    /// 가능)을 돌려준다. 실패는 nil.
+    public static func resilientQuery(for quote: String, in body: String) -> String? {
+        let cleaned = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.count >= 2 else { return nil }
+        // ① exact — 인용이 그대로 본문에 있다.
+        if body.contains(cleaned) { return cleaned }
+        // ② 접두 — 앞 12자만으로 한 번 더 (꼬리 수정 대응).
+        let head = String(cleaned.prefix(12))
+        if head.count >= 6, body.contains(head) { return head }
+        // ③ 어절 지문 — 인용의 어절(2자 이상) 과반을 담은 첫 줄.
+        let tokens = cleaned.split(whereSeparator: { $0.isWhitespace })
+            .map(String.init)
+            .filter { $0.count >= 2 }
+        guard tokens.count >= 2 else { return nil }
+        let needed = max(2, (tokens.count + 1) / 2)
+        var best: (line: Substring, hits: Int)?
+        for line in body.split(separator: "\n") {
+            guard line.count >= 4 else { continue }
+            let hits = tokens.reduce(0) { $0 + (line.contains($1) ? 1 : 0) }
+            if hits >= needed, hits > (best?.hits ?? 0) {
+                best = (line, hits)
+            }
+        }
+        guard let best else { return nil }
+        let snippet = best.line.trimmingCharacters(in: .whitespaces).prefix(40)
+        return snippet.count >= 2 ? String(snippet) : nil
+    }
+}

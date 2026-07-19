@@ -9,6 +9,7 @@ enum SidebarSection: String {
     case files  // 문서(폴더 트리) — 기존 사이드바
     case bible  // 스토리 바이블 (PLAN §7)
     case timeline  // 이해 타임라인 (PLAN §6.3·§8)
+    case graph  // 서사 그래프 (v5, 요구사항 §22–§26)
     case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
 }
 
@@ -102,6 +103,7 @@ struct SidebarView: View {
             case .files: filesSection
             case .bible: bibleSection
             case .timeline: timelineSection
+            case .graph: graphSection
             case .context: contextSection
             }
         }
@@ -156,6 +158,9 @@ struct SidebarView: View {
             sectionTab(.files, icon: "doc.text", help: "문서")
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
             sectionTab(.timeline, icon: "arrow.triangle.branch", help: "이해 타임라인")
+            sectionTab(
+                .graph, icon: "point.3.connected.trianglepath.dotted",
+                help: "서사 그래프 — 사건·흐름·인과")
             sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
             Spacer()
         }
@@ -222,6 +227,15 @@ struct SidebarView: View {
     @ViewBuilder private var timelineSection: some View {
         if let indexer {
             KnowledgeTimelineView(indexer: indexer, store: store, theme: theme, embedded: true)
+        } else {
+            SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
+        }
+    }
+
+    /// 서사 그래프 섹션 (v5) — 사건 중심 흐름 그래프.
+    @ViewBuilder private var graphSection: some View {
+        if let indexer {
+            NarrativeGraphView(indexer: indexer, store: store, theme: theme, embedded: true)
         } else {
             SidebarSectionHint(theme: theme, text: "이해 파이프라인이 준비되지 않았어요.")
         }

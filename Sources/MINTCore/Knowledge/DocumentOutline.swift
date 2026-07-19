@@ -85,8 +85,12 @@ public struct DocumentOutline: Equatable, Sendable {
             {
                 return
             }
-            // 상한 이하는 통째로 하나 — 대부분의 씬이 이 빠른 경로다.
-            guard endUTF16 - sceneStartUTF16 > maxSegmentUTF16 else {
+            // 상한 이하 + 명시적 장면 구분자 없음 = 통째로 하나 — 대부분의 씬이
+            // 이 빠른 경로다. 구분자("***" 등)가 있으면 크기와 무관하게 의미
+            // 경계에서 쪼갠다 (요구사항 §32 — 작가가 그은 경계는 씬 경계다).
+            guard endUTF16 - sceneStartUTF16 > maxSegmentUTF16
+                || containsSceneBreakLine(text)
+            else {
                 scenes.append(
                     Scene(
                         level: sceneLevel,
@@ -164,6 +168,27 @@ public struct DocumentOutline: Equatable, Sendable {
     /// 정한다(CDC): 문장 해시가 조건을 만족하는 곳에서 끊으므로, 앞쪽 편집이
     /// 뒤 세그먼트 경계를 연쇄로 밀지 않고 다음 경계에서 재동기화된다 —
     /// 한 글자 편집의 재요약 반경이 국소에 갇힌다 (CLAUDE.md §2-3 증분이 기본).
+    /// 명시적 장면 전환 구분자 (요구사항 §32) — 작가가 그은 경계는 CDC보다
+    /// 우선한다. 이 줄에서 끊긴 세그먼트는 의미 단위와 정확히 일치한다.
+    static func isSceneBreakLine(_ piece: Substring) -> Bool {
+        let trimmed = piece.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 8 else { return false }
+        // "***"·"* * *"·"⁂"·"§" 등 — 산문에 나올 수 없는 구분자 문자만으로 된 줄.
+        let breakChars = Set("*-—─―⁂§◇◆·• ")
+        return trimmed.allSatisfy { breakChars.contains($0) }
+            && trimmed.contains(where: { $0 != " " })
+    }
+
+    /// 구분자 경계 성립을 위한 최소 세그먼트 크기 — 토막 방지 (하한보다 작게
+    /// 잡는다: 작가의 명시 경계는 CDC 하한을 기다릴 이유가 없다).
+    static let minBreakSegmentUTF16 = 200
+
+    /// 본문에 장면 구분자 줄이 있는가 — closeScene 빠른 경로의 게이트.
+    /// 씬 크기는 상한(1,500) 이하라 줄 단위 스캔 비용이 미미하다.
+    static func containsSceneBreakLine(_ text: Substring) -> Bool {
+        text.split(separator: "\n").contains { isSceneBreakLine($0) }
+    }
+
     static func segmentRanges(of text: Substring) -> [Range<String.Index>] {
         let pieces = capOversized(sentencePieces(in: text), in: text)
         var segments: [Range<String.Index>] = []
@@ -178,6 +203,15 @@ public struct DocumentOutline: Equatable, Sendable {
                 segmentLength = 0
             }
             segmentLength += length
+            // 의미 경계 (요구사항 §32) — 명시적 장면 구분자 줄에서 끊는다.
+            // 내용에 매인 경계라 CDC의 국소성(앞 편집이 뒤 경계를 안 민다)을
+            // 그대로 갖는다.
+            if segmentLength >= minBreakSegmentUTF16, isSceneBreakLine(text[piece]) {
+                segments.append(segmentStart..<piece.upperBound)
+                segmentStart = piece.upperBound
+                segmentLength = 0
+                continue
+            }
             // 내용 정의 경계 — 하한을 넘겼고, 이 문장의 해시가 1/8에 걸리면 끊는다.
             if segmentLength >= minSegmentUTF16,
                 fnv1a(text[piece]) % boundaryDivisor == 0

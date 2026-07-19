@@ -21,6 +21,13 @@ import Foundation
 /// **등록은 언제나 사용자 확인**을 거치므로(CLAUDE.md §3) 남은 소수 오탐도 안전하다.
 public enum CharacterDetector {
 
+    /// 후보 신뢰도 (요구사항 §16) — HIGH만 자동 등록, MEDIUM은 사용자 확인,
+    /// LOW는 목록에도 올리지 않는다 (품질 > 적극성).
+    public enum Confidence: String, Equatable, Sendable {
+        case high = "높음"
+        case medium = "보통"
+    }
+
     /// 후보 하나 — 이름과 근거 수치 (확인 UI 문구 + 벤치 리포트용).
     public struct Candidate: Equatable, Sendable {
         public let name: String
@@ -32,6 +39,14 @@ public enum CharacterDetector {
         public let animacyHits: Int
         /// 서로 다른 격 역할 수 (명사다움 — 여러 역할로 격변화할수록 큼).
         public let caseRoleCount: Int
+        /// 신뢰도 — 구조 신호의 강도에서 결정적으로 파생 (요구사항 §16).
+        public var confidence: Confidence = .medium
+        /// 같은 인물로 보이는 표기 변형들 ("김재형" 후보의 ["재형", "재형이"]) —
+        /// 등록 시 카드 별칭으로 함께 들어간다 (요구사항 §17).
+        public var aliasForms: [String] = []
+        /// 이미 등록된 인물의 별칭일 가능성 — 그 인물의 이름. 확실하지 않으므로
+        /// 자동 병합하지 않고 사용자가 결정한다 (요구사항 §17).
+        public var aliasOfKnown: String?
     }
 
     /// 임계 (PLAN §7) — 언급 5+ · 씬 3+. 씬이 적은 짧은 원고는 문서 씬 수까지 낮춘다.
@@ -73,11 +88,13 @@ public enum CharacterDetector {
         let excluded = lexicon.excluded
         let sceneThreshold = min(minScenes, outline.scenes.count)
 
-        let candidates = evidence.compactMap { stem, ev -> Candidate? in
+        var candidates = evidence.compactMap { stem, ev -> Candidate? in
             guard (minStemLength...maxStemLength).contains(stem.count),
                 ev.mentions >= minMentions,
                 ev.scenes.count >= sceneThreshold,
                 // ── 정밀도 레버: 유정 신호(사람만 받는 것)가 반드시 있어야 한다.
+                // 없으면 LOW — 목록에도 올리지 않는다 (요구사항 §16: 대명사·
+                // 일반명사·오분석 토큰의 자동 등록 차단은 이 관문이 담당한다).
                 ev.animacyHits >= 1,
                 // ── 명사다움: 격조사를 취하는 체언이어야 한다(고정 낱말 배제).
                 !ev.caseRoles.isEmpty,
@@ -86,18 +103,99 @@ public enum CharacterDetector {
             else { return nil }
             return Candidate(
                 name: stem, mentions: ev.mentions, sceneCount: ev.scenes.count,
-                animacyHits: ev.animacyHits, caseRoleCount: ev.caseRoles.count)
+                animacyHits: ev.animacyHits, caseRoleCount: ev.caseRoles.count,
+                confidence: tier(of: ev))
         }
 
-        // 랭킹: 유정 신호 > 격 다양성 > 빈도. 확인 UI는 맨 앞부터 하나씩 묻는다.
+        // 표기 변형 병합 (요구사항 §17) — "김재형"과 "재형"("재형이")은 같은
+        // 인물 후보다. 긴 형태(성+이름)가 대표, 짧은 형태는 별칭으로 붙는다.
+        candidates = mergeAliasForms(candidates)
+
+        // 이미 등록된 인물의 별칭 후보 감지 — 자동 병합하지 않고 표시만 한다.
+        for index in candidates.indices {
+            if let owner = known.first(where: { name in
+                isAliasShape(candidates[index].name, of: name)
+                    || isAliasShape(name, of: candidates[index].name)
+            }) {
+                candidates[index].aliasOfKnown = owner
+                // 별칭 후보는 새 인물 자동 등록 대상이 아니다 — 병합은 사용자 결정.
+                candidates[index].confidence = .medium
+            }
+        }
+
+        // 랭킹: 신뢰도 > 유정 신호 > 격 다양성 > 빈도.
         // 상위 5개 컷 — 질문 줄을 세우지 않는다(품질 > 적극성).
         return Array(
             candidates
                 .sorted {
-                    ($0.animacyHits, $0.caseRoleCount, $0.mentions, $0.name)
-                        > ($1.animacyHits, $1.caseRoleCount, $1.mentions, $1.name)
+                    ($0.confidence == .high ? 1 : 0, $0.animacyHits, $0.caseRoleCount,
+                     $0.mentions, $0.name)
+                        > ($1.confidence == .high ? 1 : 0, $1.animacyHits,
+                           $1.caseRoleCount, $1.mentions, $1.name)
                 }
                 .prefix(5))
+    }
+
+    /// 신뢰도 판정 (요구사항 §16) — HIGH는 사람임이 구조적으로 여러 번 확인된
+    /// 경우만: 유정 신호 2회 이상 **그리고** 서로 다른 격 역할 2개 이상
+    /// (주체로도 쓰이고 여격/호격도 받는, 명백한 사람 이름의 사용 패턴).
+    private static func tier(of ev: Evidence) -> Confidence {
+        ev.animacyHits >= 2 && ev.caseRoles.count >= 2 ? .high : .medium
+    }
+
+    /// 표기 변형 병합 — 접미 관계(김재형 ⊃ 재형)와 호격 조사 형태(재형이)를
+    /// 하나의 후보로 묶는다. 연쇄(김재형–재형–재형이)도 추이적으로 한 무리다.
+    /// 확실한 구조 관계만 묶는다 — 우연히 닮은 이름(수진/진)은 길이 조건
+    /// (성 1자 차이)으로 걸러진다.
+    static func mergeAliasForms(_ candidates: [Candidate]) -> [Candidate] {
+        guard candidates.count >= 2 else { return candidates }
+        // 유니언-파인드 — 변형 관계의 연결 성분으로 묶는다.
+        var parent = Array(candidates.indices)
+        func root(_ index: Int) -> Int {
+            var index = index
+            while parent[index] != index { index = parent[index] }
+            return index
+        }
+        for a in candidates.indices {
+            for b in candidates.indices where a < b {
+                if isAliasShape(candidates[a].name, of: candidates[b].name)
+                    || isAliasShape(candidates[b].name, of: candidates[a].name)
+                {
+                    parent[root(b)] = root(a)
+                }
+            }
+        }
+        var groups: [Int: [Candidate]] = [:]
+        for index in candidates.indices {
+            groups[root(index), default: []].append(candidates[index])
+        }
+        return groups.values.map { members -> Candidate in
+            // 대표 = 가장 긴 표기 (성+이름 전체형). 나머지는 별칭·증거 합산.
+            let representative = members.max {
+                ($0.name.count, $0.mentions) < ($1.name.count, $1.mentions)
+            }!
+            let others = members.filter { $0.name != representative.name }
+            return Candidate(
+                name: representative.name,
+                mentions: members.map(\.mentions).reduce(0, +),
+                sceneCount: members.map(\.sceneCount).max() ?? 0,
+                animacyHits: members.map(\.animacyHits).reduce(0, +),
+                caseRoleCount: members.map(\.caseRoleCount).max() ?? 0,
+                confidence: members.contains { $0.confidence == .high } ? .high : .medium,
+                aliasForms: others.map(\.name).sorted(),
+                aliasOfKnown: representative.aliasOfKnown)
+        }
+        .sorted { $0.name < $1.name }
+    }
+
+    /// `short`가 `long`의 표기 변형인가 — ① 성+이름 관계 (김재형 → 재형:
+    /// long이 short를 접미로 갖고 1자 차이), ② 애칭 조사 형태 (재형 → 재형이).
+    static func isAliasShape(_ short: String, of long: String) -> Bool {
+        guard short != long else { return false }
+        if long.hasSuffix(short), long.count == short.count + 1 { return true }
+        if short.hasSuffix("이"), String(short.dropLast()) == long { return true }
+        if long.hasSuffix("이"), String(long.dropLast()) == short { return true }
+        return false
     }
 
     /// 한 씬을 훑어 어간별 증거를 누적한다. 토큰 순서를 보존해 "이름+주어표지"

@@ -390,8 +390,8 @@ final class NarrativeIntelligenceTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(KnowledgeSidecar.self, from: data)
         XCTAssertEqual(decoded, sidecar)
-        // 구버전(스키마 3)은 로드 시 폐기·재구축 대상이다.
-        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 4)
+        // 구버전(스키마 4 이하)은 로드 시 폐기·재구축 대상이다 (v5: Narrative Graph).
+        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 5)
     }
 
     // MARK: - 컨텍스트 조립 (요구사항 §16·§17)

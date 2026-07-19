@@ -22,6 +22,9 @@ struct KnowledgeTimelineView: View {
     /// 제목 수정 중인 씬 해시 (인라인 편집).
     @State private var editingSceneHash: String?
     @State private var draftTitle = ""
+    /// 구간 경계 수정 (v5, 요구사항 §15) — (구간 ID, 시작 경계인가).
+    @State private var editingBoundary: (id: String, isStart: Bool)?
+    @State private var draftBoundary = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -36,6 +39,7 @@ struct KnowledgeTimelineView: View {
                         staleNotice(snapshot)
                         railRows(snapshot, names: names)
                         foreshadowList(snapshot)
+                        metricsFooter
                     }
                     .padding(.vertical, 2)
                 }
@@ -48,6 +52,31 @@ struct KnowledgeTimelineView: View {
         }
         .padding(14)
         .frame(width: embedded ? nil : 460)
+        .alert(
+            editingBoundary?.isStart == true ? "구간 시작 경계 수정" : "구간 끝(복귀) 경계 수정",
+            isPresented: Binding(
+                get: { editingBoundary != nil },
+                set: { if !$0 { editingBoundary = nil } }
+            )
+        ) {
+            TextField("경계 문장을 원문 그대로", text: $draftBoundary)
+            Button("적용") {
+                if let editing = editingBoundary {
+                    let trimmed = draftBoundary.trimmingCharacters(in: .whitespaces)
+                    if !trimmed.isEmpty {
+                        store.setNarrativeOverride(
+                            NarrativeOverride(
+                                kind: editing.isStart ? .segmentStart : .segmentEnd,
+                                key: editing.id, value: trimmed),
+                            in: store.activeID)
+                    }
+                }
+                editingBoundary = nil
+            }
+            Button("취소", role: .cancel) { editingBoundary = nil }
+        } message: {
+            Text("본문에서 경계가 될 문장을 복사해 붙여 넣으세요. 원문에 있는 문장만 경계가 돼요.")
+        }
     }
 
     /// 델타·대화 렌더링용 인물 id → 이름.
@@ -72,9 +101,12 @@ struct KnowledgeTimelineView: View {
         store.requestSearchJump(store.activeID, query: snippet)
     }
 
-    /// 근거 인용으로 이동 — 인용 자체가 본문 부분 문자열이라 그대로 검색어다.
+    /// 근거 인용으로 이동 — exact가 사라졌으면 재앵커 사다리 (요구사항 §28).
     private func jump(quote: String) {
-        store.requestSearchJump(store.activeID, query: quote)
+        let query = store.activeEntry.flatMap {
+            SourceAnchor.resilientQuery(for: quote, in: $0.body)
+        } ?? quote
+        store.requestSearchJump(store.activeID, query: query)
     }
 
     /// 사건의 근거로 이동 — 인용이 있으면 인용(직접 근거), 없으면 씬 시작(추론).
@@ -316,6 +348,15 @@ struct KnowledgeTimelineView: View {
                                 start: scene.utf16Range.lowerBound,
                                 value: SceneNarrativeType.present.rawValue)
                         }
+                    },
+                    onSegmentOverride: { id, kind, value in
+                        store.setNarrativeOverride(
+                            NarrativeOverride(kind: kind, key: id, value: value),
+                            in: store.activeID)
+                    },
+                    onEditSegmentBoundary: { id, isStart, current in
+                        draftBoundary = current
+                        editingBoundary = (id, isStart)
                     })
             }
         }
@@ -328,6 +369,25 @@ struct KnowledgeTimelineView: View {
     private func editingTitleBinding(for row: TimelineRow) -> Bool {
         if case .scene(let scene) = row { return editingSceneHash == scene.hash }
         return false
+    }
+
+    // MARK: - 성능 지표 (요구사항 §33 — 로컬 전용 개발 지표)
+
+    /// 사이드카 크기·지연 한 줄 — SQLite 이관 시점 판단의 근거 데이터.
+    @ViewBuilder private var metricsFooter: some View {
+        if let metrics = indexer.metrics {
+            Text(
+                String(
+                    format: "지식 %.1fKB · 씬 %d (씬당 %.1fKB) · 로드 %.0fms · 저장 %.0fms · 조립 %.0fms",
+                    Double(metrics.sidecarBytes) / 1024, metrics.sceneCount,
+                    Double(metrics.bytesPerScene) / 1024,
+                    metrics.loadMs, metrics.saveMs, metrics.deriveMs)
+            )
+            .font(MintFonts.monoUI(8.5))
+            .foregroundStyle(theme.ink3C)
+            .padding(.top, 6)
+            .help("지식 저장소 성능 — 기기 밖으로 나가지 않는 로컬 지표예요")
+        }
     }
 
     // MARK: - 복선 (v4, 요구사항 §15)
@@ -432,6 +492,8 @@ enum TimelineRow: Identifiable {
     case branchStart(branch: NarrativeBranch)
     case branchEnd(branch: NarrativeBranch)
     case scene(SceneInfo)
+    /// 씬 내부 서사 구간 (v5, 요구사항 §8·§15) — 회상·꿈·구술의 시작·끝·층.
+    case segment(segment: NarrativeSegment, sceneStart: Int, userEdited: Bool, inBranch: Bool)
     /// 씬 원문이 이해 상한을 넘어 잘린 구간 — 지식에 존재하지 않는 본문이다.
     case truncated(id: String, total: Int, read: Int)
     case event(id: String, event: StoryEvent, start: Int, inBranch: Bool)
@@ -445,6 +507,7 @@ enum TimelineRow: Identifiable {
         case .branchStart(let branch): "bs-\(branch.anchorHash)"
         case .branchEnd(let branch): "be-\(branch.anchorHash)"
         case .scene(let scene): "s-\(scene.hash)"
+        case .segment(let segment, _, _, _): "g-\(segment.persistentID)"
         case .truncated(let id, _, _): "t-\(id)"
         case .event(let id, _, _, _): "e-\(id)"
         case .minorEvents(let id, _, _, _): "m-\(id)"
@@ -456,6 +519,7 @@ enum TimelineRow: Identifiable {
     var jumpTargetUTF16: Int? {
         switch self {
         case .scene(let scene): scene.start
+        case .segment(let segment, let sceneStart, _, _): sceneStart + segment.localStart
         case .event(_, _, let start, _): start
         case .minorEvents(_, _, let start, _): start
         case .branchStart, .branchEnd, .truncated, .pending: nil
@@ -465,6 +529,7 @@ enum TimelineRow: Identifiable {
     var inBranch: Bool {
         switch self {
         case .scene(let scene): scene.inBranch
+        case .segment(_, _, _, let inBranch): inBranch
         case .event(_, _, _, let inBranch): inBranch
         case .minorEvents(_, _, _, let inBranch): inBranch
         case .pending(_, let inBranch): inBranch
@@ -534,6 +599,20 @@ enum TimelineRow: Identifiable {
                         importance: events.map(\.importance).max(),
                         inBranch: inBranch
                     )))
+            // 서사 구간 (v5) — 씬 안의 회상·꿈·구술 구조를 씬 바로 아래에.
+            for segment in snapshot.segmentsByScene[scene.contentHash] ?? [] {
+                let edited = [
+                    NarrativeOverride.Kind.segmentLayer, .segmentPOV, .segmentNarrator,
+                    .segmentFocal, .segmentChrono, .segmentReliability, .segmentSubject,
+                    .segmentStart, .segmentEnd,
+                ].contains { snapshot.overrides.value($0, key: segment.persistentID) != nil }
+                rows.append(
+                    .segment(
+                        segment: segment,
+                        sceneStart: scene.utf16Range.lowerBound,
+                        userEdited: edited,
+                        inBranch: inBranch))
+            }
             // 이해 상한 초과 — 뒷부분은 요약에도 사건에도 반영되지 않았다.
             if scene.utf16Range.count > BackgroundIndexer.maxSceneCharacters {
                 rows.append(
@@ -595,6 +674,10 @@ private struct TimelineRowView: View {
     var onRenameBranch: ((NarrativeBranch, String) -> Void)?
     var onSetBranchChrono: ((NarrativeBranch, ChronoRelation) -> Void)?
     var onMergeBranch: ((NarrativeBranch) -> Void)?
+    /// 구간 오버라이드 저장 (v5, 요구사항 §15) — (구간 ID, 종류, 값).
+    var onSegmentOverride: ((String, NarrativeOverride.Kind, String) -> Void)?
+    /// 구간 경계 수정 시작 — (구간 ID, 시작 경계인가, 현재 인용).
+    var onEditSegmentBoundary: ((String, Bool, String) -> Void)?
 
     /// 사소 묶음 펼침 상태.
     @State private var minorExpanded = false
@@ -675,6 +758,7 @@ private struct TimelineRowView: View {
             }
         case .minorEvents: return 4.5
         case .branchStart, .branchEnd: return 5
+        case .segment: return 5.5
         default: return 5
         }
     }
@@ -703,6 +787,18 @@ private struct TimelineRowView: View {
             Circle()
                 .fill(theme.blueC.opacity(0.7))
                 .frame(width: nodeSize, height: nodeSize)
+        case .segment(let segment, _, _, _):
+            // 구간 — 층 깊이에 따라 겹 링 (회상 속 회상 = 두 겹).
+            ZStack {
+                Circle()
+                    .strokeBorder(theme.blueC.opacity(0.8), lineWidth: 1.3)
+                    .frame(width: nodeSize, height: nodeSize)
+                if segment.depth >= 2 {
+                    Circle()
+                        .strokeBorder(theme.blueC.opacity(0.5), lineWidth: 1)
+                        .frame(width: nodeSize + 4, height: nodeSize + 4)
+                }
+            }
         case .truncated:
             Circle()
                 .fill(theme.ink3C)
@@ -738,6 +834,8 @@ private struct TimelineRowView: View {
             }
         case .scene(let scene):
             sceneContent(scene)
+        case .segment(let segment, _, let userEdited, _):
+            segmentContent(segment, userEdited: userEdited)
         case .truncated(_, let total, let read):
             // ⚠️ 헤딩 없는 장편이 씬 하나가 되면 여기서 대부분이 잘린다 (PLAN §8).
             Text("앞 \(read.formatted())자만 이해됨 — 나머지 \((total - read).formatted())자는 지식에 없어요")
@@ -888,6 +986,120 @@ private struct TimelineRowView: View {
             if scene.titleUserEdited || scene.typeUserEdited {
                 Divider()
                 Button("AI 분석으로 되돌리기") { onResetScene?(scene.hash) }
+            }
+        }
+    }
+
+    // MARK: 구간 행 (v5, 요구사항 §8·§9·§15)
+
+    @ViewBuilder private func segmentContent(
+        _ segment: NarrativeSegment, userEdited: Bool
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 5) {
+                Text(segment.layer.rawValue)
+                    .font(MintFonts.uiFont(9, .semibold))
+                    .foregroundStyle(theme.blueC)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(Capsule().fill(theme.blueC.opacity(0.12)))
+                if segment.depth >= 2 {
+                    Text("깊이 \(segment.depth)")
+                        .font(MintFonts.uiFont(8.5))
+                        .foregroundStyle(theme.ink3C)
+                }
+                if let subject = segment.subjectCharacter {
+                    Text("\(subject)의 과거")
+                        .font(MintFonts.uiFont(9))
+                        .foregroundStyle(theme.ink2C)
+                }
+                Text("\(segment.source.rawValue)·\(segment.reliability.rawValue)")
+                    .font(MintFonts.uiFont(8.5))
+                    .foregroundStyle(theme.ink3C)
+                if segment.returnState == .uncertain {
+                    // 복귀 미확정 — 임의 확정 대신 불확실 표시 (요구사항 §9).
+                    Text("복귀 불확실")
+                        .font(MintFonts.uiFont(8.5))
+                        .foregroundStyle(theme.novelC)
+                }
+                if userEdited { UserEditedMark(theme: theme) }
+            }
+            Text("“\(segment.startQuote)” \(segment.endQuote.map { "→ “\($0)”" } ?? "→ 씬 끝")")
+                .font(MintFonts.uiFont(9.5))
+                .foregroundStyle(theme.ink3C)
+                .lineLimit(1)
+            if segment.pov != nil || segment.narrator != nil {
+                Text(
+                    [segment.pov.map { "시점: \($0)" },
+                     segment.narrator.map { "화자: \($0)" },
+                     segment.focalCharacter.map { "초점: \($0)" }]
+                        .compactMap { $0 }.joined(separator: " · ")
+                )
+                .font(MintFonts.uiFont(8.5))
+                .foregroundStyle(theme.ink3C)
+            }
+        }
+        .padding(.leading, 2)
+        .contextMenu {
+            let id = segment.persistentID
+            Menu("층 — 이 구간의 성격") {
+                ForEach(NarrativeSegment.Layer.allCases, id: \.rawValue) { layer in
+                    Button {
+                        onSegmentOverride?(id, .segmentLayer, layer.rawValue)
+                    } label: {
+                        if segment.layer == layer {
+                            Label(layer.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(layer.rawValue)
+                        }
+                    }
+                }
+            }
+            Button("회상 아님 — 현재로") {
+                onSegmentOverride?(id, .segmentLayer, NarrativeSegment.Layer.present.rawValue)
+            }
+            Menu("시점 인물") {
+                ForEach(characterNames.values.sorted(), id: \.self) { name in
+                    Button(name) { onSegmentOverride?(id, .segmentPOV, name) }
+                }
+            }
+            Menu("이 과거의 주인") {
+                ForEach(characterNames.values.sorted(), id: \.self) { name in
+                    Button(name) { onSegmentOverride?(id, .segmentSubject, name) }
+                }
+            }
+            Menu("신뢰 상태") {
+                ForEach(SourceReliability.allCases, id: \.rawValue) { reliability in
+                    Button {
+                        onSegmentOverride?(id, .segmentReliability, reliability.rawValue)
+                    } label: {
+                        if segment.reliability == reliability {
+                            Label(reliability.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(reliability.rawValue)
+                        }
+                    }
+                }
+            }
+            Menu("시간 관계") {
+                ForEach(ChronoRelation.allCases, id: \.rawValue) { relation in
+                    Button {
+                        onSegmentOverride?(id, .segmentChrono, relation.rawValue)
+                    } label: {
+                        if segment.chrono == relation {
+                            Label(relation.rawValue, systemImage: "checkmark")
+                        } else {
+                            Text(relation.rawValue)
+                        }
+                    }
+                }
+            }
+            Divider()
+            Button("시작 경계 수정…") {
+                onEditSegmentBoundary?(id, true, segment.startQuote)
+            }
+            Button("끝(복귀) 경계 수정…") {
+                onEditSegmentBoundary?(id, false, segment.endQuote ?? "")
             }
         }
     }
