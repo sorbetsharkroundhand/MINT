@@ -54,7 +54,7 @@ private struct SidebarSectionHint: View {
 /// 좌측 사이드바 (에디터 v3 — 디자인 이식, 파일시스템 v1 · 섹션화 M6-8).
 ///
 /// 상단: 신호등 옆을 채우는 52px 헤더(우측 날짜 툴바와 같은 높이) —
-/// "MINT"(세리프) + 새 폴더(폴더＋) + 새 저널(＋).
+/// 새 폴더(폴더＋) + 새 소설(책) + 새 저널(＋).
 /// 그 아래 섹션 탭(문서·바이블·타임라인) — 팝오버였던 바이블·타임라인을
 /// 상시 패널로 승격한다 (열람이 잦아졌다 — 팝오버는 열 때마다 닫힌다).
 /// 목록(문서 섹션): 폴더 트리(펼침/접힘) + 저널 행.
@@ -336,11 +336,10 @@ struct SidebarView: View {
     // MARK: - 헤더
 
     private var header: some View {
+        // 로고 없이 액션만 — 앱 이름은 메뉴바가 이미 말한다. 왼쪽 빈 자리를
+        // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
         HStack(spacing: 2) {
-            Text("MINT")
-                .font(MintFonts.serifUI(19, .semibold))
-                .foregroundStyle(theme.inkC)
-            Spacer(minLength: 4)
+            Spacer(minLength: 0)
             HeaderIconButton(theme: theme, help: "새 폴더") {
                 store.newFolder()
             } label: {
@@ -714,6 +713,10 @@ struct SidebarView: View {
                 requestNaming: { completion.requestFolderName(for: $0, in: store) }))
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
+            // 작성일 바꾸기 (L9) — 상단바 달력 버튼이 사라진 뒤의 유일한 진입점.
+            // 저널마다 붙는 속성이라 앱 설정이 아니라 이 문맥 메뉴가 제자리다
+            // (이름 바꾸기·종류 전환·내보내기와 같은 층).
+            Button("작성일 바꾸기…") { promptForDate(entry) }
             moveMenu(for: entry)
             // 종류 전환 (M7 요청) — 원문 불변, 소설이 되면 이해 파이프라인이
             // 돌기 시작하고 저널이 되면 멈춘다 (지식은 파생이라 안전).
@@ -728,6 +731,24 @@ struct SidebarView: View {
             }
             Button("삭제", role: .destructive) { requestDelete(entry) }
         }
+    }
+
+    /// 작성일 선택 — 문맥 메뉴에서 부르므로 SwiftUI 팝오버(앵커 없음) 대신
+    /// NSAlert + NSDatePicker로 띄운다. 취소하면 아무것도 바꾸지 않는다.
+    private func promptForDate(_ entry: JournalEntry) {
+        let picker = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 300, height: 160))
+        picker.datePickerStyle = .clockAndCalendar
+        picker.datePickerElements = [.yearMonthDay]
+        picker.dateValue = entry.createdAt
+
+        let alert = NSAlert()
+        alert.messageText = "작성일 바꾸기"
+        alert.informativeText = "어제 일을 오늘 적었다면 날짜를 맞춰 두세요."
+        alert.accessoryView = picker
+        alert.addButton(withTitle: "바꾸기")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        store.setDate(entry.id, to: picker.dateValue)
     }
 
     /// 저널을 다른 폴더/루트로 옮기는 문맥 메뉴 — 이미 만든 글도 정리할 수 있게 (M3).

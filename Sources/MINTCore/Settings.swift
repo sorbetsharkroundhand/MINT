@@ -176,6 +176,10 @@ public final class CompletionSettings: ObservableObject {
         static let kvCache = "completion.kvCache"
         static let lineSpacing = "editor.lineSpacing"
         static let fontSize = "editor.fontSize"
+        /// 저자 이름은 예측 동작이 아니라 **작품 메타데이터**라 `completion.*`이
+        /// 아닌 앱 전역 이름공간(`mint.*`)에 둔다 — 예측 파라미터 스냅샷
+        /// (`CompletionParameters`)에도 들어가지 않는다.
+        static let authorName = "mint.authorName"
     }
 
     private let defaults: UserDefaults
@@ -217,6 +221,11 @@ public final class CompletionSettings: ObservableObject {
     @Published public var lineSpacing: Double {
         didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) }
     }
+    /// 저자 이름(필명) — EPUB 내보내기의 `<dc:creator>`에 실린다. 비워 두면
+    /// 저자 정보를 아예 넣지 않는다(빈 저자명보다 없는 편이 낫다).
+    @Published public var authorName: String {
+        didSet { defaults.set(authorName, forKey: Keys.authorName) }
+    }
     /// 본문 기본 글자 크기(pt) — 모든 블록이 이 값에 비례한다(⌘+/⌘−).
     @Published public var editorFontSize: Double {
         didSet {
@@ -255,6 +264,7 @@ public final class CompletionSettings: ObservableObject {
         self.editorFontSize =
             defaults.object(forKey: Keys.fontSize) as? Double
             ?? Self.defaultFontSize
+        self.authorName = defaults.string(forKey: Keys.authorName) ?? ""
     }
 
     /// 추론 엔진으로 넘기는 값 스냅샷.
