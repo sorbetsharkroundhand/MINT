@@ -12,7 +12,7 @@ public struct ContentView: View {
     @ObservedObject private var completion: CompletionController
     /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
     private let indexer: BackgroundIndexer?
-    /// ""=시스템 따름 / "light" / "dark" — 툴바 토글로 전환.
+    /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
 
     public init(
@@ -96,6 +96,8 @@ private struct MainSurface: View {
     /// 인물 감지 후보 UI 배선용 (M6) — 프리뷰 등에서는 nil.
     var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
+    /// 사용자 색상 팔레트 — 관찰해서 설정에서 색을 바꾸는 즉시 화면에 반영한다.
+    @ObservedObject private var palette = PaletteSettings.shared
     /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     /// 사이드바 폭 — 사용자가 divider를 끌어 조절하며 UserDefaults에 보존된다.
@@ -112,7 +114,7 @@ private struct MainSurface: View {
     }
 
     var body: some View {
-        let theme = MintTheme.of(colorScheme)
+        let theme = palette.theme(for: colorScheme)
         ZStack {
             GlassBackground()
             theme.glassWinC
@@ -393,32 +395,31 @@ struct EditorPane: View {
     }
 }
 
-// MARK: - 툴바 (날짜 · 모델 스위처 · 다크 모드)
+// MARK: - 툴바 (사이드바 · 소설 배지 · 모델 스위처)
 
+/// 상단바는 **글을 쓰는 동안 필요한 것**만 남긴다 — 날짜·다크 모드·도움말·이미지
+/// 삽입은 한 번 정하면 잘 바뀌지 않거나 단축키/메뉴로 이미 닿을 수 있어 설정(⌘,)과
+/// 메뉴로 옮겼다 (CLAUDE.md §3 "고스트는 조용히"의 연장 — 화면의 소음을 줄인다).
 struct EditorToolbar: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     var indexer: BackgroundIndexer?
-    @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
-    @Environment(\.colorScheme) private var colorScheme
     @State private var sidebarButtonHovered = false
-    @State private var imageButtonHovered = false
-    @State private var helpButtonHovered = false
-    @State private var helpOpen = false
-    @State private var dateOpen = false
-    @State private var dateHovered = false
+    @State private var settingsButtonHovered = false
     @State private var longParagraphOpen = false
+    /// ⌘,의 Settings 씬을 여는 표준 액션 (macOS 14+). 다크 모드·사용 방법·
+    /// 저자 이름이 전부 설정으로 옮겨 가면서 눈에 보이는 입구가 필요해졌다.
+    @Environment(\.openSettings) private var openSettings
     /// 사이드바 섹션 (M6-8) — 배지 클릭이 팝오버 대신 사이드바 패널을 연다.
     @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             sidebarToggle
-            dateButton
-            // 소설 저널이면 날짜 옆에 종류 배지 = 스토리 바이블 입구 (PLAN §7).
+            // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // M6-8: 팝오버 → 사이드바 패널 승격. 배지는 바이블 섹션을 연다.
             if store.activeEntry?.resolvedKind == .novel {
                 Button {
@@ -482,10 +483,8 @@ struct EditorToolbar: View {
                 }
             }
             Spacer()
-            helpButton
-            imageButton
             ModelChip(completion: completion, settings: settings, theme: theme)
-            themeSwitch
+            settingsButton
         }
         // 사이드바를 접으면 툴바가 창 맨 왼쪽까지 차서 신호등(닫기·최소화·최대화)과
         // 겹친다 — 접힘 상태에선 신호등을 비켜 갈 만큼 왼쪽 여백을 준다.
@@ -493,89 +492,6 @@ struct EditorToolbar: View {
         .padding(.trailing, 22)
         .frame(height: 52)
         .background(theme.toolbarC)
-    }
-
-    /// 작성일 — 누르면 날짜를 바꿀 수 있다(어제 일을 오늘 적었을 때 등, L9).
-    private var dateButton: some View {
-        Button {
-            dateOpen.toggle()
-        } label: {
-            Text(store.activeDateLabel)
-                .font(MintFonts.uiFont(13.5, .semibold))
-                .foregroundStyle(theme.inkC)
-                .padding(.vertical, 3)
-                .padding(.horizontal, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(dateHovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { dateHovered = $0 }
-        .help("작성일 바꾸기")
-        .popover(isPresented: $dateOpen, arrowEdge: .bottom) {
-            DatePicker(
-                "작성일", selection: dateBinding, displayedComponents: [.date]
-            )
-            .datePickerStyle(.graphical)
-            .labelsHidden()
-            .padding(14)
-            .frame(width: 300)
-        }
-    }
-
-    private var dateBinding: Binding<Date> {
-        Binding(
-            get: { store.activeEntry?.createdAt ?? .now },
-            set: { if let id = store.activeEntry?.id { store.setDate(id, to: $0) } }
-        )
-    }
-
-    /// 마크다운 서식 도움말 — 블록·인라인 단축 문법을 발견할 수 있는 유일한 창구.
-    /// (예전엔 "# " 같은 변환을 아무도 알 수 없었다.)
-    private var helpButton: some View {
-        Button {
-            helpOpen.toggle()
-        } label: {
-            Image(systemName: "questionmark.circle")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.ink2C)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(helpButtonHovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { helpButtonHovered = $0 }
-        .help("마크다운 서식 도움말")
-        .popover(isPresented: $helpOpen, arrowEdge: .bottom) {
-            MarkdownCheatSheet(theme: theme)
-        }
-    }
-
-    /// 이미지 삽입 — 리스폰더 체인으로 에디터(BlockTextView)에 파일 선택을 요청한다.
-    /// 붙여넣기(⌘V)·드래그 드롭·⇧⌘I와 같은 삽입 경로를 버튼으로도 노출한다.
-    private var imageButton: some View {
-        Button {
-            NSApp.sendAction(
-                #selector(BlockTextView.insertImageFromMenu(_:)), to: nil, from: nil)
-        } label: {
-            Image(systemName: "photo")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.ink2C)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(imageButtonHovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { imageButtonHovered = $0 }
-        .help("이미지 삽입 (⇧⌘I · 붙여넣기 · 드래그)")
     }
 
     /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
@@ -598,24 +514,25 @@ struct EditorToolbar: View {
         .help(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기")
     }
 
-    /// 디자인의 커스텀 스위치 (42×25, ☾) — 리퀴드 글래스 토글.
-    private var themeSwitch: some View {
+    /// 설정 — ⌘,와 같은 Settings 창을 연다. 모델·제안·다크 모드·저자 이름·
+    /// 사용 방법이 전부 그 안에 있으므로 툴바의 유일한 설정 입구다.
+    private var settingsButton: some View {
         Button {
-            appearance = isDark ? "light" : "dark"
+            openSettings()
         } label: {
-            HStack(spacing: 8) {
-                Text("☾")
-                    .font(.system(size: 13))
-                    .foregroundStyle(theme.ink3C)
-                GlassSwitch(isOn: isDark, theme: theme)
-            }
+            Image(systemName: "gearshape")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(theme.ink2C)
+                .frame(width: 28, height: 28)
+                .background(
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .fill(settingsButtonHovered ? theme.hoverC : .clear)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help("다크 모드")
-    }
-
-    private var isDark: Bool {
-        appearance == "dark" || (appearance.isEmpty && colorScheme == .dark)
+        .onHover { settingsButtonHovered = $0 }
+        .help("설정 (⌘,) — 모델·제안·다크 모드·저자 이름·사용 방법")
     }
 }
 
@@ -1007,7 +924,8 @@ struct PulsingDots: View {
 
 // MARK: - 마크다운 치트시트
 
-/// 도움말 버튼 팝오버 — 줄 맨 앞/인라인 단축 문법을 한눈에.
+/// 마크다운 단축 문법 안내 — 줄 맨 앞/인라인 문법을 한눈에.
+/// 상단바 도움말 버튼이 사라진 뒤로는 설정(⌘,)의 "사용 방법"에서 보여준다.
 struct MarkdownCheatSheet: View {
     let theme: MintTheme
 

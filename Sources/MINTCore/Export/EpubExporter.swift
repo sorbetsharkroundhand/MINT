@@ -34,7 +34,8 @@ public enum EpubExporter {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try export(entry, to: url)
+            // 설정의 저자 이름은 값 스냅샷으로만 넘긴다 (CLAUDE.md §4 격리 경계).
+            try export(entry, to: url, author: CompletionSettings.shared.authorName)
         } catch {
             let alert = NSAlert()
             alert.messageText = "EPUB 내보내기 실패"
@@ -45,8 +46,11 @@ public enum EpubExporter {
     }
 
     /// 저널 한 편을 EPUB 파일로 만든다. UI 없이 파일만 쓴다.
+    /// `author`는 설정의 저자 이름(필명) — 비어 있으면 저자 메타데이터를 생략한다.
     @MainActor
-    public static func export(_ entry: JournalEntry, to destination: URL) throws {
+    public static func export(
+        _ entry: JournalEntry, to destination: URL, author: String = ""
+    ) throws {
         let fm = FileManager.default
         let staging = fm.temporaryDirectory
             .appendingPathComponent("mint-epub-\(UUID().uuidString)", isDirectory: true)
@@ -74,7 +78,7 @@ public enum EpubExporter {
             to: oebps.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
         try navXHTML(bookTitle: entry.title, chapters: chapters).write(
             to: oebps.appendingPathComponent("nav.xhtml"), atomically: true, encoding: .utf8)
-        try packageOPF(entry: entry, chapters: chapters, images: images).write(
+        try packageOPF(entry: entry, chapters: chapters, images: images, author: author).write(
             to: oebps.appendingPathComponent("content.opf"), atomically: true, encoding: .utf8)
 
         try runZip(["-X", "-0", "book.epub", "mimetype"], in: staging)
@@ -361,15 +365,26 @@ public enum EpubExporter {
             """
     }
 
+    /// OPF 패키지 문서. `private`가 아닌 이유는 저자 메타데이터를 zip 없이
+    /// 단위 테스트로 고정하기 위해서다 (EpubMetadataTests).
     @MainActor
-    private static func packageOPF(
-        entry: JournalEntry, chapters: [Chapter], images: [String]
+    static func packageOPF(
+        entry: JournalEntry, chapters: [Chapter], images: [String], author: String = ""
     ) -> String {
         let modified: String = {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
             formatter.timeZone = TimeZone(identifier: "UTC")
             return formatter.string(from: .now)
+        }()
+        // 저자 이름이 비면 `<dc:creator>` 자체를 넣지 않는다 — 빈 저자명은
+        // 리더 서가에 "이름 없음"으로 남아 없는 것만 못하다.
+        let creatorXML: String = {
+            let name = author.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { return "" }
+            return "\n    <dc:creator id=\"creator\">\(escape(name))</dc:creator>"
+                + "\n    <meta refines=\"#creator\" property=\"role\""
+                + " scheme=\"marc:relators\">aut</meta>"
         }()
         var manifest = [
             #"<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>"#,
@@ -390,7 +405,7 @@ public enum EpubExporter {
             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="ko">
               <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
                 <dc:identifier id="pub-id">urn:uuid:\(entry.id.uuidString.lowercased())</dc:identifier>
-                <dc:title>\(escape(plainTitle(entry.title)))</dc:title>
+                <dc:title>\(escape(plainTitle(entry.title)))</dc:title>\(creatorXML)
                 <dc:language>ko</dc:language>
                 <meta property="dcterms:modified">\(modified)</meta>
               </metadata>

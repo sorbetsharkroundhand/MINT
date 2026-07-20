@@ -38,9 +38,16 @@ struct NarrativeView: View {
     /// 선택된 정본 사건 — 상세 패널 (Progressive Disclosure의 축).
     @State private var selectedEventKey: String?
     /// 선택된 플롯 스레드 — 그 레인·사건 강조, 나머지 약화.
+    ///
+    /// **선택은 클릭으로만 바뀐다** — 다른 플롯을 누르면 곧바로 그리로 옮겨가고,
+    /// 같은 플롯을 다시 누르면 풀린다 (`toggleThread`). 강조 범위가 포인터를
+    /// 따라 흔들리면 읽던 맥락을 잃지만, 비교하려고 옆 플롯을 누르는 것은
+    /// 명백한 의도다 — 먼저 해제하라고 요구할 이유가 없다.
+    ///
+    /// hover는 여기에 **관여하지 않는다.** 예전에는 hover가 강조 스레드를
+    /// 정해서, 스크롤로 포인터 아래를 지나가는 것만으로 최상위 body가 무효화되고
+    /// 행·레이아웃이 통째로 다시 계산됐다 (프레임당 3.7ms@200씬).
     @State private var selectedThreadID: String?
-    /// hover 중인 사건 — 속한 스레드 레인 강조.
-    @State private var hoveredEventKey: String?
     /// 인물 필터 — 그 인물이 참여한 사건만 강조.
     @State private var selectedCharacterID: UUID?
     /// 검토 필요 영역 펼침 — 기본 접힘 (메인 사건 흐름을 방해하지 않는다).
@@ -283,7 +290,7 @@ struct NarrativeView: View {
         let color = threadColor(thread)
         let selected = selectedThreadID == thread.id
         Button {
-            selectedThreadID = selected ? nil : thread.id
+            toggleThread(thread.id)
         } label: {
             HStack(spacing: 4) {
                 Circle().fill(color).frame(width: 7, height: 7)
@@ -303,7 +310,10 @@ struct NarrativeView: View {
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
-        .help(thread.summary.isEmpty ? "클릭: 이 플롯의 경로 강조" : thread.summary)
+        .help(
+            thread.summary.isEmpty
+                ? (selected ? "다시 클릭: 강조 해제" : "클릭: 이 플롯의 경로만 강조")
+                : thread.summary)
         .contextMenu {
             Button("이름 바꾸기…") {
                 draftThreadTitle = thread.title
@@ -371,7 +381,8 @@ struct NarrativeView: View {
                 theme: theme,
                 dark: colorScheme == .dark,
                 selectedEventKey: selectedEventKey,
-                emphasizedThreadIDs: emphasizedThreadIDs(snapshot),
+                selectedThreadID: selectedThreadID,
+                emphasizedThreadIDs: emphasizedThreadIDs,
                 dimmedKeys: dimmedKeys(snapshot),
                 isEditingTitle: { editingSceneHash == $0 },
                 draftTitle: $draftTitle,
@@ -379,7 +390,8 @@ struct NarrativeView: View {
                 onSelectEvent: { key in
                     selectedEventKey = selectedEventKey == key ? nil : key
                 },
-                onHoverEvent: { hoveredEventKey = $0 },
+                // 노드·레인 클릭 = 그 레인의 플롯으로 강조를 옮긴다.
+                onSelectThread: { toggleThread($0) },
                 onToggleMinor: { id in
                     if expandedMinors.contains(id) {
                         expandedMinors.remove(id)
@@ -450,15 +462,24 @@ struct NarrativeView: View {
         }
     }
 
-    /// 강조할 스레드 집합 — hover(그 사건의 스레드들) > 플롯 선택 > 없음(nil).
-    private func emphasizedThreadIDs(_ snapshot: KnowledgeSnapshot) -> Set<String>? {
-        if let hovered = hoveredEventKey,
-            let ids = snapshot.threadIDsByEvent[hovered], !ids.isEmpty
-        {
-            return Set(ids)
-        }
-        if let selected = selectedThreadID { return [selected] }
-        return nil
+    /// 강조할 스레드 — **선택된 플롯 하나뿐**이다 (nil = 전부 보통).
+    /// hover는 보지 않는다: 가시성·필터링·연결선 표시는 선택에만 반응한다.
+    private var emphasizedThreadIDs: Set<String>? {
+        selectedThreadID.map { [$0] }
+    }
+
+    /// 플롯 선택 토글 — 다른 플롯을 누르면 그리로 전환, 같은 것이면 해제.
+    private func toggleThread(_ id: String) {
+        selectedThreadID = Self.nextSelection(current: selectedThreadID, tapped: id)
+    }
+
+    /// 선택 전환 규칙 (순수 함수 — 검증 가능하게 분리).
+    ///
+    /// 누른 것이 이미 선택돼 있으면 해제하고, 아니면 누른 것으로 **바로
+    /// 옮겨간다**. 전환하려고 이전 선택을 먼저 풀게 하면, 플롯을 갈아 보며
+    /// 읽는 흐름이 클릭마다 두 번씩 끊긴다.
+    nonisolated static func nextSelection(current: String?, tapped: String) -> String? {
+        current == tapped ? nil : tapped
     }
 
     /// 인물 필터로 흐려질 정본 사건 키 집합 — 필터 없으면 nil.
@@ -1084,6 +1105,30 @@ struct ThreadGraphLayout {
     }
 }
 
+// MARK: - 행 기하 (중심 y · 전체 높이)
+
+/// 행 높이의 누적을 **한 번에** 접은 값.
+///
+/// 예전엔 `rowCenters`·`totalHeight`가 각각 O(행) computed property라 한 번의
+/// body 패스에서 네 번(캔버스 프레임·바깥 프레임·drawLanes·본문) 다시 계산됐다.
+/// 행 높이는 데이터에서 정해지므로(`GraphRow.height`) 한 번 접으면 그만이다.
+struct GraphRowGeometry {
+    var centers: [CGFloat]
+    var totalHeight: CGFloat
+
+    init(rows: [GraphRow]) {
+        var centers: [CGFloat] = []
+        centers.reserveCapacity(rows.count)
+        var y: CGFloat = 0
+        for row in rows {
+            centers.append(y + row.height / 2)
+            y += row.height
+        }
+        self.centers = centers
+        self.totalHeight = y
+    }
+}
+
 // MARK: - 그래프 렌더 (Canvas 레인 + 행 콘텐츠 + 노드)
 
 private struct ThreadGraphArea: View {
@@ -1093,7 +1138,9 @@ private struct ThreadGraphArea: View {
     let theme: MintTheme
     let dark: Bool
     let selectedEventKey: String?
-    /// 강조 스레드 (hover·플롯 선택) — nil이면 전부 보통.
+    /// 선택된 플롯 — 노드의 선택 링 표시에 쓴다.
+    let selectedThreadID: String?
+    /// 강조 스레드 (플롯 선택에서만 온다) — nil이면 전부 보통.
     let emphasizedThreadIDs: Set<String>?
     /// 인물 필터로 흐려질 사건 키.
     let dimmedKeys: Set<String>?
@@ -1102,7 +1149,7 @@ private struct ThreadGraphArea: View {
     let characterNames: [UUID: String]
 
     var onSelectEvent: (String) -> Void
-    var onHoverEvent: (String?) -> Void
+    var onSelectThread: (String) -> Void
     var onToggleMinor: (String) -> Void
     var onJump: (Int) -> Void
     var onJumpQuote: (String) -> Void
@@ -1121,63 +1168,83 @@ private struct ThreadGraphArea: View {
     private let laneWidth: CGFloat = 14
     private let leftInset: CGFloat = 8
 
-    /// 행 중심 y — 가변 높이의 누적 합.
-    private var rowCenters: [CGFloat] {
-        var centers: [CGFloat] = []
-        var y: CGFloat = 0
-        for row in rows {
-            centers.append(y + row.height / 2)
-            y += row.height
-        }
-        return centers
-    }
-
-    private var totalHeight: CGFloat {
-        rows.reduce(0) { $0 + $1.height }
-    }
-
     /// 그래프 열 폭 — 레인 수에 비례 (직선 소설 = 좁게).
     private var graphWidth: CGFloat {
         leftInset + CGFloat(max(layout.slotCount, 1)) * laneWidth + 6
     }
 
     var body: some View {
-        let centers = rowCenters
+        let geometry = GraphRowGeometry(rows: rows)
         ZStack(alignment: .topLeading) {
             // 캔버스 폭 = graphWidth 정확히 — 레인·곡선·헤일로는 전부 이 안에
             // 그려진다. 고정 여유 폭을 더하면 좁은 사이드바에서 ZStack이
             // 뷰포트보다 넓어지고, 세로 ScrollView가 넓은 콘텐츠를 **가운데
             // 정렬**해 왼쪽 레인이 leading 밖으로 잘린다 (clipping의 원인).
             Canvas { context, _ in
-                drawLanes(context: &context, centers: centers)
+                drawLanes(context: &context, geometry: geometry)
             }
-            .frame(width: graphWidth, height: totalHeight)
+            .frame(width: graphWidth, height: geometry.totalHeight)
             .allowsHitTesting(false)
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(rows) { row in
-                    rowContent(row)
-                        .frame(height: row.height)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(.leading, graphWidth)
-
-            // 노드 — 사건 행 위에만.
-            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                if case .event(_, let event, _) = row,
-                    let node = layout.nodes[event.canonicalKey],
-                    node.row == index
-                {
-                    nodeView(node, event: event)
-                        .position(x: x(of: node.slot), y: centers[index])
+            // 행 하나 = [그래프 거터(노드) | 콘텐츠] 한 단위.
+            //
+            // 왜 합쳤나: 예전엔 행 배열을 **세 번** 순회했다 — 콘텐츠 VStack,
+            // 노드 오버레이 ForEach, 그리고 캔버스의 헤일로 루프. 노드가 별도
+            // 패스로 절대 배치되면 행을 Lazy로 만들어도 노드 1200개는 그대로
+            // 만들어져 laziness가 무의미하다. 행 높이는 데이터로 고정이라
+            // (`GraphRow.height`) 거터 안 배치가 예전 절대 좌표와 정확히 같다.
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    HStack(spacing: 0) {
+                        graphGutter(row: row, index: index)
+                        rowContent(row)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .frame(height: row.height)
                 }
             }
         }
-        .frame(height: totalHeight, alignment: .topLeading)
+        .frame(height: geometry.totalHeight, alignment: .topLeading)
         // leading 고정 — 부모가 얼마나 넓든 그래프 원점은 항상 leading에서
         // 시작한다 (사이드바 리사이즈·전체화면에서 inset 유지).
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    /// 행의 그래프 거터 — 레인 히트 스트립 위에 사건 노드를 놓는다.
+    /// 좌표는 예전 절대 배치와 동일 (x = 레인 중심, y = 행 중심).
+    @ViewBuilder private func graphGutter(row: GraphRow, index: Int) -> some View {
+        ZStack(alignment: .topLeading) {
+            Color.clear
+            // 레인 선 자체도 클릭 대상이다 — 노드가 드문 구간에서는 선이
+            // 그 플롯의 유일한 표식이라, 선을 눌러도 반응하지 않으면 화면이
+            // 죽은 것처럼 보인다. Canvas는 그리기 전용이라 히트가 안 되므로
+            // 행마다 투명 스트립을 깔아 대신 받는다 (레인 수는 보통 ≤8).
+            ForEach(lanesCrossing(index), id: \.thread.id) { lane in
+                Color.clear
+                    .contentShape(Rectangle())
+                    .frame(width: laneWidth, height: row.height)
+                    .position(x: x(of: lane.slot), y: row.height / 2)
+                    .onTapGesture { onSelectThread(lane.thread.id) }
+            }
+            if case .event(_, let event, _) = row,
+                let node = layout.nodes[event.canonicalKey],
+                node.row == index
+            {
+                // 노드는 스트립보다 **위**에 — 같은 x를 공유하므로 아래 깔리면
+                // 사건 선택(상세 패널)이 레인 선택에 먹힌다.
+                nodeView(node, event: event)
+                    .position(x: x(of: node.slot), y: row.height / 2)
+            }
+        }
+        .frame(width: graphWidth, height: row.height)
+    }
+
+    /// 이 행에 걸쳐 있는 레인들 — 열린 행부터 해결 행까지(미해결이면 끝까지).
+    private func lanesCrossing(_ index: Int) -> [ThreadGraphLayout.Lane] {
+        let lastRow = rows.count - 1
+        return layout.lanes.filter { lane in
+            lane.openRow <= index && index <= (lane.resolveRow ?? lastRow)
+        }
     }
 
     private func x(of slot: Int) -> CGFloat {
@@ -1192,9 +1259,10 @@ private struct ThreadGraphArea: View {
 
     // MARK: 레인 그리기
 
-    private func drawLanes(context: inout GraphicsContext, centers: [CGFloat]) {
+    private func drawLanes(context: inout GraphicsContext, geometry: GraphRowGeometry) {
+        let centers = geometry.centers
         guard !centers.isEmpty else { return }
-        let bottom = totalHeight
+        let bottom = geometry.totalHeight
 
         for lane in layout.lanes {
             let color = laneColor(lane)
@@ -1335,8 +1403,11 @@ private struct ThreadGraphArea: View {
         let opacity: Double = dimmed ? 0.25 : 1
         let size = nodeSize(event)
 
+        // 노드가 그려진 레인의 플롯 — 클릭하면 강조가 이 플롯으로 옮겨온다.
+        let laneThreadID = lane?.thread.id
         Button {
             onSelectEvent(event.canonicalKey)
+            if let laneThreadID { onSelectThread(laneThreadID) }
         } label: {
             ZStack {
                 if node.isJunction {
@@ -1365,10 +1436,14 @@ private struct ThreadGraphArea: View {
             .contentShape(Circle().scale(2.2))
         }
         .buttonStyle(.plain)
-        .onHover { hovering in
-            onHoverEvent(hovering ? event.canonicalKey : nil)
-        }
-        .help(event.summary)
+        // hover 상태를 두지 않는다 — 강조·가시성은 선택에만 반응한다.
+        // 클릭 가능하다는 신호는 tooltip이 대신한다 (상태 변화 0).
+        .help(
+            laneThreadID != nil && laneThreadID == selectedThreadID
+                ? "\(event.summary)\n다시 클릭: 플롯 강조 해제"
+                : laneThreadID != nil
+                    ? "\(event.summary)\n클릭: 이 플롯의 경로만 강조"
+                : event.summary)
     }
 
     // MARK: 행 콘텐츠 (그래프 오른쪽 열)
@@ -1638,9 +1713,8 @@ private struct ThreadGraphArea: View {
         .opacity(dimmed ? 0.35 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onSelectEvent(event.canonicalKey) }
-        .onHover { hovering in
-            onHoverEvent(hovering ? event.canonicalKey : nil)
-        }
+        // hover 없음 — 포인터가 지나가는 것만으로 강조가 바뀌면 안 되고,
+        // 스크롤 중 그 상태 변화가 곧 프레임 드롭이었다.
         .help("클릭: 사건 상세 보기")
         .contextMenu {
             Menu("중요도") {
