@@ -591,6 +591,21 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 - [ ] 플롯 군집 품질의 실코퍼스 검증 — 서로 다른 구조의 소설에서 서로 다른
       topology가 나오는지 (요구사항 §14) 라벨 코퍼스 필요, MINTBench 후속.
 
+### M10 (제안) — Agentic Writing Environment "OpenCode for Writing"
+
+MINT를 온디바이스 Writing Agent Environment로 재정의하는 조사·설계 (아직 착수 전).
+Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용자의 집필을
+돕는다 — 자동완성과 **같은 `KnowledgeSnapshot`을 공유**(중복 분석 없음). 재설계의
+본질은 신규 구축이 아니라 **기존 질의·추출·검색 인프라의 Tool 승격**이다.
+
+- 조사·설계 전문(경쟁사 분석·Tool 카탈로그·Agent Runtime·Context·UX·Migration·ADR):
+  **[docs/agent-redesign.md](docs/agent-redesign.md)**.
+- 기술 검증: 네이티브 tool calling 가능 — `UserInput(chat:tools:)`(mlx-swift-lm 3.31.3)
+  + Qwen3.6 Hermes 챗 템플릿 + `generate` 스트림 `.toolCall`. 리스크는 양자화 하
+  형식 신뢰도 → lenient/strict 파서 + 폴백(EventParser 철학).
+- MVP = **읽기 전용 Agent**(조회·조언 12 tool, side-effect 없음). 편집(propose_patch·
+  diff/accept)은 P1. Agent와 고스트 자동완성은 **공존**(ADR-4).
+
 ## 15. 향후 연구 아이디어
 
 - **개인 문체 LoRA**: 수락/거부 시그널로 온디바이스 미세조정 — 어댑터 로드 지연,
