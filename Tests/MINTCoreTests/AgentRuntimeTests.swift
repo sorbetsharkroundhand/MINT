@@ -100,6 +100,10 @@ final class AgentRuntimeTests: XCTestCase {
             parameters: CompletionParameters(maxTokens: 128), onEvent: { _ in })
 
         XCTAssertEqual(result.text, "현재 문서는 ‘비밀’이고 소설입니다.")
+        XCTAssertEqual(result.toolTrace.count, 1)
+        XCTAssertEqual(result.toolTrace[0].step, 1)
+        XCTAssertEqual(result.toolTrace[0].toolName, "get_active_document")
+        XCTAssertTrue(result.toolTrace[0].resultSummary.contains("비밀"))
         let callCount = await generator.callCount
         let lastMessages = await generator.lastMessages
         XCTAssertEqual(callCount, 2)

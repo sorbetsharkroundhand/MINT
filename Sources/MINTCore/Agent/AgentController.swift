@@ -8,11 +8,16 @@ public final class AgentController: ObservableObject {
         public let id: UUID
         public var role: Role
         public var text: String
+        public var toolTrace: [AgentToolTrace]
 
-        public init(id: UUID = UUID(), role: Role, text: String) {
+        public init(
+            id: UUID = UUID(), role: Role, text: String,
+            toolTrace: [AgentToolTrace] = []
+        ) {
             self.id = id
             self.role = role
             self.text = text
+            self.toolTrace = toolTrace
         }
     }
 
@@ -20,15 +25,17 @@ public final class AgentController: ObservableObject {
         public let id: UUID
         public var toolName: String
         public var text: String
+        public var argumentsText: String
         public var isFinished: Bool
 
         public init(
             id: UUID = UUID(), toolName: String,
-            text: String, isFinished: Bool = false
+            text: String, argumentsText: String = "", isFinished: Bool = false
         ) {
             self.id = id
             self.toolName = toolName
             self.text = text
+            self.argumentsText = argumentsText
             self.isFinished = isFinished
         }
     }
@@ -93,7 +100,9 @@ public final class AgentController: ObservableObject {
                 guard !Task.isCancelled else { return }
                 self.streamingText = ""
                 self.messages.append(
-                    TranscriptMessage(role: .assistant, text: result.text))
+                    TranscriptMessage(
+                        role: .assistant, text: result.text,
+                        toolTrace: result.toolTrace))
                 self.setRunning(false)
             } catch is CancellationError {
                 self.streamingText = ""
@@ -140,9 +149,13 @@ public final class AgentController: ObservableObject {
             streamingText = ""
         case .textChunk(let chunk):
             streamingText += chunk
-        case .toolStarted(let name, let label):
+        case .toolStarted(let name, let label, let arguments):
             streamingText = ""
-            activities.append(Activity(toolName: name, text: label))
+            activities.append(
+                Activity(
+                    toolName: name, text: label,
+                    argumentsText: AgentTraceFormatter.arguments(
+                        arguments, empty: "입력 없음")))
         case .toolFinished(let name, let summary):
             if let index = activities.lastIndex(where: {
                 $0.toolName == name && !$0.isFinished
@@ -159,4 +172,5 @@ public final class AgentController: ObservableObject {
                     toolName: "repair", text: "도구 호출 형식을 한 번 바로잡는 중…"))
         }
     }
+
 }

@@ -36,6 +36,7 @@ public actor AgentRuntime {
         var consecutiveRepeats = 0
         var repairedOnce = false
         var completedSteps = 0
+        var toolTrace: [AgentToolTrace] = []
 
         for step in 1...maxSteps {
             try Task.checkCancellation()
@@ -64,7 +65,8 @@ public actor AgentRuntime {
                 }
                 let final = cleanText.isEmpty ? turn.text : cleanText
                 return AgentRunResult(
-                    text: Self.cleanedFinal(final), steps: completedSteps)
+                    text: Self.cleanedFinal(final), steps: completedSteps,
+                    toolTrace: toolTrace)
             }
 
             // 다음 턴이 tool 역할을 해석하려면 assistant의 호출도 이력에 남아야 한다.
@@ -86,12 +88,20 @@ public actor AgentRuntime {
                     let result = AgentToolResult.error(
                         "같은 도구와 인자를 세 번 반복해 루프를 중단했어요.")
                     messages.append(AgentChatMessage(role: .tool, content: result.content))
+                    toolTrace.append(
+                        AgentToolTrace(
+                            step: step, toolName: call.name,
+                            label: registry.label(for: call.name),
+                            arguments: call.arguments, resultSummary: result.summary))
                     onEvent(.toolFinished(name: call.name, summary: result.summary))
                     forceFinish = true
                     break
                 }
 
-                onEvent(.toolStarted(name: call.name, label: registry.label(for: call.name)))
+                let label = registry.label(for: call.name)
+                onEvent(
+                    .toolStarted(
+                        name: call.name, label: label, arguments: call.arguments))
                 let cacheKey = "\(context.generationKey)|\(signature)"
                 let result: AgentToolResult
                 if let cached = resultCache[cacheKey] {
@@ -103,25 +113,32 @@ public actor AgentRuntime {
                     trimCacheIfNeeded()
                 }
                 onEvent(.toolFinished(name: call.name, summary: result.summary))
+                toolTrace.append(
+                    AgentToolTrace(
+                        step: step, toolName: call.name, label: label,
+                        arguments: call.arguments, resultSummary: result.summary))
                 messages.append(AgentChatMessage(role: .tool, content: result.content))
             }
 
             if forceFinish {
                 return try await finalize(
                     messages: messages, parameters: parameters,
-                    completedSteps: completedSteps, onEvent: onEvent)
+                    completedSteps: completedSteps, toolTrace: toolTrace,
+                    onEvent: onEvent)
             }
         }
 
         return try await finalize(
             messages: messages, parameters: parameters,
-            completedSteps: completedSteps, onEvent: onEvent)
+            completedSteps: completedSteps, toolTrace: toolTrace,
+            onEvent: onEvent)
     }
 
     private func finalize(
         messages: [AgentChatMessage],
         parameters: CompletionParameters,
         completedSteps: Int,
+        toolTrace: [AgentToolTrace],
         onEvent: @Sendable @escaping (AgentRuntimeEvent) -> Void
     ) async throws -> AgentRunResult {
         var messages = messages
@@ -136,7 +153,7 @@ public actor AgentRuntime {
         let text = Self.cleanedFinal(turn.text)
         return AgentRunResult(
             text: text.isEmpty ? "확인한 정보만으로는 답을 확정하기 어려워요." : text,
-            steps: completedSteps)
+            steps: completedSteps, toolTrace: toolTrace)
     }
 
     private func trimCacheIfNeeded() {

@@ -435,7 +435,7 @@ final class AgentSmokeRecorder: @unchecked Sendable {
     private var toolNames: [String] = []
 
     func record(_ event: AgentRuntimeEvent) {
-        guard case .toolStarted(let name, _) = event else { return }
+        guard case .toolStarted(let name, _, _) = event else { return }
         lock.lock()
         toolNames.append(name)
         lock.unlock()

@@ -134,18 +134,41 @@ public struct AgentToolResult: Sendable, Equatable {
 public enum AgentRuntimeEvent: Sendable, Equatable {
     case stepStarted(Int)
     case textChunk(String)
-    case toolStarted(name: String, label: String)
+    case toolStarted(name: String, label: String, arguments: [String: JSONValue])
     case toolFinished(name: String, summary: String)
     case repairingToolCall
+}
+
+/// 한 답변이 어떤 근거를 조회했는지 사용자가 펼쳐 볼 수 있는 검증 가능한 기록.
+/// 모델의 숨은 사고 문자열이 아니라 실제 실행된 도구·입력·결과만 보존한다.
+public struct AgentToolTrace: Sendable, Equatable {
+    public var step: Int
+    public var toolName: String
+    public var label: String
+    public var arguments: [String: JSONValue]
+    public var resultSummary: String
+
+    public init(
+        step: Int, toolName: String, label: String,
+        arguments: [String: JSONValue], resultSummary: String
+    ) {
+        self.step = step
+        self.toolName = toolName
+        self.label = label
+        self.arguments = arguments
+        self.resultSummary = resultSummary
+    }
 }
 
 public struct AgentRunResult: Sendable, Equatable {
     public var text: String
     public var steps: Int
+    public var toolTrace: [AgentToolTrace]
 
-    public init(text: String, steps: Int) {
+    public init(text: String, steps: Int, toolTrace: [AgentToolTrace] = []) {
         self.text = text
         self.steps = steps
+        self.toolTrace = toolTrace
     }
 }
 
@@ -159,6 +182,18 @@ enum AgentJSON {
 
     static func signature(name: String, arguments: [String: JSONValue]) -> String {
         "\(name)|\(encode(.object(arguments)))"
+    }
+}
+
+/// UI가 MLX JSON 타입의 세부 표현을 알지 않고도 도구 입력을 읽기 좋게 표시한다.
+enum AgentTraceFormatter {
+    static func arguments(
+        _ arguments: [String: JSONValue], empty emptyText: String = "없음"
+    ) -> String {
+        guard !arguments.isEmpty else { return emptyText }
+        return arguments.keys.sorted().compactMap { key in
+            arguments[key].map { "\(key)=\(AgentJSON.encode($0))" }
+        }.joined(separator: " · ")
     }
 }
 
