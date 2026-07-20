@@ -30,6 +30,10 @@
   읽습니다.
 - **공저자 보조**: 죽은 인물 발화·존대 붕괴 같은 일관성 경고, 설정 충돌 후보
   검토, 복선 추적, 대화 자동 감지 + 「이 대화를 기록할까요?」 인라인 제안.
+- **Writing Agent**: 사이드바의 ✨ 탭에서 작품을 질문하면 활성 문서·아웃라인·
+  씬 원문·인물 상태·사건·대사·관계·타임라인을 필요한 만큼 조회해 답합니다.
+  현재는 **읽기 전용**이라 원고를 직접 바꾸지 않으며, 모든 조회는 커서 이후
+  지식을 차단하고 실행·원고 모두 Mac 밖으로 나가지 않습니다.
 - **정리**: 다중 저널·중첩 폴더(드래그 앤 드롭 정렬·병합, AI 폴더 명명),
   전역 검색(⌘⇧F), 작성일 변경(사이드바에서 저널 오른쪽 클릭).
 - **내보내기**: Markdown · **EPUB 3**(소설, 설정의 저자 이름이 메타데이터로 실림) ·
@@ -74,6 +78,8 @@ Sources/
     Inference/   CompletionEngine(MLX 단일 상주 모델·예측 우선 선점)·
                  ContextAssembler(지식 → 프롬프트 조립)·PromptCache(KV 재사용)·
                  ModelDownloadManager
+    Agent/       읽기 전용 tool-calling loop·12개 Story Intelligence 조회 도구·
+                 strict validate/폴백 파서·사이드바 챗/진행 스트림
     Knowledge/   백그라운드 이해 파이프라인 (아래 "서사" 절) — 씬 분할·요약
                  피라미드·사건 로그·인물 감지·대화 귀속·구간 분석·사건 그래프·
                  플롯 스레드·일관성 검사·지식 사이드카
@@ -82,6 +88,7 @@ Sources/
   MINTBench/   품질·지연 벤치 CLI (앱 없이 모델·파라미터 측정)
 Tests/
   MINTCoreTests/  결정적 로직 회귀 테스트 (XCTest, 모델·Metal 미사용)
+                  — Agent 루프는 가짜 생성기를 주입해 모델 없이 검증
 ```
 
 ### 저장 형식
@@ -214,6 +221,58 @@ git graph의 시각 언어를 소설의 서사 구조에 옮겼습니다. 핵심
 싣습니다. 예측이 실제로 참고한 항목은 AI 컨텍스트 인스펙터에서 열람하고
 고정(Pin)·제외(Exclude)할 수 있습니다 — 인스펙터가 보는 것 = 조립이 하는 것.
 
+프롬프트가 실제로 어떻게 조립되는지(블록 순서·예산·삭감 순서·KV 프리필 재사용·
+시점 차단의 3중 방어)는 [CONTEXT_EXPLAIN.md](CONTEXT_EXPLAIN.md)에 다이어그램과
+함께 정리돼 있습니다.
+
+## Writing Agent
+
+사이드바의 ✨ 탭에서 엽니다. 질문을 보내면 Agent가 원고 전체를 프롬프트에 넣는
+대신 작은 조회 도구를 **최대 6단계**로 조합합니다. 어떤 정보를 확인했는지는 진행
+줄로 보이며, 같은 `KnowledgeSnapshot`을 쓰므로 바이블·서사·자동완성과 이해가
+어긋나지 않습니다. *의도*: 온디바이스에서 거대 컨텍스트는 지연으로 갚아야 하는
+빚이다 — 원고를 통째로 넣는 대신 **필요한 사실만 질의**하면 같은 모델로 더 정확한
+답이 나온다.
+
+**조회 도구 12개** (읽기 전용, `Agent/WritingTools.swift`):
+
+| 도구 | 하는 일 | 주요 인자 |
+|---|---|---|
+| `get_active_document` | 활성 문서의 제목·종류·장르·등록 인물·커서까지의 분량과 씬 수를 확인합니다. | 없음 |
+| `get_outline` | 현재 커서까지의 장·절·씬 목록, 헤딩, 범위와 준비된 씬 요약을 가져옵니다. 작성 중인 씬의 전체 요약은 숨깁니다. | 없음 |
+| `read_scene` | 아웃라인의 특정 씬 원문을 읽습니다. 현재 작성 중인 씬이면 커서까지만 반환합니다. | `scene_ref`: 씬 번호·해시·헤딩 |
+| `search_text` | 정확한 문자열을 찾아 문서·위치·짧은 앞뒤 문맥을 반환합니다. 필요하면 다른 로컬 문서까지 검색합니다. | `query`, `all_documents`, `limit` |
+| `find_character` | 이름·별칭·UUID로 등록 인물 카드를 찾아 안정 식별자, 별칭, 메모와 자동 등록 여부를 확인합니다. | `character_ref` |
+| `get_character_state` | 특정 시점의 인물 위치·감정·관계·목표·생사 상태를 확인합니다. | `character_ref`, `before` |
+| `get_character_events` | 인물이 참여한 사건을 담화 순서로 가져옵니다. 사건 요약·중요도·씬·근거 인용을 함께 반환합니다. | `character_ref`, `before` |
+| `get_character_dialogues` | 인물의 최근 대사, 존대 기본값, 참여 대화의 주제·어조를 확인해 말투 판단에 사용합니다. | `character_ref`, `before` |
+| `get_relation` | 두 인물 사이의 **방향 있는** 현재 관계, 관계 변화 이력과 존대 사용을 확인합니다. | `from_character`, `to_character`, `before` |
+| `get_timeline` | 사건을 원고에 나온 순서 또는 작품 안의 시간순으로 정렬하고 시간 관계 충돌도 확인합니다. | `order`: `discourse`/`chronological`, `before` |
+| `check_consistency` | 죽은 인물의 발화와 이미 확립된 존대가 무너진 지점을 결정적 규칙으로 검사합니다. | `before` |
+| `get_context_at_cursor` | 현재 씬·헤딩·서사 흐름·시간층·POV와 자동완성이 실제로 참고할 지식 항목을 보여줍니다. | 없음 |
+
+`before`는 Agent가 사용하는 내부 UTF-16 위치 인자입니다. 생략하면 현재 커서이며,
+더 큰 값을 요청해도 현재 커서로 잘립니다. 인물 상태·사건·대사·관계처럼
+Story Intelligence가 필요한 도구는 해당 문서의 백그라운드 이해가 아직 준비되지
+않았으면 추측하지 않고 "준비된 정보가 없다"고 답합니다.
+
+- **원고를 수정하는 도구는 등록되어 있지 않습니다.** 편집 요청에도 제안만 답합니다
+  (편집 도구 `propose_patch`·diff/accept는 P1 — PLAN §14 M-A2).
+- **시점 차단이 도구 레벨에 있습니다** — 모든 도구의 `before` 인자는 현재 커서로
+  clamp되고, 커서가 속한 씬은 커서까지만 읽힙니다. 모델이 큰 값을 만들어도 뒤 장의
+  결말이 도구 결과로 샐 수 없습니다.
+- **단일 모델 선점** — Agent가 도는 동안 고스트 자동완성과 백그라운드 이해가
+  양보하고(예약·진행 중 작업 취소), 종료 뒤 현재 문서의 증분 타이머만 다시 감깁니다.
+  완료된 해시는 재처리하지 않습니다.
+- **형식 복구** — 네이티브 tool call이 우선이고, 깨지면 태그/`TOOL:` 줄 형식 폴백
+  파서와 엄격한 인자 검증으로 **한 번만** 바로잡습니다. 같은 도구·같은 인자 3회
+  반복이나 6단계 초과는 강제 종료하되, 마지막에 "지금까지 확인한 것만으로 답하라"는
+  마무리 턴을 한 번 더 돌려 빈손으로 끝내지 않습니다.
+- **요청 세대별 결과 캐시** — 같은 세션에서 같은 조회를 반복하면 캐시가 답합니다.
+  캐시 키에 원문·지식 해시가 들어 있어 원고가 바뀌면 자동으로 식습니다.
+- 대화 이력은 최근 12개·각 2,000자로 제한해 긴 세션에서도 프롬프트가 부풀지
+  않습니다.
+
 ## 요구사항
 
 - **Apple Silicon Mac** (M1 이상) — AI 추론이 Apple Silicon GPU 기반이라 필수.
@@ -260,13 +319,19 @@ KV 캐시 재사용, 소설 컨텍스트 크기를 조절할 수 있습니다.
 swift run -c release MINTBench                # 단발 프롬프트 — 스타일·지연 비교
 swift run -c release MINTBench --help         # 전체 옵션
 
+# Peppermint 실모델 Agent 스모크: 네이티브 tool call 3종 + 전체 loop.
+swift run -c release MINTBench --model mlx-community/Qwen3.6-35B-A3B-4bit --agent-smoke
+
 # 리플레이 벤치: 실제 원고를 문장 경계에서 잘라 제안 vs 실제 이어진 원문 비교.
 # 컷마다 콜드/웜 2회 실행해 KV 프리필 재사용 효과(TTFC)까지 확인합니다.
 swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre 판타지
 ```
 
-측정 기록: [docs/m2-inference.md](docs/m2-inference.md) ·
-파이프라인 분석: [docs/autocomplete-context.md](docs/autocomplete-context.md)
+- 측정 기록: [docs/m2-inference.md](docs/m2-inference.md)
+- 파이프라인 분석: [docs/autocomplete-context.md](docs/autocomplete-context.md)
+- **컨텍스트 주입 전수 분석**: [CONTEXT_EXPLAIN.md](CONTEXT_EXPLAIN.md) — 예측·이해
+  두 경로가 로컬 LLM에 무엇을 어떤 순서로 넣는지
+- Agent 재설계 조사·설계: [docs/agent-redesign.md](docs/agent-redesign.md)
 
 ## 프로젝트 진행 상태
 
@@ -280,4 +345,5 @@ swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre �
 | M7 "공저자 1차" | 일관성 경고 · 수락률 로깅 · 인물 연대기 · 타임라인 점프 | ✅ 완료 |
 | M8 Narrative Intelligence/Graph | 구간·정본 사건·관점·인과·시간 부분 순서 · 대화 기록 · 컨텍스트 인스펙터 | ✅ 완료 |
 | M9 "Branch = PlotThread" | 플롯 스레드 추론 · 통합 서사 화면 (플롯 레인 그래프 · 흐름/시간순) | ✅ 코드 완료 |
+| M10 Writing Agent MVP | 읽기 전용 tool-calling loop · 조회 도구 12개 · 진행 스트림 · 시점 차단 | ✅ 코드 완료 · Peppermint 스모크 통과 |
 | 후속 | 플롯 군집 품질의 실코퍼스 검증 · 대작 스케일 실기기 측정 · 일반 문서 라이트 모드 | 📋 계획 (PLAN §14·§16) |

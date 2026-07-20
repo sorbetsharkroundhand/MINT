@@ -78,6 +78,9 @@ public final class BackgroundIndexer: ObservableObject {
     private var fastTimer: Task<Void, Never>?
     private var deepTimer: Task<Void, Never>?
     private var passTask: Task<Void, Never>?
+    /// Agent foreground 생성 중에는 유휴 LLM 작업을 보류한다. 원문 파싱·웜로드 같은
+    /// 결정적 읽기는 허용하지만 같은 모델을 쓰는 pass만 취소한다 (ADR-4).
+    private var agentActive = false
 
     public init(
         engine: CompletionEngine,
@@ -118,6 +121,7 @@ public final class BackgroundIndexer: ObservableObject {
 
         fastTimer?.cancel()
         deepTimer?.cancel()
+        guard !agentActive else { return }
         // 자동완성이 꺼져 있으면 타이머조차 감지 않는다 — 어차피 패스가 거부되고,
         // 키 입력 경로에 태스크 생성 비용을 남길 이유가 없다 (랙 진단의 대조군:
         // 스위치를 끄면 백그라운드 이해 관련 작업이 문자 그대로 0이어야 한다).
@@ -132,6 +136,22 @@ public final class BackgroundIndexer: ObservableObject {
             try? await Task.sleep(for: Self.deepPassIdle)
             guard !Task.isCancelled else { return }
             self?.startPass(deep: true)
+        }
+    }
+
+    /// Agent 실행과 백그라운드 이해의 단일 모델 경합 조율. Agent 종료 뒤에는 현재
+    /// 문서의 증분 타이머만 다시 감고, 완료된 해시는 재처리하지 않는다.
+    public func setAgentActive(_ active: Bool) {
+        guard agentActive != active else { return }
+        agentActive = active
+        if active {
+            fastTimer?.cancel()
+            deepTimer?.cancel()
+            passTask?.cancel()
+            passTask = nil
+            isIndexing = false
+        } else if let entryID = store?.activeID {
+            noteChange(entryID: entryID)
         }
     }
 

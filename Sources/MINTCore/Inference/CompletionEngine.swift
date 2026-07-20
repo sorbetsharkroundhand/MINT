@@ -217,6 +217,66 @@ public actor CompletionEngine {
         }
     }
 
+    /// 읽기 전용 Writing Agent의 한 모델 턴 (PLAN §14 M10, ADR-1).
+    /// 자동완성·백그라운드와 같은 컨테이너를 공유하며, 도구 스키마를 챗 템플릿과
+    /// 생성 스트림 양쪽에 전달해야 `.toolCall`이 실제로 발행된다.
+    public func generateAgentTurn(
+        messages: [AgentChatMessage],
+        tools: [ToolSpec],
+        parameters: CompletionParameters,
+        onChunk: @Sendable @escaping (String) -> Void
+    ) async throws -> AgentModelTurn {
+        let container = try await loadedContainer(
+            modelID: parameters.modelID, onProgress: nil)
+        try Task.checkCancellation()
+        return try await container.perform { context in
+            let chat: [Chat.Message] = messages.map { message in
+                switch message.role {
+                case .system: .system(message.content)
+                case .user: .user(message.content)
+                case .assistant: .assistant(message.content)
+                case .tool: .tool(message.content)
+                }
+            }
+            let toolSpecs: [ToolSpec]? = tools.isEmpty ? nil : tools
+            let userInput = UserInput(
+                chat: chat, tools: toolSpecs,
+                additionalContext: ["enable_thinking": false])
+            let input = try await context.processor.prepare(input: userInput)
+            try Task.checkCancellation()
+
+            let generateParameters = GenerateParameters(
+                maxTokens: min(1_024, max(64, parameters.maxTokens)),
+                temperature: Float(parameters.temperature),
+                topP: Float(parameters.topP))
+            let stream = try MLXLMCommon.generate(
+                input: input, parameters: generateParameters, context: context,
+                tools: toolSpecs)
+            var text = ""
+            var calls: [AgentToolCall] = []
+            for await generation in stream {
+                if Task.isCancelled { break }
+                switch generation {
+                case .chunk(let chunk):
+                    text += chunk
+                    onChunk(chunk)
+                case .toolCall(let call):
+                    calls.append(
+                        AgentToolCall(
+                            name: call.function.name,
+                            arguments: call.function.arguments))
+                case .info:
+                    break
+                }
+            }
+            try Task.checkCancellation()
+            return AgentModelTurn(
+                text: Self.stripThinking(text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                toolCalls: calls)
+        }
+    }
+
     // MARK: - 모델 로드 (1회, 교체 가능)
 
     private func loadedContainer(
@@ -512,3 +572,5 @@ public actor CompletionEngine {
         return String(text.dropFirst().dropLast())
     }
 }
+
+extension CompletionEngine: AgentTurnGenerating {}

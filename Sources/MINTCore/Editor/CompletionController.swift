@@ -166,6 +166,9 @@ public final class CompletionController: ObservableObject {
             : settings.contextCharacters
     }
     private var pendingTask: Task<Void, Never>?
+    /// Agent가 같은 단일 모델을 쓰는 동안 고스트 요청을 보류한다 (ADR-4).
+    /// 값은 ContentView의 AgentController 배선에서만 바뀐다.
+    private var agentActive = false
     /// 편집/커서 이벤트마다 증가 — 뒤늦게 도착한 stale 응답을 버리는 기준.
     private var generation = 0
     /// 제안이 발행된 시점의 커서(UTF-16). 커서가 여기서 벗어나면 폐기.
@@ -292,6 +295,14 @@ public final class CompletionController: ObservableObject {
         }
     }
 
+    /// 읽기 전용 Agent의 foreground 생성 선점. 켜는 순간 예약·생성 중인 고스트와
+    /// 화면 제안을 모두 취소하고, 끌 때까지 새 고스트를 예약하지 않는다.
+    public func setAgentActive(_ active: Bool) {
+        guard agentActive != active else { return }
+        agentActive = active
+        if active { invalidate() }
+    }
+
     private func noteLoadProgress(_ fraction: Double) {
         switch engineState {
         case .ready: return
@@ -341,6 +352,7 @@ public final class CompletionController: ObservableObject {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
 
+        guard !agentActive else { return }  // Agent가 단일 모델을 선점 중 (ADR-4)
         guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
         guard caretAtParagraphEnd else { return }

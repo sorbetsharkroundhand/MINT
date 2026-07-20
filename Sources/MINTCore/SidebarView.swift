@@ -12,6 +12,7 @@ enum SidebarSection: String {
     /// (PLAN §6.6). raw값 "timeline" 유지 — 기존 사용자의 저장된 섹션이 살아남는다.
     case narrative = "timeline"
     case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
+    case agent  // 읽기 전용 Writing Agent (PLAN §14 M10)
 }
 
 /// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
@@ -65,6 +66,8 @@ struct SidebarView: View {
     let theme: MintTheme
     /// 바이블·타임라인 섹션의 데이터 소스 — nil이면 문서 섹션만 (프리뷰 등).
     var indexer: BackgroundIndexer?
+    /// nil이면 Agent 탭을 숨긴다(프리뷰·테스트의 기존 초기화 호환).
+    var agent: AgentController?
 
     /// 현재 섹션 — 툴바의 소설 배지도 이 키를 써서 바이블 섹션을 연다.
     @AppStorage("mint.sidebarSection") private var sectionRaw = SidebarSection.files.rawValue
@@ -103,6 +106,7 @@ struct SidebarView: View {
             case .bible: bibleSection
             case .narrative: narrativeSection
             case .context: contextSection
+            case .agent: agentSection
             }
         }
         .background(theme.sidebarTintC)
@@ -159,6 +163,9 @@ struct SidebarView: View {
                 .narrative, icon: "arrow.triangle.branch",
                 help: "서사 — 씬·사건·흐름·시간")
             sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
+            if agent != nil {
+                sectionTab(.agent, icon: "sparkles", help: "Writing Agent — 작품 조회와 조언")
+            }
             Spacer()
         }
         .padding(.horizontal, 10)
@@ -232,6 +239,15 @@ struct SidebarView: View {
     /// AI 컨텍스트 섹션 (v4) — 최근 예측이 실제로 참고한 정보의 열람.
     private var contextSection: some View {
         ContextInspectorView(completion: completion, store: store, theme: theme)
+    }
+
+    /// Agent는 별도 진입점이지만 자동완성과 같은 KnowledgeSnapshot·모델을 쓴다.
+    @ViewBuilder private var agentSection: some View {
+        if let agent {
+            AgentView(agent: agent, theme: theme)
+        } else {
+            SidebarSectionHint(theme: theme, text: "Writing Agent가 준비되지 않았어요.")
+        }
     }
 
     /// 문서(폴더 트리) 섹션 — 기존 사이드바 본문 그대로.

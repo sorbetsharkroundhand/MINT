@@ -12,21 +12,27 @@ public struct ContentView: View {
     @ObservedObject private var completion: CompletionController
     /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
     private let indexer: BackgroundIndexer?
+    /// 읽기 전용 Writing Agent (M10) — nil이면 기존 화면만 구성한다.
+    private let agent: AgentController?
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
 
     public init(
         store: EntryStore,
         completion: CompletionController,
-        indexer: BackgroundIndexer? = nil
+        indexer: BackgroundIndexer? = nil,
+        agent: AgentController? = nil
     ) {
         self.store = store
         self.completion = completion
         self.indexer = indexer
+        self.agent = agent
     }
 
     public var body: some View {
-        MainSurface(store: store, completion: completion, indexer: indexer)
+        MainSurface(
+            store: store, completion: completion, indexer: indexer,
+            agent: agent)
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
             .onAppear {
@@ -77,6 +83,28 @@ public struct ContentView: View {
                     // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
                     indexer.noteChange(entryID: store.activeID)
                 }
+                // Writing Agent도 Store/Indexer 객체가 아니라 요청 시점의 값 복사만
+                // 받는다. 실행 중에는 고스트와 백그라운드 생성을 함께 선점한다.
+                if let agent {
+                    agent.sourceProvider = { [weak store, weak indexer, weak completion] in
+                        guard let store, let entry = store.activeEntry else { return nil }
+                        let knowledge = indexer?.snapshot.flatMap {
+                            $0.entryID == entry.id ? $0 : nil
+                        }
+                        return AgentSourceSnapshot(
+                            activeEntry: entry, entries: store.entries,
+                            folders: store.folders, knowledge: knowledge,
+                            caretUTF16: completion?.lastCaretLocation
+                                ?? (entry.body as NSString).length)
+                    }
+                    agent.parametersProvider = { [weak completion] in
+                        completion?.settings.parameters ?? CompletionParameters()
+                    }
+                    agent.runningDidChange = { [weak completion, weak indexer] active in
+                        completion?.setAgentActive(active)
+                        indexer?.setAgentActive(active)
+                    }
+                }
             }
     }
 
@@ -95,6 +123,7 @@ private struct MainSurface: View {
     @ObservedObject var completion: CompletionController
     /// 인물 감지 후보 UI 배선용 (M6) — 프리뷰 등에서는 nil.
     var indexer: BackgroundIndexer?
+    var agent: AgentController?
     @Environment(\.colorScheme) private var colorScheme
     /// 사용자 색상 팔레트 — 관찰해서 설정에서 색을 바꾸는 즉시 화면에 반영한다.
     @ObservedObject private var palette = PaletteSettings.shared
@@ -124,7 +153,7 @@ private struct MainSurface: View {
                 if sidebarVisible {
                     SidebarView(
                         store: store, completion: completion, theme: theme,
-                        indexer: indexer
+                        indexer: indexer, agent: agent
                     )
                     .frame(width: clampedSidebarWidth)
                 }

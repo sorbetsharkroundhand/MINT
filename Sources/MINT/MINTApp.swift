@@ -16,10 +16,13 @@ struct MINTApp: App {
     private static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
     @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
+    @StateObject private var agent = AgentController(engine: MINTApp.sharedEngine)
 
     var body: some Scene {
         Window("MINT", id: "main") {
-            ContentView(store: store, completion: completion, indexer: indexer)
+            ContentView(
+                store: store, completion: completion, indexer: indexer,
+                agent: agent)
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)

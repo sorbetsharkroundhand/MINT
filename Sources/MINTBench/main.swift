@@ -31,6 +31,8 @@ struct BenchOptions {
     var detectOnly = false
     /// --detect-only 정밀도 채점용 정답 인물 (쉼표 구분).
     var truePeople = ""
+    /// 실제 모델의 네이티브 tool call과 Agent loop를 짧게 검증 (PLAN §14 M10).
+    var agentSmoke = false
 
     enum ParseResult {
         case options(BenchOptions)
@@ -112,6 +114,8 @@ struct BenchOptions {
             case "--true-people":
                 guard let value = iterator.next() else { return .failure("--true-people 값 누락") }
                 options.truePeople = value
+            case "--agent-smoke":
+                options.agentSmoke = true
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -127,6 +131,7 @@ struct BenchOptions {
           --temperature <x>    샘플링 온도 (기본: \(CompletionParameters().temperature))
           --runs <n>           스타일별 반복 횟수 (기본: 2 — 1회차는 워밍업 포함)
           --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
+          --agent-smoke       실제 모델로 Agent 네이티브 tool call 3종과 전체 loop 검증
           --help               이 도움말
 
         리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
@@ -227,12 +232,19 @@ if options.detectOnly {
     exit(0)
 }
 
-print("== MINT M2 추론 선검증 ==")
-print("모델     : \(options.modelID)")
-print("스타일   : \(options.styles.map(\.rawValue).joined(separator: ", "))")
-print("토큰 상한: \(options.maxTokens) · 온도: \(options.temperature) · 반복: \(options.runs)")
-print("프롬프트 : \(options.prompt)")
-print("")
+if options.agentSmoke {
+    print("== MINT Writing Agent 실모델 검증 ==")
+    print("모델       : \(options.modelID)")
+    print("응답 토큰 상한: \(max(256, options.maxTokens)) · 온도: \(options.temperature)")
+    print("")
+} else {
+    print("== MINT M2 추론 선검증 ==")
+    print("모델     : \(options.modelID)")
+    print("스타일   : \(options.styles.map(\.rawValue).joined(separator: ", "))")
+    print("토큰 상한: \(options.maxTokens) · 온도: \(options.temperature) · 반복: \(options.runs)")
+    print("프롬프트 : \(options.prompt)")
+    print("")
+}
 
 let engine = CompletionEngine()
 let reporter = ProgressReporter()
@@ -250,6 +262,12 @@ do {
     exit(1)
 }
 print(String(format: "✅ 모델 로드 완료: %.1fs (다운로드 캐시 포함)", Date().timeIntervalSince(loadStart)))
+
+// Agent 실모델 스모크 — 자동완성 벤치와 섞지 않고 tool 형식 준수를 별도 판정한다.
+if options.agentSmoke {
+    let ok = await runAgentSmoke(engine: engine, options: options)
+    exit(ok ? 0 : 1)
+}
 
 // 리플레이 모드 — 단발 측정 대신 원고 기반 품질 루프 (PLAN §13).
 if let replayPath = options.replayPath {
@@ -320,6 +338,115 @@ print("""
     · 목표 초과 시 --max-tokens 축소(8) 또는 더 작은 모델로 재측정
     · 확정값은 Sources/MINTCore/Settings.swift 의 CompletionParameters 기본값에 반영
     """)
+
+// MARK: - Agent 실모델 스모크 (PLAN §14 M10)
+
+/// 세 개의 단일 도구 선택과 한 번의 실제 Agent loop를 재현한다. 네이티브
+/// `.toolCall`과 폴백 호출을 구분해 양자화 모델의 형식 준수 위험을 드러낸다.
+func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Bool {
+    let body = """
+        # 1장 — 비 오는 병원
+        서연은 병원 복도에서 민준을 만났다.
+        “네가 편지를 가져갔어?” 서연이 물었다.
+        “아니야. 난 어젯밤 내내 집에 있었어.” 민준이 말했다.
+
+        # 2장 — 닫힌 서재
+        서연은 책상 아래에서 젖은 편지를 발견했다.
+        """
+    let entry = JournalEntry(
+        title: "젖은 편지", body: body, kind: .novel, genre: "미스터리",
+        characters: [CharacterCard(name: "서연"), CharacterCard(name: "민준")])
+    let source = AgentSourceSnapshot(
+        activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
+        caretUTF16: (body as NSString).length)
+    let registry = DefaultWritingTools.readOnlyMVP
+    let parameters = CompletionParameters(
+        modelID: options.modelID, promptStyle: .instruct,
+        maxTokens: max(256, options.maxTokens),
+        temperature: options.temperature)
+    let system = AgentChatMessage(
+        role: .system,
+        content: "MINT 읽기 전용 집필 Agent다. 답을 추측하지 말고 요청에 가장 알맞은 도구 하나를 호출하라.")
+    let cases: [(request: String, expected: String)] = [
+        ("현재 문서의 제목과 종류를 확인해 줘.", "get_active_document"),
+        ("본문에서 ‘병원’이라는 표현이 나온 위치를 찾아 줘.", "search_text"),
+        ("현재 커서까지 장면 아웃라인을 확인해 줘.", "get_outline"),
+    ]
+
+    print("\n== Writing Agent 실모델 스모크 ==")
+    print("도구: \(registry.names.count)개 · 단일 선택: \(cases.count)건")
+    var correct = 0
+    var native = 0
+    for (index, test) in cases.enumerated() {
+        let started = Date()
+        do {
+            let turn = try await engine.generateAgentTurn(
+                messages: [system, AgentChatMessage(role: .user, content: test.request)],
+                tools: registry.specs, parameters: parameters, onChunk: { _ in })
+            let fallback = AgentToolCallParser.parse(turn.text).calls
+            let calls = turn.toolCalls.isEmpty ? fallback : turn.toolCalls
+            let origin = turn.toolCalls.isEmpty ? "폴백" : "네이티브"
+            if !turn.toolCalls.isEmpty { native += 1 }
+            let names = calls.map(\.name)
+            let passed = names.first == test.expected
+            if passed { correct += 1 }
+            print(
+                "[\(index + 1)] \(passed ? "✅" : "❌") \(test.expected) ← "
+                    + "\(names.isEmpty ? "호출 없음" : names.joined(separator: ", "))"
+                    + " · \(origin) · \(format(Date().timeIntervalSince(started)))")
+        } catch {
+            print("[\(index + 1)] ❌ 생성 실패: \(error.localizedDescription)")
+        }
+    }
+
+    print("\n-- 전체 Agent loop --")
+    let recorder = AgentSmokeRecorder()
+    do {
+        let runtime = AgentRuntime(generator: engine, registry: registry, maxSteps: 4)
+        let started = Date()
+        let result = try await runtime.run(
+            request: "이 작품의 제목과 병원이 등장하는 대목을 확인해서 두 문장으로 알려 줘.",
+            history: [], source: source, parameters: parameters
+        ) { event in
+            recorder.record(event)
+        }
+        let events = recorder.snapshot()
+        print("도구 호출: \(events.toolNames.isEmpty ? "없음" : events.toolNames.joined(separator: " → "))")
+        print("단계: \(result.steps) · 전체: \(format(Date().timeIntervalSince(started)))")
+        print("답변: \(result.text)")
+        let loopPassed = !events.toolNames.isEmpty && !result.text.isEmpty
+        print("\n== Agent 판정 ==")
+        print("단일 도구 정확도: \(correct)/\(cases.count) · 네이티브 호출: \(native)/\(cases.count)")
+        print("전체 loop: \(loopPassed ? "✅ 통과" : "❌ 실패")")
+        return correct == cases.count && loopPassed
+    } catch {
+        print("❌ 전체 Agent loop 실패: \(error.localizedDescription)")
+        return false
+    }
+}
+
+/// `@Sendable` 진행 콜백에서 벤치 결과만 안전하게 모은다.
+final class AgentSmokeRecorder: @unchecked Sendable {
+    struct Snapshot {
+        let toolNames: [String]
+    }
+
+    private let lock = NSLock()
+    private var toolNames: [String] = []
+
+    func record(_ event: AgentRuntimeEvent) {
+        guard case .toolStarted(let name, _) = event else { return }
+        lock.lock()
+        toolNames.append(name)
+        lock.unlock()
+    }
+
+    func snapshot() -> Snapshot {
+        lock.lock()
+        defer { lock.unlock() }
+        return Snapshot(toolNames: toolNames)
+    }
+}
 
 // MARK: - 리플레이 벤치 (PLAN §13)
 

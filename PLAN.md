@@ -87,6 +87,8 @@ flowchart TD
         CC["CompletionController<br/>게이트 · 디바운스 · in-flight 취소"]
         CA["ContextAssembler (신규)<br/>모드 선택 · 랭킹 · 토큰 예산 · state_at(커서)"]
         CE["CompletionEngine (actor)<br/>단일 모델 상주 · KV 캐시 · 취소 가능 생성"]
+        AR["AgentRuntime<br/>읽기 전용 loop · step/반복 상한 · 폴백 파서"]
+        TR["ToolRegistry<br/>12개 조회 도구 · strict validate · 결과 캐시"]
     end
 
     BE -->|"편집 이벤트"| CC
@@ -99,6 +101,10 @@ flowchart TD
     KS -->|"준비된 지식"| CA
     CA -->|"조립된 프롬프트"| CE
     CE -->|"제안"| CC --> BE
+    ES -->|"요청 시 값 복사"| TR
+    KS -->|"같은 KnowledgeSnapshot"| TR
+    AR -->|"조회"| TR -->|"tool result"| AR
+    AR -->|"tool-aware 단일 생성"| CE
     ES <--> BE
 ```
 
@@ -110,6 +116,9 @@ flowchart TD
    KnowledgeStore 갱신(append) → 지식 세대 +1. (KV 프리웜은 보류 — §12.)
 3. **예측 경로** (디바운스 후, ~0.5초 예산): 게이트 → 모드 선택 → 준비된 지식
    랭킹·조립 → 단일 생성 → 후처리 → 고스트. **여기서 지식을 만들지 않는다.**
+4. **Agent 경로** (사용자 명시 요청): 현재 문서·지식 값 복사 → 필요한 조회 도구
+   조합(최대 6단계) → 답변 스트림. 원고 편집 side-effect는 없고, 실행 중에는
+   고스트·백그라운드 생성을 취소해 단일 모델을 선점한다.
 
 ## 5. 문서 모델
 
@@ -591,9 +600,9 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 - [ ] 플롯 군집 품질의 실코퍼스 검증 — 서로 다른 구조의 소설에서 서로 다른
       topology가 나오는지 (요구사항 §14) 라벨 코퍼스 필요, MINTBench 후속.
 
-### M10 (제안) — Agentic Writing Environment "OpenCode for Writing"
+### M10 — Agentic Writing Environment "OpenCode for Writing" (MVP, 2026-07-20)
 
-MINT를 온디바이스 Writing Agent Environment로 재정의하는 조사·설계 (아직 착수 전).
+MINT를 온디바이스 Writing Agent Environment로 재정의한다.
 Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용자의 집필을
 돕는다 — 자동완성과 **같은 `KnowledgeSnapshot`을 공유**(중복 분석 없음). 재설계의
 본질은 신규 구축이 아니라 **기존 질의·추출·검색 인프라의 Tool 승격**이다.
@@ -605,6 +614,22 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
   형식 신뢰도 → lenient/strict 파서 + 폴백(EventParser 철학).
 - MVP = **읽기 전용 Agent**(조회·조언 12 tool, side-effect 없음). 편집(propose_patch·
   diff/accept)은 P1. Agent와 고스트 자동완성은 **공존**(ADR-4).
+- [x] M-A0 — `WritingTool`/`ToolRegistry`/값복사 `AgentContext`, strict schema 검증,
+      요청 세대별 결과 캐시. 조회 도구 12개: 활성 문서·아웃라인·씬 읽기·문자열
+      검색·인물·상태·사건·대사·관계·타임라인·일관성·커서 컨텍스트.
+- [x] M-A1 — 네이티브 Hermes `.toolCall` + 태그/`TOOL:` lenient 폴백,
+      최대 6단계·동일 호출 3회 중단·1회 형식 repair·취소 협조. 사이드바 Agent 챗과
+      도구 진행 스트림. 모든 도구의 `before`는 커서로 clamp하고 현재 씬 원문은
+      커서까지만 읽어 미래 지식을 차단한다.
+- [x] 단일 모델 조율 — Agent 실행 중 고스트 예측·백그라운드 pass 취소/보류,
+      종료 뒤 증분 타이머 복구. 원문·파생 캐시 저장 형식 변경 없음.
+- [x] Peppermint 실모델 스모크 — `MINTBench --agent-smoke`에서 Qwen3.6-35B-A3B
+      4bit 로드 5.4s, 단일 도구 선택 3/3·네이티브 `.toolCall` 3/3, 2-step 전체
+      loop 14.0s 통과(2026-07-20, 온도 0.3). 재현 명령은 README §MINTBench.
+- [ ] M-A1 확장 벤치 — 모델별 tool 선택/JSON 형식 성공률과 1/3/6-step 지연을
+      10개 이상 라벨 코퍼스로 측정. 코드 경로·결정적 loop·Peppermint smoke는 완료.
+- [ ] M-A2 이후 — 편집 도구와 Diff/Accept, 세션 압축·MINT.md, semantic search는
+      각각 P1/P2. 읽기 전용 MVP에 섞지 않는다.
 
 ## 15. 향후 연구 아이디어
 
@@ -728,6 +753,10 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 | `Sources/MINTCore/Editor/BlockTextView.swift` | 블록 에디터 + 고스트 렌더 + Tab/→/Esc |
 | `Sources/MINTCore/Editor/CompletionController.swift` | 게이트 · 디바운스 · 수락/거부 · 취소 |
 | `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 단일 모델 상주 · 취소 가능 생성 (actor) |
+| `Sources/MINTCore/Agent/AgentRuntime.swift` | 읽기 전용 Agent loop · step/반복 상한 · 도구 실행 |
+| `Sources/MINTCore/Agent/WritingTools.swift` | 조회 도구 12개 · schema/strict validate · 시점 차단 어댑터 |
+| `Sources/MINTCore/Agent/AgentController.swift` | Agent 세션 UI 상태 · 단일 모델 선점 배선 |
+| `Sources/MINTCore/Agent/AgentView.swift` | 사이드바 챗 · 도구 진행 스트림 |
 | `Sources/MINTCore/Storage/EntryStore.swift` | 원문 저장 (entries.json) — 유일한 진실 |
 | `Sources/MINTCore/Settings.swift` | `CompletionSettings` · 모델 프리셋 |
 | `Sources/MINTCore/Theme.swift` | 색·폰트 토큰 (라이트/다크) |

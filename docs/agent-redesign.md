@@ -3,7 +3,7 @@
 > MINT를 **"OpenCode for Writing"** — 온디바이스 Writing Agent Environment — 로
 > 재정의하기 위한 조사·설계 보고서. 핵심 Agent 모델은 Qwen3.6 계열(MLX 온디바이스).
 > 철학·불변 규칙은 [CLAUDE.md](../CLAUDE.md), 시스템 설계·로드맵은 [PLAN.md](../PLAN.md).
-> 이 문서는 **조사·설계**다 — 구현 지시가 아니다. 실제 착수는 §17 Migration Plan 참조.
+> 이 문서는 **조사·설계**다. 구현 상태와 다음 착수점은 §17 Migration Plan 참조.
 
 추측과 코드에서 확인한 사실을 구분해 표기한다: **[코드확인]** / **[추론]** / **[미확인]**.
 경쟁사 주장은 CONFIRMED/INFERRED/UNKNOWN + 출처 URL(§3).
@@ -15,6 +15,12 @@
 **설계 결정(확정)**: ① **Agent ↔ 자동완성 공존**(같은 Story Intelligence 공유,
 자동완성 대체 아님, ADR-4). ② **MVP = 읽기 전용 Agent 먼저**(조회·조언, 편집은 P1).
 ③ 이 문서를 저장소 설계 자산으로 유지(PLAN §14 M10 포인터).
+
+**구현 상태(2026-07-20)**: M-A0 + M-A1 읽기 전용 MVP 완료. 네이티브 tool call,
+lenient/strict 폴백, 6-step loop, 12개 조회 도구, 시점 차단, 사이드바 진행 스트림,
+단일 모델 선점까지 구현했다. Peppermint(Qwen3.6-35B-A3B 4bit) 실모델 스모크에서
+단일 도구 선택과 네이티브 호출이 각각 3/3, 2-step 전체 loop가 14.0s로 통과했다.
+10개 이상 라벨 코퍼스의 모델별 형식 성공률·1/3/6-step 지연 비교는 후속이다.
 
 ---
 
@@ -590,9 +596,9 @@ Manuscript(entries.json body)
   `instruct` 자동완성 경로는 Agent와 중복 시 정리 검토(측정 후).
 
 ## 17. 단계별 Migration Plan
-1. **M-A0 인프라 승격**: `WritingTool`/`ToolRegistry`/`AgentContext` + 조회 tool(§8 P0)
+1. ✅ **M-A0 인프라 승격**: `WritingTool`/`ToolRegistry`/`AgentContext` + 조회 tool(§8 P0)
    구현(전부 기존 코드 래핑, side-effect 없음). 벤치: tool 호출 정확도(Qwen3.6).
-2. **M-A1 Read-only Agent**: Loop + 네이티브 tool call + 폴백 파서 + 챗 UI + 진행 스트림.
+2. ✅ **M-A1 Read-only Agent**: Loop + 네이티브 tool call + 폴백 파서 + 챗 UI + 진행 스트림.
    "질문 답변"만(편집 없음). §18 신뢰도 측정.
 3. **M-A2 편집**: `propose_patch`·`rewrite_selection`·`continue_writing` + Diff/Accept UX.
 4. **M-A3 세션·컨텍스트**: Budget·Compression·Session Memory·MINT.md.
@@ -657,5 +663,6 @@ Manuscript(entries.json body)
 
 ## 부록: 검증 (구현 착수 시)
 - 실제 코드 인용의 파일·행이 착수 시점과 일치하는지 재확인(이 문서는 조사 시점 스냅샷).
-- tool 스키마 프로토타입을 MINTBench로 Qwen3.6 tool-call 정확도 측정(§18 최대 미지수).
+- ✅ `MINTBench --agent-smoke`로 Peppermint 도구 선택 3/3·네이티브 호출 3/3,
+  2-step loop 14.0s 측정(2026-07-20). 10개 이상 라벨 코퍼스 확장은 계속 필요.
 - MVP 게이트: 12개 조회 tool로 §Example Traces 1–8·11–12를 E2E 재현.
