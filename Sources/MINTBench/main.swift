@@ -375,6 +375,46 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
 
     print("\n== Writing Agent 실모델 스모크 ==")
     print("도구: \(registry.names.count)개 · 단일 선택: \(cases.count)건")
+
+    // 백그라운드 생성을 취소하자마자 Agent가 같은 모델을 선점한다. 이전 token
+    // task의 Metal 작업이 끝나기 전에 다음 gather가 시작되면 이 경로가 크래시한다.
+    print("\n-- 취소 → 즉시 Agent 선점 --")
+    let cancelledGeneration = Task {
+        try await engine.generateOneShot(
+            system: "한국어 장편 장면을 자세히 서술한다.",
+            user: "비 오는 도시의 밤을 여러 문단으로 길게 묘사해 줘.",
+            maxTokens: 512, parameters: parameters, stopAtBlankLine: false)
+    }
+    try? await Task.sleep(for: .seconds(1))
+    cancelledGeneration.cancel()
+    let preemptionStarted = Date()
+    let preemptionPassed: Bool
+    do {
+        let turn = try await engine.generateAgentTurn(
+            messages: [
+                system,
+                AgentChatMessage(role: .user, content: "현재 문서 정보를 확인해 줘."),
+            ],
+            tools: registry.specs, parameters: parameters, onChunk: { _ in })
+        let fallback = AgentToolCallParser.parse(turn.text).calls
+        let calls = turn.toolCalls.isEmpty ? fallback : turn.toolCalls
+        let cancellationObserved: Bool
+        switch await cancelledGeneration.result {
+        case .failure(let error): cancellationObserved = error is CancellationError
+        case .success: cancellationObserved = false
+        }
+        preemptionPassed = cancellationObserved
+            && calls.first?.name == "get_active_document"
+        print(
+            "\(preemptionPassed ? "✅" : "❌") 취소 동기화 후 "
+                + "\(calls.first?.name ?? "호출 없음") · "
+                + "\(format(Date().timeIntervalSince(preemptionStarted)))")
+    } catch {
+        _ = await cancelledGeneration.result
+        preemptionPassed = false
+        print("❌ 선점 실패: \(error.localizedDescription)")
+    }
+
     var correct = 0
     var native = 0
     for (index, test) in cases.enumerated() {
@@ -417,8 +457,9 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
         let loopPassed = !events.toolNames.isEmpty && !result.text.isEmpty
         print("\n== Agent 판정 ==")
         print("단일 도구 정확도: \(correct)/\(cases.count) · 네이티브 호출: \(native)/\(cases.count)")
+        print("취소 후 선점: \(preemptionPassed ? "✅ 통과" : "❌ 실패")")
         print("전체 loop: \(loopPassed ? "✅ 통과" : "❌ 실패")")
-        return correct == cases.count && loopPassed
+        return preemptionPassed && correct == cases.count && loopPassed
     } catch {
         print("❌ 전체 Agent loop 실패: \(error.localizedDescription)")
         return false

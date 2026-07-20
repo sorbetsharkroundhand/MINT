@@ -35,8 +35,11 @@ public enum AcceptanceMetrics {
         var line = #"{"ts":"\#(timestamp)","event":"\#(event.rawValue)","mode":"\#(mode)""#
         if let latencyMs { line += #","latencyMs":\#(latencyMs)"# }
         line += "}\n"
+        // 변경 가능한 지역 변수를 Sendable 큐 클로저가 붙잡지 않도록 완성된 값을
+        // 불변 복사한다. 로그 한 줄의 스냅샷이라는 의미도 더 정확하다.
+        let completeLine = line
         queue.async {
-            guard let data = line.data(using: .utf8) else { return }
+            guard let data = completeLine.data(using: .utf8) else { return }
             let url = fileURL
             if !FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.createDirectory(

@@ -136,7 +136,7 @@ public actor CompletionEngine {
             )
 
             var text = ""
-            let stream = try MLXLMCommon.generate(
+            let (stream, generationTask) = try Self.generationTask(
                 input: input, parameters: generateParameters, context: context)
             for await generation in stream {
                 if Task.isCancelled { break }
@@ -151,6 +151,10 @@ public actor CompletionEngine {
                     }
                 }
             }
+            // 고수준 generate()는 소비자가 먼저 끝나도 GPU 태스크가 잠시 더 돈다.
+            // 다음 추론과 Metal encoder가 겹치지 않도록 명시 취소 후 동기화 완료를 기다린다.
+            generationTask.cancel()
+            await generationTask.value
             try Task.checkCancellation()
             return Self.cleanFolderName(text)
         }
@@ -194,7 +198,7 @@ public actor CompletionEngine {
             )
 
             var text = ""
-            let stream = try MLXLMCommon.generate(
+            let (stream, generationTask) = try Self.generationTask(
                 input: input, parameters: generateParameters, context: context)
             for await generation in stream {
                 if Task.isCancelled { break }
@@ -210,6 +214,8 @@ public actor CompletionEngine {
                     }
                 }
             }
+            generationTask.cancel()
+            await generationTask.value
             try Task.checkCancellation()
             let cleaned = Self.stripThinking(text)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -249,7 +255,7 @@ public actor CompletionEngine {
                 maxTokens: min(1_024, max(64, parameters.maxTokens)),
                 temperature: Float(parameters.temperature),
                 topP: Float(parameters.topP))
-            let stream = try MLXLMCommon.generate(
+            let (stream, generationTask) = try Self.generationTask(
                 input: input, parameters: generateParameters, context: context,
                 tools: toolSpecs)
             var text = ""
@@ -269,6 +275,8 @@ public actor CompletionEngine {
                     break
                 }
             }
+            generationTask.cancel()
+            await generationTask.value
             try Task.checkCancellation()
             return AgentModelTurn(
                 text: Self.stripThinking(text)
@@ -295,6 +303,12 @@ public actor CompletionEngine {
         // 다른 모델로 교체 — 기존 로드/컨테이너와 함께 프롬프트 KV도 버린다
         // (다른 모델의 캐시는 쓰레기가 아니라 독이다).
         loadTask?.cancel()
+        // 모델 교체도 진행 중 생성이 GPU 동기화를 마친 뒤에만 시작한다. 이전
+        // 컨테이너의 perform 잠금 뒤에 no-op을 세우면 별도 모델의 Metal 작업이
+        // 겹치지 않는다.
+        if let container {
+            await container.perform { _ in () }
+        }
         container = nil
         loadedModelID = nil
         promptCache.invalidate()
@@ -413,9 +427,9 @@ public actor CompletionEngine {
                 var info: GenerateCompletionInfo?
                 var stoppedAtBoundary = false
 
-                let stream = try MLXLMCommon.generate(
-                    input: input, cache: kvCache, parameters: generateParameters,
-                    context: context)
+                let (stream, generationTask) = try Self.generationTask(
+                    input: input, cache: kvCache,
+                    parameters: generateParameters, context: context)
                 for await generation in stream {
                     if Task.isCancelled { break }
                     switch generation {
@@ -441,9 +455,18 @@ public actor CompletionEngine {
                     // 루프 이탈 → 스트림 종료 → 내부 생성 태스크 취소.
                     if stoppedAtBoundary { break }
                 }
+                // 문장 경계·키 입력 취소로 스트림 소비가 먼저 끝나도 내부 token
+                // loop와 Metal command buffer가 완전히 끝난 뒤 컨테이너 잠금을 푼다.
+                generationTask.cancel()
+                await generationTask.value
                 // 조기 종료·협조 취소여도 캐시엔 "프롬프트 + α"가 앞에서부터 순서대로
                 // 들어가 있다 — 기록해 두면 다음 요청이 LCP까지 재사용한다.
-                if cacheInUse { promptCache.commit(tokens: promptTokens) }
+                if cacheInUse {
+                    promptCache.commit(tokens: promptTokens)
+                    // 내부 생성 Task와 GPU 동기화가 끝난 뒤 commit했으므로, 이후
+                    // 부모 취소가 던져져도 catch에서 안전한 캐시를 폐기하지 않는다.
+                    cacheInUse = false
+                }
                 try Task.checkCancellation()
 
                 return Completion(
@@ -462,6 +485,26 @@ public actor CompletionEngine {
                 throw error
             }
         }
+    }
+
+    /// MLX 고수준 `generate()`가 숨기는 내부 Task를 함께 받아, 모든 호출부가
+    /// 조기 종료 시 명시적으로 취소하고 GPU 동기화 완료를 기다릴 수 있게 한다.
+    private static func generationTask(
+        input: LMInput,
+        cache: [KVCache]? = nil,
+        parameters: GenerateParameters,
+        context: ModelContext,
+        tools: [ToolSpec]? = nil
+    ) throws -> (AsyncStream<Generation>, Task<Void, Never>) {
+        let iterator = try TokenIterator(
+            input: input, model: context.model, cache: cache,
+            parameters: parameters)
+        return MLXLMCommon.generateTask(
+            promptTokenCount: input.text.tokens.size,
+            modelConfiguration: context.configuration,
+            tokenizer: context.tokenizer,
+            iterator: iterator,
+            tools: tools)
     }
 
     // MARK: - 프롬프트 (폴더 명명 전용 — 자동완성 프롬프트는 ContextAssembler 소유)

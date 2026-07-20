@@ -676,16 +676,16 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
   MINTCoreTests 신설(직렬화 무결성 26 + 퍼즈 3). 에디터의 다른 경로(블록 변환·
   이미지·수식)는 여전히 미커버.
 - topP 하드코딩·문자 수 clamp — M5에서 해소 예정. 컨트롤러 주변 자동 테스트 부재.
-- **취소된 생성이 KV 캐시를 버린다**: `runGeneration`은 협조 취소 시 commit 직후
-  `checkCancellation`이 던져 catch의 `abandon`이 캐시를 폐기한다 — commit 주석의
-  "취소여도 다음 요청이 LCP 재사용" 의도와 어긋난다. 다만 취소 시 MLX 내부
-  태스크가 캐시에 아직 쓰고 있을 수 있어(스트림 종료의 비동기성) 폐기가 안전한
-  선택일 수 있음 — 고치려면 내부 태스크 종료 보장부터 확인 (2026-07-17 프리웜
-  작업 중 발견, 프리웜은 시작 후 비취소로 우회).
+- ~~취소된 생성의 비동기 GPU 작업·KV 캐시 폐기~~ **해소(2026-07-20)**:
+  고수준 `generate()`는 스트림 중단 뒤 내부 token task가 잠시 더 실행된다. 모든
+  추론을 `generateTask()`로 바꾸고 조기 종료·취소 시 task 취소 → GPU synchronize
+  완료를 기다린 뒤 컨테이너 잠금을 푼다. 따라서 다음 자동완성·백그라운드·Agent와
+  Metal encoder가 겹치지 않으며, 동기화 뒤 commit한 KV 캐시는 취소 예외에서도
+  보존한다.
 - 코드 주석의 `PLAN §N` 일부는 구판 번호 — 만나는 대로 부록 A 기준으로 갱신.
-- MINTBench 릴리즈 CLI 간헐 세그폴트 (~2/10 실행, 문장 경계 조기 종료의 스트림
-  중단 경로 의심 — mlx-swift 내부, 앱 미재현). mlx-swift 업데이트 시 재확인
-  (docs/m6-knowledge.md).
+- ~~MINTBench·앱의 문장 경계/선점 직후 MLX Metal 간헐 세그폴트~~ 위의 내부
+  생성 task 종료 대기로 해소. Peppermint 취소→즉시 tool-call 선점 스모크로 재현
+  경로를 검증한다(2026-07-20, `MINTBench --agent-smoke`).
 
 **열린 질문 (결정 전 — CLAUDE.md §5 체크리스트로 평가)**
 
