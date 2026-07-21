@@ -632,6 +632,28 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 - [ ] M-A2 이후 — 편집 도구와 Diff/Accept, 세션 압축·MINT.md, semantic search는
       각각 P1/P2. 읽기 전용 MVP에 섞지 않는다.
 
+### M11 — KeyScene "작가 중심 핵심 장면" (도메인 재설계, 2026-07-21)
+
+설계: **[docs/keyscene-domain.md](docs/keyscene-domain.md)**. `DocumentOutline.Scene`이
+서사 Scene이 아니라 CDC 분석 청크임을 인정하고(§16-3), 사용자·Agent에 노출할 단위를
+**원문을 덮지 않는 sparse 핵심 장면(KeyScene)** 으로 분리한다. 최종 판단자는 AI가
+아니라 작가다 — AI는 후보·근거만 제안한다.
+
+- 도메인: **AnalysisChunk**(내부 기술 단위, LLM 0회 결정적, 노출 금지) ·
+  **KeyScene**(entries.json, 안정 UUID, `planned/drafted/confirmed`, `authorConfirmed`) ·
+  **StoryEventCandidate**(비영속 규칙 제안). ⚠️ 기존 `StoryEvent`(청크 사건)와
+  이름 충돌 — P0에서 전역 rename 금지, `KeyScene`으로 명명.
+- [ ] **P0-A** — KeyScene 저장(`JournalEntry.keyScenes`, `RecordedConversation` 패턴,
+      schemaVersion 불변) · 작가 CRUD/확정/병합 · sourceRange 재앵커(id 불변, stale
+      보존) · `get_outline`/`read_scene`/`NarrativeView`의 청크 노출 차단. 모델 없이 동작.
+- [ ] **P0-B** — 청크별 LLM 4루프를 **변경 Chapter 단위**로 축소 (규칙 후보 → 후보
+      digest LLM ≤1회/챕터 → 작가 확정). 요약 피라미드를 챕터+KeyScene 출처로 재편.
+      Narrative Graph 입력은 **경로 A**(산출 타입 유지, 챕터 묶음 호출)로 무회귀 전환.
+      MINTBench로 호출 수 감소·예측 무회귀 측정 (CLAUDE.md §2-7).
+- [ ] **P1** — 임베딩 후보 탐색(`MLXEmbedders`·e5-small spike 선행, 현재 미의존) ·
+      Top-K context retrieval · AgentBootstrapContext · NLTokenizer 토큰 청킹 ·
+      전역 rename `Scene→AnalysisChunk`. P0 회귀 테스트 완료 후 착수.
+
 ## 15. 향후 연구 아이디어
 
 - **개인 문체 LoRA**: 수락/거부 시그널로 온디바이스 미세조정 — 어댑터 로드 지연,
@@ -719,6 +741,10 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
    살고, 구 대형 씬 키는 pruning GC가 자연 청소한다. 타일링 무손실·상한 보장·
    경계 안정성·폴백 사슬을 테스트 12건으로 고정. ⚠️ 남은 비용: 개츠비급이면
    세그먼트 ~87개 × 요약+추출 = 유휴 LLM 174회 (일회성, 메모 후 증분).
+   **후속 재규정 (2026-07-21, M11):** 이 세그먼트는 서사 Scene이 아니라 **분석
+   청크**다. 사용자·Agent에 씬으로 노출하던 결합을 끊고, 노출 단위를 sparse
+   **KeyScene**으로 분리하며 청크별 LLM을 챕터 단위로 축소한다 —
+   [docs/keyscene-domain.md](docs/keyscene-domain.md), §14 M11.
 4. "폴더 = 작품(장별 문서)" 전환 — 초장편 UX엔 유리하나 아웃라인·Pos·KV 전략
    전반에 파급. 1작품 1문서의 실사용 한계가 보일 때 재론.
 5. 지식 사이드카 SQLite 전환 시점 (§6 전환 조건 도달 여부).
@@ -762,7 +788,8 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 | `Sources/MINTCore/Settings.swift` | `CompletionSettings` · 모델 프리셋 |
 | `Sources/MINTCore/Theme.swift` | 색·폰트 토큰 (라이트/다크) |
 | `Sources/MINTBench/main.swift` | 추론·품질 벤치 CLI (§13) |
-| `Sources/MINTCore/Knowledge/DocumentOutline.swift` | 헤딩 트리 · 씬 해시 · 시점 차단 질의 (§5, M5) |
+| `Sources/MINTCore/Knowledge/DocumentOutline.swift` | 헤딩 트리 · 씬 해시 · 시점 차단 질의 (§5, M5) — 씬 = 내부 분석 청크(M11) |
+| `Sources/MINTCore/Knowledge/KeyScene.swift` | 작가 큐레이션 핵심 장면 · 후보 규칙 (§14 M11, 계획 — docs/keyscene-domain.md) |
 | `Sources/MINTCore/Inference/ContextAssembler.swift` | A/B/C 조립 · 카드 선택 (§10–§11, M5) |
 | `Sources/MINTCore/Inference/PromptCache.swift` | LCP trim + 증분 프리필 KV 재사용 (§12, M5) |
 | `Sources/MINTCore/CharacterBibleView.swift` | 바이블 v0 편집 팝오버 (§7, M5) |
