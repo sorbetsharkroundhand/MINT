@@ -33,6 +33,8 @@ struct BenchOptions {
     var truePeople = ""
     /// 실제 모델의 네이티브 tool call과 Agent loop를 짧게 검증 (PLAN §14 M10).
     var agentSmoke = false
+    /// 모델 없이 M12 서술 시점·한국어 이름 정규화 골드 세트를 채점한다.
+    var storyBibleBench = false
 
     enum ParseResult {
         case options(BenchOptions)
@@ -116,6 +118,8 @@ struct BenchOptions {
                 options.truePeople = value
             case "--agent-smoke":
                 options.agentSmoke = true
+            case "--story-bible-bench":
+                options.storyBibleBench = true
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -132,6 +136,7 @@ struct BenchOptions {
           --runs <n>           스타일별 반복 횟수 (기본: 2 — 1회차는 워밍업 포함)
           --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
           --agent-smoke       실제 모델로 Agent 네이티브 tool call 3종과 전체 loop 검증
+          --story-bible-bench M12 POV(1/3인칭 각 5편)·이름 정규화 결정적 채점
           --help               이 도움말
 
         리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
@@ -197,6 +202,54 @@ case .failure(let message):
     exit(2)
 case .options(let parsed):
     options = parsed
+}
+
+// M12 결정적 품질 벤치 — 모델·Metal 없이 정확도와 CPU 지연을 함께 기록한다.
+if options.storyBibleBench {
+    let firstPerson = [
+        "나는 문을 열었다. 내가 먼저 왔다. 난 창가에 앉았다.",
+        "저는 오래 기다렸다. 제가 편지를 썼다. 전 답을 알고 있었다.",
+        "나는 길을 잃었다. 나도 겁이 났다. 내가 지도를 펼쳤다.",
+        "난 그날을 기억한다. 나는 숨을 골랐다. 내가 종을 울렸다.",
+        "내가 불을 켰다. 나는 계단을 올랐다. 나도 인기척을 들었다.",
+    ]
+    let thirdPerson = [
+        "서연은 문을 열었다. 서연이가 먼저 왔다. 서연도 창가에 앉았다.",
+        "서연이 오래 기다렸다. 서연은 편지를 썼다. 서연도 답을 알고 있었다.",
+        "서연은 길을 잃었다. 서연도 겁이 났다. 서연이가 지도를 펼쳤다.",
+        "서연은 그날을 기억했다. 서연이가 숨을 골랐다. 서연도 종을 울렸다.",
+        "서연이가 불을 켰다. 서연은 계단을 올랐다. 서연도 인기척을 들었다.",
+    ]
+    let card = CharacterCard(name: "서연")
+    let started = Date()
+    var correct = 0
+    for body in firstPerson {
+        if NarrationAnalyzer.analyze(body: body, outline: .parse(body)).mode == .firstPerson {
+            correct += 1
+        }
+    }
+    for body in thirdPerson {
+        if NarrationAnalyzer.analyze(
+            body: body, outline: .parse(body), characters: [card]).mode == .thirdPerson
+        {
+            correct += 1
+        }
+    }
+    let elapsedMS = Date().timeIntervalSince(started) * 1_000
+    let nameGold: [(String, String, Bool)] = [
+        ("점순", "점순이", true), ("서연이가", "서연", true),
+        ("민준에게서", "민준", true), ("도경이는", "도경", true),
+        ("재형아", "재형", true), ("순이", "순이", true),
+        ("점순이", "민준", false), ("영수이도", "영수", false),
+        ("A순", "순", false),
+    ]
+    let nameCorrect = nameGold.filter {
+        KoreanName.mayReferToSame($0.0, $0.1) == $0.2
+    }.count
+    print("== M12 스토리 바이블 결정적 벤치 ==")
+    print("POV 정확도: \(correct)/10 (\(correct * 10)%) · \(String(format: "%.2f", elapsedMS))ms")
+    print("이름 정규화: \(nameCorrect)/\(nameGold.count)")
+    exit(correct == 10 && nameCorrect == nameGold.count ? 0 : 1)
 }
 
 // 인물 감지 정밀도 점검 — 모델 로드 없이 감지기만 (결정적이라 GPU 불필요, PLAN §7).

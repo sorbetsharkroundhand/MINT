@@ -44,6 +44,8 @@ struct CharacterBibleView: View {
                 .textFieldStyle(.roundedBorder)
                 .font(MintFonts.uiFont(12))
 
+            narrationSection
+
             Text("제목·장르·인물 카드가 예측에 함께 실려요. 최근 본문에 이름이 등장하는 인물이 우선돼요 (최대 3명).")
                 .font(MintFonts.uiFont(10.5))
                 .foregroundStyle(theme.ink2C)
@@ -217,6 +219,59 @@ struct CharacterBibleView: View {
             get: { store.activeEntry?.genre ?? "" },
             set: { value in
                 if let id = store.activeEntry?.id { store.setGenre(value, for: id) }
+            }
+        )
+    }
+
+    /// 전역 시점은 자동 분석을 보여주되 작가가 고정할 수 있다. 빈 선택은
+    /// 오버라이드를 지워 다시 원문 파생값으로 돌아간다는 뜻이다 (PLAN §7, M12).
+    @ViewBuilder
+    private var narrationSection: some View {
+        if let profile = snapshot?.narrationProfile {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text("서술 시점")
+                        .font(MintFonts.uiFont(11.5, .semibold))
+                        .foregroundStyle(theme.inkC)
+                    Spacer()
+                    Picker("서술 시점", selection: narrationModeBinding) {
+                        Text("자동 · \(snapshot?.automaticNarrationProfile.displayText ?? "미상")")
+                            .tag("")
+                        ForEach(NarrationMode.allCases.filter { $0 != .unknown }, id: \.self) {
+                            Text($0.rawValue).tag($0.rawValue)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .controlSize(.small)
+                }
+                Text(
+                    "서술문 \(profile.narrationSentenceCount)문장 · "
+                        + "1인칭 주어 \(profile.firstPersonSubjectHits) · "
+                        + "3인칭 주어 \(profile.thirdPersonProperNameSubjectHits)"
+                )
+                .font(MintFonts.uiFont(10))
+                .foregroundStyle(theme.ink3C)
+            }
+        }
+    }
+
+    private var narrationModeBinding: Binding<String> {
+        Binding(
+            get: {
+                store.activeEntry?.narrativeOverrides?.first {
+                    $0.kind == .narrationMode && $0.key == "global"
+                }?.value ?? ""
+            },
+            set: { value in
+                guard let id = store.activeEntry?.id else { return }
+                if value.isEmpty {
+                    store.removeNarrativeOverride(kind: .narrationMode, key: "global", in: id)
+                } else {
+                    store.setNarrativeOverride(
+                        NarrativeOverride(kind: .narrationMode, key: "global", value: value),
+                        in: id)
+                }
             }
         )
     }

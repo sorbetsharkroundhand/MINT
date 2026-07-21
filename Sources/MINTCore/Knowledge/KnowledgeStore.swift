@@ -243,6 +243,10 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     public let staleOverrides: [NarrativeOverride]
     /// 스냅샷에 적용된 오버라이드 — UI의 userEdited 표시가 이걸 본다.
     public let overrides: NarrativeOverrides
+    /// 대사를 제외한 전역 서술 시점 통계. 원문에서 다시 만들 수 있어 저장하지 않는다.
+    public let narrationProfile: NarrationProfile
+    /// 사용자 고정을 얹기 전 자동 판정 — UI의 "자동으로 되돌리기" 설명용.
+    public let automaticNarrationProfile: NarrationProfile
 
     // MARK: Narrative Graph (v5, PLAN §6.6)
 
@@ -309,7 +313,8 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         staleKeySceneIDs: Set<UUID> = [],
         rejectedKeySceneCandidateHashes: Set<String> = [],
         overrides: NarrativeOverrides = .empty,
-        staleOverrides: [NarrativeOverride] = []
+        staleOverrides: [NarrativeOverride] = [],
+        body: String = ""
     ) {
         self.entryID = entryID
         self.outline = outline
@@ -320,6 +325,16 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.overrides = overrides
         self.staleOverrides = staleOverrides
         self.characters = characters
+        let automaticNarration = NarrationAnalyzer.analyze(
+            body: body, outline: outline, characters: characters, insights: insights)
+        self.automaticNarrationProfile = automaticNarration
+        var narration = automaticNarration
+        if let raw = overrides.value(.narrationMode, key: "global"),
+            let mode = NarrationMode(rawValue: raw)
+        {
+            narration.mode = mode
+        }
+        self.narrationProfile = narration
         self.keyScenes = keyScenes.sorted { lhs, rhs in
             switch (lhs.sourceRange, rhs.sourceRange) {
             case let (a?, b?): a.lowerBound < b.lowerBound

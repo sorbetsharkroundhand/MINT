@@ -659,6 +659,24 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
       Top-K context retrieval · AgentBootstrapContext · NLTokenizer 토큰 청킹 ·
       전역 rename `Scene→AnalysisChunk`. P0 회귀 테스트 완료 후 착수.
 
+### M12 — 스토리 바이블 정밀도 "시점·동일인" (설계, 2026-07-21)
+
+설계·조사 전문: **[docs/story-bible-pov-and-coref.md](docs/story-bible-pov-and-coref.md)**.
+두 실패를 뿌리부터 고친다 — (1) 작품이 1인칭인지 3인칭 전지적인지 판별하는 전역
+장치 부재(`pov`는 씬/구간 자유 문자열뿐, 시간 이동 씬에만 채워짐), (2) 인물명
+정규화가 파이프라인마다 달라 Agent 조회에서 "점순이"→"점순" 매칭 실패. 둘 다
+결정적·백그라운드·증분·측정 가능(§5 체크리스트 5문항 통과).
+
+- [x] **P1** — `KoreanName` 공유 정규화(조사·매개 "이" 스트리핑, 받침 판정)로
+      승격 → `AgentContext.characterMatches` 동일인 매칭 버그 수정 +
+      `CharacterDetector` 인라인 로직 위임(중복 제거). 결정적 회귀 8건.
+- [x] **P2** — `NarrationMode` 전역 판별기(Eisenberg & Finlayson 2016: 대명사
+      빈도만으로 POV F1 0.928). 서술문(대화 제외) 1인칭 주어 vs 인물명 주어
+      카운트로 1인칭/3인칭/혼합/미상 결정적 판정, `KnowledgeSnapshot` 파생.
+      프롬프트 A 헤더·Agent 노출·`NarrativeOverride.narrationMode`.
+- [x] **P3** — `MINTBench --story-bible-bench`: POV 10/10(1인칭·3인칭 각
+      5편), 인물 정규화 9/9, 10편 판정 약 2.5ms(2026-07-21, debug).
+
 ## 15. 향후 연구 아이디어
 
 - **개인 문체 LoRA**: 수락/거부 시그널로 온디바이스 미세조정 — 어댑터 로드 지연,

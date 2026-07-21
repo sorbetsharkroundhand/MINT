@@ -556,6 +556,18 @@ public enum ContextAssembler {
         lines.append(
             (metaLine, [ContextReport.Item(kind: .meta, text: metaLine, stableKey: "meta")]))
 
+        // 전역 서술 시점은 원문에서 백그라운드로 준비된 파생값이다(M12). 근거가
+        // 부족한 `.unknown`은 주입하지 않아 잘못된 시점 강제를 피한다.
+        if let profile = knowledge?.narrationProfile, profile.mode != .unknown,
+            controls.allows("narration")
+        {
+            let line = "[서술] \(profile.displayText)"
+            lines.append(
+                (line, [ContextReport.Item(
+                    kind: .meta, text: line, stableKey: "narration",
+                    pinned: controls.pinned("narration"))]))
+        }
+
         // 회상 집필 중의 인물 앎은 담화 위치가 아니라 **작품 내 시간**으로 접는다
         // (요구사항 §14·§30) — 그 시점의 인물이 모르는 것은 카드에도 없어야 한다.
         let writingInPast =

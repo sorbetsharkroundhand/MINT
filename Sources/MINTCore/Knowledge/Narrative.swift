@@ -350,6 +350,8 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         case contextPin
         /// 컨텍스트 제외 (키 = ContextReport.Item.stableKey, 값 = "제외").
         case contextExclude
+        /// 작품 전역 서술 시점 (키 = "global", 값 = NarrationMode rawValue).
+        case narrationMode
     }
 
     public var kind: Kind

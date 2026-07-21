@@ -53,8 +53,8 @@ public enum CharacterDetector {
     static let minMentions = 5
     static let minScenes = 3
     /// 이름 어간 길이 (한글) — 1자는 대명사·조사 파편, 5자↑은 구·문장 파편.
-    static let minStemLength = 2
-    static let maxStemLength = 4
+    static let minStemLength = KoreanName.minLength
+    static let maxStemLength = KoreanName.maxLength
 
     /// 어간별 누적 증거.
     private struct Evidence {
@@ -193,9 +193,7 @@ public enum CharacterDetector {
     static func isAliasShape(_ short: String, of long: String) -> Bool {
         guard short != long else { return false }
         if long.hasSuffix(short), long.count == short.count + 1 { return true }
-        if short.hasSuffix("이"), String(short.dropLast()) == long { return true }
-        if long.hasSuffix("이"), String(long.dropLast()) == short { return true }
-        return false
+        return KoreanName.mayReferToSame(short, long)
     }
 
     /// 한 씬을 훑어 어간별 증거를 누적한다. 토큰 순서를 보존해 "이름+주어표지"
@@ -238,23 +236,12 @@ public enum CharacterDetector {
 
         for (suffix, role) in lexicon.particles where word.count > suffix.count {
             guard word.hasSuffix(suffix) else { continue }
-            var stem = String(word.dropLast(suffix.count))
-            // "서연이가/서연이는" — 받침 이름 뒤 매개 "이"까지 벗긴다(주격 이 제외).
-            if role != .subject, stem.count >= minStemLength + 1, stem.hasSuffix("이") {
-                stem = String(stem.dropLast())
-            }
-            guard isNameShape(stem) else { return nil }
+            guard let stem = KoreanName.parsedStem(word, removing: suffix) else { return nil }
             return (stem, role)
         }
         // 조사가 없는 맨 토큰 — 이름꼴이면 어간(맨 이름, 대화문 "도경."), 아니면 버림.
-        guard isNameShape(word) else { return nil }
+        guard KoreanName.isNameShape(word) else { return nil }
         return (word, nil)
-    }
-
-    /// 이름 어간의 형태 조건 — 순수 한글 2~4자.
-    private static func isNameShape(_ stem: String) -> Bool {
-        guard (minStemLength...maxStemLength).contains(stem.count) else { return false }
-        return stem.unicodeScalars.allSatisfy { (0xAC00...0xD7A3).contains($0.value) }
     }
 
     /// 텍스트를 한글 최대 연속 토큰의 순서 있는 배열로 자른다(공백·문장부호 경계).

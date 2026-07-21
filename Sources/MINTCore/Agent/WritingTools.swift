@@ -215,9 +215,10 @@ public enum DefaultWritingTools {
 
     private static let activeDocument = ClosureWritingTool(
         name: "get_active_document",
-        description: "현재 문서의 제목·종류·장르·분량·핵심 장면 수를 확인합니다."
+        description: "현재 문서의 제목·종류·장르·분량·서술 시점·핵심 장면 수를 확인합니다."
     ) { _, context in
         let entry = context.activeEntry
+        let narration = context.knowledge?.narrationProfile
         let value: JSONValue = .object([
             "id": .string(entry.id.uuidString),
             "title": .string(entry.title),
@@ -228,6 +229,8 @@ public enum DefaultWritingTools {
             "caret_utf16": .int(context.caretUTF16),
             "key_scene_count": .int(context.visibleKeyScenes.count),
             "chapter_count": .int(context.chapters.count),
+            "narration_mode": narration.map { .string($0.mode.rawValue) } ?? .null,
+            "narrator": narration?.narratorName.map(JSONValue.string) ?? .null,
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
@@ -628,7 +631,8 @@ public enum DefaultWritingTools {
         let position = context.knowledge?.position(at: cursor)
         let sceneIndex = context.outline.sceneIndex(at: cursor)
         let scene = sceneIndex.map { context.outline.scenes[$0] }
-        let pov: JSONValue = (position?.pov).map(JSONValue.string) ?? .null
+        let pov: JSONValue = (position?.pov ?? context.knowledge?.narrationProfile.agentPOV)
+            .map(JSONValue.string) ?? .null
         let value: JSONValue = .object([
             "cursor": .int(cursor),
             "scene_ref": scene.map { .string($0.contentHash) } ?? .null,
@@ -769,6 +773,11 @@ private extension AgentContext {
                 }
         }
         if !exact.isEmpty { return exact }
+        let normalized = cards.filter { card in
+            KoreanName.mayReferToSame(query, card.name)
+                || aliases(of: card).contains { KoreanName.mayReferToSame(query, $0) }
+        }
+        if !normalized.isEmpty { return normalized }
         return cards.filter { card in
             card.name.localizedCaseInsensitiveContains(query)
                 || aliases(of: card).contains { $0.localizedCaseInsensitiveContains(query) }

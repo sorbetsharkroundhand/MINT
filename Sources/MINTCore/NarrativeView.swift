@@ -209,6 +209,7 @@ struct NarrativeView: View {
             }
             if liveSnapshot != nil {
                 HStack(spacing: 10) {
+                    narrationModeMenu
                     characterFilterMenu
                     Picker("", selection: $projection) {
                         ForEach(Projection.allCases, id: \.self) { Text($0.rawValue) }
@@ -220,6 +221,35 @@ struct NarrativeView: View {
                     Spacer()
                 }
             }
+        }
+    }
+
+    /// 서사 화면에서도 전역 시점을 보고 고친다. 같은 전역 오버라이드를 써서
+    /// 스토리 바이블과 어느 쪽에서 수정해도 즉시 같은 값으로 재조립된다.
+    @ViewBuilder private var narrationModeMenu: some View {
+        if let profile = liveSnapshot?.narrationProfile {
+            Menu {
+                Button("자동 · \(liveSnapshot?.automaticNarrationProfile.displayText ?? "미상")") {
+                    store.removeNarrativeOverride(
+                        kind: .narrationMode, key: "global", in: store.activeID)
+                }
+                Divider()
+                ForEach(NarrationMode.allCases.filter { $0 != .unknown }, id: \.self) { mode in
+                    Button(mode.rawValue) {
+                        store.setNarrativeOverride(
+                            NarrativeOverride(
+                                kind: .narrationMode, key: "global", value: mode.rawValue),
+                            in: store.activeID)
+                    }
+                }
+            } label: {
+                Label(profile.displayText, systemImage: "eye")
+                    .font(MintFonts.uiFont(10.5))
+                    .foregroundStyle(profile.mode == .unknown ? theme.ink3C : theme.novelC)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("작품 전역 서술 시점 — 자동 분석 또는 작가 고정")
         }
     }
 

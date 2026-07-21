@@ -1224,7 +1224,8 @@ public final class BackgroundIndexer: ObservableObject {
             staleKeySceneIDs: reconciledKeyScenes.staleIDs,
             rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes,
             overrides: rekeyed,
-            staleOverrides: stale
+            staleOverrides: stale,
+            body: body
         )
     }
 
