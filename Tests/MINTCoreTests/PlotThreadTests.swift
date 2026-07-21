@@ -34,6 +34,21 @@ final class PlotThreadTests: XCTestCase {
             isMain: main, userEdited: false, confidence: 0.6)
     }
 
+    func test_플롯분석_동일stableKey는_첫등장하나로_정규화한다() {
+        let first = StoryEvent(
+            sceneHash: "scene-1", participants: [], summary: "문이 열린다", importance: 3)
+        let repeated = StoryEvent(
+            sceneHash: "scene-2", participants: [], summary: "문이 열린다", importance: 5)
+        let next = StoryEvent(
+            sceneHash: "scene-3", participants: [], summary: "안으로 들어간다", importance: 4)
+
+        let normalized = BackgroundIndexer.uniqueEventsForAnalysis([first, repeated, next])
+
+        XCTAssertEqual(normalized.count, 2)
+        XCTAssertEqual(normalized.map(\.sceneHash), ["scene-1", "scene-3"])
+        XCTAssertEqual(Set(normalized.map(\.stableKey)).count, normalized.count)
+    }
+
     // MARK: - 파서
 
     func test_파서_플롯_제목_해결_역할() {

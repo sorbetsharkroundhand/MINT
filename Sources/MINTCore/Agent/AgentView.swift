@@ -319,7 +319,7 @@ struct AgentView: View {
         case "get_active_document":
             "질문의 기준이 되는 활성 문서 정보를 먼저 확인했어요."
         case "get_outline":
-            "관련 장면의 범위를 좁히기 위해 커서 이전 구조를 확인했어요."
+            "관련 장면의 범위를 좁히기 위해 작품 전체 구조를 확인했어요."
         case "read_scene":
             "판단 근거를 요약이 아닌 실제 씬 원문에서 확인했어요."
         case "search_text":

@@ -87,6 +87,9 @@ public struct AgentContext: Sendable {
     public let folders: [JournalFolder]
     public let knowledge: KnowledgeSnapshot?
     public let caretUTF16: Int
+    /// Agent가 기본적으로 탐색할 수 있는 원고 끝. 커서는 현재 위치 질문에만 쓰며
+    /// 전체 작품 조회의 상한이 아니다 (PLAN §14 M10).
+    public let documentEndUTF16: Int
     public let outline: DocumentOutline
     public let generationKey: String
 
@@ -96,6 +99,7 @@ public struct AgentContext: Sendable {
         folders = source.folders
         knowledge = source.knowledge
         caretUTF16 = source.caretUTF16
+        documentEndUTF16 = (source.activeEntry.body as NSString).length
         outline = DocumentOutline.parse(source.activeEntry.body)
         // 원문·스냅샷 내용이 바뀌면 세션 도구 캐시가 자동으로 식는다.
         generationKey = DocumentOutline.stableHash(
@@ -104,10 +108,11 @@ public struct AgentContext: Sendable {
                 + "\(source.knowledge?.knowledgeDeltas.count ?? 0)")
     }
 
-    /// Agent의 모든 시점 인자는 현재 커서를 넘을 수 없다. 모델이 큰 값을 만들어도
-    /// 미래 장의 결말이 도구 결과로 새지 않게 하는 마지막 방어선이다.
+    /// 위치를 명시한 질의만 해당 위치로 제한한다. 생략하면 작품 전체를 읽는다.
+    /// 커서 이후 차단은 고스트 자동완성의 불변식이며 Agent 전체 분석에는 적용하지
+    /// 않는다. 범위를 넘는 모델 인자는 원고 끝으로 clamp한다.
     public func boundedOffset(_ requested: Int?) -> Int {
-        min(max(0, requested ?? caretUTF16), caretUTF16)
+        min(max(0, requested ?? documentEndUTF16), documentEndUTF16)
     }
 }
 

@@ -4,7 +4,7 @@ import XCTest
 @testable import MINTCore
 
 /// Agent MVP의 결정적 경계 회귀 테스트. 모델·Metal 없이 parser→registry→loop와
-/// 커서 이후 차단을 검증한다.
+/// Agent의 전체 원고 탐색과 명시적 시점 범위를 검증한다.
 final class AgentRuntimeTests: XCTestCase {
     private func source(caret: Int? = nil) -> AgentSourceSnapshot {
         let body = """
@@ -13,9 +13,19 @@ final class AgentRuntimeTests: XCTestCase {
             # 2장
             민준이 범인이었다는 사실이 드러났다.
             """
+        let outline = DocumentOutline.parse(body)
+        let keyScenes = [
+            KeyScene(
+                title: "병원을 나서다", summary: "서연이 병원을 나선다",
+                sourceRange: outline.scenes[0].utf16Range, status: .confirmed,
+                authorConfirmed: true),
+            KeyScene(
+                title: "범인의 정체", summary: "민준의 정체가 드러난다",
+                sourceRange: outline.scenes[1].utf16Range, status: .drafted),
+        ]
         let entry = JournalEntry(
             title: "비밀", body: body, kind: .novel,
-            characters: [CharacterCard(name: "서연")])
+            characters: [CharacterCard(name: "서연")], keyScenes: keyScenes)
         return AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
             caretUTF16: caret ?? (body as NSString).length)
@@ -48,7 +58,7 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertTrue(invalid.summary.contains("허용되지 않은"))
     }
 
-    func test원문_도구는_현재_커서_이후_씬을_노출하지_않음() async {
+    func testAgent는_커서이후를_포함한_작품전체를_탐색() async {
         let full = source()
         let firstEnd = DocumentOutline.parse(full.activeEntry.body).scenes[0].utf16Range.upperBound
         let context = AgentContext(source: source(caret: firstEnd))
@@ -56,17 +66,46 @@ final class AgentRuntimeTests: XCTestCase {
 
         let outline = await registry.execute(
             AgentToolCall(name: "get_outline"), context: context)
-        XCTAssertTrue(outline.content.contains("1장"))
-        XCTAssertFalse(outline.content.contains("2장"))
+        XCTAssertTrue(outline.content.contains("병원을 나서다"))
+        XCTAssertTrue(outline.content.contains("범인의 정체"))
+        XCTAssertFalse(outline.content.contains("contentHash"))
+        XCTAssertFalse(outline.content.contains("분할"))
 
         let future = await registry.execute(
             AgentToolCall(name: "read_scene", arguments: ["scene_ref": .string("2")]),
             context: context)
-        XCTAssertTrue(future.content.contains("error"))
-        XCTAssertFalse(future.content.contains("범인"))
+        XCTAssertFalse(future.content.contains("error"))
+        XCTAssertTrue(future.content.contains("범인"))
+        XCTAssertEqual(context.boundedOffset(nil), (full.activeEntry.body as NSString).length)
+        XCTAssertEqual(context.boundedOffset(firstEnd), firstEnd)
     }
 
-    func test작성중_씬의_전체요약은_커서앞에_노출하지_않음() async {
+    func testKeyScene없는_기존원고도_장단위로_전체탐색() async {
+        let body = "# 1장\n첫 장의 내용이다.\n# 2장\n후반부의 비밀이 드러난다."
+        let entry = JournalEntry(title: "기존 원고", body: body, kind: .novel)
+        let firstEnd = DocumentOutline.parse(body).scenes[0].utf16Range.upperBound
+        let source = AgentSourceSnapshot(
+            activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
+            caretUTF16: firstEnd)
+        let context = AgentContext(source: source)
+        let registry = DefaultWritingTools.readOnlyMVP
+
+        let outline = await registry.execute(
+            AgentToolCall(name: "get_outline"), context: context)
+        XCTAssertTrue(outline.content.contains("chapter:2"))
+        XCTAssertTrue(outline.content.contains("2장"))
+        XCTAssertTrue(outline.content.contains(#""key_scenes":[]"#))
+
+        let second = await registry.execute(
+            AgentToolCall(
+                name: "read_scene",
+                arguments: ["scene_ref": .string("chapter:2")]),
+            context: context)
+        XCTAssertTrue(second.content.contains("후반부의 비밀"))
+        XCTAssertFalse(second.content.contains("error"))
+    }
+
+    func test분석청크_요약과해시는_getOutline에_노출하지_않음() async {
         let body = "# 1장\n서연은 문을 열었다. 뒤에서 민준이 죽는다."
         let character = CharacterCard(name: "서연")
         let entry = JournalEntry(
@@ -85,6 +124,7 @@ final class AgentRuntimeTests: XCTestCase {
         let result = await DefaultWritingTools.readOnlyMVP.execute(
             AgentToolCall(name: "get_outline"), context: AgentContext(source: source))
         XCTAssertFalse(result.content.contains(secretSummary))
+        XCTAssertFalse(result.content.contains(outline.scenes[0].contentHash))
     }
 
     func testRuntime이_도구결과를_받아_다음턴에서_답변() async throws {

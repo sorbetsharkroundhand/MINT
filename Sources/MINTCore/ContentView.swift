@@ -42,15 +42,11 @@ public struct ContentView: View {
                 completion.documentContextProvider = { [weak store] in
                     store?.activeDocumentContext
                 }
-                // 대화 기록 (요구사항 §20–§21) — Enter 승인 → 마크다운 본문
-                // 좌표로 재앵커해 entries.json에 저장. 스토어가 재조립 신호를 쏜다.
+                // 대화 자동 기록 (PLAN §6.6) — 감지 좌표는 이미 본문 절대 좌표다.
+                // 최초 저장에서 재앵커하면 반복되는 짧은 대사가 작품 앞부분의 동명
+                // 대사로 이동하므로, 재앵커는 이후 원문 수정 복구에만 사용한다.
                 completion.onRecordConversation = { [weak store] record in
                     guard let store else { return }
-                    var record = record
-                    if let body = store.activeEntry?.body {
-                        record = ConversationDetector.reanchor(record, in: body as NSString)
-                            ?? record
-                    }
                     store.recordConversation(record, in: store.activeID)
                 }
                 completion.recordedConversationHashesProvider = { [weak store] in

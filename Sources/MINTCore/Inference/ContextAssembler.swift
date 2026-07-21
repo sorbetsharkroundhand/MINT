@@ -43,6 +43,7 @@ public struct ContextReport: Sendable, Equatable {
             case workSummary = "지난 줄거리"
             case chapterSummary = "장 요약"
             case sceneSummary = "앞선 장면"
+            case keyScene = "핵심 장면"
             case currentScene = "지금 장면"
             case narrative = "서사 위치"
             case flowEvent = "흐름 사건"
@@ -349,6 +350,30 @@ public enum ContextAssembler {
         var picked: [(line: String, item: ContextReport.Item)] = []
         var coveredChapters: Set<String> = []
         var coveredScenes: Set<String> = []
+        // M11: 작가가 고른 sparse 핵심 장면을 같은 장의 내부 청크 요약보다 먼저
+        // 싣는다. 안정 UUID의 사용자 지식이며, 범위가 C 창 전에 끝난 것만 골라
+        // 미래 누출과 원문 중복을 함께 막는다.
+        let visibleKeyScenes = knowledge.keyScenes.filter {
+            guard let range = $0.sourceRange else { return false }
+            return range.upperBound <= windowStart
+                && !knowledge.staleKeySceneIDs.contains($0.id)
+        }.sorted { ($0.sourceRange?.lowerBound ?? 0) > ($1.sourceRange?.lowerBound ?? 0) }
+        for keyScene in visibleKeyScenes {
+            let stableKey = "keyscene|\(keyScene.id.uuidString)"
+            guard controls.allows(stableKey) else { continue }
+            let line = "핵심 장면(\(keyScene.title)): \(keyScene.summary)"
+            guard line.count <= budget else { continue }
+            picked.append(
+                (line, ContextReport.Item(
+                    kind: .keyScene, text: line,
+                    jumpUTF16: keyScene.sourceRange?.lowerBound,
+                    stableKey: stableKey, pinned: controls.pinned(stableKey))))
+            budget -= line.count
+            // 이 핵심 장면이 덮는 내부 청크 요약은 같은 사실의 중복이다.
+            for scene in outside where keyScene.sourceRange?.overlaps(scene.utf16Range) == true {
+                coveredScenes.insert(scene.contentHash)
+            }
+        }
         let pinnedFirst =
             outside.filter { controls.pinned("scene|\($0.contentHash)") }.reversed()
             + outside.filter { !controls.pinned("scene|\($0.contentHash)") }.reversed()

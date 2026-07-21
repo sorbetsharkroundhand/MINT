@@ -359,3 +359,7 @@ public struct DocumentOutline: Equatable, Sendable {
             .joined()
     }
 }
+
+/// M11 P0 호환 별칭. `Scene`은 사용자에게 노출할 서사 장면이 아니라 내부 CDC
+/// 분석 청크다. 전역 rename은 회귀 검증 뒤 P1에서 수행한다 (PLAN §14 M11).
+public typealias AnalysisChunk = DocumentOutline.Scene

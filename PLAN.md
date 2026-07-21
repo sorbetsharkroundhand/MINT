@@ -250,11 +250,12 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   `knowledgeChrono(of:atSceneIndex:)`(작품 내 시간 기준 — 회상 집필 중 그
   시점의 인물이 모르는 미래 앎을 차단). 조립기는 커서의
   `position(at:)`(흐름·층·깊이·시간)으로 축을 고른다 (§11).
-- **대화 기록** (`RecordedConversation`, entries.json): 작성 중 결정적
-  감지(`ConversationDetector` — 실시간 경로 LLM 금지) → 「이 대화를
-  기록할까요?」 인라인 제안 → Enter 기록(개행은 정상 진행). 기록은 자동 감지
-  인덱스에 겹쳐 하나의 목록이 되고, 주제·어조 보완만 깊은 패스가 채운다
-  (`ConversationMeta`, contentHash 메모).
+- **대화 자동 기록** (`RecordedConversation`, entries.json): 작성 중 결정적
+  감지(`ConversationDetector` — 실시간 경로 LLM 금지) → 1.5초 유휴 후 자동
+  수집. 같은 대화를 이어 쓰면 범위가 겹치는 기록을 하나로 확장하고, 기록은 자동
+  감지 인덱스에 겹쳐 하나의 목록이 된다. 최초 저장은 감지 좌표를 그대로 쓰며,
+  원문 수정 뒤 재앵커는 기존 위치에 가까운 첫·끝 대사를 선택한다. 주제·어조
+  보완만 깊은 패스가 채운다 (`ConversationMeta`, contentHash 메모).
 - **Plot Thread** (`PlotThread`·`ResolvedPlotThread`, v6): Narrative Graph의
   **branch 단위 = 플롯 라인** (인물·POV·씬·회상이 아니다). 하나의 지속적인
   문제·목표·갈등을 추적하는 사건 묶음으로, 깊은 패스가 사건 목록 + 인과 힌트를
@@ -568,8 +569,8 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
       분화/합류·노드 상세(관점·인과·근거)·흐름 강조·필터.
 - [x] 인물 감지 신뢰도 3단 (HIGH 자동 등록 — CLAUDE.md §3 갱신) +
       표기 변형 Entity Resolution (김재형/재형/재형이) + 별칭 병합 UX.
-- [x] 대화 기록 — 실시간 결정적 감지 + 「이 대화를 기록할까요?」 인라인 제안
-      (Enter 기록·개행 유지, Esc 닫기) + 바이블 연동 + 깊은 패스 보완.
+- [x] 대화 자동 기록 — 실시간 결정적 감지 + 1.5초 유휴 자동 수집 + 이어 쓴
+      대화 병합 + 반복 대사 안전 재앵커 + 바이블 연동 + 깊은 패스 보완.
 - [x] Retrieval의 서사 좌표 인지 — 회상 집필 중 작품 내 시간 기준 앎 fold·
       미래 씬 요약/작품 요약 차단·흐름 사건 승격. Reader/Character 지식 분리.
 - [x] 인스펙터 Pin/Exclude — 조립 파이프라인 자체에 적용 (오버라이드 저장).
@@ -620,8 +621,10 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 - [x] M-A1 — 네이티브 Hermes `.toolCall` + 태그/`TOOL:` lenient 폴백,
       최대 6단계·동일 호출 3회 중단·1회 형식 repair·취소 협조. 사이드바 Agent 챗과
       도구 진행 스트림. 답변별 「작업 과정」 토글에 단계·판단 요약·실행 도구·입력·
-      결과를 보존한다(숨은 사고 원문이 아닌 검증 가능한 trace). 모든 도구의
-      `before`는 커서로 clamp하고 현재 씬 원문은 커서까지만 읽어 미래 지식을 차단한다.
+      결과를 보존한다(숨은 사고 원문이 아닌 검증 가능한 trace). Agent는 작품 전체를
+      기본 탐색하고, 특정 시점 질문에서만 문서 끝으로 clamp된 `before`를 적용한다.
+      고스트 자동완성의 커서 이후 차단은 그대로 유지한다. KeyScene이 없는 기존
+      원고도 장·절 범위로 접은 아웃라인과 페이지 조회를 통해 전체 원문에 도달한다.
 - [x] 단일 모델 조율 — Agent 실행 중 고스트 예측·백그라운드 pass 취소/보류,
       종료 뒤 증분 타이머 복구. 원문·파생 캐시 저장 형식 변경 없음.
 - [x] Peppermint 실모델 스모크 — `MINTBench --agent-smoke`에서 Qwen3.6-35B-A3B
@@ -643,9 +646,11 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
   **KeyScene**(entries.json, 안정 UUID, `planned/drafted/confirmed`, `authorConfirmed`) ·
   **StoryEventCandidate**(비영속 규칙 제안). ⚠️ 기존 `StoryEvent`(청크 사건)와
   이름 충돌 — P0에서 전역 rename 금지, `KeyScene`으로 명명.
-- [ ] **P0-A** — KeyScene 저장(`JournalEntry.keyScenes`, `RecordedConversation` 패턴,
+- [x] **P0-A** — KeyScene 저장(`JournalEntry.keyScenes`, `RecordedConversation` 패턴,
       schemaVersion 불변) · 작가 CRUD/확정/병합 · sourceRange 재앵커(id 불변, stale
       보존) · `get_outline`/`read_scene`/`NarrativeView`의 청크 노출 차단. 모델 없이 동작.
+      `ContextAssembler`도 커서 이전 KeyScene을 내부 청크 요약보다 우선하고 중복
+      청크를 제외한다. 결정적 회귀 테스트 10건(KeyScene 5 + Agent 경계 5) 통과.
 - [ ] **P0-B** — 청크별 LLM 4루프를 **변경 Chapter 단위**로 축소 (규칙 후보 → 후보
       digest LLM ≤1회/챕터 → 작가 확정). 요약 피라미드를 챕터+KeyScene 출처로 재편.
       Narrative Graph 입력은 **경로 A**(산출 타입 유지, 챕터 묶음 호출)로 무회귀 전환.
@@ -781,7 +786,7 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 | `Sources/MINTCore/Editor/CompletionController.swift` | 게이트 · 디바운스 · 수락/거부 · 취소 |
 | `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 단일 모델 상주 · 취소 가능 생성 (actor) |
 | `Sources/MINTCore/Agent/AgentRuntime.swift` | 읽기 전용 Agent loop · step/반복 상한 · 도구 실행 |
-| `Sources/MINTCore/Agent/WritingTools.swift` | 조회 도구 12개 · schema/strict validate · 시점 차단 어댑터 |
+| `Sources/MINTCore/Agent/WritingTools.swift` | 조회 도구 12개 · schema/strict validate · 전체 작품 탐색 + 명시적 `before` |
 | `Sources/MINTCore/Agent/AgentController.swift` | Agent 세션 UI 상태 · 단일 모델 선점 배선 |
 | `Sources/MINTCore/Agent/AgentView.swift` | 사이드바 챗 · 도구 진행 스트림 |
 | `Sources/MINTCore/Storage/EntryStore.swift` | 원문 저장 (entries.json) — 유일한 진실 |

@@ -1,6 +1,12 @@
 import Foundation
 import MLXLMCommon
 
+private struct AgentReadableTarget {
+    var reference: String
+    var title: String
+    var range: Range<Int>
+}
+
 public enum AgentToolValueType: String, Sendable {
     case string
     case integer
@@ -205,11 +211,11 @@ public enum DefaultWritingTools {
 
     private static let beforeParameter = AgentToolParameter(
         "before", type: .integer,
-        description: "조회 상한 UTF-16 위치. 생략하면 현재 커서이며 커서 이후 값은 자동 차단됩니다.")
+        description: "특정 시점 질의의 UTF-16 상한. 생략하면 작품 전체를 조회합니다.")
 
     private static let activeDocument = ClosureWritingTool(
         name: "get_active_document",
-        description: "현재 문서의 제목·종류·장르·분량·씬 수를 확인합니다."
+        description: "현재 문서의 제목·종류·장르·분량·핵심 장면 수를 확인합니다."
     ) { _, context in
         let entry = context.activeEntry
         let value: JSONValue = .object([
@@ -218,66 +224,99 @@ public enum DefaultWritingTools {
             "kind": .string(entry.resolvedKind.label),
             "genre": entry.genre.map(JSONValue.string) ?? .null,
             "characters": .array((entry.characters ?? []).map { .string($0.name) }),
-            "visible_utf16_length": .int(context.caretUTF16),
-            "scene_count": .int(context.visibleScenes.count),
+            "document_utf16_length": .int(context.documentEndUTF16),
+            "caret_utf16": .int(context.caretUTF16),
+            "key_scene_count": .int(context.visibleKeyScenes.count),
+            "chapter_count": .int(context.chapters.count),
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "‘\(entry.title)’ · 씬 \(context.visibleScenes.count)개")
+            summary: "‘\(entry.title)’ · 핵심 장면 \(context.visibleKeyScenes.count)개")
     }
 
     private static let outline = ClosureWritingTool(
         name: "get_outline",
-        description: "현재 커서까지의 장·절·씬 아웃라인과 준비된 요약을 확인합니다."
+        description: "작품 전체의 장·절 아웃라인과 작가가 관리하는 핵심 장면을 확인합니다."
     ) { _, context in
-        let scenes = context.visibleScenes.enumerated().map { index, scene -> JSONValue in
-            let clipped = context.visibleRange(of: scene)
-            // 현재 작성 중인 씬의 요약은 커서 뒤 원문까지 읽어 만든 파생물일 수
-            // 있다. 씬이 완전히 끝난 경우에만 Agent에 공개한다.
-            let summary: JSONValue = scene.utf16Range.upperBound <= context.caretUTF16
-                ? context.knowledge?.summariesByHash[scene.contentHash]
-                    .map(JSONValue.string) ?? .null
-                : .null
+        let chapters = context.chapters.map { chapter -> JSONValue in
+            .object([
+                "chapter_ref": .string(chapter.reference),
+                "heading": .string(chapter.title),
+                "path": .array(chapter.path.map(JSONValue.string)),
+                "range": .array([.int(chapter.range.lowerBound), .int(chapter.range.upperBound)]),
+            ])
+        }
+        let scenes = context.visibleKeyScenes.enumerated().map { index, scene -> JSONValue in
+            let range: JSONValue = scene.sourceRange.map {
+                .array([.int($0.lowerBound), .int($0.upperBound)])
+            } ?? .null
             return .object([
                 "index": .int(index + 1),
-                "scene_ref": .string(scene.contentHash),
-                "heading": .string(context.heading(of: scene)),
-                "range": .array([.int(clipped.lowerBound), .int(clipped.upperBound)]),
-                "summary": summary,
+                "scene_ref": .string(scene.id.uuidString),
+                "chapter": .array(scene.chapterAnchor.map(JSONValue.string)),
+                "title": .string(scene.title),
+                "range": range,
+                "status": .string(scene.status.rawValue),
+                "importance": .int(scene.importance),
+                "author_confirmed": .bool(scene.authorConfirmed),
+                "stale": .bool(context.knowledge?.staleKeySceneIDs.contains(scene.id) == true),
+                "summary": .string(scene.summary),
             ])
         }
         return AgentToolResult(
-            content: AgentJSON.encode(.object(["scenes": .array(scenes)])),
-            summary: "커서 이전 씬 \(scenes.count)개를 확인했어요.")
+            content: AgentJSON.encode(.object([
+                "chapters": .array(chapters), "key_scenes": .array(scenes),
+            ])),
+            summary: "장·절 \(chapters.count)개와 핵심 장면 \(scenes.count)개를 확인했어요.")
     }
 
     private static let readScene = ClosureWritingTool(
         name: "read_scene",
-        description: "씬 번호·해시·헤딩으로 현재 커서 이전 원문 한 씬을 읽습니다.",
+        description: "get_outline의 장·절 또는 핵심 장면 원문을 페이지 단위로 읽습니다.",
         parameters: [
             AgentToolParameter(
                 "scene_ref", type: .string,
-                description: "get_outline의 1부터 시작하는 index, scene_ref 해시, 또는 헤딩",
-                required: true)
+                description: "chapter_ref, 핵심 장면 UUID·번호·제목",
+                required: true),
+            AgentToolParameter("offset", type: .integer, description: "장면 범위 안 시작 위치(기본 0)"),
+            AgentToolParameter("limit", type: .integer, description: "읽을 UTF-16 길이(기본 1200, 최대 3000)"),
         ]
     ) { arguments, context in
         guard let reference = arguments["scene_ref"]?.agentString else {
             return .error("scene_ref가 필요해요.")
         }
-        switch context.resolveScene(reference) {
-        case .failure(let message): return .error(message)
+        let target: AgentReadableTarget
+        switch context.resolveKeyScene(reference) {
         case .success(let resolved):
-            let text = context.text(in: context.visibleRange(of: resolved.scene))
-            let value: JSONValue = .object([
-                "index": .int(resolved.index + 1),
-                "scene_ref": .string(resolved.scene.contentHash),
-                "heading": .string(context.heading(of: resolved.scene)),
-                "text": .string(text),
-            ])
-            return AgentToolResult(
-                content: AgentJSON.encode(value),
-                summary: "\(context.heading(of: resolved.scene)) · \(text.count)자를 읽었어요.")
+            guard let source = resolved.scene.sourceRange else {
+                return .error("계획 단계 핵심 장면은 아직 연결된 원문이 없어요.")
+            }
+            target = AgentReadableTarget(
+                reference: resolved.scene.id.uuidString,
+                title: resolved.scene.title, range: source)
+        case .failure:
+            guard let chapter = context.resolveChapter(reference) else {
+                return .error("장·절 또는 핵심 장면 '\(reference)'을 찾지 못했어요.")
+            }
+            target = AgentReadableTarget(
+                reference: chapter.reference, title: chapter.title, range: chapter.range)
         }
+        let offset = max(0, arguments["offset"]?.agentInt ?? 0)
+        let limit = min(3_000, max(1, arguments["limit"]?.agentInt ?? 1_200))
+        let lower = min(target.range.upperBound, target.range.lowerBound + offset)
+        let upper = min(target.range.upperBound, lower + limit)
+        guard upper > lower else { return .error("이 범위에서 더 읽을 원문이 없어요.") }
+        let text = context.text(in: lower..<upper)
+        let value: JSONValue = .object([
+            "scene_ref": .string(target.reference),
+            "title": .string(target.title),
+            "offset": .int(offset),
+            "has_more": .bool(upper < target.range.upperBound),
+            "text": .string(text),
+        ])
+        return AgentToolResult(
+            content: AgentJSON.encode(value),
+            summary: "\(target.title) · \(text.count)자를 읽었어요.")
     }
 
     private static let searchText = ClosureWritingTool(
@@ -288,7 +327,7 @@ public enum DefaultWritingTools {
                 "query", type: .string, description: "찾을 문자열", required: true),
             AgentToolParameter(
                 "all_documents", type: .boolean,
-                description: "true면 다른 문서도 함께 검색합니다. 현재 문서는 커서 이후를 제외합니다."),
+                description: "true면 다른 문서도 함께 검색합니다. 현재 문서도 작품 전체를 검색합니다."),
             AgentToolParameter(
                 "limit", type: .integer, description: "결과 상한(기본 12, 최대 30)"),
         ]
@@ -302,8 +341,7 @@ public enum DefaultWritingTools {
         var matches: [JSONValue] = []
         for entry in targets {
             if matches.count >= limit { break }
-            let body = entry.id == context.activeEntry.id
-                ? context.text(in: 0..<context.caretUTF16) : entry.body
+            let body = entry.body
             matches.append(contentsOf: context.matches(
                 query: query, in: body, entry: entry, remaining: limit - matches.count))
         }
@@ -372,7 +410,7 @@ public enum DefaultWritingTools {
 
     private static let characterEvents = ClosureWritingTool(
         name: "get_character_events",
-        description: "인물이 참여한 사건을 현재 커서 이전 담화 순서로 확인합니다.",
+        description: "인물이 참여한 사건을 담화 순서로 확인합니다.",
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
@@ -403,7 +441,7 @@ public enum DefaultWritingTools {
 
     private static let characterDialogues = ClosureWritingTool(
         name: "get_character_dialogues",
-        description: "인물의 커서 이전 대사 예문·말투·참여 대화를 확인합니다.",
+        description: "인물의 대사 예문·말투·참여 대화를 확인합니다.",
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
@@ -499,7 +537,7 @@ public enum DefaultWritingTools {
 
     private static let timeline = ClosureWritingTool(
         name: "get_timeline",
-        description: "커서 이전 사건을 담화순 또는 작품 내 시간순으로 확인합니다.",
+        description: "사건을 담화순 또는 작품 내 시간순으로 확인합니다.",
         parameters: [
             AgentToolParameter(
                 "order", type: .string, description: "discourse 또는 chronological",
@@ -551,7 +589,7 @@ public enum DefaultWritingTools {
 
     private static let consistency = ClosureWritingTool(
         name: "check_consistency",
-        description: "커서 이전의 죽은 인물 발화와 확립된 존대 붕괴를 결정적으로 검사합니다.",
+        description: "작품의 죽은 인물 발화와 확립된 존대 붕괴를 결정적으로 검사합니다.",
         parameters: [beforeParameter]
     ) { arguments, context in
         guard let knowledge = context.knowledge else { return .error("준비된 Story Intelligence가 없어요.") }
@@ -615,14 +653,49 @@ public enum DefaultWritingTools {
 // MARK: - 결정적 조회 어댑터
 
 private extension AgentContext {
-    var visibleScenes: [DocumentOutline.Scene] {
-        // 경계와 정확히 같은 커서는 아직 그 씬 원문 앞이다. `<=`면 빈 범위의
-        // 미래 씬 헤딩·요약이 노출되므로 엄격히 `<`를 쓴다.
-        outline.scenes.filter { $0.utf16Range.lowerBound < caretUTF16 }
+    var visibleKeyScenes: [KeyScene] {
+        knowledge?.keyScenes
+            ?? KeySceneReconciler.reconcile(activeEntry.keyScenes ?? [], in: activeEntry.body).scenes
     }
 
-    func visibleRange(of scene: DocumentOutline.Scene) -> Range<Int> {
-        scene.utf16Range.lowerBound..<min(scene.utf16Range.upperBound, caretUTF16)
+    struct AgentChapter {
+        var reference: String
+        var title: String
+        var path: [String]
+        var range: Range<Int>
+    }
+
+    /// 내부 분석 청크를 그대로 노출하지 않고, 같은 헤딩 경로의 연속 범위를
+    /// Agent가 읽을 수 있는 장·절 단위로 접는다. KeyScene이 0개여도 원문 전체에
+    /// 도달할 수 있는 결정적 폴백이다.
+    var chapters: [AgentChapter] {
+        var grouped: [(path: [String], range: Range<Int>)] = []
+        for scene in outline.scenes {
+            let path = Array(scene.headingPath.prefix(2))
+            if let last = grouped.indices.last, grouped[last].path == path {
+                grouped[last].range = grouped[last].range.lowerBound..<scene.utf16Range.upperBound
+            } else {
+                grouped.append((path, scene.utf16Range))
+            }
+        }
+        return grouped.enumerated().map { index, item in
+            let parts = item.path.filter { !$0.isEmpty }
+            return AgentChapter(
+                reference: "chapter:\(index + 1)",
+                title: parts.isEmpty ? "문서 전체" : parts.joined(separator: " > "),
+                path: item.path, range: item.range)
+        }
+    }
+
+    func resolveChapter(_ reference: String) -> AgentChapter? {
+        let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let exact = chapters.first(where: { $0.reference == trimmed }) { return exact }
+        // KeyScene이 하나도 없는 레거시 원고에서는 숫자만으로도 장을 읽을 수 있다.
+        if visibleKeyScenes.isEmpty, let number = Int(trimmed), chapters.indices.contains(number - 1) {
+            return chapters[number - 1]
+        }
+        let matches = chapters.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     func text(in range: Range<Int>) -> String {
@@ -647,34 +720,34 @@ private extension AgentContext {
         outline.scenes.first(where: { $0.contentHash == hash })?.utf16Range.upperBound ?? .max
     }
 
-    struct ResolvedScene {
+    struct ResolvedKeyScene {
         var index: Int
-        var scene: DocumentOutline.Scene
+        var scene: KeyScene
     }
 
-    enum SceneResolution {
-        case success(ResolvedScene)
+    enum KeySceneResolution {
+        case success(ResolvedKeyScene)
         case failure(String)
     }
 
-    func resolveScene(_ reference: String) -> SceneResolution {
+    func resolveKeyScene(_ reference: String) -> KeySceneResolution {
         let trimmed = reference.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let number = Int(trimmed), visibleScenes.indices.contains(number - 1) {
-            return .success(ResolvedScene(index: number - 1, scene: visibleScenes[number - 1]))
+        if let number = Int(trimmed), visibleKeyScenes.indices.contains(number - 1) {
+            return .success(.init(index: number - 1, scene: visibleKeyScenes[number - 1]))
         }
-        if let match = visibleScenes.enumerated().first(where: { $0.element.contentHash == trimmed }) {
-            return .success(ResolvedScene(index: match.offset, scene: match.element))
+        if let id = UUID(uuidString: trimmed),
+            let match = visibleKeyScenes.enumerated().first(where: { $0.element.id == id })
+        {
+            return .success(.init(index: match.offset, scene: match.element))
         }
-        let matches = visibleScenes.enumerated().filter {
-            heading(of: $0.element).localizedCaseInsensitiveContains(trimmed)
+        let matches = visibleKeyScenes.enumerated().filter {
+            $0.element.title.localizedCaseInsensitiveContains(trimmed)
         }
         if matches.count == 1, let match = matches.first {
-            return .success(ResolvedScene(index: match.offset, scene: match.element))
+            return .success(.init(index: match.offset, scene: match.element))
         }
-        if matches.count > 1 {
-            return .failure("헤딩이 여러 씬과 일치해요. get_outline의 index나 scene_ref를 사용하세요.")
-        }
-        return .failure("현재 커서 이전에서 씬 '\(reference)'을 찾지 못했어요.")
+        if matches.count > 1 { return .failure("제목이 같은 핵심 장면이 여러 개예요. UUID를 사용하세요.") }
+        return .failure("핵심 장면 '\(reference)'을 찾지 못했어요.")
     }
 
     func aliases(of card: CharacterCard) -> [String] {

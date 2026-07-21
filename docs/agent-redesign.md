@@ -87,7 +87,7 @@ lenient/strict 폴백, 6-step loop, 12개 조회 도구, 시점 차단, 사이�
 
 **자동완성 (`Editor/CompletionController.swift` 555 + `Inference/*`)**
 1. 무엇: 게이트(마스터→IME 조합→문단 끝→길이→디바운스) → 모드 선택(fast/smart/story
-   [-dialogue]) → 조립 → 단일 생성 → 고스트. 대화 기록 인라인 제안도 여기.
+   [-dialogue]) → 조립 → 단일 생성 → 고스트. 대화 자동 기록 감지도 여기.
 2. 담당: `CompletionController`(MainActor), `ContextAssembler`, `CompletionEngine`,
    `PromptCache`.
 3. 입력: prefix, caret, `DocumentContext`(제목·장르·카드), `KnowledgeSnapshot`.
@@ -130,8 +130,9 @@ lenient/strict 폴백, 6-step loop, 12개 조회 도구, 시점 차단, 사이�
 - `Utterance`(화자·청자·존대·텍스트·위치). 귀속: 결정적 2단(인접 서술·교대 규칙),
   모호하면 침묵. 존대: 닫힌 종결어미 규칙. 발화는 **비저장**(패스마다 재계산→스냅샷만).
 - 존대 매트릭스: `honorific(from:to:before:)`(방향별 존/반/혼재, 시점 차단 fold).
-- 대화 기록: 실시간 결정적 감지(`ConversationDetector`) → 「기록할까요?」 인라인 →
-  `RecordedConversation`(entries.json). 깊은 패스가 주제·어조 보완(`analyzeConversation`).
+- 대화 기록: 실시간 결정적 감지(`ConversationDetector`) → 1.5초 유휴 자동 수집 →
+  `RecordedConversation`(entries.json). 겹치는 후속 발화는 기존 기록으로 합치고,
+  깊은 패스가 주제·어조를 보완한다(`analyzeConversation`).
 
 **사건·서사 분석 (`Knowledge/EventLog.swift`, `Narrative.swift`, `NarrativeGraph.swift`,
 `PlotThread.swift`, `SegmentAnalysis.swift`)** [코드확인]
@@ -540,8 +541,9 @@ Manuscript(entries.json body)
   - **상태 외부화**(Claude Code 패턴): 세션 진행/결정을 **story-state(세션 스크래치)**로
     외부화 — compaction이 일어나도 재조회로 복구(plot state 유실 방지).
 - **Session Memory**: 세션 종료 시 핵심 결정을 MINT.md에 반영 제안(사용자 승인).
-- **시점 차단 유지**: Agent 조회도 커서 이전만(기존 `before:` 질의) — 회상 집필 시 미래
-  누출 차단이 tool 레벨에서 자동 성립. (경쟁사엔 이 시점 차단 개념 자체가 없다.)
+- **경로별 시점 정책**: 고스트 자동완성은 커서 이후를 항상 차단한다. Agent는 작품
+  전체를 기본 탐색하고, "3장 시점에서"처럼 사용자가 위치를 지정한 질의에만 기존
+  `before:` fold를 적용한다. 커서를 전체 분석의 상한으로 쓰지 않는다.
 
 ---
 

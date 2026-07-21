@@ -493,7 +493,7 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertTrue(ns.substring(from: start).hasPrefix("\"오늘"))
     }
 
-    func test_case15_발화_한개면_제안하지_않는다() {
+    func test_case15_발화_한개면_자동기록하지_않는다() {
         let text = "\"안녕.\"\n그는 갔다."
         let ns = text as NSString
         XCTAssertNil(ConversationDetector.blockEnding(at: ns.length, in: ns))
@@ -545,6 +545,74 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertTrue(ns.substring(to: anchored!.utf16End).hasSuffix("\"고맙습니다.\""))
         // 첫 대사가 사라졌으면 nil — 엉뚱한 위치로 잇지 않는다.
         XCTAssertNil(ConversationDetector.reanchor(record, in: "전혀 다른 본문" as NSString))
+    }
+
+    func test_기록_재앵커_반복대사는_기존위치와_가까운블록을_선택한다() {
+        let body = "\"네.\"\n\"먼저 갈게.\"\n\n긴 서술이 이어진다.\n\n\"네.\"\n\"나중에 갈게.\""
+        let ns = body as NSString
+        let expectedStart = ns.range(of: "\"네.\"", options: .backwards).location
+        let expectedEndRange = ns.lineRange(for: ns.range(of: "나중에 갈게."))
+        let record = RecordedConversation(
+            participants: [], utf16Start: expectedStart + 2, utf16End: ns.length,
+            firstLine: "네.", lastLine: "나중에 갈게.", contentHash: "낡은 해시")
+
+        let anchored = ConversationDetector.reanchor(record, in: ns)
+
+        XCTAssertEqual(anchored?.utf16Start, expectedStart)
+        XCTAssertEqual(anchored?.utf16End, expectedEndRange.upperBound)
+    }
+
+    func test_자동기록_이어쓴대화는_ID를_보존하며_하나로_확장한다() {
+        let id = UUID()
+        let first = RecordedConversation(
+            id: id, participants: [남편.id], utf16Start: 10, utf16End: 40,
+            firstLine: "어디 가?", lastLine: "다녀올게.", contentHash: "h1")
+        let expanded = RecordedConversation(
+            participants: [아내.id], utf16Start: 10, utf16End: 70,
+            firstLine: "어디 가?", lastLine: "기다릴게.", contentHash: "h2")
+
+        let merged = ConversationDetector.merging(expanded, into: [first])
+
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].id, id)
+        XCTAssertEqual(merged[0].utf16End, 70)
+        XCTAssertEqual(merged[0].contentHash, "h2")
+        XCTAssertEqual(Set(merged[0].participants), Set([남편.id, 아내.id]))
+    }
+
+    @MainActor
+    func test_대화는_Enter승인없이_유휴후_자동기록된다() async throws {
+        let process = ProcessInfo.processInfo
+        try XCTSkipIf(
+            process.isLowPowerModeEnabled
+                || process.thermalState == .serious
+                || process.thermalState == .critical,
+            "열·저전력 게이트에서는 자동 기록을 다음 편집으로 미룬다")
+        let suite = "MINTTests.ConversationCapture.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CompletionSettings(defaults: defaults)
+        settings.autocompleteEnabled = false
+        let controller = CompletionController(settings: settings)
+        controller.documentContextProvider = {
+            DocumentContext(title: "테스트", kind: .novel)
+        }
+        controller.recordedConversationHashesProvider = { [] }
+        let recorded = expectation(description: "대화 자동 기록")
+        var captured: RecordedConversation?
+        controller.onRecordConversation = { record in
+            captured = record
+            recorded.fulfill()
+        }
+        let text = "\"어디 가?\"\n\"금방 다녀올게.\""
+
+        controller.noteEdit(
+            prefix: text, caretLocation: (text as NSString).length,
+            isComposing: false, caretAtParagraphEnd: true)
+        await fulfillment(of: [recorded], timeout: 2.5)
+
+        XCTAssertEqual(captured?.firstLine, "어디 가?")
+        XCTAssertEqual(captured?.lastLine, "금방 다녀올게.")
     }
 
     // MARK: - Case 18–23: 통합 서사 화면 — 흐름 Projection 행 모델

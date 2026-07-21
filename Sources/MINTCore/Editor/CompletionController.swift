@@ -72,36 +72,45 @@ public final class CompletionController: ObservableObject {
         refreshLongParagraphDetection()
     }
 
-    // MARK: - 대화 기록 제안 (요구사항 §18–§20)
+    // MARK: - 대화 자동 기록 (PLAN §6.6)
 
-    /// 현재 떠 있는 「이 대화를 기록할까요?」 제안 — 범위는 에디터 스토리지
-    /// 좌표다 (감지가 에디터 프리픽스에서 돌기 때문). nil이면 없음.
-    @Published public private(set) var conversationSuggestion: ConversationDetector.Block?
-    /// 에디터(BlockTextView)로의 직통 알림 — 은은한 하이라이트·인라인 pill 렌더.
-    public var conversationSuggestionDidChange: ((ConversationDetector.Block?) -> Void)?
-    /// 기록 실행 다리 — ContentView가 스토어(재앵커 포함)로 배선한다.
+    /// 자동 기록 실행 다리 — ContentView가 스토어로 배선한다.
     public var onRecordConversation: ((RecordedConversation) -> Void)?
-    /// 이미 기록된 블록 해시 제공자 — 같은 대화를 다시 제안하지 않는다.
+    /// 이미 기록된 블록 해시 제공자 — 같은 대화를 다시 수집하지 않는다.
     public var recordedConversationHashesProvider: (() -> Set<String>)?
 
-    /// 감지 유휴 대기 — 고스트 디바운스보다 길다: 제안은 "대화를 다 쓰고 잠시
-    /// 멈췄을 때"만 떠야 한다 (요구사항 §18·§20, 조용한 UI).
+    /// 감지 유휴 대기 — 고스트 디바운스보다 길다. 대화를 쓰는 도중 조각마다
+    /// 저장하지 않고, 잠시 멈춘 완결된 런만 자동 수집한다.
     nonisolated static let conversationIdle: Duration = .milliseconds(1_500)
 
     private var conversationTask: Task<Void, Never>?
-    /// 닫힌(Esc·계속 입력) 블록 해시 — 같은 내용을 다시 묻지 않는다. 대화가
-    /// 이어져 내용이 바뀌면 해시가 바뀌어 다시 제안된다.
-    private var dismissedConversationHashes: Set<String> = []
+    private var conversationCaret: Int?
+
+    /// 문서 전환 시 이전 문서에서 예약된 자동 기록을 폐기한다.
+    public func cancelConversationCapture() {
+        conversationTask?.cancel()
+        conversationTask = nil
+        conversationCaret = nil
+    }
 
     /// 편집 후 유휴에 대화 블록을 감지한다 — 소설에서만, 결정적·LLM 없음
-    /// (요구사항 §19 실시간 경로). 감지 자체도 유휴 태스크 안에서 돌므로
-    /// 키 입력 경로 비용은 태스크 예약뿐이다 (요구사항 §34).
+    /// (PLAN §6.6). 감지 자체도 유휴 태스크 안에서 돌므로 키 입력 경로 비용은
+    /// 태스크 예약뿐이다.
     private func scheduleConversationDetection(prefix: String, caretLocation: Int) {
         conversationTask?.cancel()
         guard documentContextProvider?()?.kind == .novel else { return }
+        conversationCaret = caretLocation
         conversationTask = Task { [weak self] in
             try? await Task.sleep(for: Self.conversationIdle)
             guard !Task.isCancelled, let self else { return }
+            // 자동 수집도 백그라운드 작업이다. 열·저전력 상태에서는 다음 편집
+            // 유휴까지 미뤄 글쓰기와 모델 추론의 자원을 먼저 보장한다 (PLAN §9).
+            let process = ProcessInfo.processInfo
+            guard !process.isLowPowerModeEnabled else { return }
+            switch process.thermalState {
+            case .serious, .critical: return
+            default: break
+            }
             let text = prefix as NSString
             guard var block = ConversationDetector.blockEnding(at: text.length, in: text)
             else { return }
@@ -109,41 +118,18 @@ public final class CompletionController: ObservableObject {
             let prefixStart = caretLocation - text.length
             block.utf16Range =
                 (block.utf16Range.lowerBound + prefixStart)..<(block.utf16Range.upperBound + prefixStart)
-            guard !self.dismissedConversationHashes.contains(block.contentHash),
-                self.recordedConversationHashesProvider?().contains(block.contentHash) != true
+            guard self.recordedConversationHashesProvider?().contains(block.contentHash) != true
             else { return }
-            self.conversationSuggestion = block
-            self.conversationSuggestionDidChange?(block)
+            // 스냅샷 갱신을 기다리지 않고 같은 결정적 귀속기를 즉시 적용한다.
+            // 프리픽스 상대 좌표를 본문 절대 좌표로 올려 기록 범위와 맞춘다.
+            let cards = self.documentContextProvider?()?.characters ?? []
+            var utterances = DialogueAttribution.utterances(in: prefix, cards: cards)
+            for index in utterances.indices {
+                utterances[index].utf16Start += prefixStart
+            }
+            self.onRecordConversation?(
+                ConversationDetector.record(from: block, utterances: utterances))
         }
-    }
-
-    /// Enter 승인 (요구사항 §20) — 기록을 실행하고 true. 호출부(에디터)는
-    /// false를 리턴해 **개행도 정상 진행**시킨다 — 글쓰기 흐름이 끊기지 않는다.
-    @discardableResult
-    public func acceptConversationSuggestion() -> Bool {
-        guard let block = conversationSuggestion else { return false }
-        clearConversationSuggestion()
-        // 기록 승인 = 사용자 결정 — 참여자 귀속·주제는 백그라운드가 보완한다.
-        onRecordConversation?(ConversationDetector.record(from: block, utterances: []))
-        return true
-    }
-
-    /// 제안 닫기 — remember면 같은 내용을 다시 묻지 않는다 (Esc·계속 입력).
-    public func dismissConversationSuggestion(remember: Bool) {
-        if remember, let block = conversationSuggestion {
-            dismissedConversationHashes.insert(block.contentHash)
-        }
-        conversationTask?.cancel()
-        conversationTask = nil
-        clearConversationSuggestion()
-    }
-
-    public var hasConversationSuggestion: Bool { conversationSuggestion != nil }
-
-    private func clearConversationSuggestion() {
-        guard conversationSuggestion != nil else { return }
-        conversationSuggestion = nil
-        conversationSuggestionDidChange?(nil)
     }
 
     public let settings: CompletionSettings
@@ -344,10 +330,7 @@ public final class CompletionController: ObservableObject {
 
         invalidate()  // 편집 즉시 고스트 제거 + in-flight 취소 (PLAN §5)
 
-        // 대화 기록 제안 — 입력이 이어지면 닫고(같은 내용 재질문 금지), 유휴 뒤
-        // 다시 감지한다 (요구사항 §20 "일반 문자 입력: 제안을 닫고 정상 입력 계속").
-        // 결정적·LLM 없음이라 자동완성 마스터 스위치와 무관하다.
-        if conversationSuggestion != nil { dismissConversationSuggestion(remember: true) }
+        // 대화 자동 기록 — 결정적·LLM 없음이라 자동완성 마스터 스위치와 무관하다.
         if !isComposing {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
@@ -391,13 +374,10 @@ public final class CompletionController: ObservableObject {
         } else if pendingTask != nil {
             if pendingCaret != caretLocation { invalidate() }
         }
-        // 대화 제안 — 커서가 블록을 떠나면 조용히 닫는다 (기억하지 않는다:
-        // 돌아와 이어 쓰면 다시 제안될 수 있다).
-        if let block = conversationSuggestion,
-            caretLocation < block.utf16Range.lowerBound
-                || caretLocation > block.utf16Range.upperBound + 2
-        {
-            dismissConversationSuggestion(remember: false)
+        // 타이핑 직후 선택 변경 알림은 같은 위치라 유지한다. 사용자가 다른 곳으로
+        // 이동했다면 이전 커서의 대화를 뒤늦게 자동 기록하지 않는다.
+        if let conversationCaret, conversationCaret != caretLocation {
+            cancelConversationCapture()
         }
     }
 

@@ -174,6 +174,8 @@ public final class BackgroundIndexer: ObservableObject {
         let characters = entry.characters ?? []
         let overrides = entry.narrativeOverrides ?? []
         let recorded = entry.recordedConversations ?? []
+        let keyScenes = entry.keyScenes ?? []
+        let rejectedKeySceneCandidates = Set(entry.rejectedKeySceneCandidateHashes ?? [])
 
         hydrateTask?.cancel()
         // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
@@ -188,7 +190,9 @@ public final class BackgroundIndexer: ObservableObject {
             let snapshot = Self.makeSnapshot(
                 entryID: entryID, outline: outline, sidecar: sidecar,
                 utterances: utterances, overrides: overrides, body: body,
-                characters: characters, recordedConversations: recorded)
+                characters: characters, recordedConversations: recorded,
+                keyScenes: keyScenes,
+                rejectedKeySceneCandidateHashes: rejectedKeySceneCandidates)
             let deriveMs = (CFAbsoluteTimeGetCurrent() - deriveStart) * 1000
             let metrics = Self.measure(
                 sidecar: sidecar, sceneCount: outline.scenes.count,
@@ -291,6 +295,8 @@ public final class BackgroundIndexer: ObservableObject {
         let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
         let overrides = entry.narrativeOverrides ?? []
         let recorded = entry.recordedConversations ?? []
+        let keyScenes = entry.keyScenes ?? []
+        let rejectedKeySceneCandidates = Set(entry.rejectedKeySceneCandidateHashes ?? [])
         let caret = caretProvider?()
 
         isIndexing = true
@@ -326,6 +332,8 @@ public final class BackgroundIndexer: ObservableObject {
                 parameters: parameters, engine: engine,
                 liveEntryIDs: liveEntryIDs, characters: liveCharacters,
                 overrides: overrides, recordedConversations: recorded,
+                keyScenes: keyScenes,
+                rejectedKeySceneCandidateHashes: rejectedKeySceneCandidates,
                 caretUTF16: caret
             ) { snapshot in
                 // 일관성 검사는 스냅샷과 같은 주기 — 백그라운드에서 계산하고
@@ -472,6 +480,8 @@ public final class BackgroundIndexer: ObservableObject {
         characters: [CharacterCard],
         overrides: [NarrativeOverride],
         recordedConversations: [RecordedConversation] = [],
+        keyScenes: [KeyScene] = [],
+        rejectedKeySceneCandidateHashes: Set<String> = [],
         caretUTF16: Int?,
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void,
         publishMetrics: @Sendable @escaping (KnowledgeMetrics) -> Void = { _ in }
@@ -534,7 +544,9 @@ public final class BackgroundIndexer: ObservableObject {
                     entryID: entryID, outline: outline, sidecar: sidecar,
                     utterances: utterances, overrides: overrides, body: body,
                     characters: characters,
-                    recordedConversations: recordedConversations))
+                    recordedConversations: recordedConversations,
+                    keyScenes: keyScenes,
+                    rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -584,7 +596,9 @@ public final class BackgroundIndexer: ObservableObject {
                         entryID: entryID, outline: outline, sidecar: sidecar,
                         utterances: utterances, overrides: overrides, body: body,
                         characters: characters,
-                        recordedConversations: recordedConversations))
+                        recordedConversations: recordedConversations,
+                        keyScenes: keyScenes,
+                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
             }
         }
 
@@ -622,7 +636,9 @@ public final class BackgroundIndexer: ObservableObject {
                         entryID: entryID, outline: outline, sidecar: sidecar,
                         utterances: utterances, overrides: overrides, body: body,
                         characters: characters,
-                        recordedConversations: recordedConversations))
+                        recordedConversations: recordedConversations,
+                        keyScenes: keyScenes,
+                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
             }
         }
 
@@ -723,7 +739,9 @@ public final class BackgroundIndexer: ObservableObject {
             entryID: entryID, outline: outline, sidecar: sidecar,
             utterances: utterances, overrides: overrides, body: body,
             characters: characters,
-            recordedConversations: recordedConversations)
+            recordedConversations: recordedConversations,
+            keyScenes: keyScenes,
+            rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes)
         let deriveMs = (CFAbsoluteTimeGetCurrent() - deriveStart) * 1000
         publish(snapshot)
         // 성능 지표 (요구사항 §33) — 깊은 패스 끝에서 한 번 갱신.
@@ -935,11 +953,12 @@ public final class BackgroundIndexer: ObservableObject {
         events: [StoryEvent], characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> EventGraphParser.Result? {
-        let capped = Array(events.prefix(40))
+        let capped = uniqueEventsForAnalysis(events)
         guard capped.count >= 2 else {
             return EventGraphParser.Result(causalLinks: [], identities: [], chronoEdges: [])
         }
-        let names = Dictionary(uniqueKeysWithValues: characters.map { ($0.id, $0.name) })
+        let names = Dictionary(
+            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let listing = capped.enumerated()
             .map { offset, event in
                 let who = event.participants.compactMap { names[$0] }.joined(separator: "·")
@@ -966,9 +985,10 @@ public final class BackgroundIndexer: ObservableObject {
         causalLinks: [CausalLink],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [PlotThread]? {
-        let capped = Array(events.prefix(40))
+        let capped = uniqueEventsForAnalysis(events)
         guard capped.count >= 3 else { return [] }
-        let names = Dictionary(uniqueKeysWithValues: characters.map { ($0.id, $0.name) })
+        let names = Dictionary(
+            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
         let listing = capped.enumerated()
             .map { offset, event in
                 let who = event.participants.compactMap { names[$0] }.joined(separator: "·")
@@ -996,6 +1016,22 @@ public final class BackgroundIndexer: ObservableObject {
             return []
         }
         return PlotThreadParser.parse(output, keys: capped.map(\.stableKey))
+    }
+
+    /// 사건 stableKey는 요약 기반이라 같은 사건이 여러 장면에서 재서술되면
+    /// 중복될 수 있다. LLM 번호 목록과 key→번호 인덱스는 1:1이어야 하므로 첫
+    /// 등장만 보존해 정규화한 뒤 상한을 적용한다 (PLAN §6.6 정본 사건).
+    nonisolated static func uniqueEventsForAnalysis(
+        _ events: [StoryEvent], limit: Int = 40
+    ) -> [StoryEvent] {
+        var seen: Set<String> = []
+        var result: [StoryEvent] = []
+        result.reserveCapacity(min(limit, events.count))
+        for event in events where seen.insert(event.stableKey).inserted {
+            result.append(event)
+            if result.count == limit { break }
+        }
+        return result
     }
 
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 주제·어조·핵심 발언을 뽑는다.
@@ -1147,7 +1183,9 @@ public final class BackgroundIndexer: ObservableObject {
         entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
         utterances: [Utterance], overrides: [NarrativeOverride] = [],
         body: String = "", characters: [CharacterCard] = [],
-        recordedConversations: [RecordedConversation] = []
+        recordedConversations: [RecordedConversation] = [],
+        keyScenes: [KeyScene] = [],
+        rejectedKeySceneCandidateHashes: Set<String> = []
     ) -> KnowledgeSnapshot {
         // 사용자 수정 재앵커 — 씬 원문이 바뀌어 해시가 바뀐 오버라이드를 앵커
         // 스니펫으로 잇는다. 실패분은 stale로 스냅샷에 실려 UI가 알린다 (§1-5).
@@ -1158,6 +1196,7 @@ public final class BackgroundIndexer: ObservableObject {
         let anchoredRecords = recordedConversations.map {
             ConversationDetector.reanchor($0, in: text) ?? $0
         }
+        let reconciledKeyScenes = KeySceneReconciler.reconcile(keyScenes, in: body)
         // 사용자 구간 경계 수정 적용 (요구사항 §15) — 인용을 씬 원문에서 되찾아
         // 범위를 다시 잡는다. 층·시점 등 나머지 오버라이드는 스냅샷 조립이 얹는다.
         let boundedSegments = SegmentParser.applyingBoundaryOverrides(
@@ -1181,6 +1220,9 @@ public final class BackgroundIndexer: ObservableObject {
             recordedConversations: anchoredRecords,
             conversationMeta: sidecar.conversationMeta,
             characters: characters,
+            keyScenes: reconciledKeyScenes.scenes,
+            staleKeySceneIDs: reconciledKeyScenes.staleIDs,
+            rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes,
             overrides: rekeyed,
             staleOverrides: stale
         )

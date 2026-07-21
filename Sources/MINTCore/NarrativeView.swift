@@ -70,6 +70,7 @@ struct NarrativeView: View {
             header
             Divider()
             if let snapshot = liveSnapshot {
+                KeySceneView(store: store, snapshot: snapshot, theme: theme)
                 threadLegend(snapshot)
                 ScrollView {
                     VStack(alignment: .leading, spacing: 8) {
@@ -869,12 +870,6 @@ enum GraphRow: Identifiable {
             }
         }
 
-        // 세그먼트 수 — 같은 헤딩 경로가 몇 조각으로 쪼개졌는지 ("1장 (3/14)").
-        var segmentCounts: [[String]: Int] = [:]
-        for scene in snapshot.outline.scenes {
-            segmentCounts[scene.headingPath, default: 0] += 1
-        }
-
         // 씬 인덱스 → 그 씬이 여는/닫는 traversal(브랜치).
         var branchOpenAt: [Int: NarrativeBranch] = [:]
         var branchCloseAt: [Int: NarrativeBranch] = [:]
@@ -891,23 +886,24 @@ enum GraphRow: Identifiable {
 
             var path = scene.headingPath.filter { !$0.isEmpty }.joined(separator: " › ")
             if path.isEmpty { path = "서두" }
-            if let count = segmentCounts[scene.headingPath], count > 1 {
-                path += " (\(scene.segmentIndex + 1)/\(count))"
-            }
             let meta = snapshot.sceneMetaByHash[scene.contentHash]
             let events = canonicalByScene[scene.contentHash] ?? []
             let refs = refsByScene[scene.contentHash] ?? []
-            rows.append(
-                .sceneMarker(
-                    SceneInfo(
-                        hash: scene.contentHash,
-                        title: meta?.title,
-                        titleUserEdited: meta?.titleUserEdited ?? false,
-                        path: path,
-                        summary: snapshot.summariesByHash[scene.contentHash],
-                        type: meta?.type ?? .present,
-                        typeUserEdited: meta?.typeUserEdited ?? false,
-                        start: scene.utf16Range.lowerBound)))
+            // M11: CDC 분할 청크는 사용자 장면이 아니다. 같은 헤딩의 첫 청크만
+            // 장/절 표지로 보이고, 뒤 청크의 사건은 그 아래 이어진다.
+            if scene.segmentIndex == 0 {
+                rows.append(
+                    .sceneMarker(
+                        SceneInfo(
+                            hash: scene.contentHash,
+                            title: meta?.title,
+                            titleUserEdited: meta?.titleUserEdited ?? false,
+                            path: path,
+                            summary: snapshot.summariesByHash[scene.contentHash],
+                            type: meta?.type ?? .present,
+                            typeUserEdited: meta?.typeUserEdited ?? false,
+                            start: scene.utf16Range.lowerBound)))
+            }
 
             // 씬 내부 traversal 구간 — bracket (플롯 branch가 아니다).
             for segment in snapshot.segmentsByScene[scene.contentHash] ?? [] {
@@ -922,13 +918,6 @@ enum GraphRow: Identifiable {
                         sceneStart: scene.utf16Range.lowerBound,
                         userEdited: edited))
             }
-            if scene.utf16Range.count > BackgroundIndexer.maxSceneCharacters {
-                rows.append(
-                    .truncated(
-                        id: scene.contentHash, total: scene.utf16Range.count,
-                        read: BackgroundIndexer.maxSceneCharacters))
-            }
-
             // 사건 — 사소(중요도 ≤2)라도 본줄기 밖 플롯에 속하면 접지 않는다
             // (topology에 구멍이 나면 안 된다).
             let start = scene.utf16Range.lowerBound
@@ -972,7 +961,7 @@ enum GraphRow: Identifiable {
                         canonicalKey: ref.canonical.canonicalKey,
                         perspective: ref.perspective))
             }
-            if events.isEmpty, refs.isEmpty,
+            if scene.segmentIndex == 0, events.isEmpty, refs.isEmpty,
                 snapshot.summariesByHash[scene.contentHash] == nil
             {
                 rows.append(.pending(id: "\(scene.contentHash)-\(index)"))

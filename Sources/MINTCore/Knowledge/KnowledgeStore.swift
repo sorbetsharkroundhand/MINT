@@ -268,6 +268,12 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     public let chronoConflicts: [ChronoEdge]
     /// 스냅샷 조립 시점의 등록 인물 (이름 질의용 값 복사).
     public let characters: [CharacterCard]
+    /// 작가가 관리하는 sparse 핵심 장면. 원문 수정에 대한 재앵커가 적용된 값이다.
+    public let keyScenes: [KeyScene]
+    /// 재앵커 근거를 찾지 못한 장면. 삭제하지 않고 UI에 검토 대상으로 남긴다.
+    public let staleKeySceneIDs: Set<UUID>
+    /// 규칙 기반 비영속 후보. 작가 승인 전에는 entries.json에 들어가지 않는다.
+    public let keySceneCandidates: [StoryEventCandidate]
     /// 씬 해시 → 씬 시작 UTF-16 (구간 절대 좌표 환산용).
     private let sceneStartByHash: [String: Int]
 
@@ -299,6 +305,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         recordedConversations: [RecordedConversation] = [],
         conversationMeta: [String: ConversationMeta] = [:],
         characters: [CharacterCard] = [],
+        keyScenes: [KeyScene] = [],
+        staleKeySceneIDs: Set<UUID> = [],
+        rejectedKeySceneCandidateHashes: Set<String> = [],
         overrides: NarrativeOverrides = .empty,
         staleOverrides: [NarrativeOverride] = []
     ) {
@@ -311,6 +320,15 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.overrides = overrides
         self.staleOverrides = staleOverrides
         self.characters = characters
+        self.keyScenes = keyScenes.sorted { lhs, rhs in
+            switch (lhs.sourceRange, rhs.sourceRange) {
+            case let (a?, b?): a.lowerBound < b.lowerBound
+            case (.some, .none): true
+            case (.none, .some): false
+            case (.none, .none): lhs.createdAt < rhs.createdAt
+            }
+        }
+        self.staleKeySceneIDs = staleKeySceneIDs
 
         // 사건을 담화 순서로 편다 — 저장은 해시 키(삽입에 불변), 순서는 여기서
         // 아웃라인으로부터 파생한다 (docs/m6-events.md 결정 1).
@@ -340,6 +358,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             ordered.append(contentsOf: sceneEvents)
         }
         self.events = ordered
+        self.keySceneCandidates = KeySceneCandidateDetector.detect(
+            outline: outline, events: ordered, body: "", existing: keyScenes,
+            ignoredInputHashes: rejectedKeySceneCandidateHashes)
         self.sceneEndByHash = ends
 
         var index: [UUID: [Int]] = [:]

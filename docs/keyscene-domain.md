@@ -1,6 +1,6 @@
 # KeyScene 도메인 — 작가 중심 핵심 장면 & 챕터 단위 분석 (설계)
 
-> **상태: 설계 승인 대기 → 구현 계획.** 실제 코드 조사(2026-07-21) 기준.
+> **상태: P0-A 구현 완료 · P0-B 측정 구현 대기.** 2026-07-21 기준.
 > 철학은 [CLAUDE.md](../CLAUDE.md), 시스템 설계·로드맵은 [PLAN.md](../PLAN.md).
 > 선행 조사: [docs/m6-scene-split.md](m6-scene-split.md) · [docs/m6-events.md](m6-events.md).
 
@@ -283,6 +283,18 @@ P0(KeyScene 모델 + 챕터 분석 + 회귀 테스트)가 끝난 뒤에만 착�
 | `NarrativeView.swift` | "핵심 장면"(KeyScene) 표시·CRUD 패널, 청크 `(N/M)` 노출 축소 |
 | `Sources/MINTBench/main.swift` | 챕터 분석 LLM 호출 수 측정 축 (§3.5) |
 | `Tests/MINTCoreTests/KeySceneTests.swift` (신규) | §6 결정적 테스트 |
+
+### P0-A 구현 기록 (2026-07-21)
+
+- `KeyScene` 저장과 작가 CRUD/확정/병합, 안정 UUID, 계획형 범위 nil을 구현했다.
+- `anchorSnippet` 재앵커 실패는 `staleKeySceneIDs`로 보존하며 사용자 데이터를
+  자동 삭제하지 않는다. 스냅샷 재조립만 수행하므로 모델 없이 동작한다.
+- `get_outline`/`read_scene`은 KeyScene UUID만 사용하고 페이지 조회한다. CDC 해시와
+  `(분할 N)`은 반환하지 않는다. NarrativeView도 같은 헤딩의 CDC 후속 청크 표지를
+  숨기고 별도 핵심 장면 패널에서 등록·수정·확정·병합·삭제를 제공한다.
+- `ContextAssembler`는 커서 이전 KeyScene을 우선하고 겹치는 청크 요약을 제외한다.
+- P0-B의 호출 경로 변경은 MINTBench 호출 수/수락 프록시 측정과 함께 수행해야 한다.
+  현재 청크별 추출 호출은 유지된다(측정 없이 품질 경로를 바꾸지 않는 §2-7 준수).
 
 ## 8. 위험 · 롤백
 

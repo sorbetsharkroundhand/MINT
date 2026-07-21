@@ -1,7 +1,6 @@
 import Foundation
 
-// Conversation Capture (요구사항 §18–§21) — 작성 중 대화 블록의 실시간 감지와
-// 사용자 기록.
+// Conversation Capture (PLAN §6.6) — 작성 중 대화 블록의 실시간 감지와 자동 기록.
 //
 // 경로 분리 (요구사항 §19·§34):
 // - **실시간**: `ConversationDetector` — 결정적·LLM 없음·O(스캔 창). 커서 근처만
@@ -10,18 +9,17 @@ import Foundation
 // - **백그라운드**: 참여자 귀속·주제·어조 보완은 BackgroundIndexer의 몫이다 —
 //   기록 시점에는 원문 범위·첫 대사만 있으면 된다.
 //
-// 기록된 대화는 **사용자 결정**이라 entries.json에 산다 (NarrativeOverride와
-// 같은 이유 — 사이드카 폐기가 사용자 데이터를 건드리면 안 된다). 자동 감지된
-// Conversation 인덱스와 별도 저장 시스템을 만들지 않는다: 스냅샷 조립이 기록을
-// 기존 인덱스 위에 겹쳐(같은 범위 = 같은 대화) 하나의 목록으로 낸다 (§21).
+// 기록은 높은 신뢰의 결정적 규칙을 통과한 사용자 가시 메모리다. entries.json에
+// 저장해 재실행 후에도 유지하되 원문 범위·해시로 재검증할 수 있고 사용자가 지울
+// 수 있다. 스냅샷은 기존 Conversation 인덱스와 겹쳐 하나의 목록으로 낸다.
 
 // MARK: - 기록된 대화 (사용자 데이터 — entries.json)
 
-/// 사용자가 「이 대화를 기록할까요?」로 승인한 대화 하나.
+/// 결정적 감지기가 자동으로 수집한 대화 하나.
 /// 대사 전체를 복제하지 않는다 — 원문 범위 + 재앵커용 첫/끝 대사만 (요구사항 §21).
 public struct RecordedConversation: Codable, Equatable, Sendable, Identifiable {
     public var id: UUID
-    /// 기록 시점의 참여자 후보 (등록 카드 id) — 백그라운드가 보완할 수 있다.
+    /// 기록 시점의 참여자 후보 (등록 카드 id) — 결정적 발화 귀속 결과.
     public var participants: [UUID]
     /// 기록 시점의 본문 위치 (UTF-16) — 원문이 수정되면 firstLine으로 재앵커.
     public var utf16Start: Int
@@ -205,41 +203,66 @@ public enum ConversationDetector {
             contentHash: DocumentOutline.stableHash(content))
     }
 
-    /// 기록의 재앵커 (요구사항 §21·§28) — 원문이 수정돼 위치가 밀렸으면
-    /// 첫/끝 대사로 범위를 되찾는다. 못 찾으면 nil (stale — 조용히 엉뚱한
-    /// 위치로 잇는 것보다 낫다).
+    /// 기록의 재앵커 (PLAN §6.6) — 현재 범위와 해시가 여전히 맞으면 그대로
+    /// 유지하고, 원문이 수정돼 밀렸을 때만 기존 위치에서 가장 가까운 첫/끝 대사로
+    /// 범위를 되찾는다. 못 찾으면 nil — 엉뚱한 반복 대사에 잇는 것보다 낫다.
     public static func reanchor(
         _ record: RecordedConversation, in body: NSString
     ) -> RecordedConversation? {
         guard !record.firstLine.isEmpty else { return nil }
-        let full = NSRange(location: 0, length: body.length)
-        let first = body.range(of: record.firstLine, options: [], range: full)
-        guard first.location != NSNotFound else { return nil }
+        if record.utf16Start >= 0, record.utf16End > record.utf16Start,
+            record.utf16End <= body.length
+        {
+            let current = body.substring(
+                with: NSRange(
+                    location: record.utf16Start,
+                    length: record.utf16End - record.utf16Start))
+            if DocumentOutline.stableHash(current) == record.contentHash { return record }
+        }
+
+        var candidates: [NSRange] = []
+        var searchStart = 0
+        while searchStart < body.length {
+            let found = body.range(
+                of: record.firstLine, options: [],
+                range: NSRange(location: searchStart, length: body.length - searchStart))
+            guard found.location != NSNotFound else { break }
+            candidates.append(found)
+            searchStart = found.location + max(1, found.length)
+        }
+        guard let first = candidates.min(by: {
+            abs($0.location - record.utf16Start) < abs($1.location - record.utf16Start)
+        }) else { return nil }
         var updated = record
         // 문단 시작으로 확장 — 기록 범위는 발화 문단 단위였다.
         let firstParagraph = body.lineRange(for: first)
         updated.utf16Start = firstParagraph.location
         let tailStart = first.location + first.length
-        if !record.lastLine.isEmpty, tailStart < body.length {
-            let last = body.range(
+        guard !record.lastLine.isEmpty, tailStart < body.length else { return nil }
+        var lastCandidates: [NSRange] = []
+        searchStart = tailStart
+        while searchStart < body.length {
+            let found = body.range(
                 of: record.lastLine, options: [],
-                range: NSRange(location: tailStart, length: body.length - tailStart))
-            if last.location != NSNotFound {
-                let lastParagraph = body.lineRange(for: last)
-                var end = lastParagraph.location + lastParagraph.length
-                while end > updated.utf16Start, body.character(at: end - 1) == 0x0A { end -= 1 }
-                updated.utf16End = end
-                return updated
-            }
+                range: NSRange(location: searchStart, length: body.length - searchStart))
+            guard found.location != NSNotFound else { break }
+            lastCandidates.append(found)
+            searchStart = found.location + max(1, found.length)
         }
-        // 끝을 못 찾으면 원래 길이만큼 잠정 유지.
-        updated.utf16End = min(
-            body.length, updated.utf16Start + (record.utf16End - record.utf16Start))
+        let expectedEnd = updated.utf16Start + (record.utf16End - record.utf16Start)
+        guard let last = lastCandidates.min(by: {
+            abs(($0.location + $0.length) - expectedEnd)
+                < abs(($1.location + $1.length) - expectedEnd)
+        }) else { return nil }
+        let lastParagraph = body.lineRange(for: last)
+        var end = lastParagraph.location + lastParagraph.length
+        while end > updated.utf16Start, body.character(at: end - 1) == 0x0A { end -= 1 }
+        updated.utf16End = end
         return updated
     }
 
-    /// 블록 → 기록 레코드. 참여자는 스냅샷 발화 귀속에서 겹치는 화자들로 채운다
-    /// (없으면 빈 배열 — 백그라운드가 보완).
+    /// 블록 → 기록 레코드. 참여자는 현재 스냅샷의 발화 귀속에서 겹치는 화자들로
+    /// 채운다. 아직 스냅샷이 따라오지 못했으면 다음 확장 감지에서 병합 보완된다.
     public static func record(
         from block: Block, utterances: [Utterance]
     ) -> RecordedConversation {
@@ -253,5 +276,28 @@ public enum ConversationDetector {
             firstLine: block.firstLine,
             lastLine: block.lastLine,
             contentHash: block.contentHash)
+    }
+
+    /// 새 감지 결과를 기존 자동 기록에 합친다. 같은 해시는 무시하고, 이어 쓰기로
+    /// 범위가 겹치면 ID·최초 기록 시각을 보존한 채 한 대화로 확장한다.
+    static func merging(
+        _ record: RecordedConversation, into existing: [RecordedConversation]
+    ) -> [RecordedConversation] {
+        guard !existing.contains(where: { $0.contentHash == record.contentHash }) else {
+            return existing
+        }
+        var records = existing
+        if let overlap = records.firstIndex(where: {
+            $0.utf16Start < record.utf16End && record.utf16Start < $0.utf16End
+        }) {
+            var expanded = record
+            expanded.id = records[overlap].id
+            expanded.recordedAt = records[overlap].recordedAt
+            expanded.participants = Array(Set(records[overlap].participants + record.participants))
+            records[overlap] = expanded
+        } else {
+            records.append(record)
+        }
+        return records
     }
 }

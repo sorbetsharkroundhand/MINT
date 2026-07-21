@@ -86,9 +86,14 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     /// 스키마 변경 시 통째로 버려지지만 이 목록은 살아남아, 재분석·재구축이
     /// 사용자 수정을 절대 덮지 못한다 (CLAUDE.md §1-5). 레거시 파일엔 없는 키.
     public var narrativeOverrides: [NarrativeOverride]?
-    /// 사용자가 기록한 대화 (요구사항 §20–§21) — 오버라이드와 같은 이유로
-    /// 여기 산다. 재분석이 지우지 못한다. 레거시 파일엔 없는 키.
+    /// 높은 신뢰 규칙으로 자동 기록한 대화 (PLAN §6.6). 사용자에게 보이고 삭제할
+    /// 수 있는 기억이라 entries.json에 두며, 재분석이 임의로 지우지 않는다.
     public var recordedConversations: [RecordedConversation]?
+    /// 작가가 직접 관리하는 sparse 핵심 장면 (PLAN §14 M11). 파생 캐시가 아닌
+    /// 사용자 데이터이며, 레거시 entries.json에는 키가 없어 nil로 로드된다.
+    public var keyScenes: [KeyScene]?
+    /// 사용자가 무시한 비영속 후보의 입력 해시. 같은 입력을 다시 묻지 않는다.
+    public var rejectedKeySceneCandidateHashes: [String]?
 
     public init(
         id: UUID = UUID(),
@@ -103,7 +108,9 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         rejectedCharacterNames: [String]? = nil,
         sortOrder: Double? = nil,
         narrativeOverrides: [NarrativeOverride]? = nil,
-        recordedConversations: [RecordedConversation]? = nil
+        recordedConversations: [RecordedConversation]? = nil,
+        keyScenes: [KeyScene]? = nil,
+        rejectedKeySceneCandidateHashes: [String]? = nil
     ) {
         self.id = id
         self.title = title
@@ -118,6 +125,8 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
         self.sortOrder = sortOrder
         self.narrativeOverrides = narrativeOverrides
         self.recordedConversations = recordedConversations
+        self.keyScenes = keyScenes
+        self.rejectedKeySceneCandidateHashes = rejectedKeySceneCandidateHashes
     }
 
     /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
@@ -829,16 +838,15 @@ public final class EntryStore: ObservableObject {
         narrativeOverridesDidChange?(id)
     }
 
-    // MARK: - 기록된 대화 (요구사항 §20–§21)
+    // MARK: - 자동 기록된 대화 (PLAN §6.6)
 
-    /// 대화 기록 승인 — 사용자 결정 = 즉시 저장. 스냅샷 재조립 신호까지 쏜다
-    /// (기록이 대화 인덱스에 바로 보이도록).
+    /// 높은 신뢰의 대화 자동 기록 — 즉시 저장하고 스냅샷을 재조립한다. 같은
+    /// 대화를 이어 쓰면 겹치는 짧은 기록을 새 항목으로 쌓지 않고 하나로 확장한다.
     public func recordConversation(_ record: RecordedConversation, in id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        var records = entries[index].recordedConversations ?? []
-        // 같은 범위의 중복 기록 방지 — 같은 블록을 두 번 기록하지 않는다.
-        guard !records.contains(where: { $0.contentHash == record.contentHash }) else { return }
-        records.append(record)
+        let previous = entries[index].recordedConversations ?? []
+        let records = ConversationDetector.merging(record, into: previous)
+        guard records != previous else { return }
         entries[index].recordedConversations = records
         saveNow()
         narrativeOverridesDidChange?(id)
@@ -852,6 +860,87 @@ public final class EntryStore: ObservableObject {
         else { return }
         records.removeAll { $0.id == recordID }
         entries[index].recordedConversations = records.isEmpty ? nil : records
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    // MARK: - 핵심 장면 (PLAN §14 M11)
+
+    /// 작가의 추가·수정은 즉시 저장한다. 범위형 장면은 재앵커 근거도 함께 보존한다.
+    public func upsertKeyScene(_ scene: KeyScene, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var scene = scene
+        scene.importance = min(5, max(1, scene.importance))
+        if scene.sourceRange != nil, scene.anchorSnippet?.isEmpty != false {
+            scene.anchorSnippet = KeySceneReconciler.snippet(
+                in: entries[index].body, range: scene.sourceRange)
+        }
+        scene.anchorSnippet = scene.anchorSnippet.map { String($0.prefix(40)) }
+        scene.updatedAt = .now
+        var scenes = entries[index].keyScenes ?? []
+        if let offset = scenes.firstIndex(where: { $0.id == scene.id }) {
+            scenes[offset] = scene
+        } else {
+            scenes.append(scene)
+        }
+        entries[index].keyScenes = scenes
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    public func removeKeyScene(id sceneID: UUID, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            var scenes = entries[index].keyScenes,
+            scenes.contains(where: { $0.id == sceneID })
+        else { return }
+        scenes.removeAll { $0.id == sceneID }
+        entries[index].keyScenes = scenes.isEmpty ? nil : scenes
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    public func confirmKeyScene(id sceneID: UUID, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            var scenes = entries[index].keyScenes,
+            let offset = scenes.firstIndex(where: { $0.id == sceneID })
+        else { return }
+        scenes[offset].status = .confirmed
+        scenes[offset].authorConfirmed = true
+        scenes[offset].updatedAt = .now
+        entries[index].keyScenes = scenes
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    public func rejectKeySceneCandidate(inputHash: String, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        var hashes = entries[index].rejectedKeySceneCandidateHashes ?? []
+        guard !hashes.contains(inputHash) else { return }
+        hashes.append(inputHash)
+        entries[index].rejectedKeySceneCandidateHashes = hashes
+        saveNow()
+        narrativeOverridesDidChange?(id)
+    }
+
+    /// 두 장면을 첫 장면의 안정 UUID로 합친다. 작가가 쓴 필드는 우선 보존한다.
+    public func mergeKeyScenes(keeping keptID: UUID, removing removedID: UUID, in id: UUID) {
+        guard keptID != removedID,
+            let index = entries.firstIndex(where: { $0.id == id }),
+            var scenes = entries[index].keyScenes,
+            let kept = scenes.firstIndex(where: { $0.id == keptID }),
+            let removed = scenes.firstIndex(where: { $0.id == removedID })
+        else { return }
+        let other = scenes[removed]
+        if scenes[kept].summary.isEmpty { scenes[kept].summary = other.summary }
+        if scenes[kept].sourceRange == nil { scenes[kept].sourceRange = other.sourceRange }
+        scenes[kept].characters = Array(Set(scenes[kept].characters + other.characters))
+        scenes[kept].linkedEventKeys = Array(
+            Set(scenes[kept].linkedEventKeys + other.linkedEventKeys))
+        scenes[kept].importance = max(scenes[kept].importance, other.importance)
+        scenes[kept].authorConfirmed = scenes[kept].authorConfirmed || other.authorConfirmed
+        scenes[kept].updatedAt = .now
+        scenes.remove(at: removed)
+        entries[index].keyScenes = scenes
         saveNow()
         narrativeOverridesDidChange?(id)
     }
