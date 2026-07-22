@@ -11,14 +11,13 @@ import UniformTypeIdentifiers
 /// - 압축은 시스템 `/usr/bin/zip` — mimetype은 규격상 무압축(-0) 첫 항목이어야
 ///   해서 두 번에 나눠 담는다.
 public enum EpubExporter {
-
     public enum ExportError: LocalizedError {
         case zipFailed(String)
 
         public var errorDescription: String? {
             switch self {
-            case .zipFailed(let message):
-                return "EPUB 압축에 실패했어요 — \(message)"
+            case let .zipFailed(message):
+                "EPUB 압축에 실패했어요 — \(message)"
             }
         }
     }
@@ -65,21 +64,26 @@ public enum EpubExporter {
             .write(to: staging.appendingPathComponent("mimetype"))
         try containerXML.write(
             to: metaInf.appendingPathComponent("container.xml"),
-            atomically: true, encoding: .utf8)
+            atomically: true, encoding: .utf8
+        )
 
         var images: [String] = []
         let chapters = makeChapters(from: entry, copyingImagesInto: oebps, collected: &images)
         for (index, chapter) in chapters.enumerated() {
             try chapterXHTML(chapter).write(
                 to: oebps.appendingPathComponent(chapterFile(index)),
-                atomically: true, encoding: .utf8)
+                atomically: true, encoding: .utf8
+            )
         }
         try styleCSS.write(
-            to: oebps.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
+            to: oebps.appendingPathComponent("style.css"), atomically: true, encoding: .utf8
+        )
         try navXHTML(bookTitle: entry.title, chapters: chapters).write(
-            to: oebps.appendingPathComponent("nav.xhtml"), atomically: true, encoding: .utf8)
+            to: oebps.appendingPathComponent("nav.xhtml"), atomically: true, encoding: .utf8
+        )
         try packageOPF(entry: entry, chapters: chapters, images: images, author: author).write(
-            to: oebps.appendingPathComponent("content.opf"), atomically: true, encoding: .utf8)
+            to: oebps.appendingPathComponent("content.opf"), atomically: true, encoding: .utf8
+        )
 
         try runZip(["-X", "-0", "book.epub", "mimetype"], in: staging)
         try runZip(["-rX", "book.epub", "META-INF", "OEBPS"], in: staging)
@@ -138,7 +142,8 @@ public enum EpubExporter {
             // 정렬 래퍼는 스타일로 옮긴다.
             var align: String?
             if let match = alignWrapper.firstMatch(
-                in: line, range: NSRange(location: 0, length: (line as NSString).length)) {
+                in: line, range: NSRange(location: 0, length: (line as NSString).length)
+            ) {
                 align = (line as NSString).substring(with: match.range(at: 1))
                 line = (line as NSString).substring(with: match.range(at: 2))
             }
@@ -179,7 +184,8 @@ public enum EpubExporter {
                 let source = String(line.dropFirst(2).dropLast(2))
                 html += "<p class=\"math\"><code>\(escape(source))</code></p>\n"
             } else if let attrs = BlockTextView.imageAttrs(
-                from: line.trimmingCharacters(in: .whitespaces)) {
+                from: line.trimmingCharacters(in: .whitespaces)
+            ) {
                 closeList()
                 if let relative = copyImage(attrs.src, into: oebps) {
                     if !images.contains(relative) { images.append(relative) }
@@ -233,7 +239,8 @@ public enum EpubExporter {
         var cursor = 0
         for match in fontTag.matches(in: s, range: NSRange(location: 0, length: ns.length)) {
             result += ns.substring(with: NSRange(
-                location: cursor, length: match.range.location - cursor))
+                location: cursor, length: match.range.location - cursor
+            ))
             let attrs = ns.substring(with: match.range(at: 1))
             let content = ns.substring(with: match.range(at: 2))
             var styles: [String] = []
@@ -250,13 +257,17 @@ public enum EpubExporter {
         s = result
         // 마커 → 태그. 순서 중요: *** > ** > *.
         s = boldItalic.stringByReplacingMatches(
-            in: s, range: fullRange(s), withTemplate: "<strong><em>$1</em></strong>")
+            in: s, range: fullRange(s), withTemplate: "<strong><em>$1</em></strong>"
+        )
         s = bold.stringByReplacingMatches(
-            in: s, range: fullRange(s), withTemplate: "<strong>$1</strong>")
+            in: s, range: fullRange(s), withTemplate: "<strong>$1</strong>"
+        )
         s = italic.stringByReplacingMatches(
-            in: s, range: fullRange(s), withTemplate: "<em>$1</em>")
+            in: s, range: fullRange(s), withTemplate: "<em>$1</em>"
+        )
         s = codeSpan.stringByReplacingMatches(
-            in: s, range: fullRange(s), withTemplate: "<code>$1</code>")
+            in: s, range: fullRange(s), withTemplate: "<code>$1</code>"
+        )
         return s
     }
 
@@ -279,51 +290,64 @@ public enum EpubExporter {
         return (text as NSString).substring(with: match.range(at: 1))
     }
 
+    // 아래 패턴은 모두 정적 리터럴이라 초기화 실패를 복구할 수 없다.
+    // swiftlint:disable force_try
     private static let alignWrapper = try! NSRegularExpression(
-        pattern: #"^<p align="(center|right)">(.*)</p>$"#)
+        pattern: #"^<p align="(center|right)">(.*)</p>$"#
+    )
     private static let fontTag = try! NSRegularExpression(
-        pattern: #"&lt;font ([^&]*)&gt;(.*?)&lt;/font&gt;"#)
+        pattern: #"&lt;font ([^&]*)&gt;(.*?)&lt;/font&gt;"#
+    )
     private static let fontColorAttr = try! NSRegularExpression(
-        pattern: ##"color="#([0-9A-Fa-f]{6})""##)
+        pattern: ##"color="#([0-9A-Fa-f]{6})""##
+    )
     private static let fontSizeAttr = try! NSRegularExpression(
-        pattern: #"size="([0-9.]+)""#)
+        pattern: #"size="([0-9.]+)""#
+    )
     private static let boldItalic = try! NSRegularExpression(
-        pattern: #"(?<!\*)\*\*\*([^*\n]+)\*\*\*(?!\*)"#)
+        pattern: #"(?<!\*)\*\*\*([^*\n]+)\*\*\*(?!\*)"#
+    )
     private static let bold = try! NSRegularExpression(
-        pattern: #"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#)
+        pattern: #"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#
+    )
     private static let italic = try! NSRegularExpression(
-        pattern: #"(?<!\*)\*([^*\n]+)\*(?!\*)"#)
+        pattern: #"(?<!\*)\*([^*\n]+)\*(?!\*)"#
+    )
     private static let codeSpan = try! NSRegularExpression(
-        pattern: #"`([^`\n]+)`"#)
+        pattern: #"`([^`\n]+)`"#
+    )
+    // swiftlint:enable force_try
 
     // MARK: - 패키지 문서들
 
     private static let containerXML = """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
-          <rootfiles>
-            <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
-          </rootfiles>
-        </container>
-        """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+      <rootfiles>
+        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+      </rootfiles>
+    </container>
+    """
 
     /// 소설다운 기본 조판 — 세리프·넉넉한 행간·들여쓰기 없는 문단 간격.
     private static let styleCSS = """
-        body { font-family: "Noto Serif KR", serif; line-height: 1.75; margin: 1em; }
-        h1 { font-size: 1.5em; margin: 1.6em 0 1em; }
-        h2 { font-size: 1.25em; margin: 1.4em 0 0.8em; }
-        h3 { font-size: 1.1em; margin: 1.2em 0 0.6em; }
-        p { margin: 0 0 0.75em; }
-        blockquote { color: #666; border-left: 3px solid #999; margin: 1em 0; padding-left: 1em; }
-        pre, code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
-        pre { background: #f2f2f2; padding: 0.8em; border-radius: 8px; overflow-x: auto; }
-        hr { border: none; border-top: 1px solid #ccc; margin: 2em auto; width: 40%; }
-        .math { text-align: center; margin: 1.2em 0; }
-        .image { text-align: center; margin: 1.2em 0; }
-        img { max-width: 100%; }
-        """
+    body { font-family: "Noto Serif KR", serif; line-height: 1.75; margin: 1em; }
+    h1 { font-size: 1.5em; margin: 1.6em 0 1em; }
+    h2 { font-size: 1.25em; margin: 1.4em 0 0.8em; }
+    h3 { font-size: 1.1em; margin: 1.2em 0 0.6em; }
+    p { margin: 0 0 0.75em; }
+    blockquote { color: #666; border-left: 3px solid #999; margin: 1em 0; padding-left: 1em; }
+    pre, code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
+    pre { background: #f2f2f2; padding: 0.8em; border-radius: 8px; overflow-x: auto; }
+    hr { border: none; border-top: 1px solid #ccc; margin: 2em auto; width: 40%; }
+    .math { text-align: center; margin: 1.2em 0; }
+    .image { text-align: center; margin: 1.2em 0; }
+    img { max-width: 100%; }
+    """
 
-    private static func chapterFile(_ index: Int) -> String { "chapter\(index).xhtml" }
+    private static func chapterFile(_ index: Int) -> String {
+        "chapter\(index).xhtml"
+    }
 
     private static func chapterXHTML(_ chapter: Chapter) -> String {
         """
@@ -349,20 +373,20 @@ public enum EpubExporter {
             .map { "      <li><a href=\"\(chapterFile($0.offset))\">\(escape($0.element.title))</a></li>" }
             .joined(separator: "\n")
         return """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <!DOCTYPE html>
-            <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ko" lang="ko">
-            <head><title>\(escape(bookTitle))</title></head>
-            <body>
-              <nav epub:type="toc">
-                <h1>목차</h1>
-                <ol>
-            \(items)
-                </ol>
-              </nav>
-            </body>
-            </html>
-            """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <!DOCTYPE html>
+        <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="ko" lang="ko">
+        <head><title>\(escape(bookTitle))</title></head>
+        <body>
+          <nav epub:type="toc">
+            <h1>목차</h1>
+            <ol>
+        \(items)
+            </ol>
+          </nav>
+        </body>
+        </html>
+        """
     }
 
     /// OPF 패키지 문서. `private`가 아닌 이유는 저자 메타데이터를 zip 없이
@@ -388,35 +412,37 @@ public enum EpubExporter {
         }()
         var manifest = [
             #"<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>"#,
-            #"<item id="css" href="style.css" media-type="text/css"/>"#,
+            #"<item id="css" href="style.css" media-type="text/css"/>"#
         ]
         var spine: [String] = []
         for index in chapters.indices {
             manifest.append(
-                "<item id=\"ch\(index)\" href=\"\(chapterFile(index))\" media-type=\"application/xhtml+xml\"/>")
+                "<item id=\"ch\(index)\" href=\"\(chapterFile(index))\" media-type=\"application/xhtml+xml\"/>"
+            )
             spine.append("<itemref idref=\"ch\(index)\"/>")
         }
         for (index, image) in images.enumerated() {
             manifest.append(
-                "<item id=\"img\(index)\" href=\"\(image)\" media-type=\"\(mediaType(of: image))\"/>")
+                "<item id=\"img\(index)\" href=\"\(image)\" media-type=\"\(mediaType(of: image))\"/>"
+            )
         }
         return """
-            <?xml version="1.0" encoding="UTF-8"?>
-            <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="ko">
-              <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-                <dc:identifier id="pub-id">urn:uuid:\(entry.id.uuidString.lowercased())</dc:identifier>
-                <dc:title>\(escape(plainTitle(entry.title)))</dc:title>\(creatorXML)
-                <dc:language>ko</dc:language>
-                <meta property="dcterms:modified">\(modified)</meta>
-              </metadata>
-              <manifest>
-                \(manifest.joined(separator: "\n    "))
-              </manifest>
-              <spine>
-                \(spine.joined(separator: "\n    "))
-              </spine>
-            </package>
-            """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="ko">
+          <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <dc:identifier id="pub-id">urn:uuid:\(entry.id.uuidString.lowercased())</dc:identifier>
+            <dc:title>\(escape(plainTitle(entry.title)))</dc:title>\(creatorXML)
+            <dc:language>ko</dc:language>
+            <meta property="dcterms:modified">\(modified)</meta>
+          </metadata>
+          <manifest>
+            \(manifest.joined(separator: "\n    "))
+          </manifest>
+          <spine>
+            \(spine.joined(separator: "\n    "))
+          </spine>
+        </package>
+        """
     }
 
     private static func mediaType(of path: String) -> String {

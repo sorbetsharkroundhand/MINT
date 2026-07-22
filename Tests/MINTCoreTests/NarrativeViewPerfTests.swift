@@ -1,6 +1,5 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 서사 화면의 **스크롤 경로 비용** 측정 (CLAUDE.md §2-7 "측정 없이 튜닝 없음").
 ///
@@ -9,14 +8,13 @@ import XCTest
 /// hover 같은 고빈도 상태가 상위 body를 무효화하면 이 비용이 프레임마다
 /// 반복돼 스크롤이 끊긴다 — 그 비용이 실제로 얼마인지 숫자로 남긴다.
 final class NarrativeViewPerfTests: XCTestCase {
-
     /// 장편 규모 픽스처 — 씬 200개, 씬당 사건 3개(=600), 플롯 6개.
     /// 30만 자 장편에서 실제로 나올 수 있는 규모.
     private func makeLargeSnapshot(
         sceneCount: Int = 200, eventsPerScene: Int = 3, threadCount: Int = 6
     ) -> KnowledgeSnapshot {
         var body = ""
-        for index in 0..<sceneCount {
+        for index in 0 ..< sceneCount {
             body += "# \(index + 1)장\n"
             body += "인물이 무언가를 했다. 그리고 또 다른 일이 벌어졌다. 장면이 이어졌다.\n\n"
         }
@@ -26,13 +24,14 @@ final class NarrativeViewPerfTests: XCTestCase {
         var allKeys: [String] = []
         for (index, scene) in outline.scenes.enumerated() {
             var sceneEvents: [StoryEvent] = []
-            for offset in 0..<eventsPerScene {
+            for offset in 0 ..< eventsPerScene {
                 let summary = "사건 \(index)-\(offset) 무언가가 일어났다"
                 let event = StoryEvent(
                     sceneHash: scene.contentHash, participants: [],
                     summary: summary,
                     // 중요도 3 이상 — 사소 묶음으로 접히지 않게 (최악 경우 측정).
-                    importance: 3 + (offset % 3))
+                    importance: 3 + (offset % 3)
+                )
                 sceneEvents.append(event)
                 allKeys.append(event.stableKey)
             }
@@ -41,7 +40,7 @@ final class NarrativeViewPerfTests: XCTestCase {
 
         // 플롯 스레드 — 사건을 라운드로빈으로 나눠 여러 레인이 겹치게.
         var threads: [PlotThread] = []
-        for threadIndex in 0..<threadCount {
+        for threadIndex in 0 ..< threadCount {
             let members = allKeys.enumerated()
                 .filter { $0.offset % threadCount == threadIndex }
                 .map { EventThreadMembership(eventKey: $0.element) }
@@ -49,7 +48,9 @@ final class NarrativeViewPerfTests: XCTestCase {
             threads.append(
                 PlotThread(
                     title: "플롯 \(threadIndex)", summary: "",
-                    memberships: members))
+                    memberships: members
+                )
+            )
         }
 
         return KnowledgeSnapshot(
@@ -57,7 +58,8 @@ final class NarrativeViewPerfTests: XCTestCase {
             events: events,
             plotThreadAnalysis: PlotThreadAnalysis(threads: threads, memoHash: "m"),
             characters: [],
-            overrides: NarrativeOverrides([]))
+            overrides: NarrativeOverrides([])
+        )
     }
 
     /// body 1회 재평가의 비용 — 스크롤 중 hover가 유발하던 바로 그 작업.
@@ -68,13 +70,13 @@ final class NarrativeViewPerfTests: XCTestCase {
             let snapshot = makeLargeSnapshot(sceneCount: sceneCount)
             var rows: [GraphRow] = []
             let rowsStart = CFAbsoluteTimeGetCurrent()
-            for _ in 0..<20 {
+            for _ in 0 ..< 20 {
                 rows = GraphRow.flowRows(from: snapshot, expandedMinors: [])
             }
             let rowsMs = (CFAbsoluteTimeGetCurrent() - rowsStart) / 20 * 1000
 
             let layoutStart = CFAbsoluteTimeGetCurrent()
-            for _ in 0..<20 {
+            for _ in 0 ..< 20 {
                 _ = ThreadGraphLayout.compute(rows: rows, threads: snapshot.plotThreads)
             }
             let layoutMs = (CFAbsoluteTimeGetCurrent() - layoutStart) / 20 * 1000
@@ -83,9 +85,11 @@ final class NarrativeViewPerfTests: XCTestCase {
             print(
                 String(
                     format:
-                        "  씬 %4d · 사건 %4d · 행 %4d │ flowRows %6.3fms + layout %6.3fms = %6.3fms (%3.0f%%)",
+                    "  씬 %4d · 사건 %4d · 행 %4d │ flowRows %6.3fms + layout %6.3fms = %6.3fms (%3.0f%%)",
                     sceneCount, snapshot.canonicalEvents.count, rows.count,
-                    rowsMs, layoutMs, rowsMs + layoutMs, (rowsMs + layoutMs) / 16.7 * 100))
+                    rowsMs, layoutMs, rowsMs + layoutMs, (rowsMs + layoutMs) / 16.7 * 100
+                )
+            )
         }
         print("")
 
@@ -104,7 +108,8 @@ final class NarrativeViewPerfTests: XCTestCase {
         // 첫 행 중심 = 제 높이의 절반, 이후는 누적.
         XCTAssertEqual(geometry.centers[0], rows[0].height / 2)
         XCTAssertEqual(
-            geometry.centers[1], rows[0].height + rows[1].height / 2, accuracy: 0.001)
+            geometry.centers[1], rows[0].height + rows[1].height / 2, accuracy: 0.001
+        )
     }
 
     // MARK: - 플롯 선택 전환 규칙

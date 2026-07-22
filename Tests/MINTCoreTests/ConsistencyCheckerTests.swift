@@ -1,24 +1,24 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 일관성 경고 회귀 테스트 (M7) — 전부 결정적, 모델 없음.
 final class ConsistencyCheckerTests: XCTestCase {
-
     private let seoyeon = CharacterCard(name: "서연")
     private let minjun = CharacterCard(name: "민준")
-    private var cards: [CharacterCard] { [seoyeon, minjun] }
+    private var cards: [CharacterCard] {
+        [seoyeon, minjun]
+    }
 
     /// 씬 2개 — 1장에서 민준 사망 델타, 2장은 이후 본문.
     private func makeSnapshot(
         utterances: [Utterance], deltas: Bool = true
     ) -> KnowledgeSnapshot {
         let body = """
-            # 1장
-            사고가 있었다. 민준은 돌아오지 못했다. 서연은 울었다.
-            # 2장
-            시간이 흘렀다. 거리는 그대로였다. 사람들이 오갔다.
-            """
+        # 1장
+        사고가 있었다. 민준은 돌아오지 못했다. 서연은 울었다.
+        # 2장
+        시간이 흘렀다. 거리는 그대로였다. 사람들이 오갔다.
+        """
         let outline = DocumentOutline.parse(body)
         let hashes = outline.scenes.map(\.contentHash)
         var events: [String: [StoryEvent]] = [:]
@@ -30,13 +30,16 @@ final class ConsistencyCheckerTests: XCTestCase {
                     deltas: [
                         StateDelta(
                             characterID: minjun.id, field: .vitality,
-                            value: "사망", sceneHash: hashes[0])
-                    ])
+                            value: "사망", sceneHash: hashes[0]
+                        )
+                    ]
+                )
             ]
         }
         return KnowledgeSnapshot(
             entryID: UUID(), outline: outline, summariesByHash: [:],
-            events: events, utterances: utterances)
+            events: events, utterances: utterances
+        )
     }
 
     /// 2장 안 위치 — 1장(사망 씬)이 끝난 뒤.
@@ -52,7 +55,8 @@ final class ConsistencyCheckerTests: XCTestCase {
         let snapshot = makeSnapshot(utterances: [
             Utterance(
                 speakerID: minjun.id, text: "저 왔어요.", utf16Start: position,
-                listenerID: seoyeon.id, politeness: .honorific)
+                listenerID: seoyeon.id, politeness: .honorific
+            )
         ])
         let warnings = ConsistencyChecker.check(snapshot: snapshot, characters: cards)
         XCTAssertEqual(warnings.count, 1)
@@ -66,7 +70,8 @@ final class ConsistencyCheckerTests: XCTestCase {
         let snapshot = makeSnapshot(utterances: [
             Utterance(
                 speakerID: minjun.id, text: "다녀올게.", utf16Start: 10,
-                listenerID: seoyeon.id, politeness: .plain)
+                listenerID: seoyeon.id, politeness: .plain
+            )
         ])
         XCTAssertTrue(ConsistencyChecker.check(snapshot: snapshot, characters: cards).isEmpty)
     }
@@ -76,7 +81,7 @@ final class ConsistencyCheckerTests: XCTestCase {
         let position = chapter2Position(in: snapshot0)
         let snapshot = makeSnapshot(utterances: [
             Utterance(speakerID: minjun.id, text: "하나.", utf16Start: position, listenerID: nil, politeness: nil),
-            Utterance(speakerID: minjun.id, text: "둘이다.", utf16Start: position + 10, listenerID: nil, politeness: nil),
+            Utterance(speakerID: minjun.id, text: "둘이다.", utf16Start: position + 10, listenerID: nil, politeness: nil)
         ])
         XCTAssertEqual(ConsistencyChecker.check(snapshot: snapshot, characters: cards).count, 1)
     }
@@ -87,7 +92,8 @@ final class ConsistencyCheckerTests: XCTestCase {
         let snapshot = makeSnapshot(utterances: [
             Utterance(
                 speakerID: seoyeon.id, text: "잘 지냈어.", utf16Start: position,
-                listenerID: nil, politeness: .plain)
+                listenerID: nil, politeness: .plain
+            )
         ])
         XCTAssertTrue(ConsistencyChecker.check(snapshot: snapshot, characters: cards).isEmpty)
     }
@@ -100,7 +106,8 @@ final class ConsistencyCheckerTests: XCTestCase {
     ) -> Utterance {
         Utterance(
             speakerID: speaker.id, text: "대사", utf16Start: position,
-            listenerID: listener.id, politeness: politeness)
+            listenerID: listener.id, politeness: politeness
+        )
     }
 
     func test확립된_존대가_무너지면_경고() {
@@ -109,8 +116,9 @@ final class ConsistencyCheckerTests: XCTestCase {
                 utterance(minjun, to: seoyeon, .honorific, at: 10),
                 utterance(minjun, to: seoyeon, .honorific, at: 20),
                 utterance(minjun, to: seoyeon, .honorific, at: 30),
-                utterance(minjun, to: seoyeon, .plain, at: 40),
-            ], deltas: false)
+                utterance(minjun, to: seoyeon, .plain, at: 40)
+            ], deltas: false
+        )
         let warnings = ConsistencyChecker.check(snapshot: snapshot, characters: cards)
         XCTAssertEqual(warnings.count, 1)
         XCTAssertEqual(warnings.first?.kind, .honorificBreak)
@@ -123,8 +131,9 @@ final class ConsistencyCheckerTests: XCTestCase {
             utterances: [
                 utterance(minjun, to: seoyeon, .honorific, at: 10),
                 utterance(minjun, to: seoyeon, .honorific, at: 20),
-                utterance(minjun, to: seoyeon, .plain, at: 30),
-            ], deltas: false)
+                utterance(minjun, to: seoyeon, .plain, at: 30)
+            ], deltas: false
+        )
         XCTAssertTrue(ConsistencyChecker.check(snapshot: snapshot, characters: cards).isEmpty)
     }
 
@@ -137,8 +146,9 @@ final class ConsistencyCheckerTests: XCTestCase {
                 utterance(minjun, to: seoyeon, .honorific, at: 30),
                 utterance(minjun, to: seoyeon, .plain, at: 40),
                 utterance(minjun, to: seoyeon, .plain, at: 50),
-                utterance(minjun, to: seoyeon, .honorific, at: 60),
-            ], deltas: false)
+                utterance(minjun, to: seoyeon, .honorific, at: 60)
+            ], deltas: false
+        )
         XCTAssertEqual(ConsistencyChecker.check(snapshot: snapshot, characters: cards).count, 1)
     }
 
@@ -149,8 +159,9 @@ final class ConsistencyCheckerTests: XCTestCase {
                 utterance(seoyeon, to: minjun, .plain, at: 10),
                 utterance(seoyeon, to: minjun, .plain, at: 20),
                 utterance(seoyeon, to: minjun, .plain, at: 30),
-                utterance(minjun, to: seoyeon, .honorific, at: 40),
-            ], deltas: false)
+                utterance(minjun, to: seoyeon, .honorific, at: 40)
+            ], deltas: false
+        )
         XCTAssertTrue(ConsistencyChecker.check(snapshot: snapshot, characters: cards).isEmpty)
     }
 

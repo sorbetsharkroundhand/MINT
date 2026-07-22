@@ -42,9 +42,13 @@ public struct StoryEvent: Codable, Equatable, Sendable {
 
     /// 사용자 수정(중요도·요약 오버라이드)의 안정 키 — 요약문 해시라 씬이
     /// 재해시돼도 같은 요약이면 살아남는다. 요약이 바뀌면 오버라이드는 stale.
-    public var stableKey: String { DocumentOutline.stableHash("evt|\(summary)") }
+    public var stableKey: String {
+        DocumentOutline.stableHash("evt|\(summary)")
+    }
 
-    public var evidenceKind: EvidenceKind { quote == nil ? .inferred : .direct }
+    public var evidenceKind: EvidenceKind {
+        quote == nil ? .inferred : .direct
+    }
 }
 
 /// 인물 상태 변화 한 조각 (PLAN §6.2) — 상태는 덮어쓰지 않고 append하며,
@@ -83,7 +87,6 @@ public struct StateDelta: Codable, Equatable, Sendable {
 /// 결정적 clamp를 쓰는 것과 같은 규율로 줄 형식을 쓴다 (docs/m6-events.md 결정 4).
 /// **파싱은 관대하게, 검증은 엄격하게**: 환각 인물은 등록 카드 매칭에서 탈락한다.
 public enum EventParser {
-
     /// 사건 요약 상한 (PLAN §6.3).
     static let maxSummaryCharacters = 80
     /// 씬 하나에서 받아들이는 사건 수 상한 — 모델이 문장마다 사건을 만들면
@@ -147,7 +150,7 @@ public enum EventParser {
             guard summary.count >= 4 else { continue }
 
             var participants: [UUID] = []
-            var importance = 3  // 표기가 없거나 깨졌으면 중간값
+            var importance = 3 // 표기가 없거나 깨졌으면 중간값
             var deltas: [StateDelta] = []
             var quote: String?
             for field in fields.dropFirst() {
@@ -168,7 +171,9 @@ public enum EventParser {
                 StoryEvent(
                     sceneHash: sceneHash, participants: participants + holders,
                     summary: summary, importance: importance, deltas: deltas,
-                    quote: quote))
+                    quote: quote
+                )
+            )
         }
         return events
     }
@@ -253,10 +258,12 @@ public enum EventParser {
             let value = String(
                 piece[piece.index(after: equals)...]
                     .trimmingCharacters(in: .whitespaces)
-                    .prefix(maxDeltaValueCharacters))
+                    .prefix(maxDeltaValueCharacters)
+            )
             guard !value.isEmpty else { continue }
             deltas.append(
-                StateDelta(characterID: id, field: field, value: value, sceneHash: sceneHash))
+                StateDelta(characterID: id, field: field, value: value, sceneHash: sceneHash)
+            )
         }
         return deltas
     }
@@ -280,7 +287,7 @@ public enum EventParser {
             else { continue }
             ids.append(id)
         }
-        return Array(Set(ids))  // 같은 인물 중복 표기 제거
+        return Array(Set(ids)) // 같은 인물 중복 표기 제거
     }
 
     /// 이름 하나 → 카드 id. 모델이 조사를 붙여 오는 경우("서연이")까지 받아준다 —
@@ -304,7 +311,6 @@ public enum EventParser {
 /// 관계: 남편→아내=의심과 통제 | 근거: "…"
 /// ```
 public enum InsightParser {
-
     static let maxFactCharacters = 60
     /// 씬 하나에서 받는 항목 수 상한 (종류별) — 소음 방지 (품질 > 적극성).
     static let maxItemsPerKind = 4
@@ -316,7 +322,8 @@ public enum InsightParser {
         var insights = SceneInsights()
         for rawLine in output.split(separator: "\n") {
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard let colon = line.firstIndex(of: ":") else { continue }
             let keyword = line[..<colon].trimmingCharacters(in: .whitespaces)
             let rest = line[line.index(after: colon)...]
@@ -334,11 +341,12 @@ public enum InsightParser {
             var quote: String?
             for field in fields.dropFirst() {
                 if let colon2 = field.firstIndex(of: ":"),
-                    ["근거", "인용"].contains(
-                        field[..<colon2].trimmingCharacters(in: .whitespaces))
-                {
+                   ["근거", "인용"].contains(
+                       field[..<colon2].trimmingCharacters(in: .whitespaces)
+                   ) {
                     quote = EventParser.validatedQuote(
-                        String(field[field.index(after: colon2)...]), in: sceneText)
+                        String(field[field.index(after: colon2)...]), in: sceneText
+                    )
                 }
             }
 
@@ -351,13 +359,15 @@ public enum InsightParser {
                 let stanceName = lhs[lhs.index(after: split)...]
                     .trimmingCharacters(in: .whitespaces)
                 guard let stance = KnowledgeDelta.Stance(rawValue: stanceName),
-                    let id = EventParser.resolveOne(name, nameIndex: nameIndex)
+                      let id = EventParser.resolveOne(name, nameIndex: nameIndex)
                 else { continue }
                 insights.knowledge.append(
                     KnowledgeDelta(
                         characterID: id, stance: stance,
                         fact: String(rhs.prefix(maxFactCharacters)),
-                        sceneHash: sceneHash, quote: quote))
+                        sceneHash: sceneHash, quote: quote
+                    )
+                )
             case "관계":
                 guard insights.relations.count < maxItemsPerKind else { continue }
                 // lhs = "A→B" (→·->·> 허용).
@@ -367,15 +377,17 @@ public enum InsightParser {
                     .split(separator: "→")
                     .map { $0.trimmingCharacters(in: .whitespaces) }
                 guard pair.count == 2,
-                    let from = EventParser.resolveOne(pair[0], nameIndex: nameIndex),
-                    let to = EventParser.resolveOne(pair[1], nameIndex: nameIndex),
-                    from != to
+                      let from = EventParser.resolveOne(pair[0], nameIndex: nameIndex),
+                      let to = EventParser.resolveOne(pair[1], nameIndex: nameIndex),
+                      from != to
                 else { continue }
                 insights.relations.append(
                     RelationDelta(
                         fromID: from, toID: to,
                         value: String(rhs.prefix(EventParser.maxDeltaValueCharacters)),
-                        sceneHash: sceneHash, quote: quote))
+                        sceneHash: sceneHash, quote: quote
+                    )
+                )
             default:
                 continue
             }

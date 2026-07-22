@@ -44,13 +44,15 @@ public struct NarrationProfile: Codable, Equatable, Sendable {
         }
     }
 
-    public var agentPOV: String? { mode == .unknown ? nil : displayText }
+    public var agentPOV: String? {
+        mode == .unknown ? nil : displayText
+    }
 }
 
 /// 씬 해시별 통계를 메모해 원문 한 조각만 바뀌면 그 조각만 다시 센다. 이 계산은
 /// BackgroundIndexer가 스냅샷을 조립할 때 수행되며 예측 경로에는 들어오지 않는다.
 public enum NarrationAnalyzer {
-    private struct Evidence: Sendable {
+    private struct Evidence {
         var first = 0
         var weakFirst = 0
         var third = 0
@@ -58,11 +60,13 @@ public enum NarrationAnalyzer {
         var interiorCharacters: Set<UUID> = []
         var vocatives: [UUID: Int] = [:]
 
-        var weightedFirst: Int { first + weakFirst / 2 }
+        var weightedFirst: Int {
+            first + weakFirst / 2
+        }
     }
 
     private static let cacheLock = NSLock()
-    nonisolated(unsafe) private static var cache: [String: Evidence] = [:]
+    private nonisolated(unsafe) static var cache: [String: Evidence] = [:]
 
     public static func analyze(
         body: String, outline: DocumentOutline,
@@ -75,7 +79,8 @@ public enum NarrationAnalyzer {
 
         for scene in outline.scenes {
             let range = NSRange(
-                location: scene.utf16Range.lowerBound, length: scene.utf16Range.count)
+                location: scene.utf16Range.lowerBound, length: scene.utf16Range.count
+            )
             guard NSMaxRange(range) <= source.length else { continue }
             let cacheKey = scene.contentHash + "|" + DocumentOutline.stableHash(characterKey)
             let evidence: Evidence
@@ -88,7 +93,7 @@ public enum NarrationAnalyzer {
                 evidence = count(in: source.substring(with: range), characters: characters)
                 cacheLock.lock()
                 cache[cacheKey] = evidence
-                if cache.count > 2_000 { cache.removeAll(keepingCapacity: true) }
+                if cache.count > 2000 { cache.removeAll(keepingCapacity: true) }
                 cacheLock.unlock()
             }
             merge(evidence, into: &total)
@@ -98,39 +103,36 @@ public enum NarrationAnalyzer {
 
         // LLM이 이미 직접 근거를 뽑은 앎도 전지/제한 근사의 보조 증거로 쓴다.
         for insight in insights.values {
-            for delta in insight.knowledge { total.interiorCharacters.insert(delta.characterID) }
+            for delta in insight.knowledge {
+                total.interiorCharacters.insert(delta.characterID)
+            }
         }
 
         let chapterModes = chapters.values.map(classify).filter { $0 != .unknown }
         let distinct = Set(chapterModes)
-        let mode: NarrationMode
-        if distinct.contains(.firstPerson) && distinct.contains(.thirdPerson) {
-            mode = .mixed
+        let mode: NarrationMode = if distinct.contains(.firstPerson), distinct.contains(.thirdPerson) {
+            .mixed
         } else {
-            mode = classify(total)
+            classify(total)
         }
-        let omniscient: Bool?
-        if mode == .thirdPerson {
-            if total.interiorCharacters.count >= 2 { omniscient = true }
-            else if total.interiorCharacters.count == 1 { omniscient = false }
-            else { omniscient = nil }
+        let omniscient: Bool? = if mode == .thirdPerson {
+            if total.interiorCharacters.count >= 2 { true } else if total.interiorCharacters.count == 1 { false } else { nil }
         } else {
-            omniscient = nil
+            nil
         }
-        let narratorName: String?
-        if mode == .firstPerson,
-            let best = total.vocatives.max(by: { $0.value < $1.value }), best.value >= 2,
-            total.vocatives.values.filter({ $0 == best.value }).count == 1
-        {
-            narratorName = characters.first { $0.id == best.key }?.name
+        let narratorName: String? = if mode == .firstPerson,
+                                       let best = total.vocatives.max(by: { $0.value < $1.value }), best.value >= 2,
+                                       total.vocatives.values.count(where: { $0 == best.value }) == 1 {
+            characters.first { $0.id == best.key }?.name
         } else {
-            narratorName = nil
+            nil
         }
         return NarrationProfile(
             mode: mode, narratorName: narratorName, omniscientHint: omniscient,
             firstPersonSubjectHits: total.weightedFirst,
             thirdPersonProperNameSubjectHits: total.third,
-            narrationSentenceCount: total.sentences)
+            narrationSentenceCount: total.sentences
+        )
     }
 
     private static func classify(_ evidence: Evidence) -> NarrationMode {
@@ -153,7 +155,9 @@ public enum NarrationAnalyzer {
         target.third += source.third
         target.sentences += source.sentences
         target.interiorCharacters.formUnion(source.interiorCharacters)
-        for (id, count) in source.vocatives { target.vocatives[id, default: 0] += count }
+        for (id, count) in source.vocatives {
+            target.vocatives[id, default: 0] += count
+        }
     }
 
     private static func count(in text: String, characters: [CharacterCard]) -> Evidence {
@@ -162,9 +166,9 @@ public enum NarrationAnalyzer {
             .map(String.init).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         var result = Evidence()
         result.sentences = sentences.count
-        let firstSignals: Set<String> = ["나는", "내가", "나도", "난", "저는", "제가", "저도", "전"]
-        let weakSignals: Set<String> = ["우리는", "우리가", "우리도", "우린"]
-        let thirdPronouns: Set<String> = ["그는", "그가", "그도", "그녀는", "그녀가", "그녀도"]
+        let firstSignals: Set = ["나는", "내가", "나도", "난", "저는", "제가", "저도", "전"]
+        let weakSignals: Set = ["우리는", "우리가", "우리도", "우린"]
+        let thirdPronouns: Set = ["그는", "그가", "그도", "그녀는", "그녀가", "그녀도"]
         let thoughtPrefixes = ["생각", "느꼈", "느끼", "깨달", "떠올", "마음속", "알았다", "몰랐다"]
 
         for sentence in sentences {
@@ -207,7 +211,7 @@ public enum NarrationAnalyzer {
 
     private static func subjectToken(_ token: String, refersTo name: String) -> Bool {
         for particle in CharacterLexicon.base.particles
-        where particle.role == .subject || particle.role == .topic {
+            where particle.role == .subject || particle.role == .topic {
             guard token.count > particle.suffix.count, token.hasSuffix(particle.suffix) else { continue }
             let stem = String(token.dropLast(particle.suffix.count))
             if KoreanName.mayReferToSame(stem, name) { return true }
@@ -268,8 +272,7 @@ public enum NarrationAnalyzer {
         var result: [String] = []
         var current = ""
         for scalar in text.unicodeScalars {
-            if (0xAC00...0xD7A3).contains(scalar.value) { current.unicodeScalars.append(scalar) }
-            else if !current.isEmpty { result.append(current); current = "" }
+            if (0xAC00 ... 0xD7A3).contains(scalar.value) { current.unicodeScalars.append(scalar) } else if !current.isEmpty { result.append(current); current = "" }
         }
         if !current.isEmpty { result.append(current) }
         return result

@@ -105,7 +105,8 @@ public struct AgentContext: Sendable {
         generationKey = DocumentOutline.stableHash(
             "\(source.activeEntry.id.uuidString)|\(source.activeEntry.body)|"
                 + "\(source.knowledge?.events.count ?? 0)|"
-                + "\(source.knowledge?.knowledgeDeltas.count ?? 0)")
+                + "\(source.knowledge?.knowledgeDeltas.count ?? 0)"
+        )
     }
 
     /// 위치를 명시한 질의만 해당 위치로 제한한다. 생략하면 작품 전체를 읽는다.
@@ -130,7 +131,8 @@ public struct AgentToolResult: Sendable, Equatable {
     public static func error(_ message: String) -> AgentToolResult {
         AgentToolResult(
             content: AgentJSON.encode(.object(["error": .string(message)])),
-            summary: message)
+            summary: message
+        )
     }
 }
 
@@ -182,7 +184,7 @@ enum AgentJSON {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         guard let data = try? encoder.encode(value) else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
+        return String(bytes: data, encoding: .utf8) ?? "{}"
     }
 
     static func signature(name: String, arguments: [String: JSONValue]) -> String {
@@ -204,20 +206,20 @@ enum AgentTraceFormatter {
 
 extension JSONValue {
     var agentString: String? {
-        if case .string(let value) = self { return value }
+        if case let .string(value) = self { return value }
         return nil
     }
 
     var agentInt: Int? {
         switch self {
-        case .int(let value): value
-        case .double(let value): Int(value)
+        case let .int(value): value
+        case let .double(value): Int(value)
         default: nil
         }
     }
 
     var agentBool: Bool? {
-        if case .bool(let value) = self { return value }
+        if case let .bool(value) = self { return value }
         return nil
     }
 }

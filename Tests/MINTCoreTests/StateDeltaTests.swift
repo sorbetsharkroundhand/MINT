@@ -1,6 +1,5 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// StateDelta 파싱·fold 회귀 테스트 (M6-5b, PLAN §6.2·§8).
 ///
@@ -8,7 +7,6 @@ import XCTest
 /// 때웠던 것을 테스트 타깃이 생긴 지금은 그물로 남긴다 (docs/m6-events.md).
 /// `swift test`로 돈다 — MLX 커널을 건드리지 않아 metallib 없이 안전하다.
 final class StateDeltaTests: XCTestCase {
-
     // MARK: - 픽스처
 
     private let seoyeon = CharacterCard(name: "서연", aliases: "연이, 서 대리")
@@ -26,7 +24,8 @@ final class StateDeltaTests: XCTestCase {
 
     func test정상_상태_파싱() {
         let event = parseOne(
-            "서연이 병원에 실려갔다 | 참여: 서연 | 중요도: 4 | 상태: 서연 위치=병원; 서연 감정=불안")
+            "서연이 병원에 실려갔다 | 참여: 서연 | 중요도: 4 | 상태: 서연 위치=병원; 서연 감정=불안"
+        )
         XCTAssertEqual(event?.deltas.count, 2)
         XCTAssertEqual(event?.deltas[0].field, .location)
         XCTAssertEqual(event?.deltas[0].value, "병원")
@@ -77,7 +76,8 @@ final class StateDeltaTests: XCTestCase {
 
     func test델타_상한_4개() {
         let event = parseOne(
-            "모든 것이 바뀌었다 | 상태: 서연 위치=a; 서연 감정=b; 서연 관계=c; 서연 목표=d; 민준 위치=e; 민준 감정=f")
+            "모든 것이 바뀌었다 | 상태: 서연 위치=a; 서연 감정=b; 서연 관계=c; 서연 목표=d; 민준 위치=e; 민준 감정=f"
+        )
         XCTAssertEqual(event?.deltas.count, EventParser.maxDeltasPerEvent)
     }
 
@@ -99,13 +99,13 @@ final class StateDeltaTests: XCTestCase {
     /// 씬 3개 픽스처 — 1장(집·기대) → 2장(병원) → 3장(민준 사망).
     private func makeSnapshot() -> (KnowledgeSnapshot, DocumentOutline) {
         let body = """
-            # 1장
-            서연은 집에서 여행 준비를 했다. 설레는 마음으로 짐을 쌌다.
-            # 2장
-            서연은 갑작스런 통증으로 병원에 실려갔다. 민준이 곁을 지켰다.
-            # 3장
-            민준은 사고로 세상을 떠났다. 서연은 홀로 남았다.
-            """
+        # 1장
+        서연은 집에서 여행 준비를 했다. 설레는 마음으로 짐을 쌌다.
+        # 2장
+        서연은 갑작스런 통증으로 병원에 실려갔다. 민준이 곁을 지켰다.
+        # 3장
+        민준은 사고로 세상을 떠났다. 서연은 홀로 남았다.
+        """
         let outline = DocumentOutline.parse(body)
         let hashes = outline.scenes.map(\.contentHash)
         let events: [String: [StoryEvent]] = [
@@ -115,8 +115,9 @@ final class StateDeltaTests: XCTestCase {
                     summary: "서연이 여행 준비를 했다", importance: 2,
                     deltas: [
                         StateDelta(characterID: seoyeon.id, field: .location, value: "집", sceneHash: hashes[0]),
-                        StateDelta(characterID: seoyeon.id, field: .emotion, value: "기대", sceneHash: hashes[0]),
-                    ])
+                        StateDelta(characterID: seoyeon.id, field: .emotion, value: "기대", sceneHash: hashes[0])
+                    ]
+                )
             ],
             hashes[1]: [
                 StoryEvent(
@@ -124,7 +125,8 @@ final class StateDeltaTests: XCTestCase {
                     summary: "서연이 병원에 실려갔다", importance: 4,
                     deltas: [
                         StateDelta(characterID: seoyeon.id, field: .location, value: "병원", sceneHash: hashes[1])
-                    ])
+                    ]
+                )
             ],
             hashes[2]: [
                 StoryEvent(
@@ -132,12 +134,14 @@ final class StateDeltaTests: XCTestCase {
                     summary: "민준이 세상을 떠났다", importance: 5,
                     deltas: [
                         StateDelta(characterID: minjun.id, field: .vitality, value: "사망", sceneHash: hashes[2])
-                    ])
-            ],
+                    ]
+                )
+            ]
         ]
         let snapshot = KnowledgeSnapshot(
             entryID: UUID(), outline: outline,
-            summariesByHash: [:], events: events)
+            summariesByHash: [:], events: events
+        )
         return (snapshot, outline)
     }
 
@@ -145,8 +149,8 @@ final class StateDeltaTests: XCTestCase {
         let (snapshot, outline) = makeSnapshot()
         let cursor = outline.scenes[1].utf16Range.upperBound
         let state = snapshot.stateAt(of: seoyeon.id, before: cursor)
-        XCTAssertEqual(state[.location], "병원")  // 1장의 "집"을 2장이 덮는다
-        XCTAssertEqual(state[.emotion], "기대")  // 갱신 없는 필드는 유지된다
+        XCTAssertEqual(state[.location], "병원") // 1장의 "집"을 2장이 덮는다
+        XCTAssertEqual(state[.emotion], "기대") // 갱신 없는 필드는 유지된다
     }
 
     func test시점_차단_커서_이후_델타_미누출() {
@@ -174,10 +178,12 @@ final class StateDeltaTests: XCTestCase {
             summary: "지워진 장면의 사건", importance: 5,
             deltas: [
                 StateDelta(characterID: seoyeon.id, field: .vitality, value: "사망", sceneHash: "죽은해시")
-            ])
+            ]
+        )
         let snapshot = KnowledgeSnapshot(
             entryID: UUID(), outline: outline,
-            summariesByHash: [:], events: ["죽은해시": [ghost]])
+            summariesByHash: [:], events: ["죽은해시": [ghost]]
+        )
         XCTAssertEqual(snapshot.stateAt(of: seoyeon.id, before: .max), [:])
     }
 
@@ -191,10 +197,12 @@ final class StateDeltaTests: XCTestCase {
     func test카드에_상태_줄이_붙는다() {
         let (snapshot, outline) = makeSnapshot()
         let document = DocumentContext(
-            title: "시험작", kind: .novel, characters: [seoyeon, minjun])
+            title: "시험작", kind: .novel, characters: [seoyeon, minjun]
+        )
         let header = ContextAssembler.headerText(
             document: document, window: "",
-            knowledge: snapshot, windowStart: outline.scenes[1].utf16Range.upperBound)
+            knowledge: snapshot, windowStart: outline.scenes[1].utf16Range.upperBound
+        )
         // CaseIterable 순서 고정 렌더링 — KV 프리픽스 안정 (PLAN §12).
         XCTAssertTrue(header.contains("상태@커서: 위치=병원 · 감정=기대"), header)
         // 3장(커서 이후)의 죽음은 카드에 없어야 한다.
@@ -204,10 +212,12 @@ final class StateDeltaTests: XCTestCase {
     func test상태가_없으면_상태_줄도_없다() {
         let (snapshot, outline) = makeSnapshot()
         let document = DocumentContext(
-            title: "시험작", kind: .novel, characters: [minjun])
+            title: "시험작", kind: .novel, characters: [minjun]
+        )
         let header = ContextAssembler.headerText(
             document: document, window: "",
-            knowledge: snapshot, windowStart: outline.scenes[0].utf16Range.upperBound)
+            knowledge: snapshot, windowStart: outline.scenes[0].utf16Range.upperBound
+        )
         XCTAssertFalse(header.contains("상태@커서"), header)
     }
 }

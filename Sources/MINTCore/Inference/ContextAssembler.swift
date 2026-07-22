@@ -97,7 +97,6 @@ public struct ContextReport: Sendable, Equatable {
 /// (Smart/Story의 원형). 예측 시점엔 준비된 값의 조립만 한다 — LLM 호출·디스크
 /// 접근 금지 (CLAUDE.md §2-2).
 public enum ContextAssembler {
-
     /// A+B 문자 상한 — 소형 모델 프리필 예산 보호 (PLAN §11 초기값, 벤치로 조정).
     static let maxHeaderCharacters = 700
     /// 주입 카드 수 상한 — 예산 초과 시 삭감 1순위가 카드다 (PLAN §11).
@@ -141,8 +140,13 @@ public enum ContextAssembler {
             excludes = Set(overrides.map(of: .contextExclude).keys)
         }
 
-        func allows(_ key: String) -> Bool { !excludes.contains(key) }
-        func pinned(_ key: String) -> Bool { pins.contains(key) }
+        func allows(_ key: String) -> Bool {
+            !excludes.contains(key)
+        }
+
+        func pinned(_ key: String) -> Bool {
+            pins.contains(key)
+        }
     }
 
     public static func assembleWithReport(
@@ -162,14 +166,15 @@ public enum ContextAssembler {
         var header = headerText(
             document: document, window: prefix,
             knowledge: knowledge, windowStart: prefixStartUTF16,
-            position: position, controls: controls, report: &items)
+            position: position, controls: controls, report: &items
+        )
         if document?.kind == .novel,
-            let knowledge,
-            case let block = knowledgeText(
-                knowledge, before: prefixStartUTF16, position: position,
-                controls: controls, report: &items),
-            !block.isEmpty
-        {
+           let knowledge,
+           case let block = knowledgeText(
+               knowledge, before: prefixStartUTF16, position: position,
+               controls: controls, report: &items
+           ),
+           !block.isEmpty {
             header = header.isEmpty ? block : header + "\n" + block
         }
         // 지금 장면·서사 위치 (v4·v5) — 커서가 속한 씬의 제목·유형·흐름·층.
@@ -178,7 +183,8 @@ public enum ContextAssembler {
         if document?.kind == .novel, let knowledge {
             let block = currentSceneText(
                 knowledge, cursor: cursor, position: position,
-                controls: controls, report: &items)
+                controls: controls, report: &items
+            )
             if !block.isEmpty {
                 header = header.isEmpty ? block : header + "\n" + block
             }
@@ -187,11 +193,11 @@ public enum ContextAssembler {
         // 화자의 말투·예문·존대쌍을 승격한다. 헤더 맨 뒤에 붙는 이유: 이 블록은
         // 커서 위치에 따라 변하므로, 앞에 두면 A+B의 KV 프리픽스까지 식힌다.
         if document?.kind == .novel, let knowledge, let document,
-            isInsideUtterance(prefix)
-        {
+           isInsideUtterance(prefix) {
             let cursor = prefixStartUTF16 + (prefix as NSString).length
             let block = dialogueText(
-                knowledge, document: document, cursor: cursor, report: &items)
+                knowledge, document: document, cursor: cursor, report: &items
+            )
             if !block.isEmpty {
                 header = header.isEmpty ? block : header + "\n" + block
             }
@@ -204,8 +210,8 @@ public enum ContextAssembler {
         case .instruct:
             let system =
                 header.isEmpty
-                ? instructSystem
-                : instructSystem + "\n\n[작품 정보]\n" + header
+                    ? instructSystem
+                    : instructSystem + "\n\n[작품 정보]\n" + header
             return (.instruct(system: system, user: instructUser(prefix: prefix)), report)
         }
     }
@@ -223,8 +229,7 @@ public enum ContextAssembler {
         let scene = knowledge.outline.scenes[index]
         var lines: [String] = []
         if let meta = knowledge.sceneMetaByHash[scene.contentHash],
-            controls.allows("current")
-        {
+           controls.allows("current") {
             var pieces: [String] = []
             if let title = meta.title, !title.isEmpty { pieces.append(title) }
             if meta.type != .present { pieces.append("(\(meta.type.rawValue) 장면)") }
@@ -238,7 +243,9 @@ public enum ContextAssembler {
                     ContextReport.Item(
                         kind: .currentScene, text: line,
                         jumpUTF16: scene.utf16Range.lowerBound,
-                        stableKey: "current", pinned: controls.pinned("current")))
+                        stableKey: "current", pinned: controls.pinned("current")
+                    )
+                )
             }
         }
         // 서사 위치 (v5) — 회상·구술·꿈 등 시간 이동 층 안일 때만 한 줄 더.
@@ -255,7 +262,9 @@ public enum ContextAssembler {
             report.append(
                 ContextReport.Item(
                     kind: .narrative, text: line,
-                    stableKey: "narrative", pinned: controls.pinned("narrative")))
+                    stableKey: "narrative", pinned: controls.pinned("narrative")
+                )
+            )
         }
         return lines.joined(separator: "\n")
     }
@@ -288,16 +297,16 @@ public enum ContextAssembler {
         // (고정은 명시적 사용자 결정, §31).
         let writingInPast = position?.chrono == .before && position?.layer.isTemporalShift == true
         if writingInPast,
-            let currentScene = position?.sceneIndex
-                ?? knowledge.outline.sceneIndex(at: max(windowStart, 0))
-        {
+           let currentScene = position?.sceneIndex
+           ?? knowledge.outline.sceneIndex(at: max(windowStart, 0)) {
             let chronoOrder = knowledge.chronologicalSceneOrder()
             if let currentRank = chronoOrder.firstIndex(of: currentScene) {
                 let allowed = Set(chronoOrder.prefix(currentRank + 1))
                 let indexByHash = Dictionary(
                     uniqueKeysWithValues: scenes.enumerated().map {
                         ($0.element.contentHash, $0.offset)
-                    })
+                    }
+                )
                 outside = outside.filter { scene in
                     guard let index = indexByHash[scene.contentHash] else { return false }
                     return allowed.contains(index)
@@ -315,17 +324,18 @@ public enum ContextAssembler {
         var reported: [ContextReport.Item] = []
 
         if let work = knowledge.workSummary, work.count + 12 <= budget,
-            controls.allows("work"),
-            // 과거 층 집필 중에는 작품 요약(미래 포함 가능)도 뺀다 — 회상 안에서
-            // 결말이 새는 것을 막는다 (Pin이 있으면 사용자 결정을 따른다).
-            !writingInPast || controls.pinned("work")
-        {
+           controls.allows("work"),
+           // 과거 층 집필 중에는 작품 요약(미래 포함 가능)도 뺀다 — 회상 안에서
+           // 결말이 새는 것을 막는다 (Pin이 있으면 사용자 결정을 따른다).
+           !writingInPast || controls.pinned("work") {
             let line = "지난 줄거리: \(work)"
             lines.append(line)
             reported.append(
                 ContextReport.Item(
                     kind: .workSummary, text: line,
-                    stableKey: "work", pinned: controls.pinned("work")))
+                    stableKey: "work", pinned: controls.pinned("work")
+                )
+            )
             budget -= work.count + 12
         }
 
@@ -340,7 +350,9 @@ public enum ContextAssembler {
                 reported.append(
                     ContextReport.Item(
                         kind: .flowEvent, text: line, jumpQuery: event.quote,
-                        stableKey: "flow", pinned: controls.pinned("flow")))
+                        stableKey: "flow", pinned: controls.pinned("flow")
+                    )
+                )
                 budget -= line.count
             }
         }
@@ -367,7 +379,9 @@ public enum ContextAssembler {
                 (line, ContextReport.Item(
                     kind: .keyScene, text: line,
                     jumpUTF16: keyScene.sourceRange?.lowerBound,
-                    stableKey: stableKey, pinned: controls.pinned(stableKey))))
+                    stableKey: stableKey, pinned: controls.pinned(stableKey)
+                ))
+            )
             budget -= line.count
             // 이 핵심 장면이 덮는 내부 청크 요약은 같은 사실의 중복이다.
             for scene in outside where keyScene.sourceRange?.overlaps(scene.utf16Range) == true {
@@ -376,7 +390,7 @@ public enum ContextAssembler {
         }
         let pinnedFirst =
             outside.filter { controls.pinned("scene|\($0.contentHash)") }.reversed()
-            + outside.filter { !controls.pinned("scene|\($0.contentHash)") }.reversed()
+                + outside.filter { !controls.pinned("scene|\($0.contentHash)") }.reversed()
         for scene in pinnedFirst {
             let sceneKey = "scene|\(scene.contentHash)"
             guard controls.allows(sceneKey), coveredScenes.insert(scene.contentHash).inserted
@@ -387,8 +401,7 @@ public enum ContextAssembler {
             let kind: ContextReport.Item.Kind
             var stableKey = sceneKey
             if chapter == cursorChapter || knowledge.chapterSummariesByPath[chapterKey] == nil
-                || controls.pinned(sceneKey)
-            {
+                || controls.pinned(sceneKey) {
                 // 같은 장(또는 장 요약이 아직 없는 장, 또는 Pin)은 씬 해상도로.
                 guard let summary = knowledge.summariesByHash[scene.contentHash] else { continue }
                 // 씬 제목(내용 기반, v4)이 있으면 헤딩보다 그쪽이 신호가 진하다.
@@ -399,7 +412,7 @@ public enum ContextAssembler {
             } else {
                 // 이전 장은 장 해상도 한 줄로 — 장 하나당 한 번만.
                 guard coveredChapters.insert(chapterKey).inserted,
-                    controls.allows("chapter|\(chapterKey)")
+                      controls.allows("chapter|\(chapterKey)")
                 else { continue }
                 line = "\(chapterKey): \(knowledge.chapterSummariesByPath[chapterKey]!)"
                 kind = .chapterSummary
@@ -411,9 +424,11 @@ public enum ContextAssembler {
             picked.append(
                 (line,
                  ContextReport.Item(
-                    kind: kind, text: line,
-                    jumpUTF16: scene.utf16Range.lowerBound,
-                    stableKey: stableKey, pinned: controls.pinned(stableKey))))
+                     kind: kind, text: line,
+                     jumpUTF16: scene.utf16Range.lowerBound,
+                     stableKey: stableKey, pinned: controls.pinned(stableKey)
+                 ))
+            )
             budget -= line.count
         }
         // 문서 순서 복원 — 씬 시작 위치로 정렬 (Pin 우선 수집과 무관하게 안정 출력).
@@ -469,30 +484,28 @@ public enum ContextAssembler {
 
         var line = "지금 대화 중 — 다음 발화: \(speaker)"
         if let addressee = name(addresseeID),
-            let usage = knowledge.honorific(from: speakerID, to: addresseeID, before: cursor)
-        {
+           let usage = knowledge.honorific(from: speakerID, to: addresseeID, before: cursor) {
             line += " (\(addressee)에게 \(usage.rawValue))"
         } else if let profile = knowledge.speechProfile(of: speakerID, before: cursor),
-            let base = profile.defaultPoliteness
-        {
+                  let base = profile.defaultPoliteness {
             line += " (\(base.rawValue) 기본)"
         }
         if let profile = knowledge.speechProfile(of: speakerID, before: cursor),
-            !profile.examples.isEmpty
-        {
+           !profile.examples.isEmpty {
             let examples = profile.examples.map { "\"\($0)\"" }.joined(separator: " ")
             line += " · \(speaker) 말투 예: \(examples)"
         }
         report.append(ContextReport.Item(kind: .dialogue, text: line, stableKey: "dialogue"))
         // 화자→청자 관계 (v4) — 대사 어조의 핵심 신호. 커서 이전 마지막 관계.
         if let addressee = name(addresseeID),
-            let relation = knowledge.relation(from: speakerID, to: addresseeID, before: cursor)
-        {
+           let relation = knowledge.relation(from: speakerID, to: addresseeID, before: cursor) {
             let relationLine = "\(speaker)→\(addressee) 관계: \(relation.value)"
             report.append(
                 ContextReport.Item(
                     kind: .relation, text: relationLine, jumpQuery: relation.quote,
-                    stableKey: "relation|\(speakerID.uuidString)|\(addresseeID.uuidString)"))
+                    stableKey: "relation|\(speakerID.uuidString)|\(addresseeID.uuidString)"
+                )
+            )
             line += "\n" + relationLine
         }
         return line
@@ -524,7 +537,8 @@ public enum ContextAssembler {
         var report: [ContextReport.Item] = []
         return headerText(
             document: document, window: window, knowledge: knowledge,
-            windowStart: windowStart, report: &report)
+            windowStart: windowStart, report: &report
+        )
     }
 
     static func headerText(
@@ -545,8 +559,7 @@ public enum ContextAssembler {
         let title = document.title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !title.isEmpty { meta.append("제목: \(title)") }
         if let genre = document.genre?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !genre.isEmpty
-        {
+           !genre.isEmpty {
             meta.append("장르: \(genre)")
         }
         // "소설"이라는 신호 자체가 몇 토큰으로 톤을 바꾼다
@@ -554,18 +567,20 @@ public enum ContextAssembler {
         meta.append("종류: 소설")
         let metaLine = meta.joined(separator: " · ")
         lines.append(
-            (metaLine, [ContextReport.Item(kind: .meta, text: metaLine, stableKey: "meta")]))
+            (metaLine, [ContextReport.Item(kind: .meta, text: metaLine, stableKey: "meta")])
+        )
 
         // 전역 서술 시점은 원문에서 백그라운드로 준비된 파생값이다(M12). 근거가
         // 부족한 `.unknown`은 주입하지 않아 잘못된 시점 강제를 피한다.
         if let profile = knowledge?.narrationProfile, profile.mode != .unknown,
-            controls.allows("narration")
-        {
+           controls.allows("narration") {
             let line = "[서술] \(profile.displayText)"
             lines.append(
                 (line, [ContextReport.Item(
                     kind: .meta, text: line, stableKey: "narration",
-                    pinned: controls.pinned("narration"))]))
+                    pinned: controls.pinned("narration")
+                )])
+            )
         }
 
         // 회상 집필 중의 인물 앎은 담화 위치가 아니라 **작품 내 시간**으로 접는다
@@ -574,24 +589,26 @@ public enum ContextAssembler {
             position?.chrono == .before && position?.layer.isTemporalShift == true
 
         for card in selectCards(
-            from: document.characters, window: window, controls: controls)
-        {
+            from: document.characters, window: window, controls: controls
+        ) {
             guard controls.allows("card|\(card.id.uuidString)") else { continue }
             let aliases = aliasList(card)
             let name =
                 aliases.isEmpty
-                ? card.name : "\(card.name)(\(aliases.joined(separator: "·")))"
+                    ? card.name : "\(card.name)(\(aliases.joined(separator: "·")))"
             let note = String(
                 card.note
                     .replacingOccurrences(of: "\n", with: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .prefix(maxCardNoteCharacters))
+                    .prefix(maxCardNoteCharacters)
+            )
             var line = note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)"
             let cardKey = "card|\(card.id.uuidString)"
             var cardItems: [ContextReport.Item] = [
                 ContextReport.Item(
                     kind: .card, text: line,
-                    stableKey: cardKey, pinned: controls.pinned(cardKey))
+                    stableKey: cardKey, pinned: controls.pinned(cardKey)
+                )
             ]
             // 상태@커서 (PLAN §7 카드 스키마, §8 `state_at`) — 창 시작 시점까지의
             // 델타를 접은 결과. 일관성 > 유창성(CLAUDE.md §3)의 실탄이다:
@@ -609,7 +626,9 @@ public enum ContextAssembler {
                     cardItems.append(
                         ContextReport.Item(
                             kind: .state, text: "\(card.name) \(piece)",
-                            stableKey: "state|\(card.id.uuidString)"))
+                            stableKey: "state|\(card.id.uuidString)"
+                        )
+                    )
                 }
                 // 앎@커서 (v4, 요구사항 §11·§16) — 그 시점까지 이 인물이 가진
                 // 앎의 최근 조각. "아직 모르는 비밀을 대사로 말하는" 제안을
@@ -617,10 +636,10 @@ public enum ContextAssembler {
                 // (요구사항 §14·§30) — 그때의 인물은 미래의 앎이 없다.
                 let known =
                     writingInPast
-                    ? position?.sceneIndex.map {
-                        knowledge.knowledgeChrono(of: card.id, atSceneIndex: $0)
-                    } ?? knowledge.knowledgeChrono(of: card.id, atSceneContaining: windowStart)
-                    : knowledge.knowledge(of: card.id, before: windowStart)
+                        ? position?.sceneIndex.map {
+                            knowledge.knowledgeChrono(of: card.id, atSceneIndex: $0)
+                        } ?? knowledge.knowledgeChrono(of: card.id, atSceneContaining: windowStart)
+                        : knowledge.knowledge(of: card.id, before: windowStart)
                 if !known.isEmpty, controls.allows("knowledge|\(card.id.uuidString)") {
                     let rendered = known.suffix(maxKnowledgeFactsPerCard)
                         .map { "\($0.fact)(\($0.stance.rawValue))" }
@@ -631,22 +650,25 @@ public enum ContextAssembler {
                         ContextReport.Item(
                             kind: .knowledge, text: "\(card.name) \(piece)",
                             jumpQuery: known.last?.quote,
-                            stableKey: "knowledge|\(card.id.uuidString)"))
+                            stableKey: "knowledge|\(card.id.uuidString)"
+                        )
+                    )
                 }
             }
             // 커서가 이미 보고 있는 사건은 붙이지 않는다 — C 창에 원문이 그대로
             // 있는데 요약을 겹쳐 넣으면 토큰만 쓴다 (`lastAppearance`가 창 밖
             // 사건만 돌려주므로 이 조건은 질의에서 이미 성립).
             if let recent = knowledge?.lastAppearance(of: card.id, before: windowStart),
-                controls.allows("recent|\(card.id.uuidString)")
-            {
+               controls.allows("recent|\(card.id.uuidString)") {
                 let piece = "최근: \(recent.summary.prefix(maxRecentEventCharacters))"
                 line += " · " + piece
                 cardItems.append(
                     ContextReport.Item(
                         kind: .recentEvent, text: "\(card.name) \(piece)",
                         jumpQuery: recent.quote,
-                        stableKey: "recent|\(card.id.uuidString)"))
+                        stableKey: "recent|\(card.id.uuidString)"
+                    )
+                )
             }
             lines.append((line, cardItems))
         }
@@ -679,8 +701,7 @@ public enum ContextAssembler {
         var picked = valid.filter { controls.pinned("card|\($0.id.uuidString)") }
         for card in valid where !picked.contains(where: { $0.id == card.id }) {
             if window.contains(card.name)
-                || aliasList(card).contains(where: { window.contains($0) })
-            {
+                || aliasList(card).contains(where: { window.contains($0) }) {
                 picked.append(card)
             }
         }
@@ -704,10 +725,10 @@ public enum ContextAssembler {
     // MARK: - instruct 프롬프트 (엔진에서 이관 — 프롬프트의 단일 소유자는 조립기)
 
     static let instructSystem = """
-        너는 글쓰기 자동완성 엔진이다. 사용자가 쓰던 글의 마지막 부분을 받아, \
-        그 마지막 글자 바로 뒤에 자연스럽게 이어질 짧은 다음 구절(최대 한 문장)을 \
-        출력한다. 설명·인사·따옴표·머리말 없이 이어질 본문만 출력한다.
-        """
+    너는 글쓰기 자동완성 엔진이다. 사용자가 쓰던 글의 마지막 부분을 받아, \
+    그 마지막 글자 바로 뒤에 자연스럽게 이어질 짧은 다음 구절(최대 한 문장)을 \
+    출력한다. 설명·인사·따옴표·머리말 없이 이어질 본문만 출력한다.
+    """
 
     static func instructUser(prefix: String) -> String {
         """

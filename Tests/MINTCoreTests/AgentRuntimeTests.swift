@@ -1,39 +1,43 @@
+@testable import MINTCore
 import MLXLMCommon
 import XCTest
-
-@testable import MINTCore
 
 /// Agent MVP의 결정적 경계 회귀 테스트. 모델·Metal 없이 parser→registry→loop와
 /// Agent의 전체 원고 탐색과 명시적 시점 범위를 검증한다.
 final class AgentRuntimeTests: XCTestCase {
     private func source(caret: Int? = nil) -> AgentSourceSnapshot {
         let body = """
-            # 1장
-            서연은 병원 문을 나섰다.
-            # 2장
-            민준이 범인이었다는 사실이 드러났다.
-            """
+        # 1장
+        서연은 병원 문을 나섰다.
+        # 2장
+        민준이 범인이었다는 사실이 드러났다.
+        """
         let outline = DocumentOutline.parse(body)
         let keyScenes = [
             KeyScene(
                 title: "병원을 나서다", summary: "서연이 병원을 나선다",
                 sourceRange: outline.scenes[0].utf16Range, status: .confirmed,
-                authorConfirmed: true),
+                authorConfirmed: true
+            ),
             KeyScene(
                 title: "범인의 정체", summary: "민준의 정체가 드러난다",
-                sourceRange: outline.scenes[1].utf16Range, status: .drafted),
+                sourceRange: outline.scenes[1].utf16Range, status: .drafted
+            )
         ]
         let entry = JournalEntry(
             title: "비밀", body: body, kind: .novel,
-            characters: [CharacterCard(name: "서연")], keyScenes: keyScenes)
+            characters: [CharacterCard(name: "서연")], keyScenes: keyScenes
+        )
         return AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
-            caretUTF16: caret ?? (body as NSString).length)
+            caretUTF16: caret ?? (body as NSString).length
+        )
     }
 
     func testHermes와_줄형식_도구호출을_복구() {
         let tagged = AgentToolCallParser.parse(
-            #"<tool_call>{"name":"search_text","arguments":{"query":"병원",}}</tool_call>"#)
+            #"<tool_call>{"name":"search_text","arguments":{"query":"병원",}}</tool_call>"#
+        )
         XCTAssertEqual(tagged.calls.count, 1)
         XCTAssertEqual(tagged.calls[0].name, "search_text")
         XCTAssertEqual(tagged.calls[0].arguments["query"], .string("병원"))
@@ -52,8 +56,10 @@ final class AgentRuntimeTests: XCTestCase {
         let context = AgentContext(source: source())
         let invalid = await registry.execute(
             AgentToolCall(
-                name: "get_active_document", arguments: ["unexpected": .bool(true)]),
-            context: context)
+                name: "get_active_document", arguments: ["unexpected": .bool(true)]
+            ),
+            context: context
+        )
         XCTAssertTrue(invalid.content.contains("error"))
         XCTAssertTrue(invalid.summary.contains("허용되지 않은"))
     }
@@ -65,7 +71,8 @@ final class AgentRuntimeTests: XCTestCase {
         let registry = DefaultWritingTools.readOnlyMVP
 
         let outline = await registry.execute(
-            AgentToolCall(name: "get_outline"), context: context)
+            AgentToolCall(name: "get_outline"), context: context
+        )
         XCTAssertTrue(outline.content.contains("병원을 나서다"))
         XCTAssertTrue(outline.content.contains("범인의 정체"))
         XCTAssertFalse(outline.content.contains("contentHash"))
@@ -73,7 +80,8 @@ final class AgentRuntimeTests: XCTestCase {
 
         let future = await registry.execute(
             AgentToolCall(name: "read_scene", arguments: ["scene_ref": .string("2")]),
-            context: context)
+            context: context
+        )
         XCTAssertFalse(future.content.contains("error"))
         XCTAssertTrue(future.content.contains("범인"))
         XCTAssertEqual(context.boundedOffset(nil), (full.activeEntry.body as NSString).length)
@@ -86,12 +94,14 @@ final class AgentRuntimeTests: XCTestCase {
         let firstEnd = DocumentOutline.parse(body).scenes[0].utf16Range.upperBound
         let source = AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
-            caretUTF16: firstEnd)
+            caretUTF16: firstEnd
+        )
         let context = AgentContext(source: source)
         let registry = DefaultWritingTools.readOnlyMVP
 
         let outline = await registry.execute(
-            AgentToolCall(name: "get_outline"), context: context)
+            AgentToolCall(name: "get_outline"), context: context
+        )
         XCTAssertTrue(outline.content.contains("chapter:2"))
         XCTAssertTrue(outline.content.contains("2장"))
         XCTAssertTrue(outline.content.contains(#""key_scenes":[]"#))
@@ -99,8 +109,10 @@ final class AgentRuntimeTests: XCTestCase {
         let second = await registry.execute(
             AgentToolCall(
                 name: "read_scene",
-                arguments: ["scene_ref": .string("chapter:2")]),
-            context: context)
+                arguments: ["scene_ref": .string("chapter:2")]
+            ),
+            context: context
+        )
         XCTAssertTrue(second.content.contains("후반부의 비밀"))
         XCTAssertFalse(second.content.contains("error"))
     }
@@ -109,20 +121,24 @@ final class AgentRuntimeTests: XCTestCase {
         let body = "# 1장\n서연은 문을 열었다. 뒤에서 민준이 죽는다."
         let character = CharacterCard(name: "서연")
         let entry = JournalEntry(
-            title: "경계", body: body, kind: .novel, characters: [character])
+            title: "경계", body: body, kind: .novel, characters: [character]
+        )
         let outline = DocumentOutline.parse(body)
         let secretSummary = "민준이 뒤에서 죽는 장면"
         let knowledge = KnowledgeSnapshot(
             entryID: entry.id, outline: outline,
             summariesByHash: [outline.scenes[0].contentHash: secretSummary],
-            characters: [character])
+            characters: [character]
+        )
         let caret = ("# 1장\n서연은 문을 열었다." as NSString).length
         let source = AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [],
-            knowledge: knowledge, caretUTF16: caret)
+            knowledge: knowledge, caretUTF16: caret
+        )
 
         let result = await DefaultWritingTools.readOnlyMVP.execute(
-            AgentToolCall(name: "get_outline"), context: AgentContext(source: source))
+            AgentToolCall(name: "get_outline"), context: AgentContext(source: source)
+        )
         XCTAssertFalse(result.content.contains(secretSummary))
         XCTAssertFalse(result.content.contains(outline.scenes[0].contentHash))
     }
@@ -131,13 +147,15 @@ final class AgentRuntimeTests: XCTestCase {
         let generator = FakeGenerator(turns: [
             AgentModelTurn(
                 text: "",
-                toolCalls: [AgentToolCall(name: "get_active_document")]),
-            AgentModelTurn(text: "현재 문서는 ‘비밀’이고 소설입니다."),
+                toolCalls: [AgentToolCall(name: "get_active_document")]
+            ),
+            AgentModelTurn(text: "현재 문서는 ‘비밀’이고 소설입니다.")
         ])
         let runtime = AgentRuntime(generator: generator, maxSteps: 3)
         let result = try await runtime.run(
             request: "무슨 문서야?", history: [], source: source(),
-            parameters: CompletionParameters(maxTokens: 128), onEvent: { _ in })
+            parameters: CompletionParameters(maxTokens: 128), onEvent: { _ in }
+        )
 
         XCTAssertEqual(result.text, "현재 문서는 ‘비밀’이고 소설입니다.")
         XCTAssertEqual(result.toolTrace.count, 1)
@@ -163,8 +181,8 @@ private actor FakeGenerator: AgentTurnGenerating {
     }
 
     func generateAgentTurn(
-        messages: [AgentChatMessage], tools: [ToolSpec],
-        parameters: CompletionParameters,
+        messages: [AgentChatMessage], tools _: [ToolSpec],
+        parameters _: CompletionParameters,
         onChunk: @Sendable @escaping (String) -> Void
     ) async throws -> AgentModelTurn {
         callCount += 1

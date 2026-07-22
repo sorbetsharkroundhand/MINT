@@ -23,20 +23,20 @@ extension NSAttributedString.Key {
 
 /// 인라인 마크다운 ↔ mint 인라인 속성 변환기 (파싱·직렬화 왕복 대칭).
 enum InlineMarkdown {
-
     /// 인라인 서식 키 전체 — 블록 재스타일 시 보존 대상.
     static let inlineKeys: [NSAttributedString.Key] = [
         .mintBold, .mintItalic, .mintCode, .mintColor, .mintFontSize, .mintAlign,
-        .mintLineSpacing,
+        .mintLineSpacing
     ]
 
     typealias Segment = (text: String, attrs: [NSAttributedString.Key: Any])
 
-    // 마커 패턴. `(?<!\*)`/`(?!\*)` — `**굵게**` 진행 중에 `*기울임*`이
-    // 먼저 오발동하지 않게 이웃 별표를 배제한다.
-    // font 태그는 color·size 속성을 임의 순서로 담는다 (serialize와 왕복 대칭).
+    /// 마커 패턴. `(?<!\*)`/`(?!\*)` — `**굵게**` 진행 중에 `*기울임*`이
+    /// 먼저 오발동하지 않게 이웃 별표를 배제한다.
+    /// font 태그는 color·size 속성을 임의 순서로 담는다 (serialize와 왕복 대칭).
     private static let fontTag = regex(
-        ##"<font ((?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+")(?: (?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+"))*)>(.*?)</font>"##)
+        ##"<font ((?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+")(?: (?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+"))*)>(.*?)</font>"##
+    )
     private static let fontColorAttr = regex(##"color="#([0-9A-Fa-f]{6})""##)
     private static let fontSizeAttr = regex(#"size="([0-9.]+)""#)
     private static let codeSpan = regex(#"`([^`\n]+)`"#)
@@ -46,6 +46,7 @@ enum InlineMarkdown {
 
     private static func regex(_ pattern: String) -> NSRegularExpression {
         // 패턴은 전부 정적 리터럴 — 실패는 프로그래머 오류.
+        // swiftlint:disable:next force_try
         try! NSRegularExpression(pattern: pattern)
     }
 
@@ -59,7 +60,7 @@ enum InlineMarkdown {
         (boldItalic, [.mintBold: true, .mintItalic: true]),
         (bold, [.mintBold: true]),
         (italic, [.mintItalic: true]),
-        (codeSpan, [.mintCode: true]),
+        (codeSpan, [.mintCode: true])
     ]
 
     // MARK: 파싱 (마크다운 → 세그먼트)
@@ -81,7 +82,7 @@ enum InlineMarkdown {
             var best: (match: NSTextCheckingResult, kind: Kind)?
             let candidates: [(NSRegularExpression, Kind)] = [
                 (fontTag, .color), (codeSpan, .code),
-                (boldItalic, .boldItalic), (bold, .bold), (italic, .italic),
+                (boldItalic, .boldItalic), (bold, .bold), (italic, .italic)
             ]
             for (rx, kind) in candidates {
                 guard let match = rx.firstMatch(in: text, range: search) else { continue }
@@ -97,8 +98,11 @@ enum InlineMarkdown {
                 segments.append(
                     (ns.substring(
                         with: NSRange(
-                            location: location, length: match.range.location - location)),
-                     inherited))
+                            location: location, length: match.range.location - location
+                        )
+                    ),
+                    inherited)
+                )
             }
             switch kind {
             case .color:
@@ -111,7 +115,7 @@ enum InlineMarkdown {
                         (tagAttrs as NSString).substring(with: color.range(at: 1)).uppercased()
                 }
                 if let size = fontSizeAttr.firstMatch(in: tagAttrs, range: tagRange),
-                    let value = Double((tagAttrs as NSString).substring(with: size.range(at: 1))) {
+                   let value = Double((tagAttrs as NSString).substring(with: size.range(at: 1))) {
                     attrs[.mintFontSize] = value
                 }
                 segments += parse(ns.substring(with: match.range(at: 2)), inherited: attrs)
@@ -151,7 +155,7 @@ enum InlineMarkdown {
             } else {
                 let isBold = attrs[.mintBold] as? Bool == true
                 let isItalic = attrs[.mintItalic] as? Bool == true
-                if isBold && isItalic {
+                if isBold, isItalic {
                     text = "***\(text)***"
                 } else if isBold {
                     text = "**\(text)**"

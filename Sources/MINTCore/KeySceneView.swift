@@ -58,7 +58,8 @@ struct KeySceneView: View {
                             HStack(spacing: 6) {
                                 Button("무시") {
                                     store.rejectKeySceneCandidate(
-                                        inputHash: candidate.inputHash, in: store.activeID)
+                                        inputHash: candidate.inputHash, in: store.activeID
+                                    )
                                 }
                                 Button("등록") { accept(candidate) }
                             }
@@ -74,7 +75,8 @@ struct KeySceneView: View {
         .padding(10)
         .background(
             RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(theme.chipC))
+                .fill(theme.chipC)
+        )
         .alert(editingScene == nil ? "핵심 장면 추가" : "핵심 장면 수정", isPresented: $showingAdd) {
             TextField("제목", text: $draftTitle)
             TextField("요약", text: $draftSummary)
@@ -128,7 +130,8 @@ struct KeySceneView: View {
                 if let previous {
                     Button("이전 핵심 장면과 병합") {
                         store.mergeKeyScenes(
-                            keeping: previous.id, removing: scene.id, in: store.activeID)
+                            keeping: previous.id, removing: scene.id, in: store.activeID
+                        )
                     }
                 }
             } label: {
@@ -156,7 +159,8 @@ struct KeySceneView: View {
         } else {
             store.upsertKeyScene(
                 KeyScene(title: title, summary: draftSummary, status: .planned),
-                in: store.activeID)
+                in: store.activeID
+            )
         }
         editingScene = nil
     }
@@ -170,7 +174,9 @@ struct KeySceneView: View {
                 chapterAnchor: chapter, title: candidate.proposedTitle,
                 summary: candidate.proposedSummary, sourceRange: candidate.proposedRange,
                 status: .drafted,
-                importance: candidate.importanceSignals.contains(where: { $0.contains("5") }) ? 5 : 4),
-            in: store.activeID)
+                importance: candidate.importanceSignals.contains(where: { $0.contains("5") }) ? 5 : 4
+            ),
+            in: store.activeID
+        )
     }
 }

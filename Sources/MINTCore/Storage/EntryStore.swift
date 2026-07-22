@@ -130,7 +130,9 @@ public struct JournalEntry: Identifiable, Codable, Equatable, Sendable {
     }
 
     /// 옵셔널 kind의 확정값 — 레거시(nil)는 전부 일반 글쓰기.
-    public var resolvedKind: EntryKind { kind ?? .journal }
+    public var resolvedKind: EntryKind {
+        kind ?? .journal
+    }
 
     /// 자동으로 붙는 기본 제목들 — 이 이름이면 본문에서 파생해도 사용자 의도를 해치지 않는다.
     static let placeholderTitles: Set<String> = ["새 저널", "새 소설", "저널", "제목 없음", ""]
@@ -236,7 +238,7 @@ public final class EntryStore: ObservableObject {
     /// 소설로 바꾸면 다음 유휴부터 이해 파이프라인이 돌기 시작한다.
     public func setKind(_ kind: EntryKind, for id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            entries[index].resolvedKind != kind
+              entries[index].resolvedKind != kind
         else { return }
         entries[index].kind = kind
         scheduleSave()
@@ -262,7 +264,7 @@ public final class EntryStore: ObservableObject {
 
     /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
     /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
-    public nonisolated(unsafe) static weak var current: EntryStore?
+    public nonisolated(unsafe) weak static var current: EntryStore?
 
     /// 본문 편집·문서 전환 알림 (M6) — BackgroundIndexer가 배선한다.
     /// 지식 로직은 여기 두지 않는다 (CLAUDE.md §4) — 신호만 내보낸다.
@@ -272,14 +274,14 @@ public final class EntryStore: ObservableObject {
         var entries: [JournalEntry]
         var activeID: UUID?
         // 파일시스템 v1 이전 파일엔 없는 키 — 옵셔널로 하위 호환.
-        var folders: [JournalFolder]? = nil
-        var expandedFolderIDs: [UUID]? = nil
+        var folders: [JournalFolder]?
+        var expandedFolderIDs: [UUID]?
     }
 
     public init(autosaveDelay: Duration = .milliseconds(800)) {
         self.autosaveDelay = autosaveDelay
         let dir = Self.storageDirectory()
-        self.fileURL = dir.appendingPathComponent("entries.json", isDirectory: false)
+        fileURL = dir.appendingPathComponent("entries.json", isDirectory: false)
 
         let loaded = Self.loadSnapshot(from: fileURL) ?? Self.migratedOrEmptySnapshot(in: dir)
         var entries = loaded.entries
@@ -308,9 +310,9 @@ public final class EntryStore: ObservableObject {
         }
         self.entries = entries
         self.folders = folders
-        self.expandedFolderIDs = Set(loaded.expandedFolderIDs ?? [])
+        expandedFolderIDs = Set(loaded.expandedFolderIDs ?? [])
             .intersection(folders.map(\.id))
-        self.activeID = loaded.activeID.flatMap { id in
+        activeID = loaded.activeID.flatMap { id in
             entries.contains(where: { $0.id == id }) ? id : nil
         } ?? entries[0].id
         Self.current = self
@@ -337,15 +339,16 @@ public final class EntryStore: ObservableObject {
     private static func migratedOrEmptySnapshot(in dir: URL) -> Snapshot {
         let legacy = dir.appendingPathComponent("journal.md", isDirectory: false)
         guard let body = try? String(contentsOf: legacy, encoding: .utf8),
-            !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             return Snapshot(entries: [JournalEntry()], activeID: nil)
         }
         let modified =
             (try? FileManager.default.attributesOfItem(atPath: legacy.path)[.modificationDate])
-            as? Date ?? .now
+                as? Date ?? .now
         let entry = JournalEntry(
-            title: Self.derivedTitle(from: body), createdAt: modified, body: body)
+            title: Self.derivedTitle(from: body), createdAt: modified, body: body
+        )
         return Snapshot(entries: [entry], activeID: entry.id)
     }
 
@@ -357,7 +360,7 @@ public final class EntryStore: ObservableObject {
     ) {
         let entryGroups = Dictionary(grouping: entries.indices) { entries[$0].folderID }
         for indices in entryGroups.values
-        where indices.contains(where: { entries[$0].sortOrder == nil }) {
+            where indices.contains(where: { entries[$0].sortOrder == nil }) {
             let ordered = indices.sorted { entries[$0].createdAt > entries[$1].createdAt }
             for (position, index) in ordered.enumerated() {
                 entries[index].sortOrder = Double(position)
@@ -365,7 +368,7 @@ public final class EntryStore: ObservableObject {
         }
         let folderGroups = Dictionary(grouping: folders.indices) { folders[$0].parentID }
         for indices in folderGroups.values
-        where indices.contains(where: { folders[$0].sortOrder == nil }) {
+            where indices.contains(where: { folders[$0].sortOrder == nil }) {
             for (position, index) in indices.sorted().enumerated() {
                 folders[index].sortOrder = Double(position)
             }
@@ -380,7 +383,8 @@ public final class EntryStore: ObservableObject {
     static func strippedInlineTags(_ text: String) -> String {
         text.replacingOccurrences(
             of: #"</?(?:font|p)\b[^>]*>"#,
-            with: "", options: .regularExpression)
+            with: "", options: .regularExpression
+        )
     }
 
     static func derivedTitle(from body: String) -> String {
@@ -390,11 +394,14 @@ public final class EntryStore: ObservableObject {
                     // 블록 마커 (#·>·목록·번호) 제거.
                     .replacingOccurrences(
                         of: #"^(#{1,3}\s+|>\s?|- \[[ x]\]\s?|[-*]\s+|\d+\.\s+)"#,
-                        with: "", options: .regularExpression))
-                // 인라인 마커(*** ** * `)도 글자만 남긴다.
-                .replacingOccurrences(
-                    of: #"[*`]+"#,
-                    with: "", options: .regularExpression)
+                        with: "", options: .regularExpression
+                    )
+            )
+            // 인라인 마커(*** ** * `)도 글자만 남긴다.
+            .replacingOccurrences(
+                of: #"[*`]+"#,
+                with: "", options: .regularExpression
+            )
             stripped = stripped.trimmingCharacters(in: .whitespaces)
             guard !stripped.isEmpty else { continue }
             // 산문이 아닌 줄(수식·이미지·코드 펜스·구분선)은 제목이 될 수 없다.
@@ -503,7 +510,8 @@ public final class EntryStore: ObservableObject {
             title: kind == .novel ? "새 소설" : "새 저널", folderID: folderID,
             titleIsCustom: false, kind: kind,
             // 새 저널은 목록 맨 위 — 첫 형제보다 작은 sortOrder.
-            sortOrder: (childEntries(of: folderID).first?.sortOrder ?? 0) - 1)
+            sortOrder: (childEntries(of: folderID).first?.sortOrder ?? 0) - 1
+        )
         entries.insert(entry, at: 0)
         activeID = entry.id
         // 새 저널이 접힌 폴더 안에 숨지 않게 부모를 펼친다.
@@ -538,13 +546,16 @@ public final class EntryStore: ObservableObject {
         MintImageStore.pruneUnreferenced(keeping: referenced)
     }
 
+    // 정적 리터럴 실패는 프로그래머 오류라 복구할 수 없다.
+    // swiftlint:disable:next force_try
     private static let imageRefPattern = try! NSRegularExpression(
-        pattern: #"!\[[^\]]*\]\(([^)\s]+)\)"#)
+        pattern: #"!\[[^\]]*\]\(([^)\s]+)\)"#
+    )
 
     /// 저널의 작성일을 바꾼다 — 어제 일을 오늘 적었을 때 날짜를 맞추도록 (L9).
     public func setDate(_ id: UUID, to date: Date) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            entries[index].createdAt != date
+              entries[index].createdAt != date
         else { return }
         entries[index].createdAt = date
         saveNow()
@@ -586,7 +597,7 @@ public final class EntryStore: ObservableObject {
     @discardableResult
     public func moveFolder(_ id: UUID, toParent parentID: UUID?, before beforeID: UUID?) -> Bool {
         guard canMoveFolder(id, toParent: parentID),
-            let index = folders.firstIndex(where: { $0.id == id })
+              let index = folders.firstIndex(where: { $0.id == id })
         else { return false }
         var siblings = childFolders(of: parentID).filter { $0.id != id }
         let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
@@ -617,14 +628,15 @@ public final class EntryStore: ObservableObject {
     @discardableResult
     public func createFolder(merging draggedID: UUID, onto targetID: UUID) -> UUID? {
         guard draggedID != targetID,
-            let target = entries.first(where: { $0.id == targetID }),
-            entries.contains(where: { $0.id == draggedID })
+              let target = entries.first(where: { $0.id == targetID }),
+              entries.contains(where: { $0.id == draggedID })
         else { return nil }
         let parent = target.folderID
         let folder = JournalFolder(
             parentID: parent,
             // 폴더 블록 맨 끝 — 대상 저널이 있던 엔트리 영역과 시각적으로 가깝게.
-            sortOrder: (childFolders(of: parent).last?.sortOrder ?? -1) + 1)
+            sortOrder: (childFolders(of: parent).last?.sortOrder ?? -1) + 1
+        )
         folders.insert(folder, at: 0)
         expandedFolderIDs.insert(folder.id)
         // 대상을 먼저, 드래그한 저널을 그 뒤에 — 떨어뜨린 방향 그대로 읽히게.
@@ -638,7 +650,7 @@ public final class EntryStore: ObservableObject {
     /// 사용자가 직접 이름을 붙였다면 그쪽을 존중한다.
     public func renameFolderIfPlaceholder(_ id: UUID, to name: String) {
         guard let index = folders.firstIndex(where: { $0.id == id }),
-            folders[index].name == JournalFolder.placeholderName
+              folders[index].name == JournalFolder.placeholderName
         else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -650,7 +662,7 @@ public final class EntryStore: ObservableObject {
     /// 재호출돼도 도로 접히지 않는다.
     public func expand(_ folderID: UUID) {
         guard !expandedFolderIDs.contains(folderID),
-            folders.contains(where: { $0.id == folderID })
+              folders.contains(where: { $0.id == folderID })
         else { return }
         expandedFolderIDs.insert(folderID)
         saveNow()
@@ -711,7 +723,8 @@ public final class EntryStore: ObservableObject {
         let folder = JournalFolder(
             parentID: parentID,
             // 새 폴더는 형제 폴더 맨 위.
-            sortOrder: (childFolders(of: parentID).first?.sortOrder ?? 0) - 1)
+            sortOrder: (childFolders(of: parentID).first?.sortOrder ?? 0) - 1
+        )
         folders.insert(folder, at: 0)
         expandedFolderIDs.insert(folder.id)
         if let parentID { expandedFolderIDs.insert(parentID) }
@@ -829,8 +842,8 @@ public final class EntryStore: ObservableObject {
         kind: NarrativeOverride.Kind, key: String, in id: UUID
     ) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            var overrides = entries[index].narrativeOverrides,
-            overrides.contains(where: { $0.kind == kind && $0.key == key })
+              var overrides = entries[index].narrativeOverrides,
+              overrides.contains(where: { $0.kind == kind && $0.key == key })
         else { return }
         overrides.removeAll { $0.kind == kind && $0.key == key }
         entries[index].narrativeOverrides = overrides.isEmpty ? nil : overrides
@@ -855,8 +868,8 @@ public final class EntryStore: ObservableObject {
     /// 기록 삭제 — 사용자만 지울 수 있다 (재분석은 절대 지우지 않는다).
     public func removeRecordedConversation(id recordID: UUID, in id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            var records = entries[index].recordedConversations,
-            records.contains(where: { $0.id == recordID })
+              var records = entries[index].recordedConversations,
+              records.contains(where: { $0.id == recordID })
         else { return }
         records.removeAll { $0.id == recordID }
         entries[index].recordedConversations = records.isEmpty ? nil : records
@@ -873,7 +886,8 @@ public final class EntryStore: ObservableObject {
         scene.importance = min(5, max(1, scene.importance))
         if scene.sourceRange != nil, scene.anchorSnippet?.isEmpty != false {
             scene.anchorSnippet = KeySceneReconciler.snippet(
-                in: entries[index].body, range: scene.sourceRange)
+                in: entries[index].body, range: scene.sourceRange
+            )
         }
         scene.anchorSnippet = scene.anchorSnippet.map { String($0.prefix(40)) }
         scene.updatedAt = .now
@@ -890,8 +904,8 @@ public final class EntryStore: ObservableObject {
 
     public func removeKeyScene(id sceneID: UUID, in id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            var scenes = entries[index].keyScenes,
-            scenes.contains(where: { $0.id == sceneID })
+              var scenes = entries[index].keyScenes,
+              scenes.contains(where: { $0.id == sceneID })
         else { return }
         scenes.removeAll { $0.id == sceneID }
         entries[index].keyScenes = scenes.isEmpty ? nil : scenes
@@ -901,8 +915,8 @@ public final class EntryStore: ObservableObject {
 
     public func confirmKeyScene(id sceneID: UUID, in id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            var scenes = entries[index].keyScenes,
-            let offset = scenes.firstIndex(where: { $0.id == sceneID })
+              var scenes = entries[index].keyScenes,
+              let offset = scenes.firstIndex(where: { $0.id == sceneID })
         else { return }
         scenes[offset].status = .confirmed
         scenes[offset].authorConfirmed = true
@@ -925,17 +939,18 @@ public final class EntryStore: ObservableObject {
     /// 두 장면을 첫 장면의 안정 UUID로 합친다. 작가가 쓴 필드는 우선 보존한다.
     public func mergeKeyScenes(keeping keptID: UUID, removing removedID: UUID, in id: UUID) {
         guard keptID != removedID,
-            let index = entries.firstIndex(where: { $0.id == id }),
-            var scenes = entries[index].keyScenes,
-            let kept = scenes.firstIndex(where: { $0.id == keptID }),
-            let removed = scenes.firstIndex(where: { $0.id == removedID })
+              let index = entries.firstIndex(where: { $0.id == id }),
+              var scenes = entries[index].keyScenes,
+              let kept = scenes.firstIndex(where: { $0.id == keptID }),
+              let removed = scenes.firstIndex(where: { $0.id == removedID })
         else { return }
         let other = scenes[removed]
         if scenes[kept].summary.isEmpty { scenes[kept].summary = other.summary }
         if scenes[kept].sourceRange == nil { scenes[kept].sourceRange = other.sourceRange }
         scenes[kept].characters = Array(Set(scenes[kept].characters + other.characters))
         scenes[kept].linkedEventKeys = Array(
-            Set(scenes[kept].linkedEventKeys + other.linkedEventKeys))
+            Set(scenes[kept].linkedEventKeys + other.linkedEventKeys)
+        )
         scenes[kept].importance = max(scenes[kept].importance, other.importance)
         scenes[kept].authorConfirmed = scenes[kept].authorConfirmed || other.authorConfirmed
         scenes[kept].updatedAt = .now
@@ -948,8 +963,8 @@ public final class EntryStore: ObservableObject {
     /// 인물 카드 삭제 — 구조 변경은 즉시 저장 (스토어의 기존 규칙).
     public func removeCharacter(_ cardID: UUID, from id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
-            var cards = entries[index].characters,
-            cards.contains(where: { $0.id == cardID })
+              var cards = entries[index].characters,
+              cards.contains(where: { $0.id == cardID })
         else { return }
         cards.removeAll { $0.id == cardID }
         entries[index].characters = cards.isEmpty ? nil : cards
@@ -993,7 +1008,8 @@ public final class EntryStore: ObservableObject {
             entries: entries, activeID: activeID,
             folders: folders,
             // Set 순서는 매번 달라진다 — 정렬해 저장 파일 diff를 안정화.
-            expandedFolderIDs: expandedFolderIDs.sorted { $0.uuidString < $1.uuidString })
+            expandedFolderIDs: expandedFolderIDs.sorted { $0.uuidString < $1.uuidString }
+        )
     }
 
     /// 저장 대기/진행 중 표시 — 상태 바의 "저장 중…/저장됨" 표시용 (L6).

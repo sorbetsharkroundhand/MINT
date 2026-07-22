@@ -20,7 +20,6 @@ import Foundation
 /// 과거형 어미("~았다")는 표지가 아니다 — 한국어 소설 서술 자체가 과거형이다
 /// (요구사항 §7 "과거형 문장이 있다는 이유만으로 회상 판단 금지").
 public enum TemporalShiftDetector {
-
     /// 시간 이동을 시사하는 표지들 — 어휘·구문 신호만 (시제 아님).
     static let markers: [String] = [
         // 회상 진입 동사
@@ -35,7 +34,7 @@ public enum TemporalShiftDetector {
         "꿈에", "꿈속", "꿈을 꾸", "편지에", "편지를", "일기에", "일기를",
         "기록에", "수첩에",
         // 구술 (인물이 설명하는 과거)
-        "그러니까 그게", "말해 줄게", "이야기해 주",
+        "그러니까 그게", "말해 줄게", "이야기해 주"
     ]
 
     /// 씬 원문에 시간 이동 후보가 있는가.
@@ -55,7 +54,6 @@ public enum TemporalShiftDetector {
 /// 출처=기억 | 신뢰=유력
 /// ```
 public enum SegmentParser {
-
     /// 씬 하나에서 받는 구간 수 상한 — 문장마다 구간을 만들면 소음이다.
     static let maxSegmentsPerScene = 6
     /// 인용 상한 — Source Evidence 규격과 동일.
@@ -72,7 +70,8 @@ public enum SegmentParser {
         for rawLine in output.split(separator: "\n") {
             guard segments.count < maxSegmentsPerScene else { break }
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard line.hasPrefix("구간") else { continue }
             guard let colon = line.firstIndex(of: ":") else { continue }
             let fields = line[line.index(after: colon)...]
@@ -124,8 +123,7 @@ public enum SegmentParser {
             var end = ns.length
             var returnState = NarrativeSegment.ReturnState.uncertain
             if let quote = endQuote,
-                let found = locate(quote, in: ns, from: start.location + start.length)
-            {
+               let found = locate(quote, in: ns, from: start.location + start.length) {
                 end = found.location + found.length
                 returnState = .found
             } else if returnRaw?.contains("씬끝") == true || returnRaw?.contains("끝") == true {
@@ -150,7 +148,8 @@ public enum SegmentParser {
                 source: source,
                 reliability: reliabilityRaw.map { SourceReliability.normalize($0) }
                     ?? source.defaultReliability,
-                confidence: returnState == .found ? 0.8 : 0.55)
+                confidence: returnState == .found ? 0.8 : 0.55
+            )
             lastAtDepth[depth] = segment.id
             segments.append(segment)
         }
@@ -176,24 +175,24 @@ public enum SegmentParser {
             guard var stored = result[scene.contentHash] else { continue }
             var changed = false
             let sceneRange = NSRange(
-                location: scene.utf16Range.lowerBound, length: scene.utf16Range.count)
+                location: scene.utf16Range.lowerBound, length: scene.utf16Range.count
+            )
             guard sceneRange.location + sceneRange.length <= text.length else { continue }
             let sceneText = text.substring(with: sceneRange) as NSString
             for index in stored.segments.indices {
                 let id = stored.segments[index].persistentID
                 if let raw = starts[id], let quote = unquote(raw),
-                    let found = locate(quote, in: sceneText)
-                {
+                   let found = locate(quote, in: sceneText) {
                     stored.segments[index].localStart = found.location
                     stored.segments[index].startQuote = String(quote.prefix(maxQuoteCharacters))
                     stored.segments[index].confidence = 1
                     changed = true
                 }
                 if let raw = ends[id], let quote = unquote(raw),
-                    let found = locate(
-                        quote, in: sceneText,
-                        from: stored.segments[index].localStart)
-                {
+                   let found = locate(
+                       quote, in: sceneText,
+                       from: stored.segments[index].localStart
+                   ) {
                     stored.segments[index].localEnd = found.location + found.length
                     stored.segments[index].endQuote = String(quote.prefix(maxQuoteCharacters))
                     stored.segments[index].returnState = .found
@@ -222,8 +221,12 @@ public enum SegmentParser {
     static func unquote(_ raw: String) -> String? {
         var cleaned = raw.trimmingCharacters(in: .whitespaces)
         let wrappers: Set<Character> = ["\"", "“", "”", "'", "‘", "’", "「", "」", "『", "』"]
-        while let first = cleaned.first, wrappers.contains(first) { cleaned.removeFirst() }
-        while let last = cleaned.last, wrappers.contains(last) { cleaned.removeLast() }
+        while let first = cleaned.first, wrappers.contains(first) {
+            cleaned.removeFirst()
+        }
+        while let last = cleaned.last, wrappers.contains(last) {
+            cleaned.removeLast()
+        }
         cleaned = cleaned.trimmingCharacters(in: .whitespaces)
         return cleaned.count >= 4 ? cleaned : nil
     }
@@ -237,7 +240,8 @@ public enum SegmentParser {
         var range = text.range(of: quote, options: [], range: searchRange)
         if range.location == NSNotFound, quote.count > 12 {
             range = text.range(
-                of: String(quote.prefix(12)), options: [], range: searchRange)
+                of: String(quote.prefix(12)), options: [], range: searchRange
+            )
         }
         return range.location == NSNotFound ? nil : range
     }
@@ -254,7 +258,6 @@ public enum SegmentParser {
 /// 시간: 4 < 1
 /// ```
 public enum EventGraphParser {
-
     public struct Result: Equatable, Sendable {
         public var causalLinks: [CausalLink]
         public var identities: [EventIdentity]
@@ -272,12 +275,13 @@ public enum EventGraphParser {
         var chrono: [ChronoEdge] = []
 
         func key(_ number: Int) -> String? {
-            (1...keys.count).contains(number) ? keys[number - 1] : nil
+            (1 ... keys.count).contains(number) ? keys[number - 1] : nil
         }
 
         for rawLine in output.split(separator: "\n") {
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard let colon = line.firstIndex(of: ":") else { continue }
             let head = line[..<colon].trimmingCharacters(in: .whitespaces)
             let rest = line[line.index(after: colon)...]
@@ -291,7 +295,7 @@ public enum EventGraphParser {
             switch head {
             case "인과":
                 guard links.count < maxLinks, numbers.count >= 2,
-                    let from = key(numbers[0]), let to = key(numbers[1]), from != to
+                      let from = key(numbers[0]), let to = key(numbers[1]), from != to
                 else { continue }
                 var kind = CausalLink.Kind.causes
                 var reason = ""
@@ -306,19 +310,19 @@ public enum EventGraphParser {
                 links.append(CausalLink(fromKey: from, toKey: to, kind: kind, reason: reason))
             case "동일":
                 guard identityPairs.count < maxIdentities, numbers.count >= 2,
-                    numbers[0] != numbers[1],
-                    key(numbers[0]) != nil, key(numbers[1]) != nil
+                      numbers[0] != numbers[1],
+                      key(numbers[0]) != nil, key(numbers[1]) != nil
                 else { continue }
                 identityPairs.append((numbers[0], numbers[1]))
             case "시간":
                 guard chrono.count < maxChronoEdges, numbers.count >= 2,
-                    let a = key(numbers[0]), let b = key(numbers[1]), a != b
+                      let a = key(numbers[0]), let b = key(numbers[1]), a != b
                 else { continue }
                 let relation: ChronoRelation =
                     first.contains("<") ? .before
-                    : first.contains(">") ? .after
-                    : first.contains("~") || first.contains("=") ? .simultaneous
-                    : .unknown
+                        : first.contains(">") ? .after
+                        : first.contains("~") || first.contains("=") ? .simultaneous
+                        : .unknown
                 guard relation != .unknown else { continue }
                 chrono.append(ChronoEdge(aKey: a, bKey: b, relation: relation))
             default:
@@ -355,7 +359,8 @@ public enum EventGraphParser {
         let dedupedChrono = chrono.filter { seenChrono.insert($0.id).inserted }
 
         return Result(
-            causalLinks: dedupedLinks, identities: identities, chronoEdges: dedupedChrono)
+            causalLinks: dedupedLinks, identities: identities, chronoEdges: dedupedChrono
+        )
     }
 
     static func normalizeKind(_ raw: String) -> CausalLink.Kind {

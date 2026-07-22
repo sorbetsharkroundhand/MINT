@@ -21,7 +21,6 @@ import Foundation
 /// 발행하고, 예측은 그것만 읽는다 — 예측 시점 디스크·LLM 접근 금지.
 @MainActor
 public final class BackgroundIndexer: ObservableObject {
-
     /// 최신 지식 스냅샷 — `CompletionController.knowledgeProvider`가 pull한다.
     @Published public private(set) var snapshot: KnowledgeSnapshot?
     /// 진행 중 패스 표시 (툴바 칩 등 UI 관찰용 — 조용한 UI 원칙상 필수는 아니다).
@@ -63,7 +62,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// "타이핑 재개 → 예측이 엔진을 기다리는" 최악 지연을 결정한다 (짧게 유지).
     /// 씬 분할(docs/m6-scene-split.md)이 같은 값을 상한으로 쪼개므로, 이제
     /// `.prefix`는 안전망일 뿐 실제로 자르지 않는다 — 이해 범위 100%.
-    nonisolated public static let maxSceneCharacters = DocumentOutline.maxSegmentUTF16
+    public nonisolated static let maxSceneCharacters = DocumentOutline.maxSegmentUTF16
 
     /// 커서 위치 제공자 (ContentView가 배선) — 씬 분할 후 씬이 수십 개가
     /// 되므로, 깊은 패스는 **커서에서 가까운 씬부터** 이해한다. 6장을 쓰는
@@ -165,9 +164,9 @@ public final class BackgroundIndexer: ObservableObject {
     /// `force`: 사용자 수정(오버라이드) 변경 시 — 이미 스냅샷이 있어도 다시
     /// 조립해 수정이 즉시 보이게 한다 (LLM 없음, 결정적 재조립).
     private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
-        guard force || snapshot?.entryID != entryID else { return }  // 이미 있음 — O(1) 탈출
+        guard force || snapshot?.entryID != entryID else { return } // 이미 있음 — O(1) 탈출
         guard let entry = store?.activeEntry, entry.id == entryID,
-            entry.resolvedKind == .novel
+              entry.resolvedKind == .novel
         else { return }
         let body = entry.body
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
@@ -192,13 +191,16 @@ public final class BackgroundIndexer: ObservableObject {
                 utterances: utterances, overrides: overrides, body: body,
                 characters: characters, recordedConversations: recorded,
                 keyScenes: keyScenes,
-                rejectedKeySceneCandidateHashes: rejectedKeySceneCandidates)
+                rejectedKeySceneCandidateHashes: rejectedKeySceneCandidates
+            )
             let deriveMs = (CFAbsoluteTimeGetCurrent() - deriveStart) * 1000
             let metrics = Self.measure(
                 sidecar: sidecar, sceneCount: outline.scenes.count,
-                loadMs: loadMs, deriveMs: deriveMs)
+                loadMs: loadMs, deriveMs: deriveMs
+            )
             let warnings = ConsistencyChecker.check(
-                snapshot: snapshot, characters: characters)
+                snapshot: snapshot, characters: characters
+            )
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
@@ -222,7 +224,8 @@ public final class BackgroundIndexer: ObservableObject {
             sidecarBytes: bytes,
             sceneCount: sceneCount,
             bytesPerScene: sceneCount > 0 ? bytes / sceneCount : 0,
-            loadMs: loadMs, saveMs: saveMs, deriveMs: deriveMs)
+            loadMs: loadMs, saveMs: saveMs, deriveMs: deriveMs
+        )
     }
 
     /// 사용자 수정 반영 재조립 — EntryStore.narrativeOverridesDidChange가 부른다.
@@ -268,7 +271,7 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     private func startPass(deep: Bool, userInitiated: Bool = false) {
-        guard passTask == nil else { return }  // 이미 도는 중 — 중복 금지
+        guard passTask == nil else { return } // 이미 도는 중 — 중복 금지
         // 자동완성이 꺼져 있으면 지식도 만들지 않는다 — 백그라운드 이해가
         // 대용량 모델 다운로드를 유발해서는 안 된다 (폴더 명명과 같은 규칙).
         // 단 사용자 명시 요청(requestPass)은 예외 — 누른 것이 곧 동의다.
@@ -291,7 +294,8 @@ public final class BackgroundIndexer: ObservableObject {
                 [card.name] + card.aliases.split(separator: ",").map {
                     $0.trimmingCharacters(in: .whitespaces)
                 }
-            }.filter { !$0.isEmpty })
+            }.filter { !$0.isEmpty }
+        )
         let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
         let overrides = entry.narrativeOverrides ?? []
         let recorded = entry.recordedConversations ?? []
@@ -308,7 +312,8 @@ public final class BackgroundIndexer: ObservableObject {
             let outline = DocumentOutline.parse(body)
             let candidates = CharacterDetector.detect(
                 body: body, outline: outline,
-                known: knownNames, rejected: rejectedNames)
+                known: knownNames, rejected: rejectedNames
+            )
             await MainActor.run {
                 // HIGH 신뢰(구조 신호 다수) 후보는 자동 등록한다 (요구사항 §16,
                 // CLAUDE.md §3 갱신) — 카드에 자동 등록 표식이 남고 삭제는 한 번의
@@ -317,7 +322,9 @@ public final class BackgroundIndexer: ObservableObject {
                 let auto = candidates.filter {
                     $0.confidence == .high && $0.aliasOfKnown == nil
                 }
-                for candidate in auto { self.autoRegister(candidate) }
+                for candidate in auto {
+                    self.autoRegister(candidate)
+                }
                 self.characterCandidates = candidates.filter { candidate in
                     !auto.contains(where: { $0.name == candidate.name })
                 }
@@ -339,7 +346,8 @@ public final class BackgroundIndexer: ObservableObject {
                 // 일관성 검사는 스냅샷과 같은 주기 — 백그라운드에서 계산하고
                 // 결과만 메인으로 (렌더 경로 재계산 금지, docs/editor-perf.md 4차).
                 let warnings = ConsistencyChecker.check(
-                    snapshot: snapshot, characters: characters)
+                    snapshot: snapshot, characters: characters
+                )
                 Task { @MainActor in
                     self.snapshot = snapshot
                     self.warnings = warnings
@@ -366,7 +374,8 @@ public final class BackgroundIndexer: ObservableObject {
         let card = CharacterCard(
             name: candidate.name,
             aliases: candidate.aliasForms.joined(separator: ", "),
-            autoRegistered: true)
+            autoRegistered: true
+        )
         store.upsertCharacter(card, in: entry.id)
         profileInBackground(card: card, name: candidate.name, entry: entry)
     }
@@ -378,7 +387,8 @@ public final class BackgroundIndexer: ObservableObject {
         guard let store, let entry = store.activeEntry else { return }
         let card = CharacterCard(
             name: candidate.name,
-            aliases: candidate.aliasForms.joined(separator: ", "))
+            aliases: candidate.aliasForms.joined(separator: ", ")
+        )
         store.upsertCharacter(card, in: entry.id)
         characterCandidates.removeAll { $0.name == candidate.name }
 
@@ -391,7 +401,7 @@ public final class BackgroundIndexer: ObservableObject {
         _ candidate: CharacterDetector.Candidate, of ownerName: String
     ) {
         guard let store, let entry = store.activeEntry,
-            var owner = entry.characters?.first(where: { $0.name == ownerName })
+              var owner = entry.characters?.first(where: { $0.name == ownerName })
         else { return }
         var aliases = owner.aliases.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -412,13 +422,14 @@ public final class BackgroundIndexer: ObservableObject {
         Task { [engine, weak store] in
             let note = await Self.profileCharacter(
                 named: name, in: body,
-                engine: engine, parameters: parameters)
+                engine: engine, parameters: parameters
+            )
             guard let note, let store else { return }
             // 그 사이 사용자가 직접 소개를 썼거나 카드를 잠갔다면 그쪽이 이긴다
             // (CLAUDE.md §1-5 — locked는 자동 추출이 덮지 못한다, PLAN §6.2).
             guard
                 var current = store.entries.first(where: { $0.id == entryID })?
-                    .characters?.first(where: { $0.id == card.id }),
+                .characters?.first(where: { $0.id == card.id }),
                 current.note.isEmpty, current.locked != true
             else { return }
             current.note = note
@@ -435,7 +446,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 등록 직후의 인물 프로파일링 — 이름이 등장하는 문장들만 모아 한 번의
     /// instruct로 성격·말투 초안을 뽑는다 (PLAN §7, `generateFolderName` 규율).
-    nonisolated private static func profileCharacter(
+    private nonisolated static func profileCharacter(
         named name: String, in body: String,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> String? {
@@ -446,23 +457,24 @@ public final class BackgroundIndexer: ObservableObject {
             let sentence = line.trimmingCharacters(in: .whitespaces)
             snippets.append(sentence)
             total += sentence.count
-            if snippets.count >= 8 || total > 1_000 { break }
+            if snippets.count >= 8 || total > 1000 { break }
         }
         guard !snippets.isEmpty else { return nil }
         let note =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: """
-                    너는 소설 인물 카드를 쓰는 도우미다. 발췌에 근거해 인물의 \
-                    성격·말투·관계를 한국어 1~2문장(최대 140자)으로 쓴다. \
-                    발췌에 없는 내용은 지어내지 않는다. 설명·머리말 없이 본문만 출력한다.
-                    """,
+                너는 소설 인물 카드를 쓰는 도우미다. 발췌에 근거해 인물의 \
+                성격·말투·관계를 한국어 1~2문장(최대 140자)으로 쓴다. \
+                발췌에 없는 내용은 지어내지 않는다. 설명·머리말 없이 본문만 출력한다.
+                """,
                 user: """
-                    인물 '\(name)'에 대한 발췌다. 이 인물의 카드 소개를 써라.
+                인물 '\(name)'에 대한 발췌다. 이 인물의 카드 소개를 써라.
 
-                    \(snippets.joined(separator: "\n"))
-                    """,
+                \(snippets.joined(separator: "\n"))
+                """,
                 maxTokens: 96,
-                parameters: parameters)) ?? ""
+                parameters: parameters
+            )) ?? ""
         let collapsed = note
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -470,7 +482,7 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 한 번의 이해 패스 — 값 입력만 받아 detached에서 돈다.
-    nonisolated private static func runPass(
+    private nonisolated static func runPass(
         deep: Bool,
         entryID: UUID,
         body: String,
@@ -493,13 +505,12 @@ public final class BackgroundIndexer: ObservableObject {
         // 커서 거리순 순회 — 씬 분할로 씬이 수십 개가 되면, 쓰고 있는 자리
         // 근처의 이해가 먼저 준비돼야 한다. 스냅샷·저장은 해시 키라 처리
         // 순서와 무관하고, 선점당해도 "가까운 것부터 남는" 성질이 생긴다.
-        let orderedScenes: [DocumentOutline.Scene]
-        if let caretUTF16 {
-            orderedScenes = outline.scenes.sorted {
+        let orderedScenes: [DocumentOutline.Scene] = if let caretUTF16 {
+            outline.scenes.sorted {
                 distance(from: $0, to: caretUTF16) < distance(from: $1, to: caretUTF16)
             }
         } else {
-            orderedScenes = outline.scenes
+            outline.scenes
         }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
@@ -518,15 +529,18 @@ public final class BackgroundIndexer: ObservableObject {
                 text.substring(
                     with: NSRange(
                         location: scene.utf16Range.lowerBound,
-                        length: scene.utf16Range.count)
-                ).prefix(maxSceneCharacters))
+                        length: scene.utf16Range.count
+                    )
+                ).prefix(maxSceneCharacters)
+            )
             guard sceneText.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40
-            else { continue }  // 요약할 내용이 없는 토막은 건너뛴다
+            else { continue } // 요약할 내용이 없는 토막은 건너뛴다
 
             let analysis = await analyzeScene(
-                sceneText, engine: engine, parameters: parameters)
+                sceneText, engine: engine, parameters: parameters
+            )
             callBudget -= 1
-            guard let analysis else { continue }  // 실패는 다음 패스가 재시도
+            guard let analysis else { continue } // 실패는 다음 패스가 재시도
 
             sidecar.sceneSummaries[scene.contentHash] = .init(
                 contentHash: scene.contentHash,
@@ -536,7 +550,8 @@ public final class BackgroundIndexer: ObservableObject {
                 narrativeType: analysis.narrativeType,
                 pov: analysis.pov,
                 location: analysis.location,
-                updatedAt: .now)
+                updatedAt: .now
+            )
             // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
             sidecar.save()
             publish(
@@ -546,7 +561,9 @@ public final class BackgroundIndexer: ObservableObject {
                     characters: characters,
                     recordedConversations: recordedConversations,
                     keyScenes: keyScenes,
-                    rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
+                    rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes
+                )
+            )
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -562,14 +579,17 @@ public final class BackgroundIndexer: ObservableObject {
                     text.substring(
                         with: NSRange(
                             location: scene.utf16Range.lowerBound,
-                            length: scene.utf16Range.count)
-                    ).prefix(maxSceneCharacters))
+                            length: scene.utf16Range.count
+                        )
+                    ).prefix(maxSceneCharacters)
+                )
                 let extracted = await extractEvents(
                     sceneText, sceneHash: scene.contentHash,
-                    characters: characters, engine: engine, parameters: parameters)
-                guard let extracted else { continue }  // 실패·인물 미등록 — 재시도 여지
+                    characters: characters, engine: engine, parameters: parameters
+                )
+                guard let extracted else { continue } // 실패·인물 미등록 — 재시도 여지
                 sidecar.events[scene.contentHash] = extracted
-                sidecar.save()  // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
+                sidecar.save() // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
             }
         }
 
@@ -583,12 +603,15 @@ public final class BackgroundIndexer: ObservableObject {
                     text.substring(
                         with: NSRange(
                             location: scene.utf16Range.lowerBound,
-                            length: scene.utf16Range.count)
-                    ).prefix(maxSceneCharacters))
+                            length: scene.utf16Range.count
+                        )
+                    ).prefix(maxSceneCharacters)
+                )
                 let insights = await extractInsights(
                     sceneText, sceneHash: scene.contentHash,
-                    characters: characters, engine: engine, parameters: parameters)
-                guard let insights else { continue }  // 실패 — 다음 패스가 재시도
+                    characters: characters, engine: engine, parameters: parameters
+                )
+                guard let insights else { continue } // 실패 — 다음 패스가 재시도
                 sidecar.insights[scene.contentHash] = insights
                 sidecar.save()
                 publish(
@@ -598,7 +621,9 @@ public final class BackgroundIndexer: ObservableObject {
                         characters: characters,
                         recordedConversations: recordedConversations,
                         keyScenes: keyScenes,
-                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
+                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes
+                    )
+                )
             }
         }
 
@@ -613,22 +638,25 @@ public final class BackgroundIndexer: ObservableObject {
                     text.substring(
                         with: NSRange(
                             location: scene.utf16Range.lowerBound,
-                            length: scene.utf16Range.count)
-                    ).prefix(maxSceneCharacters))
+                            length: scene.utf16Range.count
+                        )
+                    ).prefix(maxSceneCharacters)
+                )
                 let storedType = sidecar.sceneSummaries[scene.contentHash]?.narrativeType
                     .map { SceneNarrativeType.normalize($0) }
                 let hasShiftHint =
                     (storedType ?? .present) != .present
-                    || TemporalShiftDetector.hasCandidate(in: sceneText)
+                        || TemporalShiftDetector.hasCandidate(in: sceneText)
                 guard hasShiftHint else {
-                    sidecar.segments[scene.contentHash] = SceneSegmentation()  // 메모: 단일 서사
+                    sidecar.segments[scene.contentHash] = SceneSegmentation() // 메모: 단일 서사
                     sidecar.save()
                     continue
                 }
                 let segments = await analyzeSegments(
                     sceneText, sceneHash: scene.contentHash,
-                    engine: engine, parameters: parameters)
-                guard let segments else { continue }  // 실패 — 다음 패스가 재시도
+                    engine: engine, parameters: parameters
+                )
+                guard let segments else { continue } // 실패 — 다음 패스가 재시도
                 sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
                 sidecar.save()
                 publish(
@@ -638,7 +666,9 @@ public final class BackgroundIndexer: ObservableObject {
                         characters: characters,
                         recordedConversations: recordedConversations,
                         keyScenes: keyScenes,
-                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes))
+                        rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes
+                    )
+                )
             }
         }
 
@@ -646,7 +676,8 @@ public final class BackgroundIndexer: ObservableObject {
         if deep, !Task.isCancelled {
             await propagate(
                 outline: outline, sidecar: &sidecar,
-                parameters: parameters, engine: engine)
+                parameters: parameters, engine: engine
+            )
             // 어떤 저널도 참조하지 않는 사이드카 정리 (삭제된 작품의 파생물).
             pruneOrphans(keeping: liveEntryIDs)
         }
@@ -663,13 +694,14 @@ public final class BackgroundIndexer: ObservableObject {
             if orderedEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
                 if let analysis = await analyzeEventGraph(
                     events: orderedEvents, characters: characters,
-                    engine: engine, parameters: parameters)
-                {
+                    engine: engine, parameters: parameters
+                ) {
                     sidecar.eventGraph = EventGraphAnalysis(
                         causalLinks: analysis.causalLinks,
                         identities: analysis.identities,
                         chronoEdges: analysis.chronoEdges,
-                        memoHash: memoHash)
+                        memoHash: memoHash
+                    )
                     sidecar.save()
                 }
             }
@@ -689,13 +721,15 @@ public final class BackgroundIndexer: ObservableObject {
                 if let threads = await analyzePlotThreads(
                     events: orderedEvents, characters: characters,
                     causalLinks: sidecar.eventGraph?.causalLinks ?? [],
-                    engine: engine, parameters: parameters)
-                {
+                    engine: engine, parameters: parameters
+                ) {
                     sidecar.plotThreads = PlotThreadAnalysis(
                         threads: PlotThreadParser.reconcile(
                             new: threads,
-                            previous: sidecar.plotThreads?.threads ?? []),
-                        memoHash: memoHash)
+                            previous: sidecar.plotThreads?.threads ?? []
+                        ),
+                        memoHash: memoHash
+                    )
                     sidecar.save()
                 }
             }
@@ -715,16 +749,18 @@ public final class BackgroundIndexer: ObservableObject {
                 guard end > start else { continue }
                 let conversationText = String(
                     text.substring(with: NSRange(location: start, length: end - start))
-                        .prefix(maxSceneCharacters))
+                        .prefix(maxSceneCharacters)
+                )
                 guard let meta = await analyzeConversation(
                     conversationText, contentHash: record.contentHash,
-                    engine: engine, parameters: parameters)
+                    engine: engine, parameters: parameters
+                )
                 else { continue }
                 sidecar.conversationMeta[key] = meta
                 sidecar.save()
             }
             // 기록이 삭제된 보완 데이터 정리.
-            let liveIDs = Set(recordedConversations.map { $0.id.uuidString })
+            let liveIDs = Set(recordedConversations.map(\.id.uuidString))
             sidecar.conversationMeta = sidecar.conversationMeta.filter {
                 liveIDs.contains($0.key)
             }
@@ -741,19 +777,22 @@ public final class BackgroundIndexer: ObservableObject {
             characters: characters,
             recordedConversations: recordedConversations,
             keyScenes: keyScenes,
-            rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes)
+            rejectedKeySceneCandidateHashes: rejectedKeySceneCandidateHashes
+        )
         let deriveMs = (CFAbsoluteTimeGetCurrent() - deriveStart) * 1000
         publish(snapshot)
         // 성능 지표 (요구사항 §33) — 깊은 패스 끝에서 한 번 갱신.
         publishMetrics(
             measure(
                 sidecar: sidecar, sceneCount: outline.scenes.count,
-                loadMs: 0, deriveMs: deriveMs, saveMs: saveMs))
+                loadMs: 0, deriveMs: deriveMs, saveMs: saveMs
+            )
+        )
     }
 
     /// 장·작품 요약 상향 전파 — 하위 요약이 전부 준비된 노드만, 결합 해시가
     /// 바뀐(더티) 노드만 다시 만든다.
-    nonisolated private static func propagate(
+    private nonisolated static func propagate(
         outline: DocumentOutline,
         sidecar: inout KnowledgeSidecar,
         parameters: CompletionParameters,
@@ -778,22 +817,25 @@ public final class BackgroundIndexer: ObservableObject {
             }
             // 하위가 다 준비되지 않았거나, 씬 하나뿐이면(씬 요약으로 충분) 건너뛴다.
             guard childSummaries.count == chapter.scenes.count,
-                chapter.scenes.count >= 2
+                  chapter.scenes.count >= 2
             else { continue }
             let childrenHash = combinedHash(chapter.scenes.map(\.contentHash))
             if let existing = sidecar.chapterSummaries.first(where: {
                 $0.headingPath == chapter.path && $0.childrenHash == childrenHash
             }) {
-                freshChapters.append(existing)  // 메모 적중 — 재요약 금지
+                freshChapters.append(existing) // 메모 적중 — 재요약 금지
                 continue
             }
             let summary = await rollup(
-                childSummaries, level: .chapter, engine: engine, parameters: parameters)
+                childSummaries, level: .chapter, engine: engine, parameters: parameters
+            )
             guard let summary else { continue }
             freshChapters.append(
                 .init(
                     headingPath: chapter.path, childrenHash: childrenHash,
-                    summary: summary, updatedAt: .now))
+                    summary: summary, updatedAt: .now
+                )
+            )
         }
         sidecar.chapterSummaries = freshChapters
 
@@ -802,16 +844,18 @@ public final class BackgroundIndexer: ObservableObject {
         guard outline.scenes.count >= 3, !Task.isCancelled else { return }
         let sources =
             freshChapters.count >= 2
-            ? freshChapters.map(\.summary)
-            : outline.scenes.compactMap { sidecar.sceneSummaries[$0.contentHash]?.summary }
+                ? freshChapters.map(\.summary)
+                : outline.scenes.compactMap { sidecar.sceneSummaries[$0.contentHash]?.summary }
         guard sources.count >= 2 else { return }
         let childrenHash = combinedHash(outline.scenes.map(\.contentHash))
-        if sidecar.workSummary?.childrenHash == childrenHash { return }  // 메모 적중
+        if sidecar.workSummary?.childrenHash == childrenHash { return } // 메모 적중
         let summary = await rollup(
-            sources, level: .work, engine: engine, parameters: parameters)
+            sources, level: .work, engine: engine, parameters: parameters
+        )
         guard let summary else { return }
         sidecar.workSummary = .init(
-            childrenHash: childrenHash, summary: summary, updatedAt: .now)
+            childrenHash: childrenHash, summary: summary, updatedAt: .now
+        )
     }
 
     // MARK: - 씬 분석 호출 (공용 — 인덱서 본 경로 + MINTBench 리플레이 측정)
@@ -828,13 +872,13 @@ public final class BackgroundIndexer: ObservableObject {
     /// 씬 요약 길이 상한 — 기존 120자에서 상향. **문장 경계에서만 자른다**
     /// (SentenceClamp) — "감정조차 포즈로 여"처럼 중간에서 끊긴 요약이 저장되던
     /// 문제의 근본 수정 절반 (나머지 절반은 생성 토큰 예산 64→192 상향).
-    nonisolated public static let maxSummaryCharacters = 160
+    public nonisolated static let maxSummaryCharacters = 160
 
     /// 씬 하나를 분석한다 (제목·요약·유형·시점·장소 — 한 번의 호출).
     /// 실패·빈 결과는 nil — 호출부가 무시한다 (PLAN §9).
     /// public인 이유: 벤치가 **완전히 같은 프롬프트·규격**으로 지식을 만들어야
     /// 측정이 본 경로를 대표한다 (CLAUDE.md §2-7).
-    nonisolated public static func analyzeScene(
+    public nonisolated static func analyzeScene(
         _ text: String, engine: CompletionEngine, parameters: CompletionParameters
     ) async -> SceneAnalysis? {
         // 헤딩 한 줄뿐인 초미니 씬은 요약할 내용이 없다 — 모델에 넣으면 환각
@@ -843,20 +887,21 @@ public final class BackgroundIndexer: ObservableObject {
             return nil
         }
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.sceneSystem,
                 user: Prompts.sceneUser(text),
                 // 다섯 줄 형식 — 빈 줄 조기 종료를 끄고 토큰 예산으로만 제한한다.
                 // 64토큰이 한국어 120자를 못 채워 요약이 중간에서 잘리던 원인.
                 maxTokens: 192,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
+                stopAtBlankLine: false
+            )) ?? ""
         guard !output.isEmpty else { return nil }
         return parseSceneAnalysis(output)
     }
 
     /// 벤치 호환 래퍼 — 분석에서 요약만 취한다 (같은 프롬프트·같은 경로).
-    nonisolated public static func summarizeScene(
+    public nonisolated static func summarizeScene(
         _ text: String, engine: CompletionEngine, parameters: CompletionParameters
     ) async -> String? {
         await analyzeScene(text, engine: engine, parameters: parameters)?.summary
@@ -872,7 +917,8 @@ public final class BackgroundIndexer: ObservableObject {
         var location: String?
         for rawLine in output.split(separator: "\n") {
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard let colon = line.firstIndex(of: ":") else {
                 // 키 없는 첫 산문 줄 — 구형 응답(요약만 출력)의 폴백.
                 if summary == nil, line.count >= 10 { summary = line }
@@ -894,50 +940,54 @@ public final class BackgroundIndexer: ObservableObject {
         guard let summary, !summary.isEmpty else { return nil }
         return SceneAnalysis(
             title: title, summary: summary, narrativeType: type,
-            pov: pov, location: location)
+            pov: pov, location: location
+        )
     }
 
     /// 심화 추출 (v4, PLAN §6.5) — 앎·관계. 깊은 패스 전용.
     /// 사건 추출과 별도 호출인 이유: 여러 필드를 한 프롬프트에 욱여넣으면 소형
     /// 모델의 형식 준수가 무너진다 (요약/사건 분리와 같은 실패 격리).
-    nonisolated public static func extractInsights(
+    public nonisolated static func extractInsights(
         _ text: String, sceneHash: String, characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> SceneInsights? {
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
-            return SceneInsights()  // 초미니 씬 — 뽑을 것이 없다 (환각 방지)
+            return SceneInsights() // 초미니 씬 — 뽑을 것이 없다 (환각 방지)
         }
         let nameIndex = EventParser.nameIndex(characters)
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.insightSystem,
                 user: Prompts.insightUser(text, names: nameIndex.keys.sorted()),
                 maxTokens: 384,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
-        guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
+                stopAtBlankLine: false
+            )) ?? ""
+        guard !output.isEmpty else { return nil } // 실패 — 다음 패스가 재시도
         return InsightParser.parse(
-            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text)
+            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text
+        )
     }
 
     /// 서사 구간 분석 (v5, 요구사항 §7–§10) — 씬 안의 시간·관점 전환 구간을
     /// 한 번의 structured 호출로 뽑는다. 파서가 인용을 원문 대조로 검증하므로
     /// 환각 경계는 구조적으로 걸러진다. 실패는 nil — 다음 패스가 재시도.
     /// public인 이유: 벤치가 같은 프롬프트·규격으로 측정해야 한다 (CLAUDE.md §2-7).
-    nonisolated public static func analyzeSegments(
+    public nonisolated static func analyzeSegments(
         _ text: String, sceneHash: String,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [NarrativeSegment]? {
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
-            return []  // 초미니 씬 — 구간이 있을 수 없다 (환각 방지)
+            return [] // 초미니 씬 — 구간이 있을 수 없다 (환각 방지)
         }
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.segmentSystem,
                 user: Prompts.segmentUser(text),
                 maxTokens: 384,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
+                stopAtBlankLine: false
+            )) ?? ""
         guard !output.isEmpty else { return nil }
         // "없음"만 출력 = 씬 전체가 단일 서사 (유효한 완료).
         if output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("없음") {
@@ -949,7 +999,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 사건 그래프 분석 (v5, 요구사항 §3·§6·§12·§29) — 사건 목록 전체를 번호로
     /// 제시하고 인과·동일 사건·시간 관계 후보를 한 번의 호출로 받는다.
     /// 사건은 짧은 요약(≤80자)이라 수십 개여도 프롬프트가 작다. 실패는 nil.
-    nonisolated public static func analyzeEventGraph(
+    public nonisolated static func analyzeEventGraph(
         events: [StoryEvent], characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> EventGraphParser.Result? {
@@ -958,7 +1008,8 @@ public final class BackgroundIndexer: ObservableObject {
             return EventGraphParser.Result(causalLinks: [], identities: [], chronoEdges: [])
         }
         let names = Dictionary(
-            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }
+        )
         let listing = capped.enumerated()
             .map { offset, event in
                 let who = event.participants.compactMap { names[$0] }.joined(separator: "·")
@@ -966,12 +1017,13 @@ public final class BackgroundIndexer: ObservableObject {
             }
             .joined(separator: "\n")
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.eventGraphSystem,
                 user: "사건 목록 (본문 등장 순서):\n\(listing)",
                 maxTokens: 384,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
+                stopAtBlankLine: false
+            )) ?? ""
         guard !output.isEmpty else { return nil }
         return EventGraphParser.parse(output, keys: capped.map(\.stableKey))
     }
@@ -980,7 +1032,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 아니라 목표·갈등·질문의 연속성으로 묶으라는 규칙이 프롬프트의 핵심이다
     /// (Branch ≠ Character). 인과 후보를 힌트로 함께 준다 — 인과 사슬은 같은
     /// 플롯일 강한 신호다. 실패는 nil (기존 분석 유지).
-    nonisolated public static func analyzePlotThreads(
+    public nonisolated static func analyzePlotThreads(
         events: [StoryEvent], characters: [CharacterCard],
         causalLinks: [CausalLink],
         engine: CompletionEngine, parameters: CompletionParameters
@@ -988,7 +1040,8 @@ public final class BackgroundIndexer: ObservableObject {
         let capped = uniqueEventsForAnalysis(events)
         guard capped.count >= 3 else { return [] }
         let names = Dictionary(
-            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            characters.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first }
+        )
         let listing = capped.enumerated()
             .map { offset, event in
                 let who = event.participants.compactMap { names[$0] }.joined(separator: "·")
@@ -997,7 +1050,8 @@ public final class BackgroundIndexer: ObservableObject {
             .joined(separator: "\n")
         // 인과 힌트 — 번호로 환산 가능한 것만 (같은 40개 상한 안).
         let numberByKey = Dictionary(
-            uniqueKeysWithValues: capped.enumerated().map { ($0.element.stableKey, $0.offset + 1) })
+            uniqueKeysWithValues: capped.enumerated().map { ($0.element.stableKey, $0.offset + 1) }
+        )
         let hints = causalLinks.compactMap { link -> String? in
             guard let from = numberByKey[link.fromKey], let to = numberByKey[link.toKey]
             else { return nil }
@@ -1005,12 +1059,13 @@ public final class BackgroundIndexer: ObservableObject {
         }
         let hintBlock = hints.isEmpty ? "" : "\n\n인과 관계 힌트:\n\(hints.joined(separator: "\n"))"
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.plotThreadSystem,
                 user: "사건 목록 (본문 등장 순서):\n\(listing)\(hintBlock)",
                 maxTokens: 384,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
+                stopAtBlankLine: false
+            )) ?? ""
         guard !output.isEmpty else { return nil }
         if output.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("없음") {
             return []
@@ -1035,7 +1090,7 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 주제·어조·핵심 발언을 뽑는다.
-    nonisolated public static func analyzeConversation(
+    public nonisolated static func analyzeConversation(
         _ text: String, contentHash: String,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> ConversationMeta? {
@@ -1043,19 +1098,21 @@ public final class BackgroundIndexer: ObservableObject {
             return ConversationMeta(contentHash: contentHash)
         }
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.conversationSystem,
                 user: "다음 대화를 분석하라.\n\n\(text)",
                 maxTokens: 128,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
+                stopAtBlankLine: false
+            )) ?? ""
         guard !output.isEmpty else { return nil }
         var topic: String?
         var tone: String?
         var statements: [String] = []
         for rawLine in output.split(separator: "\n") {
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard let colon = line.firstIndex(of: ":") else { continue }
             let key = line[..<colon].trimmingCharacters(in: .whitespaces)
             let value = line[line.index(after: colon)...]
@@ -1066,15 +1123,15 @@ public final class BackgroundIndexer: ObservableObject {
             case "어조", "분위기": tone = String(value.prefix(20))
             case "핵심":
                 if statements.count < 2,
-                    let quote = EventParser.validatedQuote(value, in: text)
-                {
+                   let quote = EventParser.validatedQuote(value, in: text) {
                     statements.append(String(quote.prefix(40)))
                 }
             default: break
             }
         }
         return ConversationMeta(
-            contentHash: contentHash, topic: topic, tone: tone, keyStatements: statements)
+            contentHash: contentHash, topic: topic, tone: tone, keyStatements: statements
+        )
     }
 
     /// 등록 인물 ↔ 과거 사건 참여자 소급 연결 (결정적·LLM 없음, CLAUDE.md §2-5).
@@ -1089,7 +1146,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 편지를 읽었다"의 민준)까지 링크된다. 이름이 언급된 사건은 그 인물의
     /// 맥락으로서 여전히 유효하다고 보고 받아들인다 — 역색인에 구멍이 남는 쪽이
     /// 더 나쁘다. 기존 참여자는 지우지 않는다(추출 당시의 판단을 신뢰).
-    nonisolated private static func relinkParticipants(
+    private nonisolated static func relinkParticipants(
         sidecar: inout KnowledgeSidecar, characters: [CharacterCard]
     ) {
         guard !characters.isEmpty else { return }
@@ -1116,49 +1173,52 @@ public final class BackgroundIndexer: ObservableObject {
     /// 등록 카드가 없으면 호출 자체를 건너뛴다 — 참여자를 링크할 수 없는 사건은
     /// 역색인에 들어가지 못해 토큰만 태운다 (CLAUDE.md §5-1).
     /// 벤치가 같은 프롬프트를 쓰도록 public (요약 경로와 같은 이유).
-    nonisolated public static func extractEvents(
+    public nonisolated static func extractEvents(
         _ text: String, sceneHash: String, characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [StoryEvent]? {
         let nameIndex = EventParser.nameIndex(characters)
         guard !nameIndex.isEmpty else { return nil }
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
-            return []  // 요약과 같은 초미니 씬 가드 — 뽑을 사건이 없다(환각 방지)
+            return [] // 요약과 같은 초미니 씬 가드 — 뽑을 사건이 없다(환각 방지)
         }
         let output =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: Prompts.eventSystem,
                 user: Prompts.eventUser(text, names: nameIndex.keys.sorted()),
                 // 5b에서 줄마다 `상태:` 필드가, v4에서 `근거:`가 붙어 길어졌다 —
                 // 마지막 줄이 중간에서 잘리면 그 사건·델타를 통째로 잃는다.
                 maxTokens: 384,
                 parameters: parameters,
-                stopAtBlankLine: false)) ?? ""
-        guard !output.isEmpty else { return nil }  // 실패 — 다음 패스가 재시도
+                stopAtBlankLine: false
+            )) ?? ""
+        guard !output.isEmpty else { return nil } // 실패 — 다음 패스가 재시도
         return EventParser.parse(
-            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text)
+            output, sceneHash: sceneHash, nameIndex: nameIndex, sceneText: text
+        )
     }
 
     /// 하위 요약 묶음 → 상위 요약 (장 ≤300자 · 작품 ≤500자).
-    nonisolated public enum RollupLevel { case chapter, work }
+    public nonisolated enum RollupLevel { case chapter, work }
 
-    nonisolated public static func rollup(
+    public nonisolated static func rollup(
         _ summaries: [String], level: RollupLevel,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> String? {
         let summary =
-            (try? await engine.generateOneShot(
+            await (try? engine.generateOneShot(
                 system: level == .chapter ? Prompts.chapterSystem : Prompts.workSystem,
                 user: Prompts.rollupUser(summaries),
                 maxTokens: level == .chapter ? 128 : 160,
-                parameters: parameters)) ?? ""
+                parameters: parameters
+            )) ?? ""
         return summary.isEmpty ? nil : clamp(summary, to: level == .chapter ? 300 : 500)
     }
 
     // MARK: - 보조
 
     /// 커서와 씬의 UTF-16 거리 — 커서가 씬 안이면 0.
-    nonisolated private static func distance(
+    private nonisolated static func distance(
         from scene: DocumentOutline.Scene, to caret: Int
     ) -> Int {
         if scene.utf16Range.contains(caret) { return 0 }
@@ -1169,7 +1229,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 열·전력 시민의식 (PLAN §9) — `.serious` 이상이면 전부, 저전력이면 깊은
     /// 패스만 보류한다.
-    nonisolated private static func gateAllows(deep: Bool) -> Bool {
+    private nonisolated static func gateAllows(deep: Bool) -> Bool {
         let process = ProcessInfo.processInfo
         switch process.thermalState {
         case .serious, .critical: return false
@@ -1179,7 +1239,7 @@ public final class BackgroundIndexer: ObservableObject {
         return true
     }
 
-    nonisolated private static func makeSnapshot(
+    private nonisolated static func makeSnapshot(
         entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
         utterances: [Utterance], overrides: [NarrativeOverride] = [],
         body: String = "", characters: [CharacterCard] = [],
@@ -1200,7 +1260,8 @@ public final class BackgroundIndexer: ObservableObject {
         // 사용자 구간 경계 수정 적용 (요구사항 §15) — 인용을 씬 원문에서 되찾아
         // 범위를 다시 잡는다. 층·시점 등 나머지 오버라이드는 스냅샷 조립이 얹는다.
         let boundedSegments = SegmentParser.applyingBoundaryOverrides(
-            sidecar.segments, overrides: rekeyed, outline: outline, body: body)
+            sidecar.segments, overrides: rekeyed, outline: outline, body: body
+        )
         return KnowledgeSnapshot(
             entryID: entryID,
             outline: outline,
@@ -1208,7 +1269,8 @@ public final class BackgroundIndexer: ObservableObject {
             chapterSummariesByPath: Dictionary(
                 uniqueKeysWithValues: sidecar.chapterSummaries.map {
                     ($0.headingPath.joined(separator: " > "), $0.summary)
-                }),
+                }
+            ),
             workSummary: sidecar.workSummary?.summary,
             events: sidecar.events,
             utterances: utterances,
@@ -1230,24 +1292,25 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 하위 해시들의 결합 해시 — 장·작품 노드의 더티 판정 키.
-    nonisolated private static func combinedHash(_ hashes: [String]) -> String {
+    private nonisolated static func combinedHash(_ hashes: [String]) -> String {
         DocumentOutline.stableHash(hashes.joined(separator: "|"))
     }
 
     /// 요약 길이 상한 (PLAN §6.1) — 모델이 상한을 어겨도 저장은 규격대로.
     /// **문장 경계 절단** — prefix로 문장 중간을 자르던 것이 타임라인 텍스트
     /// 잘림의 저장 단계 원인이었다 (SentenceClamp 참조).
-    nonisolated private static func clamp(_ text: String, to limit: Int) -> String {
+    private nonisolated static func clamp(_ text: String, to limit: Int) -> String {
         SentenceClamp.clamp(text, to: limit)
     }
 
     /// 삭제된 저널의 사이드카 정리 — 깊은 패스 끝에서만 (디렉터리 스캔은 싸지만
     /// 매 패스마다 할 일은 아니다).
-    nonisolated private static func pruneOrphans(keeping liveEntryIDs: Set<UUID>) {
+    private nonisolated static func pruneOrphans(keeping liveEntryIDs: Set<UUID>) {
         let directory = KnowledgeSidecar.directory()
         guard
             let files = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil)
+                at: directory, includingPropertiesForKeys: nil
+            )
         else { return }
         for file in files where file.pathExtension == "json" {
             let stem = file.deletingPathExtension().lastPathComponent
@@ -1259,19 +1322,19 @@ public final class BackgroundIndexer: ObservableObject {
 
     // MARK: - 프롬프트 (요약 피라미드, PLAN §6.1)
 
-    nonisolated private enum Prompts {
+    private nonisolated enum Prompts {
         static let sceneSystem = """
-            너는 소설 장면을 분석하는 도우미다. 주어진 장면을 읽고 아래 형식으로 \
-            한 줄씩 출력한다. 인물 이름을 유지하고, 장면에 없는 내용은 지어내지 \
-            않는다. 설명·머리말 없이 아래 줄들만 출력한다.
+        너는 소설 장면을 분석하는 도우미다. 주어진 장면을 읽고 아래 형식으로 \
+        한 줄씩 출력한다. 인물 이름을 유지하고, 장면에 없는 내용은 지어내지 \
+        않는다. 설명·머리말 없이 아래 줄들만 출력한다.
 
-            제목: 장면 내용을 한눈에 알 수 있는 제목 (최대 20자, 번호·작품명 금지)
-            요약: 일어난 일 1~2문장 (최대 150자, 문장을 끝까지 완성할 것)
-            유형: 현재/회상/꿈/예상/병렬/삽입 중 하나 (기본은 현재. 장면 전체가 \
-            과거 회상일 때만 회상)
-            시점: 시점 인물 이름 (모르면 이 줄 생략)
-            장소: 장면의 장소 (모르면 이 줄 생략)
-            """
+        제목: 장면 내용을 한눈에 알 수 있는 제목 (최대 20자, 번호·작품명 금지)
+        요약: 일어난 일 1~2문장 (최대 150자, 문장을 끝까지 완성할 것)
+        유형: 현재/회상/꿈/예상/병렬/삽입 중 하나 (기본은 현재. 장면 전체가 \
+        과거 회상일 때만 회상)
+        시점: 시점 인물 이름 (모르면 이 줄 생략)
+        장소: 장면의 장소 (모르면 이 줄 생략)
+        """
 
         static func sceneUser(_ text: String) -> String {
             """
@@ -1284,20 +1347,20 @@ public final class BackgroundIndexer: ObservableObject {
         // MARK: 심화 추출 (v4, PLAN §6.5) — 앎·관계
 
         static let insightSystem = """
-            너는 소설 장면에서 서사 정보를 뽑는 도우미다. 장면에 실제로 근거가 \
-            있는 것만, 한 줄에 하나씩 아래 두 형식 중 맞는 것으로 출력한다. \
-            해당 사항이 없는 종류는 출력하지 않는다. 종류마다 최대 3개.
+        너는 소설 장면에서 서사 정보를 뽑는 도우미다. 장면에 실제로 근거가 \
+        있는 것만, 한 줄에 하나씩 아래 두 형식 중 맞는 것으로 출력한다. \
+        해당 사항이 없는 종류는 출력하지 않는다. 종류마다 최대 3개.
 
-            앎: 인물 태도=사실 | 근거: 원문 짧은 인용
-            관계: 인물A→인물B=관계 상태 | 근거: 원문 짧은 인용
+        앎: 인물 태도=사실 | 근거: 원문 짧은 인용
+        관계: 인물A→인물B=관계 상태 | 근거: 원문 짧은 인용
 
-            규칙:
-            - 앎의 태도는 안다/의심/오해/숨김 네 가지만 쓴다. "인물이 이 장면에서 \
-            새로 알게 되거나 의심하게 된 것"만 쓴다.
-            - 앎과 관계의 인물은 주어진 인물 목록에 있는 이름만 쓴다.
-            - 근거 인용은 장면 원문에서 그대로 복사한 30자 이내 구절이다.
-            - 설명·머리말 없이 위 형식의 줄만 출력한다.
-            """
+        규칙:
+        - 앎의 태도는 안다/의심/오해/숨김 네 가지만 쓴다. "인물이 이 장면에서 \
+        새로 알게 되거나 의심하게 된 것"만 쓴다.
+        - 앎과 관계의 인물은 주어진 인물 목록에 있는 이름만 쓴다.
+        - 근거 인용은 장면 원문에서 그대로 복사한 30자 이내 구절이다.
+        - 설명·머리말 없이 위 형식의 줄만 출력한다.
+        """
 
         static func insightUser(_ text: String, names: [String]) -> String {
             """
@@ -1312,29 +1375,29 @@ public final class BackgroundIndexer: ObservableObject {
         // MARK: 서사 구간 분석 (v5, 요구사항 §7–§10)
 
         static let segmentSystem = """
-            너는 소설 장면 안의 시간 이동과 관점 전환을 찾는 도우미다. 장면을 \
-            읽고, 서술이 현재에서 벗어나는 구간(회상·꿈·기록·구술)이 있으면 \
-            구간마다 한 줄씩 아래 형식으로 출력한다. 없으면 "없음"만 출력한다. \
-            최대 4개.
+        너는 소설 장면 안의 시간 이동과 관점 전환을 찾는 도우미다. 장면을 \
+        읽고, 서술이 현재에서 벗어나는 구간(회상·꿈·기록·구술)이 있으면 \
+        구간마다 한 줄씩 아래 형식으로 출력한다. 없으면 "없음"만 출력한다. \
+        최대 4개.
 
-            구간: 층=회상 | 시작="구간 첫 문장을 원문 그대로 복사" | \
-            끝="현재로 복귀하기 직전 문장을 원문 그대로 복사" | 복귀=확인 | \
-            깊이=1 | 시점=인물이름 | 화자=서술자 | 인물=이 과거의 주인 | \
-            출처=기억 | 신뢰=유력
+        구간: 층=회상 | 시작="구간 첫 문장을 원문 그대로 복사" | \
+        끝="현재로 복귀하기 직전 문장을 원문 그대로 복사" | 복귀=확인 | \
+        깊이=1 | 시점=인물이름 | 화자=서술자 | 인물=이 과거의 주인 | \
+        출처=기억 | 신뢰=유력
 
-            규칙:
-            - 층은 회상/짧은기억/구술/꿈/기록/재서술/예상 중 하나만 쓴다. \
-            과거형 문장이 있다는 이유만으로 회상이 아니다 — 서술의 시간 자체가 \
-            이동한 구간만 쓴다. 과거 사건을 한 문장으로 언급만 하고 지나가면 \
-            구간이 아니다.
-            - 시작·끝 인용은 장면 원문에서 글자 그대로 복사한다 (30자 이내).
-            - 장면이 그 구간인 채로 끝나면 끝 항목을 생략하고 복귀=씬끝 이라고 \
-            쓴다. 복귀 지점을 모르면 복귀=불확실 이라고 쓴다.
-            - 회상 속의 또 다른 회상은 깊이=2로 쓴다.
-            - 출처는 기억/증언/기록물/소문/꿈속/추론 중 하나. 신뢰는 확정/유력/\
-            이견/불신/미상 중 하나 — 인물의 기억이나 말은 틀릴 수 있다.
-            - 설명·머리말 없이 구간 줄만 출력한다.
-            """
+        규칙:
+        - 층은 회상/짧은기억/구술/꿈/기록/재서술/예상 중 하나만 쓴다. \
+        과거형 문장이 있다는 이유만으로 회상이 아니다 — 서술의 시간 자체가 \
+        이동한 구간만 쓴다. 과거 사건을 한 문장으로 언급만 하고 지나가면 \
+        구간이 아니다.
+        - 시작·끝 인용은 장면 원문에서 글자 그대로 복사한다 (30자 이내).
+        - 장면이 그 구간인 채로 끝나면 끝 항목을 생략하고 복귀=씬끝 이라고 \
+        쓴다. 복귀 지점을 모르면 복귀=불확실 이라고 쓴다.
+        - 회상 속의 또 다른 회상은 깊이=2로 쓴다.
+        - 출처는 기억/증언/기록물/소문/꿈속/추론 중 하나. 신뢰는 확정/유력/\
+        이견/불신/미상 중 하나 — 인물의 기억이나 말은 틀릴 수 있다.
+        - 설명·머리말 없이 구간 줄만 출력한다.
+        """
 
         static func segmentUser(_ text: String) -> String {
             """
@@ -1347,67 +1410,67 @@ public final class BackgroundIndexer: ObservableObject {
         // MARK: 사건 그래프 분석 (v5, 요구사항 §3·§6·§12·§29)
 
         static let eventGraphSystem = """
-            너는 소설의 사건 목록에서 사건 사이의 관계를 찾는 도우미다. 번호가 \
-            붙은 사건 목록을 읽고, 근거가 분명한 관계만 아래 세 형식으로 한 줄씩 \
-            출력한다. 없으면 "없음"만 출력한다.
+        너는 소설의 사건 목록에서 사건 사이의 관계를 찾는 도우미다. 번호가 \
+        붙은 사건 목록을 읽고, 근거가 분명한 관계만 아래 세 형식으로 한 줄씩 \
+        출력한다. 없으면 "없음"만 출력한다.
 
-            인과: 3 -> 7 | 종류: 원인 | 이유: 왜 그런지 한 문장 (최대 50자)
-            동일: 2 & 9
-            시간: 4 < 1
+        인과: 3 -> 7 | 종류: 원인 | 이유: 왜 그런지 한 문장 (최대 50자)
+        동일: 2 & 9
+        시간: 4 < 1
 
-            규칙:
-            - 인과의 종류는 원인/영향/폭로/설명/모순/복선 중 하나만 쓴다.
-            - 동일은 같은 사건이 다른 자리에서 다시 서술된 경우만 쓴다 (예: \
-            4번의 싸움을 9번에서 다른 인물이 회상). 비슷한 사건은 동일이 아니다.
-            - 시간은 본문 등장 순서와 실제 시간 순서가 다른 경우만 쓴다. \
-            "4 < 1"은 4번이 1번보다 시간상 먼저라는 뜻이다. 동시는 "4 ~ 1".
-            - 확실하지 않은 관계는 출력하지 않는다. 각 형식 최대 6개.
-            - 설명·머리말 없이 위 형식의 줄만 출력한다.
-            """
+        규칙:
+        - 인과의 종류는 원인/영향/폭로/설명/모순/복선 중 하나만 쓴다.
+        - 동일은 같은 사건이 다른 자리에서 다시 서술된 경우만 쓴다 (예: \
+        4번의 싸움을 9번에서 다른 인물이 회상). 비슷한 사건은 동일이 아니다.
+        - 시간은 본문 등장 순서와 실제 시간 순서가 다른 경우만 쓴다. \
+        "4 < 1"은 4번이 1번보다 시간상 먼저라는 뜻이다. 동시는 "4 ~ 1".
+        - 확실하지 않은 관계는 출력하지 않는다. 각 형식 최대 6개.
+        - 설명·머리말 없이 위 형식의 줄만 출력한다.
+        """
 
         // MARK: 플롯 스레드 추론 (v6 — Branch = PlotThread)
 
         static let plotThreadSystem = """
-            너는 소설의 사건 목록에서 플롯 라인(이야기 갈래)을 찾는 도우미다. \
-            플롯 라인 하나는 하나의 지속적인 문제·목표·갈등·미스터리·관계 변화를 \
-            추적하는 사건들의 묶음이다. 번호가 붙은 사건 목록을 읽고 아래 형식으로 \
-            한 줄에 플롯 하나씩 출력한다. 없으면 "없음"만 출력한다.
+        너는 소설의 사건 목록에서 플롯 라인(이야기 갈래)을 찾는 도우미다. \
+        플롯 라인 하나는 하나의 지속적인 문제·목표·갈등·미스터리·관계 변화를 \
+        추적하는 사건들의 묶음이다. 번호가 붙은 사건 목록을 읽고 아래 형식으로 \
+        한 줄에 플롯 하나씩 출력한다. 없으면 "없음"만 출력한다.
 
-            플롯: 1,3,5,8 | 제목: 플롯 이름 (최대 15자) | 요약: 무엇을 추적하는지 한 문장 (최대 50자) | 해결: 8
+        플롯: 1,3,5,8 | 제목: 플롯 이름 (최대 15자) | 요약: 무엇을 추적하는지 한 문장 (최대 50자) | 해결: 8
 
-            규칙:
-            - 같은 인물이 나온다는 이유로 묶지 않는다. 같은 목표·갈등·질문을 \
-            잇는 사건만 같은 플롯이다. 인물이 달라도 같은 문제를 이으면 같은 플롯이다.
-            - 회상·시간 이동은 플롯 구분의 근거가 아니다.
-            - 앞 사건의 결과를 뒤 사건이 이어받으면(인과) 같은 플롯일 가능성이 높다.
-            - 한 사건이 여러 플롯에 속할 수 있다 — 두 이야기가 만나는 사건이다.
-            - "해결"은 그 플롯의 질문·갈등이 실제로 끝난 사건 번호만 쓴다. 없으면 생략.
-            - 사건 2개 이상인 플롯만 출력한다. 확실하지 않으면 출력하지 않는다. 최대 5개.
-            - 설명·머리말 없이 위 형식의 줄만 출력한다.
-            """
+        규칙:
+        - 같은 인물이 나온다는 이유로 묶지 않는다. 같은 목표·갈등·질문을 \
+        잇는 사건만 같은 플롯이다. 인물이 달라도 같은 문제를 이으면 같은 플롯이다.
+        - 회상·시간 이동은 플롯 구분의 근거가 아니다.
+        - 앞 사건의 결과를 뒤 사건이 이어받으면(인과) 같은 플롯일 가능성이 높다.
+        - 한 사건이 여러 플롯에 속할 수 있다 — 두 이야기가 만나는 사건이다.
+        - "해결"은 그 플롯의 질문·갈등이 실제로 끝난 사건 번호만 쓴다. 없으면 생략.
+        - 사건 2개 이상인 플롯만 출력한다. 확실하지 않으면 출력하지 않는다. 최대 5개.
+        - 설명·머리말 없이 위 형식의 줄만 출력한다.
+        """
 
         // MARK: 기록된 대화 보완 (v5, 요구사항 §19)
 
         static let conversationSystem = """
-            너는 소설 속 대화를 분석하는 도우미다. 대화를 읽고 아래 형식으로 \
-            한 줄씩 출력한다. 설명·머리말 없이 아래 줄만 출력한다.
+        너는 소설 속 대화를 분석하는 도우미다. 대화를 읽고 아래 형식으로 \
+        한 줄씩 출력한다. 설명·머리말 없이 아래 줄만 출력한다.
 
-            주제: 대화의 주제 (최대 25자)
-            어조: 대화의 정서적 분위기 (최대 15자)
-            핵심: 가장 중요한 대사 하나를 원문 그대로 복사 (최대 40자)
-            """
+        주제: 대화의 주제 (최대 25자)
+        어조: 대화의 정서적 분위기 (최대 15자)
+        핵심: 가장 중요한 대사 하나를 원문 그대로 복사 (최대 40자)
+        """
 
         static let chapterSystem = """
-            너는 소설의 장(章)을 요약하는 도우미다. 주어진 장면 요약들을 묶어 \
-            줄거리를 한국어 2~3문장(최대 300자)으로 요약한다. 인물 이름을 \
-            유지하고, 설명·머리말 없이 요약문만 출력한다.
-            """
+        너는 소설의 장(章)을 요약하는 도우미다. 주어진 장면 요약들을 묶어 \
+        줄거리를 한국어 2~3문장(최대 300자)으로 요약한다. 인물 이름을 \
+        유지하고, 설명·머리말 없이 요약문만 출력한다.
+        """
 
         static let workSystem = """
-            너는 소설 전체 줄거리를 요약하는 도우미다. 주어진 요약들을 묶어 \
-            지금까지의 이야기를 한국어 3~4문장(최대 500자)으로 요약한다. 인물 \
-            이름을 유지하고, 설명·머리말 없이 요약문만 출력한다.
-            """
+        너는 소설 전체 줄거리를 요약하는 도우미다. 주어진 요약들을 묶어 \
+        지금까지의 이야기를 한국어 3~4문장(최대 500자)으로 요약한다. 인물 \
+        이름을 유지하고, 설명·머리말 없이 요약문만 출력한다.
+        """
 
         static func rollupUser(_ summaries: [String]) -> String {
             """
@@ -1420,28 +1483,28 @@ public final class BackgroundIndexer: ObservableObject {
         // MARK: 사건 추출 (PLAN §6.3) — JSON 대신 줄 형식 (docs/m6-events.md 결정 4)
 
         static let eventSystem = """
-            너는 소설 장면에서 사건을 뽑는 도우미다. 장면에서 실제로 일어난 일만 \
-            중요한 순서로 최대 3개까지, 한 줄에 하나씩 아래 형식으로 출력한다.
+        너는 소설 장면에서 사건을 뽑는 도우미다. 장면에서 실제로 일어난 일만 \
+        중요한 순서로 최대 3개까지, 한 줄에 하나씩 아래 형식으로 출력한다.
 
-            사건요약(최대 80자, 문장을 끝까지 완성) | 참여: 인물이름들 | 중요도: 1~5 | \
-            상태: 인물 필드=값; 인물 필드=값 | 근거: 원문 짧은 인용
+        사건요약(최대 80자, 문장을 끝까지 완성) | 참여: 인물이름들 | 중요도: 1~5 | \
+        상태: 인물 필드=값; 인물 필드=값 | 근거: 원문 짧은 인용
 
-            중요도 기준 (요구사항: 숫자를 감으로 매기지 않는다):
-            5 = 갈등·관계·목표가 뒤집히거나, 비밀·죽음처럼 이후 이야기의 방향을 \
-            바꾸는 사건
-            4 = 중요한 결정, 새로운 정보의 공개, 이후 사건의 직접 원인
-            3 = 이야기가 앞으로 나아가는 보통 사건
-            2 = 분위기·일상 묘사 속의 작은 일
-            1 = 스쳐 가는 사소한 일
+        중요도 기준 (요구사항: 숫자를 감으로 매기지 않는다):
+        5 = 갈등·관계·목표가 뒤집히거나, 비밀·죽음처럼 이후 이야기의 방향을 \
+        바꾸는 사건
+        4 = 중요한 결정, 새로운 정보의 공개, 이후 사건의 직접 원인
+        3 = 이야기가 앞으로 나아가는 보통 사건
+        2 = 분위기·일상 묘사 속의 작은 일
+        1 = 스쳐 가는 사소한 일
 
-            상태는 이 사건으로 실제로 **바뀐** 인물 상태만 쓴다. 필드는 위치, 감정, \
-            관계, 목표, 생사 다섯 가지만 쓴다. 값은 40자 이내로 짧게 쓴다. \
-            바뀐 상태가 없으면 상태 항목을 통째로 생략한다. \
-            근거는 장면 원문에서 그대로 복사한 30자 이내 구절이다.
+        상태는 이 사건으로 실제로 **바뀐** 인물 상태만 쓴다. 필드는 위치, 감정, \
+        관계, 목표, 생사 다섯 가지만 쓴다. 값은 40자 이내로 짧게 쓴다. \
+        바뀐 상태가 없으면 상태 항목을 통째로 생략한다. \
+        근거는 장면 원문에서 그대로 복사한 30자 이내 구절이다.
 
-            규칙: 주어진 인물 목록에 있는 이름만 참여와 상태에 쓴다. 장면에 없는 \
-            일을 지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
-            """
+        규칙: 주어진 인물 목록에 있는 이름만 참여와 상태에 쓴다. 장면에 없는 \
+        일을 지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
+        """
 
         /// 등록 인물 목록을 함께 준다 — 모델이 지어낸 인물은 파서가 버리지만
         /// (EventParser.resolve), 목록을 미리 주면 애초에 덜 지어낸다.

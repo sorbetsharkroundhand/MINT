@@ -128,33 +128,33 @@ struct BenchOptions {
     }
 
     static let usage = """
-        사용법: swift run -c release MINTBench [옵션]
-          --model <hf-id>      Hugging Face 저장소 id (기본: \(CompletionParameters().modelID))
-          --style <s>          continuation | instruct | both (기본: both — PLAN §9-4 비교 실험)
-          --max-tokens <n>     생성 토큰 상한 (기본: \(CompletionParameters().maxTokens))
-          --temperature <x>    샘플링 온도 (기본: \(CompletionParameters().temperature))
-          --runs <n>           스타일별 반복 횟수 (기본: 2 — 1회차는 워밍업 포함)
-          --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
-          --agent-smoke       실제 모델로 Agent 네이티브 tool call 3종과 전체 loop 검증
-          --story-bible-bench M12 POV(1/3인칭 각 5편)·이름 정규화 결정적 채점
-          --help               이 도움말
+    사용법: swift run -c release MINTBench [옵션]
+      --model <hf-id>      Hugging Face 저장소 id (기본: \(CompletionParameters().modelID))
+      --style <s>          continuation | instruct | both (기본: both — PLAN §9-4 비교 실험)
+      --max-tokens <n>     생성 토큰 상한 (기본: \(CompletionParameters().maxTokens))
+      --temperature <x>    샘플링 온도 (기본: \(CompletionParameters().temperature))
+      --runs <n>           스타일별 반복 횟수 (기본: 2 — 1회차는 워밍업 포함)
+      --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
+      --agent-smoke       실제 모델로 Agent 네이티브 tool call 3종과 전체 loop 검증
+      --story-bible-bench M12 POV(1/3인칭 각 5편)·이름 정규화 결정적 채점
+      --help               이 도움말
 
-        리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
-          --replay <파일>      원고 텍스트 파일 — 문장 경계 컷포인트마다 제안을
-                               생성해 정답(이어지는 원문)과 비교. 컷마다 2회 실행:
-                               1회차 콜드, 2회차 웜(KV 프리필 재사용 검증)
-          --cuts <n>           컷포인트 수 (기본: 12)
-          --truth-chars <n>    정답으로 비교할 이어지는 원문 길이 (기본: 40자)
-          --context <n>        컷 앞에서 읽는 컨텍스트 길이 (기본: 4000자)
-          --title <text>       작품 제목 — 지정 시 소설 헤더(A)를 조립에 포함
-          --genre <text>       작품 장르 — 위와 동일
-          --knowledge          리플레이 전에 원고를 요약(씬→장→작품)해 B 블록으로
-                               주입 — 인덱서(M6)와 같은 프롬프트·규격 (PLAN §11)
+    리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
+      --replay <파일>      원고 텍스트 파일 — 문장 경계 컷포인트마다 제안을
+                           생성해 정답(이어지는 원문)과 비교. 컷마다 2회 실행:
+                           1회차 콜드, 2회차 웜(KV 프리필 재사용 검증)
+      --cuts <n>           컷포인트 수 (기본: 12)
+      --truth-chars <n>    정답으로 비교할 이어지는 원문 길이 (기본: 40자)
+      --context <n>        컷 앞에서 읽는 컨텍스트 길이 (기본: 4000자)
+      --title <text>       작품 제목 — 지정 시 소설 헤더(A)를 조립에 포함
+      --genre <text>       작품 장르 — 위와 동일
+      --knowledge          리플레이 전에 원고를 요약(씬→장→작품)해 B 블록으로
+                           주입 — 인덱서(M6)와 같은 프롬프트·규격 (PLAN §11)
 
-        모델 대안(가벼운 순): \(ModelPresets.qwen2_5_1_5B)
-                              \(ModelPresets.qwen2_5_3B)
-                              \(ModelPresets.qwen3_30B_A3B)
-        """
+    모델 대안(가벼운 순): \(ModelPresets.qwen2_5_1_5B)
+                          \(ModelPresets.qwen2_5_3B)
+                          \(ModelPresets.qwen3_30B_A3B)
+    """
 }
 
 /// 다운로드 진행률을 10% 단위로만 찍는 리포터 (progressHandler는 아무 스레드에서나 옴).
@@ -183,7 +183,8 @@ func sharesWord(_ a: String, _ b: String) -> Bool {
         Set(
             text.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
                 .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-                .filter { $0.count >= 2 })
+                .filter { $0.count >= 2 }
+        )
     }
     return !words(a).isDisjoint(with: words(b))
 }
@@ -196,11 +197,11 @@ switch parseResult {
 case .help:
     print(BenchOptions.usage)
     exit(0)
-case .failure(let message):
+case let .failure(message):
     print("오류: \(message)\n")
     print(BenchOptions.usage)
     exit(2)
-case .options(let parsed):
+case let .options(parsed):
     options = parsed
 }
 
@@ -211,41 +212,39 @@ if options.storyBibleBench {
         "저는 오래 기다렸다. 제가 편지를 썼다. 전 답을 알고 있었다.",
         "나는 길을 잃었다. 나도 겁이 났다. 내가 지도를 펼쳤다.",
         "난 그날을 기억한다. 나는 숨을 골랐다. 내가 종을 울렸다.",
-        "내가 불을 켰다. 나는 계단을 올랐다. 나도 인기척을 들었다.",
+        "내가 불을 켰다. 나는 계단을 올랐다. 나도 인기척을 들었다."
     ]
     let thirdPerson = [
         "서연은 문을 열었다. 서연이가 먼저 왔다. 서연도 창가에 앉았다.",
         "서연이 오래 기다렸다. 서연은 편지를 썼다. 서연도 답을 알고 있었다.",
         "서연은 길을 잃었다. 서연도 겁이 났다. 서연이가 지도를 펼쳤다.",
         "서연은 그날을 기억했다. 서연이가 숨을 골랐다. 서연도 종을 울렸다.",
-        "서연이가 불을 켰다. 서연은 계단을 올랐다. 서연도 인기척을 들었다.",
+        "서연이가 불을 켰다. 서연은 계단을 올랐다. 서연도 인기척을 들었다."
     ]
     let card = CharacterCard(name: "서연")
     let started = Date()
     var correct = 0
-    for body in firstPerson {
-        if NarrationAnalyzer.analyze(body: body, outline: .parse(body)).mode == .firstPerson {
-            correct += 1
-        }
+    for body in firstPerson
+        where NarrationAnalyzer.analyze(body: body, outline: .parse(body)).mode == .firstPerson {
+        correct += 1
     }
-    for body in thirdPerson {
-        if NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [card]).mode == .thirdPerson
-        {
-            correct += 1
-        }
+    for body in thirdPerson
+        where NarrationAnalyzer.analyze(
+            body: body, outline: .parse(body), characters: [card]
+        ).mode == .thirdPerson {
+        correct += 1
     }
-    let elapsedMS = Date().timeIntervalSince(started) * 1_000
+    let elapsedMS = Date().timeIntervalSince(started) * 1000
     let nameGold: [(String, String, Bool)] = [
         ("점순", "점순이", true), ("서연이가", "서연", true),
         ("민준에게서", "민준", true), ("도경이는", "도경", true),
         ("재형아", "재형", true), ("순이", "순이", true),
         ("점순이", "민준", false), ("영수이도", "영수", false),
-        ("A순", "순", false),
+        ("A순", "순", false)
     ]
-    let nameCorrect = nameGold.filter {
+    let nameCorrect = nameGold.count(where: {
         KoreanName.mayReferToSame($0.0, $0.1) == $0.2
-    }.count
+    })
     print("== M12 스토리 바이블 결정적 벤치 ==")
     print("POV 정확도: \(correct)/10 (\(correct * 10)%) · \(String(format: "%.2f", elapsedMS))ms")
     print("이름 정규화: \(nameCorrect)/\(nameGold.count)")
@@ -255,24 +254,27 @@ if options.storyBibleBench {
 // 인물 감지 정밀도 점검 — 모델 로드 없이 감지기만 (결정적이라 GPU 불필요, PLAN §7).
 if options.detectOnly {
     guard let replayPath = options.replayPath,
-        let raw = try? String(contentsOfFile: replayPath, encoding: .utf8)
+          let raw = try? String(contentsOfFile: replayPath, encoding: .utf8)
     else {
         print("❌ --detect-only 는 --replay <원고 파일>이 필요하다.")
         exit(2)
     }
     let outline = DocumentOutline.parse(raw)
     let candidates = CharacterDetector.detect(
-        body: raw, outline: outline, known: [], rejected: [])
+        body: raw, outline: outline, known: [], rejected: []
+    )
     let truth = Set(
         options.truePeople.split(separator: ",")
-            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    )
     print("== 인물 감지 정밀도 (씬 \(outline.scenes.count) · 후보 \(candidates.count)) ==")
     var tp = 0
     for c in candidates {
         let mark = truth.isEmpty ? "•" : (truth.contains(c.name) ? "✅인물" : "❌오탐")
         if truth.contains(c.name) { tp += 1 }
         print(
-            "  \(mark) \(c.name) — 언급\(c.mentions)·씬\(c.sceneCount)·유정\(c.animacyHits)·격\(c.caseRoleCount)")
+            "  \(mark) \(c.name) — 언급\(c.mentions)·씬\(c.sceneCount)·유정\(c.animacyHits)·격\(c.caseRoleCount)"
+        )
     }
     if !truth.isEmpty {
         let precision = candidates.isEmpty ? 0 : Double(tp) / Double(candidates.count) * 100
@@ -280,7 +282,9 @@ if options.detectOnly {
         print(
             String(
                 format: "Precision %.0f%% (%d/%d) · Recall %.0f%% (%d/%d)",
-                precision, tp, candidates.count, recall, tp, truth.count))
+                precision, tp, candidates.count, recall, tp, truth.count
+            )
+        )
     }
     exit(0)
 }
@@ -314,6 +318,7 @@ do {
     print("   가벼운 대안: --model \(ModelPresets.qwen2_5_3B)")
     exit(1)
 }
+
 print(String(format: "✅ 모델 로드 완료: %.1fs (다운로드 캐시 포함)", Date().timeIntervalSince(loadStart)))
 
 // Agent 실모델 스모크 — 자동완성 벤치와 섞지 않고 tool 형식 준수를 별도 판정한다.
@@ -344,10 +349,11 @@ for style in options.styles {
         maxTokens: options.maxTokens,
         temperature: options.temperature
     )
-    for run in 1...options.runs {
+    for run in 1 ... options.runs {
         do {
             let completion = try await engine.complete(
-                prefix: options.prompt, parameters: parameters)
+                prefix: options.prompt, parameters: parameters
+            )
             records.append(RunRecord(style: style, run: run, completion: completion))
             let tps = completion.generationTokensPerSecond.map {
                 String(format: "%.1f tok/s", $0)
@@ -372,25 +378,26 @@ if records.isEmpty {
     print("측정 결과 없음 — 생성이 모두 실패했습니다.")
     exit(1)
 }
+
 for style in options.styles {
     // 1회차는 워밍업이 섞이므로 마지막 run을 정상 상태로 본다.
     guard let steady = records.last(where: { $0.style == style }) else { continue }
     let first = steady.completion.timeToFirstChunk ?? steady.completion.totalTime
-    let verdict: String
-    switch first {
-    case ..<0.3: verdict = "✅ 목표(300ms) 이내"
-    case ..<0.5: verdict = "🟡 허용(500ms) 이내"
-    default: verdict = "❌ 목표 초과 — 토큰 상한 축소 또는 더 작은 모델 검토"
+    let verdict = switch first {
+    case ..<0.3: "✅ 목표(300ms) 이내"
+    case ..<0.5: "🟡 허용(500ms) 이내"
+    default: "❌ 목표 초과 — 토큰 상한 축소 또는 더 작은 모델 검토"
     }
     print("\(style.rawValue): 첫청크 \(format(first)) → \(verdict)")
 }
+
 print("""
 
-    다음 단계 (docs/m2-inference.md):
-    · 두 스타일의 한국어 품질을 눈으로 비교해 PromptStyle 기본값 확정
-    · 목표 초과 시 --max-tokens 축소(8) 또는 더 작은 모델로 재측정
-    · 확정값은 Sources/MINTCore/Settings.swift 의 CompletionParameters 기본값에 반영
-    """)
+다음 단계 (docs/m2-inference.md):
+· 두 스타일의 한국어 품질을 눈으로 비교해 PromptStyle 기본값 확정
+· 목표 초과 시 --max-tokens 축소(8) 또는 더 작은 모델로 재측정
+· 확정값은 Sources/MINTCore/Settings.swift 의 CompletionParameters 기본값에 반영
+""")
 
 // MARK: - Agent 실모델 스모크 (PLAN §14 M10)
 
@@ -398,32 +405,36 @@ print("""
 /// `.toolCall`과 폴백 호출을 구분해 양자화 모델의 형식 준수 위험을 드러낸다.
 func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Bool {
     let body = """
-        # 1장 — 비 오는 병원
-        서연은 병원 복도에서 민준을 만났다.
-        “네가 편지를 가져갔어?” 서연이 물었다.
-        “아니야. 난 어젯밤 내내 집에 있었어.” 민준이 말했다.
+    # 1장 — 비 오는 병원
+    서연은 병원 복도에서 민준을 만났다.
+    “네가 편지를 가져갔어?” 서연이 물었다.
+    “아니야. 난 어젯밤 내내 집에 있었어.” 민준이 말했다.
 
-        # 2장 — 닫힌 서재
-        서연은 책상 아래에서 젖은 편지를 발견했다.
-        """
+    # 2장 — 닫힌 서재
+    서연은 책상 아래에서 젖은 편지를 발견했다.
+    """
     let entry = JournalEntry(
         title: "젖은 편지", body: body, kind: .novel, genre: "미스터리",
-        characters: [CharacterCard(name: "서연"), CharacterCard(name: "민준")])
+        characters: [CharacterCard(name: "서연"), CharacterCard(name: "민준")]
+    )
     let source = AgentSourceSnapshot(
         activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
-        caretUTF16: (body as NSString).length)
+        caretUTF16: (body as NSString).length
+    )
     let registry = DefaultWritingTools.readOnlyMVP
     let parameters = CompletionParameters(
         modelID: options.modelID, promptStyle: .instruct,
         maxTokens: max(256, options.maxTokens),
-        temperature: options.temperature)
+        temperature: options.temperature
+    )
     let system = AgentChatMessage(
         role: .system,
-        content: "MINT 읽기 전용 집필 Agent다. 답을 추측하지 말고 요청에 가장 알맞은 도구 하나를 호출하라.")
+        content: "MINT 읽기 전용 집필 Agent다. 답을 추측하지 말고 요청에 가장 알맞은 도구 하나를 호출하라."
+    )
     let cases: [(request: String, expected: String)] = [
         ("현재 문서의 제목과 종류를 확인해 줘.", "get_active_document"),
         ("본문에서 ‘병원’이라는 표현이 나온 위치를 찾아 줘.", "search_text"),
-        ("현재 커서까지 장면 아웃라인을 확인해 줘.", "get_outline"),
+        ("현재 커서까지 장면 아웃라인을 확인해 줘.", "get_outline")
     ]
 
     print("\n== Writing Agent 실모델 스모크 ==")
@@ -436,7 +447,8 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
         try await engine.generateOneShot(
             system: "한국어 장편 장면을 자세히 서술한다.",
             user: "비 오는 도시의 밤을 여러 문단으로 길게 묘사해 줘.",
-            maxTokens: 512, parameters: parameters, stopAtBlankLine: false)
+            maxTokens: 512, parameters: parameters, stopAtBlankLine: false
+        )
     }
     try? await Task.sleep(for: .seconds(1))
     cancelledGeneration.cancel()
@@ -446,22 +458,23 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
         let turn = try await engine.generateAgentTurn(
             messages: [
                 system,
-                AgentChatMessage(role: .user, content: "현재 문서 정보를 확인해 줘."),
+                AgentChatMessage(role: .user, content: "현재 문서 정보를 확인해 줘.")
             ],
-            tools: registry.specs, parameters: parameters, onChunk: { _ in })
+            tools: registry.specs, parameters: parameters, onChunk: { _ in }
+        )
         let fallback = AgentToolCallParser.parse(turn.text).calls
         let calls = turn.toolCalls.isEmpty ? fallback : turn.toolCalls
-        let cancellationObserved: Bool
-        switch await cancelledGeneration.result {
-        case .failure(let error): cancellationObserved = error is CancellationError
-        case .success: cancellationObserved = false
+        let cancellationObserved: Bool = switch await cancelledGeneration.result {
+        case let .failure(error): error is CancellationError
+        case .success: false
         }
         preemptionPassed = cancellationObserved
             && calls.first?.name == "get_active_document"
         print(
             "\(preemptionPassed ? "✅" : "❌") 취소 동기화 후 "
                 + "\(calls.first?.name ?? "호출 없음") · "
-                + "\(format(Date().timeIntervalSince(preemptionStarted)))")
+                + "\(format(Date().timeIntervalSince(preemptionStarted)))"
+        )
     } catch {
         _ = await cancelledGeneration.result
         preemptionPassed = false
@@ -475,7 +488,8 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
         do {
             let turn = try await engine.generateAgentTurn(
                 messages: [system, AgentChatMessage(role: .user, content: test.request)],
-                tools: registry.specs, parameters: parameters, onChunk: { _ in })
+                tools: registry.specs, parameters: parameters, onChunk: { _ in }
+            )
             let fallback = AgentToolCallParser.parse(turn.text).calls
             let calls = turn.toolCalls.isEmpty ? fallback : turn.toolCalls
             let origin = turn.toolCalls.isEmpty ? "폴백" : "네이티브"
@@ -486,7 +500,8 @@ func runAgentSmoke(engine: CompletionEngine, options: BenchOptions) async -> Boo
             print(
                 "[\(index + 1)] \(passed ? "✅" : "❌") \(test.expected) ← "
                     + "\(names.isEmpty ? "호출 없음" : names.joined(separator: ", "))"
-                    + " · \(origin) · \(format(Date().timeIntervalSince(started)))")
+                    + " · \(origin) · \(format(Date().timeIntervalSince(started)))"
+            )
         } catch {
             print("[\(index + 1)] ❌ 생성 실패: \(error.localizedDescription)")
         }
@@ -529,7 +544,7 @@ final class AgentSmokeRecorder: @unchecked Sendable {
     private var toolNames: [String] = []
 
     func record(_ event: AgentRuntimeEvent) {
-        guard case .toolStarted(let name, _, _) = event else { return }
+        guard case let .toolStarted(name, _, _) = event else { return }
         lock.lock()
         toolNames.append(name)
         lock.unlock()
@@ -550,21 +565,20 @@ final class AgentSmokeRecorder: @unchecked Sendable {
 /// 일어나야 정상 — 웜 TTFC가 콜드보다 눈에 띄게 짧으면 PLAN §12가 작동하는 것.
 func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) async -> Bool {
     guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
-        !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+          !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else {
         print("❌ 리플레이 파일을 읽을 수 없음: \(path)")
         return false
     }
-    let text = Array(raw)  // Character 배열 — 컷 계산 단순화 (벤치라 성능 무관)
+    let text = Array(raw) // Character 배열 — 컷 계산 단순화 (벤치라 성능 무관)
 
     // 컷 후보: 문장 경계 문자 바로 뒤가 공백/줄바꿈인 위치 (문장이 막 끝난 순간).
     let boundaries: Set<Character> = [".", "!", "?", "…", "。", "！", "？", "\n"]
     let minCut = max(200, options.truthChars)
     var candidates: [Int] = []
-    for index in 0..<max(0, text.count - 1)
-    where boundaries.contains(text[index])
-        && (text[index + 1].isWhitespace || text[index + 1].isNewline)
-    {
+    for index in 0 ..< max(0, text.count - 1)
+        where boundaries.contains(text[index])
+        && (text[index + 1].isWhitespace || text[index + 1].isNewline) {
         let cut = index + 1
         if cut >= minCut, cut + options.truthChars <= text.count {
             candidates.append(cut)
@@ -579,7 +593,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     if candidates.count <= options.cuts {
         cuts = candidates
     } else {
-        for i in 0..<options.cuts {
+        for i in 0 ..< options.cuts {
             cuts.append(candidates[i * (candidates.count - 1) / max(1, options.cuts - 1)])
         }
     }
@@ -587,10 +601,11 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     // 소설 헤더(A) — 제목·장르가 주어졌을 때만 (없으면 Fast 모드 그대로).
     let document: DocumentContext? =
         (options.title.isEmpty && options.genre.isEmpty)
-        ? nil
-        : DocumentContext(
-            title: options.title, kind: .novel,
-            genre: options.genre.isEmpty ? nil : options.genre)
+            ? nil
+            : DocumentContext(
+                title: options.title, kind: .novel,
+                genre: options.genre.isEmpty ? nil : options.genre
+            )
     // 리플레이 기본은 이어쓰기 — --style 로 하나만 고르면 그 스타일.
     let style: PromptStyle = options.styles.count == 1 ? options.styles[0] : .continuation
     var parameters = CompletionParameters()
@@ -617,11 +632,14 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
                 ns.substring(
                     with: NSRange(
                         location: scene.utf16Range.lowerBound,
-                        length: scene.utf16Range.count)
-                ).prefix(BackgroundIndexer.maxSceneCharacters))
+                        length: scene.utf16Range.count
+                    )
+                ).prefix(BackgroundIndexer.maxSceneCharacters)
+            )
             guard
                 let summary = await BackgroundIndexer.summarizeScene(
-                    sceneText, engine: engine, parameters: parameters)
+                    sceneText, engine: engine, parameters: parameters
+                )
             else {
                 print("[씬 \(index + 1)] ❌ 요약 실패")
                 continue
@@ -633,30 +651,35 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         var work: String?
         if ordered.count >= 2 {
             work = await BackgroundIndexer.rollup(
-                ordered, level: .work, engine: engine, parameters: parameters)
+                ordered, level: .work, engine: engine, parameters: parameters
+            )
             if let work { print("[작품] \(work)") }
         }
         knowledge = KnowledgeSnapshot(
             entryID: UUID(), outline: outline,
-            summariesByHash: byHash, workSummary: work)
+            summariesByHash: byHash, workSummary: work
+        )
 
         // 인물 감지 깔때기 1단 점검 (M6, PLAN §7) — 결정적 후보를 그대로 찍는다.
         let candidates = CharacterDetector.detect(
-            body: raw, outline: outline, known: [], rejected: [])
+            body: raw, outline: outline, known: [], rejected: []
+        )
         print(
             "[인물 후보] "
                 + (candidates.isEmpty
                     ? "없음"
                     : candidates.map {
                         "\($0.name)(언급\($0.mentions)·씬\($0.sceneCount)·유정\($0.animacyHits)·격\($0.caseRoleCount))"
-                    }.joined(separator: " · ")))
+                    }.joined(separator: " · "))
+        )
     }
 
     print("\n== 리플레이 벤치 ==")
     print("원고: \(path) (\(text.count)자) · 컷 \(cuts.count)개 · 컨텍스트 \(options.contextChars)자")
     print(
         "스타일: \(style.rawValue) · 헤더: \(document == nil ? "없음" : "소설(제목/장르)")"
-            + " · 지식(B): \(knowledge == nil ? "없음" : "요약 피라미드")\n")
+            + " · 지식(B): \(knowledge == nil ? "없음" : "요약 피라미드")\n"
+    )
 
     struct Row {
         let cut: Int
@@ -672,14 +695,15 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
 
     for (index, cut) in cuts.enumerated() {
         let contextStart = max(0, cut - options.contextChars)
-        let context = String(text[contextStart..<cut])
-        let truth = String(text[cut..<(cut + options.truthChars)])
+        let context = String(text[contextStart ..< cut])
+        let truth = String(text[cut ..< (cut + options.truthChars)])
         // B의 시점 차단 기준 — C 창이 시작하는 본문 위치 (utf16, 조립기 규격).
-        let prefixStartUTF16 = String(text[0..<contextStart]).utf16.count
+        let prefixStartUTF16 = String(text[0 ..< contextStart]).utf16.count
         let prompt = ContextAssembler.assemble(
             prefix: context, document: document,
             knowledge: knowledge, prefixStartUTF16: prefixStartUTF16,
-            style: style)
+            style: style
+        )
         do {
             let cold = try await engine.complete(prompt: prompt, parameters: parameters)
             let warm = try await engine.complete(prompt: prompt, parameters: parameters)
@@ -698,13 +722,16 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
                     suggestionLength: cold.text.count,
                     coldTTFC: cold.timeToFirstChunk, warmTTFC: warm.timeToFirstChunk,
                     promptTokens: cold.promptTokenCount,
-                    warmReused: warm.reusedPromptTokens))
+                    warmReused: warm.reusedPromptTokens
+                )
+            )
             print(
                 "[\(index + 1)/\(cuts.count)] @\(cut)자"
                     + " · 일치 \(accepted)자/\(cold.text.count)자"
                     + (sharedWord ? " · 어절 적중" : "")
                     + " · 콜드 \(format(cold.timeToFirstChunk)) → 웜 \(format(warm.timeToFirstChunk))"
-                    + " · 프롬프트 \(cold.promptTokenCount)tok (웜 재사용 \(warm.reusedPromptTokens)tok)")
+                    + " · 프롬프트 \(cold.promptTokenCount)tok (웜 재사용 \(warm.reusedPromptTokens)tok)"
+            )
             print("    제안: \"\(cold.text)\"")
             print("    정답: \"\(truth.prefix(cold.text.count + 10))\"")
         } catch {
@@ -721,10 +748,10 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         values.isEmpty ? 0 : values.reduce(0, +) / Double(values.count)
     }
     let meanAccepted = mean(rows.map { Double($0.accepted) })
-    let hitRate = Double(rows.filter { $0.accepted >= 2 }.count) / Double(rows.count)
+    let hitRate = Double(rows.count(where: { $0.accepted >= 2 })) / Double(rows.count)
     let wordRate = Double(rows.filter(\.sharedWord).count) / Double(rows.count)
-    let coldTTFC = mean(rows.compactMap { $0.coldTTFC })
-    let warmTTFC = mean(rows.compactMap { $0.warmTTFC })
+    let coldTTFC = mean(rows.compactMap(\.coldTTFC))
+    let warmTTFC = mean(rows.compactMap(\.warmTTFC))
     let meanPromptTokens = mean(rows.map { Double($0.promptTokens) })
     let meanReused = mean(rows.map { Double($0.warmReused) })
 

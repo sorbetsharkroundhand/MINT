@@ -32,76 +32,78 @@ public struct ContentView: View {
     public var body: some View {
         MainSurface(
             store: store, completion: completion, indexer: indexer,
-            agent: agent)
-            .frame(minWidth: 860, minHeight: 540)
-            .preferredColorScheme(preferredScheme)
-            .onAppear {
-                // 모델 상주 — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다 (PLAN §10).
-                completion.preloadEngine()
-                // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
-                completion.documentContextProvider = { [weak store] in
-                    store?.activeDocumentContext
+            agent: agent
+        )
+        .frame(minWidth: 860, minHeight: 540)
+        .preferredColorScheme(preferredScheme)
+        .onAppear {
+            // 모델 상주 — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다 (PLAN §10).
+            completion.preloadEngine()
+            // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
+            completion.documentContextProvider = { [weak store] in
+                store?.activeDocumentContext
+            }
+            // 대화 자동 기록 (PLAN §6.6) — 감지 좌표는 이미 본문 절대 좌표다.
+            // 최초 저장에서 재앵커하면 반복되는 짧은 대사가 작품 앞부분의 동명
+            // 대사로 이동하므로, 재앵커는 이후 원문 수정 복구에만 사용한다.
+            completion.onRecordConversation = { [weak store] record in
+                guard let store else { return }
+                store.recordConversation(record, in: store.activeID)
+            }
+            completion.recordedConversationHashesProvider = { [weak store] in
+                Set((store?.activeEntry?.recordedConversations ?? []).map(\.contentHash))
+            }
+            // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
+            // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
+            if let indexer {
+                indexer.attach(store: store)
+                store.documentDidChange = { [weak indexer] id in
+                    indexer?.noteChange(entryID: id)
                 }
-                // 대화 자동 기록 (PLAN §6.6) — 감지 좌표는 이미 본문 절대 좌표다.
-                // 최초 저장에서 재앵커하면 반복되는 짧은 대사가 작품 앞부분의 동명
-                // 대사로 이동하므로, 재앵커는 이후 원문 수정 복구에만 사용한다.
-                completion.onRecordConversation = { [weak store] record in
-                    guard let store else { return }
-                    store.recordConversation(record, in: store.activeID)
+                // 사용자 수정(오버라이드) 변경 → LLM 없이 스냅샷만 재조립
+                // (v4) — 타임라인·바이블·예측이 즉시 수정본을 본다.
+                store.narrativeOverridesDidChange = { [weak indexer] id in
+                    indexer?.rehydrate(entryID: id)
                 }
-                completion.recordedConversationHashesProvider = { [weak store] in
-                    Set((store?.activeEntry?.recordedConversations ?? []).map(\.contentHash))
+                // 커서 거리순 이해 (docs/m6-scene-split.md §5) — 쓰고 있는
+                // 자리 근처부터 읽는다. 값 pull이라 키 입력 비용 없음.
+                indexer.caretProvider = { [weak completion] in
+                    completion?.lastCaretLocation
                 }
-                // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
-                // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
-                if let indexer {
-                    indexer.attach(store: store)
-                    store.documentDidChange = { [weak indexer] id in
-                        indexer?.noteChange(entryID: id)
-                    }
-                    // 사용자 수정(오버라이드) 변경 → LLM 없이 스냅샷만 재조립
-                    // (v4) — 타임라인·바이블·예측이 즉시 수정본을 본다.
-                    store.narrativeOverridesDidChange = { [weak indexer] id in
-                        indexer?.rehydrate(entryID: id)
-                    }
-                    // 커서 거리순 이해 (docs/m6-scene-split.md §5) — 쓰고 있는
-                    // 자리 근처부터 읽는다. 값 pull이라 키 입력 비용 없음.
-                    indexer.caretProvider = { [weak completion] in
-                        completion?.lastCaretLocation
-                    }
-                    completion.knowledgeProvider = { [weak indexer, weak store] in
-                        guard let snapshot = indexer?.snapshot,
-                            snapshot.entryID == store?.activeID
-                        else { return nil }
-                        return snapshot
-                    }
-                    // 시작 직후에도 유휴 타이머를 감는다 — 앱을 켜두기만 해도
-                    // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
-                    indexer.noteChange(entryID: store.activeID)
+                completion.knowledgeProvider = { [weak indexer, weak store] in
+                    guard let snapshot = indexer?.snapshot,
+                          snapshot.entryID == store?.activeID
+                    else { return nil }
+                    return snapshot
                 }
-                // Writing Agent도 Store/Indexer 객체가 아니라 요청 시점의 값 복사만
-                // 받는다. 실행 중에는 고스트와 백그라운드 생성을 함께 선점한다.
-                if let agent {
-                    agent.sourceProvider = { [weak store, weak indexer, weak completion] in
-                        guard let store, let entry = store.activeEntry else { return nil }
-                        let knowledge = indexer?.snapshot.flatMap {
-                            $0.entryID == entry.id ? $0 : nil
-                        }
-                        return AgentSourceSnapshot(
-                            activeEntry: entry, entries: store.entries,
-                            folders: store.folders, knowledge: knowledge,
-                            caretUTF16: completion?.lastCaretLocation
-                                ?? (entry.body as NSString).length)
+                // 시작 직후에도 유휴 타이머를 감는다 — 앱을 켜두기만 해도
+                // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
+                indexer.noteChange(entryID: store.activeID)
+            }
+            // Writing Agent도 Store/Indexer 객체가 아니라 요청 시점의 값 복사만
+            // 받는다. 실행 중에는 고스트와 백그라운드 생성을 함께 선점한다.
+            if let agent {
+                agent.sourceProvider = { [weak store, weak indexer, weak completion] in
+                    guard let store, let entry = store.activeEntry else { return nil }
+                    let knowledge = indexer?.snapshot.flatMap {
+                        $0.entryID == entry.id ? $0 : nil
                     }
-                    agent.parametersProvider = { [weak completion] in
-                        completion?.settings.parameters ?? CompletionParameters()
-                    }
-                    agent.runningDidChange = { [weak completion, weak indexer] active in
-                        completion?.setAgentActive(active)
-                        indexer?.setAgentActive(active)
-                    }
+                    return AgentSourceSnapshot(
+                        activeEntry: entry, entries: store.entries,
+                        folders: store.folders, knowledge: knowledge,
+                        caretUTF16: completion?.lastCaretLocation
+                            ?? (entry.body as NSString).length
+                    )
+                }
+                agent.parametersProvider = { [weak completion] in
+                    completion?.settings.parameters ?? CompletionParameters()
+                }
+                agent.runningDidChange = { [weak completion, weak indexer] active in
+                    completion?.setAgentActive(active)
+                    indexer?.setAgentActive(active)
                 }
             }
+        }
     }
 
     private var preferredScheme: ColorScheme? {
@@ -169,7 +171,8 @@ private struct MainSurface: View {
                     SidebarResizeDivider(
                         width: Binding(
                             get: { CGFloat(sidebarWidth) },
-                            set: { sidebarWidth = Double($0) }),
+                            set: { sidebarWidth = Double($0) }
+                        ),
                         minWidth: sidebarMin, maxWidth: sidebarMax, theme: theme
                     )
                     // 폭 24 = 근접 감지존 ±12pt. 경계선 위에 정중앙 정렬하려고
@@ -202,13 +205,13 @@ private struct SidebarResizeDivider: NSViewRepresentable {
     let maxWidth: CGFloat
     let theme: MintTheme
 
-    func makeNSView(context: Context) -> DividerHandleView {
+    func makeNSView(context _: Context) -> DividerHandleView {
         let view = DividerHandleView()
         configure(view)
         return view
     }
 
-    func updateNSView(_ view: DividerHandleView, context: Context) {
+    func updateNSView(_ view: DividerHandleView, context _: Context) {
         configure(view)
     }
 
@@ -231,8 +234,13 @@ final class DividerHandleView: NSView {
     var currentWidth: (() -> CGFloat)?
     var minWidth: CGFloat = 200
     var maxWidth: CGFloat = 360
-    var idleLineColor: NSColor = .clear { didSet { needsDisplay = true } }
-    var nearLineColor: NSColor = .clear { didSet { needsDisplay = true } }
+    var idleLineColor: NSColor = .clear {
+        didSet { needsDisplay = true }
+    }
+
+    var nearLineColor: NSColor = .clear {
+        didSet { needsDisplay = true }
+    }
 
     /// 확대 히트영역 반폭 — near/dragging에서 여기까지 클릭을 잡고 resize 커서.
     private let expandedHalf: CGFloat = 9
@@ -243,7 +251,10 @@ final class DividerHandleView: NSView {
     private var state: State = .idle {
         didSet { if oldValue != state { needsDisplay = true } }
     }
-    private var isActive: Bool { state != .idle }
+
+    private var isActive: Bool {
+        state != .idle
+    }
 
     private var trackingArea: NSTrackingArea?
     private var dragStartMouseX: CGFloat = 0
@@ -257,14 +268,15 @@ final class DividerHandleView: NSView {
         let area = NSTrackingArea(
             rect: bounds,
             options: [.activeInKeyWindow, .mouseEnteredAndExited, .mouseMoved],
-            owner: self, userInfo: nil)
+            owner: self, userInfo: nil
+        )
         addTrackingArea(area)
         trackingArea = area
     }
 
-    // idle에선 ±3pt만, near/dragging에선 ±9pt만 claim한다. 그 밖의 점은 nil을
-    // 반환해 아래 패널(사이드바·에디터)로 클릭이 통과한다 — 넓은 존이 평상시
-    // 다른 interaction을 가로채지 않게 하는 핵심.
+    /// idle에선 ±3pt만, near/dragging에선 ±9pt만 claim한다. 그 밖의 점은 nil을
+    /// 반환해 아래 패널(사이드바·에디터)로 클릭이 통과한다 — 넓은 존이 평상시
+    /// 다른 interaction을 가로채지 않게 하는 핵심.
     override func hitTest(_ point: NSPoint) -> NSView? {
         let local = convert(point, from: superview)
         guard bounds.contains(local) else { return nil }
@@ -283,7 +295,7 @@ final class DividerHandleView: NSView {
         updateCursor(for: event)
     }
 
-    override func mouseExited(with event: NSEvent) {
+    override func mouseExited(with _: NSEvent) {
         // 드래그 중엔 존을 벗어나도 상태를 유지한다 — mouseUp에서 정리.
         guard state != .dragging else { return }
         state = .idle
@@ -328,7 +340,7 @@ final class DividerHandleView: NSView {
         }
     }
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func draw(_: NSRect) {
         let lineWidth: CGFloat = isActive ? 3 : 1
         let color = isActive ? nearLineColor : idleLineColor
         guard color.alphaComponent > 0 else { return }
@@ -342,7 +354,7 @@ final class DividerHandleView: NSView {
 
 /// 창 전체 리퀴드 글래스 — 창 뒤 화면을 블러·새추레이션 (디자인 backdrop-filter).
 private struct GlassBackground: NSViewRepresentable {
-    func makeNSView(context: Context) -> NSVisualEffectView {
+    func makeNSView(context _: Context) -> NSVisualEffectView {
         let view = NSVisualEffectView()
         view.material = .hudWindow
         view.blendingMode = .behindWindow
@@ -350,7 +362,7 @@ private struct GlassBackground: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: NSVisualEffectView, context: Context) {}
+    func updateNSView(_: NSVisualEffectView, context _: Context) {}
 }
 
 // MARK: - 에디터 컬럼
@@ -370,14 +382,16 @@ struct EditorPane: View {
             if !chromeHidden {
                 EditorToolbar(
                     store: store, completion: completion, settings: settings, theme: theme,
-                    indexer: indexer)
+                    indexer: indexer
+                )
                 theme.sepC.frame(height: 1)
             }
             editor
             if !chromeHidden {
                 theme.sepC.frame(height: 1)
                 EditorStatusBar(
-                    store: store, completion: completion, settings: settings, theme: theme)
+                    store: store, completion: completion, settings: settings, theme: theme
+                )
             }
         }
     }
@@ -389,27 +403,28 @@ struct EditorPane: View {
             baseFontSize: CGFloat(settings.editorFontSize),
             entryID: store.activeID,
             focusRequest: store.editorFocusRequests,
-            searchJump: store.searchJump)
-            .overlay(alignment: .topLeading) {
-                if (store.activeEntry?.body ?? "").isEmpty {
-                    // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
-                    // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
-                    GeometryReader { geo in
-                        Text("오늘 하루를 적어보세요…")
-                            .font(MintFonts.serifUI(20))
-                            .foregroundStyle(theme.ghostC)
-                            .padding(.top, 51)
-                            .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
-                    }
-                    .allowsHitTesting(false)
+            searchJump: store.searchJump
+        )
+        .overlay(alignment: .topLeading) {
+            if (store.activeEntry?.body ?? "").isEmpty {
+                // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
+                // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
+                GeometryReader { geo in
+                    Text("오늘 하루를 적어보세요…")
+                        .font(MintFonts.serifUI(20))
+                        .foregroundStyle(theme.ghostC)
+                        .padding(.top, 51)
+                        .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
                 }
+                .allowsHitTesting(false)
             }
-            .overlay(alignment: .bottom) {
-                if settings.autocompleteEnabled {
-                    ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
-                        .padding(.bottom, 20)
-                }
+        }
+        .overlay(alignment: .bottom) {
+            if settings.autocompleteEnabled {
+                ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
+                    .padding(.bottom, 20)
             }
+        }
     }
 
     private var bodyBinding: Binding<String> {
@@ -504,7 +519,8 @@ struct EditorToolbar: View {
                 .popover(isPresented: $longParagraphOpen, arrowEdge: .bottom) {
                     LongParagraphNotice(
                         completion: completion, theme: theme,
-                        onDismiss: { longParagraphOpen = false })
+                        onDismiss: { longParagraphOpen = false }
+                    )
                 }
             }
             Spacer()
@@ -570,8 +586,7 @@ private struct CandidateDot: View {
 
     var body: some View {
         if indexer.candidatesEntryID == store.activeID,
-            !indexer.characterCandidates.isEmpty
-        {
+           !indexer.characterCandidates.isEmpty {
             Circle()
                 .fill(theme.novelC)
                 .frame(width: 5, height: 5)
@@ -720,8 +735,8 @@ struct ModelChip: View {
         .help("자동완성 켜기/끄기")
     }
 
-    // 행 전체는 탭 제스처(모델 선택), 다운로드 버튼은 내부의 독립 Button —
-    // Button 안에 Button을 겹치면 탭이 엉키므로 행을 제스처로 구성한다.
+    /// 행 전체는 탭 제스처(모델 선택), 다운로드 버튼은 내부의 독립 Button —
+    /// Button 안에 Button을 겹치면 탭이 엉키므로 행을 제스처로 구성한다.
     private func row(_ choice: ModelChoice) -> some View {
         let selected = settings.modelID == choice.id
         return HStack(spacing: 10) {
@@ -766,7 +781,7 @@ struct ModelChip: View {
     @ViewBuilder
     private func downloadAccessory(_ choice: ModelChoice) -> some View {
         switch downloads.states[choice.id] {
-        case .downloading(let fraction):
+        case let .downloading(fraction):
             Button {
                 downloads.cancel(choice.id)
             } label: {
@@ -781,7 +796,7 @@ struct ModelChip: View {
                 .font(.system(size: 12))
                 .foregroundStyle(theme.ink3C)
                 .help("다운로드됨 — 전환 시 바로 로드")
-        case .failed(let message):
+        case let .failed(message):
             Button {
                 downloads.download(choice.id)
             } label: {
@@ -841,7 +856,7 @@ struct ModelChip: View {
         if completion.isPredicting { return "예측 중" }
         switch completion.engineState {
         case .idle: return "대기"
-        case .downloading(let fraction): return String(format: "다운로드 %.0f%%", fraction * 100)
+        case let .downloading(fraction): return String(format: "다운로드 %.0f%%", fraction * 100)
         case .loading: return "로드 중"
         case .ready: return completion.suggestion != nil ? "제안 준비됨" : "대기"
         case .failed: return "오류"
@@ -930,7 +945,7 @@ struct PulsingDots: View {
 
     var body: some View {
         HStack(spacing: 3) {
-            ForEach(0..<3, id: \.self) { index in
+            ForEach(0 ..< 3, id: \.self) { index in
                 Circle()
                     .fill(color)
                     .frame(width: 4, height: 4)
@@ -970,13 +985,13 @@ struct MarkdownCheatSheet: View {
         Item(syntax: "> ", label: "인용"),
         Item(syntax: "```", label: "코드 블록"),
         Item(syntax: "$$ ", label: "수식 (LaTeX)"),
-        Item(syntax: "---", label: "구분선"),
+        Item(syntax: "---", label: "구분선")
     ]
 
     private static let inlines: [Item] = [
         Item(syntax: "**굵게**", label: "굵게"),
         Item(syntax: "*기울임*", label: "기울임"),
-        Item(syntax: "`코드`", label: "인라인 코드"),
+        Item(syntax: "`코드`", label: "인라인 코드")
     ]
 
     var body: some View {
@@ -1037,7 +1052,7 @@ struct ShortcutHintPill: View {
             divider
             item(key: "esc", label: "무시")
         }
-        .fixedSize()  // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
+        .fixedSize() // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
         .padding(.vertical, 9)
         .padding(.horizontal, 14)
         .background(
@@ -1045,7 +1060,8 @@ struct ShortcutHintPill: View {
                 .fill(theme.pillC)
                 .background(
                     .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 12, style: .continuous)
@@ -1158,7 +1174,8 @@ struct EditorStatusBar: View {
         let stats = completion.keystrokeStats
         return String(
             format: "입력 %.1f/%.0fms·max %.0f",
-            stats.handlerP95, stats.totalP95, stats.totalMax)
+            stats.handlerP95, stats.totalP95, stats.totalMax
+        )
     }
 
     private var separator: some View {
@@ -1248,16 +1265,16 @@ struct LongParagraphNotice: View {
         let ratio = info.ratio
         let ratioText = ratio > 1 ? "보통 문단의 \(ratio)배가 넘어요" : "아주 길어요"
         return """
-            에디터는 문단 하나를 통째로 다시 배치하기 때문에, 문단이 길수록 글자 하나 \
-            입력에 드는 비용이 커져요. 이 문서에서 가장 긴 문단은 약 \
-            \(info.maxLength.formatted())자로, \(ratioText).
+        에디터는 문단 하나를 통째로 다시 배치하기 때문에, 문단이 길수록 글자 하나 \
+        입력에 드는 비용이 커져요. 이 문서에서 가장 긴 문단은 약 \
+        \(info.maxLength.formatted())자로, \(ratioText).
 
-            문장 경계에서 이 문단을 몇 개로 나누면 입력이 다시 매끄러워져요. 글자는 \
-            하나도 바뀌지 않고, 문단 사이에 빈 줄만 들어가요. 마음에 안 들면 ⌘Z 한 \
-            번으로 되돌릴 수 있어요.
+        문장 경계에서 이 문단을 몇 개로 나누면 입력이 다시 매끄러워져요. 글자는 \
+        하나도 바뀌지 않고, 문단 사이에 빈 줄만 들어가요. 마음에 안 들면 ⌘Z 한 \
+        번으로 되돌릴 수 있어요.
 
-            나눌 문단: \(info.count)개 · 문장 중간은 자르지 않아요.
-            """
+        나눌 문단: \(info.count)개 · 문장 중간은 자르지 않아요.
+        """
     }
 }
 

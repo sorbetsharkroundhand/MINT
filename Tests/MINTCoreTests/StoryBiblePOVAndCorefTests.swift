@@ -1,6 +1,5 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 final class StoryBiblePOVAndCorefTests: XCTestCase {
     // MARK: - 공유 한국어 이름 정규화
@@ -47,25 +46,30 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
         let entry = JournalEntry(title: "봄", body: "점순이가 왔다.", kind: .novel, characters: cards)
         let source = AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
-            caretUTF16: (entry.body as NSString).length)
+            caretUTF16: (entry.body as NSString).length
+        )
         let registry = DefaultWritingTools.readOnlyMVP
 
         // 정확 일치가 정규화보다 먼저라 본명 "점순이" 카드만 나온다.
         let exact = await registry.execute(
             AgentToolCall(name: "find_character", arguments: ["character_ref": .string("점순이")]),
-            context: AgentContext(source: source))
+            context: AgentContext(source: source)
+        )
         XCTAssertTrue(exact.content.contains(cards[1].id.uuidString))
         XCTAssertFalse(exact.content.contains(cards[0].id.uuidString))
 
         let ambiguousCards = [CharacterCard(name: "점순", aliases: "순덕"), CharacterCard(name: "순덕이")]
         let ambiguousEntry = JournalEntry(
-            title: "모호", body: "", kind: .novel, characters: ambiguousCards)
+            title: "모호", body: "", kind: .novel, characters: ambiguousCards
+        )
         let ambiguousSource = AgentSourceSnapshot(
             activeEntry: ambiguousEntry, entries: [ambiguousEntry], folders: [], knowledge: nil,
-            caretUTF16: 0)
+            caretUTF16: 0
+        )
         let ambiguous = await registry.execute(
             AgentToolCall(name: "find_character", arguments: ["character_ref": .string("순덕이가")]),
-            context: AgentContext(source: ambiguousSource))
+            context: AgentContext(source: ambiguousSource)
+        )
         XCTAssertTrue(ambiguous.content.contains(ambiguousCards[0].id.uuidString))
         XCTAssertTrue(ambiguous.content.contains(ambiguousCards[1].id.uuidString))
     }
@@ -74,10 +78,10 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
 
     func test_대사속나는을제외하고_1인칭판정() {
         let body = """
-            # 1장
-            나는 문을 열었다. 내가 먼저 도착했다. 난 한동안 창밖을 보았다.
-            “나는 범인이 아니야.” 그가 외쳤다.
-            """
+        # 1장
+        나는 문을 열었다. 내가 먼저 도착했다. 난 한동안 창밖을 보았다.
+        “나는 범인이 아니야.” 그가 외쳤다.
+        """
         let profile = NarrationAnalyzer.analyze(body: body, outline: .parse(body))
         XCTAssertEqual(profile.mode, .firstPerson)
         XCTAssertEqual(profile.firstPersonSubjectHits, 3)
@@ -86,11 +90,12 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
     func test_반복호명된_유일한이름을_1인칭화자로연결() {
         let 점순 = CharacterCard(name: "점순")
         let body = """
-            나는 문을 열었다. 내가 먼저 왔다. 난 마루에 앉았다.
-            “점순아, 여기 있었구나.” 그가 말했다. “점순아, 이제 가자.”
-            """
+        나는 문을 열었다. 내가 먼저 왔다. 난 마루에 앉았다.
+        “점순아, 여기 있었구나.” 그가 말했다. “점순아, 이제 가자.”
+        """
         let profile = NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [점순])
+            body: body, outline: .parse(body), characters: [점순]
+        )
         XCTAssertEqual(profile.mode, .firstPerson)
         XCTAssertEqual(profile.narratorName, "점순")
     }
@@ -98,23 +103,25 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
     func test_1인칭원고의_다른인물주어를_혼합으로오인하지않음() {
         let 민준 = CharacterCard(name: "민준")
         let body = """
-            나는 문을 열었다. 내가 먼저 왔다. 민준은 뒤따라왔다.
-            민준이가 불을 켰다. 민준도 의자에 앉았다.
-            """
+        나는 문을 열었다. 내가 먼저 왔다. 민준은 뒤따라왔다.
+        민준이가 불을 켰다. 민준도 의자에 앉았다.
+        """
         let profile = NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [민준])
+            body: body, outline: .parse(body), characters: [민준]
+        )
         XCTAssertEqual(profile.mode, .firstPerson)
     }
 
     func test_등록인물주어로_3인칭판정() {
         let 서연 = CharacterCard(name: "서연")
         let body = """
-            # 1장
-            서연은 문을 열었다. 서연이가 먼저 도착했다. 서연도 창밖을 보았다.
-            바람이 오래 불었다.
-            """
+        # 1장
+        서연은 문을 열었다. 서연이가 먼저 도착했다. 서연도 창밖을 보았다.
+        바람이 오래 불었다.
+        """
         let profile = NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [서연])
+            body: body, outline: .parse(body), characters: [서연]
+        )
         XCTAssertEqual(profile.mode, .thirdPerson)
         XCTAssertEqual(profile.thirdPersonProperNameSubjectHits, 3)
     }
@@ -122,13 +129,14 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
     func test_장마다_시점이다르면_혼합판정() {
         let 서연 = CharacterCard(name: "서연")
         let body = """
-            # 서연의 기록
-            나는 문을 열었다. 내가 먼저 도착했다. 난 비밀을 알고 있었다.
-            # 관찰자의 기록
-            서연은 문을 닫았다. 서연이가 계단을 올랐다. 서연도 뒤를 돌아봤다.
-            """
+        # 서연의 기록
+        나는 문을 열었다. 내가 먼저 도착했다. 난 비밀을 알고 있었다.
+        # 관찰자의 기록
+        서연은 문을 닫았다. 서연이가 계단을 올랐다. 서연도 뒤를 돌아봤다.
+        """
         let profile = NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [서연])
+            body: body, outline: .parse(body), characters: [서연]
+        )
         XCTAssertEqual(profile.mode, .mixed)
     }
 
@@ -142,11 +150,12 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
         let 서연 = CharacterCard(name: "서연")
         let 민준 = CharacterCard(name: "민준")
         let body = """
-            서연은 그가 오리라고 생각했다. 민준은 자신이 늦었다고 느꼈다.
-            서연이 문을 열었다. 민준도 고개를 들었다.
-            """
+        서연은 그가 오리라고 생각했다. 민준은 자신이 늦었다고 느꼈다.
+        서연이 문을 열었다. 민준도 고개를 들었다.
+        """
         let profile = NarrationAnalyzer.analyze(
-            body: body, outline: .parse(body), characters: [서연, 민준])
+            body: body, outline: .parse(body), characters: [서연, 민준]
+        )
         XCTAssertEqual(profile.mode, .thirdPerson)
         XCTAssertEqual(profile.omniscientHint, true)
     }
@@ -158,11 +167,13 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
             entryID: UUID(), outline: outline, summariesByHash: [:],
             overrides: NarrativeOverrides([
                 NarrativeOverride(kind: .narrationMode, key: "global", value: "3인칭")
-            ]), body: body)
+            ]), body: body
+        )
         XCTAssertEqual(snapshot.narrationProfile.mode, .thirdPerson)
         let header = ContextAssembler.headerText(
             document: DocumentContext(title: "시험", kind: .novel),
-            window: body, knowledge: snapshot)
+            window: body, knowledge: snapshot
+        )
         XCTAssertTrue(header.contains("[서술] 3인칭"))
     }
 
@@ -170,17 +181,21 @@ final class StoryBiblePOVAndCorefTests: XCTestCase {
         let body = "나는 문을 열었다. 내가 먼저 왔다. 난 자리에 앉았다."
         let entry = JournalEntry(title: "화자", body: body, kind: .novel)
         let snapshot = KnowledgeSnapshot(
-            entryID: entry.id, outline: .parse(body), summariesByHash: [:], body: body)
+            entryID: entry.id, outline: .parse(body), summariesByHash: [:], body: body
+        )
         let source = AgentSourceSnapshot(
             activeEntry: entry, entries: [entry], folders: [], knowledge: snapshot,
-            caretUTF16: (body as NSString).length)
+            caretUTF16: (body as NSString).length
+        )
         let context = AgentContext(source: source)
         let registry = DefaultWritingTools.readOnlyMVP
         let active = await registry.execute(
-            AgentToolCall(name: "get_active_document"), context: context)
+            AgentToolCall(name: "get_active_document"), context: context
+        )
         XCTAssertTrue(active.content.contains(#""narration_mode":"1인칭""#))
         let atCursor = await registry.execute(
-            AgentToolCall(name: "get_context_at_cursor"), context: context)
+            AgentToolCall(name: "get_context_at_cursor"), context: context
+        )
         XCTAssertTrue(atCursor.content.contains(#""pov":"1인칭 서술자""#))
     }
 }

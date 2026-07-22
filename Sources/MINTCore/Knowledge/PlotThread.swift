@@ -83,7 +83,9 @@ public struct PlotThread: Codable, Equatable, Sendable, Identifiable {
     /// 추론 확신 0–1.
     public var confidence: Double
 
-    public var id: String { stableID }
+    public var id: String {
+        stableID
+    }
 
     public init(
         stableID: String? = nil, title: String, summary: String = "",
@@ -92,7 +94,7 @@ public struct PlotThread: Codable, Equatable, Sendable, Identifiable {
     ) {
         self.stableID =
             stableID
-            ?? Self.makeStableID(openingKey: memberships.first?.eventKey ?? title)
+                ?? Self.makeStableID(openingKey: memberships.first?.eventKey ?? title)
         self.title = title
         self.summary = summary
         self.memberships = memberships
@@ -133,7 +135,6 @@ public struct PlotThreadAnalysis: Codable, Equatable, Sendable {
 /// 플롯: 1,3,5,8 | 제목: 살인사건의 진실 | 요약: 남편의 죽음을 파헤친다 | 해결: 8
 /// ```
 public enum PlotThreadParser {
-
     /// 스레드 수 상한 — 플롯이 사건마다 생기면 소음이다.
     static let maxThreads = 6
     static let maxTitleCharacters = 20
@@ -147,13 +148,14 @@ public enum PlotThreadParser {
         var claimedTitles: Set<String> = []
 
         func key(_ number: Int) -> String? {
-            (1...keys.count).contains(number) ? keys[number - 1] : nil
+            (1 ... keys.count).contains(number) ? keys[number - 1] : nil
         }
 
         for rawLine in output.split(separator: "\n") {
             guard threads.count < maxThreads else { break }
             let line = EventParser.stripListMarker(
-                rawLine.trimmingCharacters(in: .whitespaces))
+                rawLine.trimmingCharacters(in: .whitespaces)
+            )
             guard line.hasPrefix("플롯") else { continue }
             guard let colon = line.firstIndex(of: ":") else { continue }
             let fields = line[line.index(after: colon)...]
@@ -165,7 +167,8 @@ public enum PlotThreadParser {
             let numbers = Array(
                 Set(
                     first.split(whereSeparator: { !$0.isNumber })
-                        .compactMap { Int($0) })
+                        .compactMap { Int($0) }
+                )
             ).sorted()
             let memberKeys = numbers.compactMap { key($0) }
             guard memberKeys.count >= minMembers else { continue }
@@ -198,13 +201,16 @@ public enum PlotThreadParser {
                 EventThreadMembership(
                     eventKey: memberKey,
                     role: memberKey == resolvedAt
-                        ? .resolves : offset == 0 ? .opens : .advances)
+                        ? .resolves : offset == 0 ? .opens : .advances
+                )
             }
             threads.append(
                 PlotThread(
                     title: title, summary: summary,
                     memberships: memberships, resolvedAtKey: resolvedAt,
-                    confidence: 0.6))
+                    confidence: 0.6
+                )
+            )
         }
         return threads
     }
@@ -245,7 +251,7 @@ public enum PlotThreadParser {
         var usedPrev: Set<Int> = []
         for candidate in candidates {
             guard !usedNew.contains(candidate.newIndex),
-                !usedPrev.contains(candidate.prevIndex)
+                  !usedPrev.contains(candidate.prevIndex)
             else { continue }
             usedNew.insert(candidate.newIndex)
             usedPrev.insert(candidate.prevIndex)
@@ -274,13 +280,17 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
 
     /// 안정 색 시드 — stableID 해시 (NarrativeFlow.colorSeed와 같은 규칙).
     public var colorSeed: Int {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in id.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+        for byte in id.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
+        }
         return Int(hash % 997)
     }
 
     /// 사건이 이 스레드를 여는가/해결하는가.
-    public func role(of key: String) -> ThreadRole? { roleByKey[key] }
+    public func role(of key: String) -> ThreadRole? {
+        roleByKey[key]
+    }
 
     /// DORMANT 판정 간격 — 마지막 멤버 이후 이만큼의 사건이 지나면 휴면.
     public static let dormantGap = 6
@@ -301,7 +311,8 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
         overrides: NarrativeOverrides
     ) -> [ResolvedPlotThread] {
         let index = Dictionary(
-            uniqueKeysWithValues: canonicalOrder.enumerated().map { ($0.element, $0.offset) })
+            uniqueKeysWithValues: canonicalOrder.enumerated().map { ($0.element, $0.offset) }
+        )
         let titleOverrides = overrides.map(of: .threadTitle)
         let statusOverrides = overrides.map(of: .threadStatus)
         let membershipOverrides = overrides.map(of: .threadMembership)
@@ -329,7 +340,7 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
             for (key, value) in membershipOverrides {
                 let parts = key.split(separator: "|", maxSplits: 1).map(String.init)
                 guard parts.count == 2, parts[0] == stored.stableID,
-                    index[parts[1]] != nil
+                      index[parts[1]] != nil
                 else { continue }
                 userEdited = true
                 if value == "제외" {
@@ -351,7 +362,8 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
             let status = deriveStatus(
                 statusOverride: statusOverrides[stored.stableID],
                 resolvedAt: resolvedAt, members: ordered,
-                index: index, total: canonicalOrder.count)
+                index: index, total: canonicalOrder.count
+            )
             threads.append(
                 ResolvedPlotThread(
                     id: stored.stableID,
@@ -365,7 +377,9 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
                     userEdited: userEdited
                         || titleOverrides[stored.stableID] != nil
                         || statusOverrides[stored.stableID] != nil,
-                    confidence: stored.confidence))
+                    confidence: stored.confidence
+                )
+            )
         }
 
         // 본줄기 — 어느 스레드에도 안 속한 사건들. 분석 전이면 전부 = 직선 그래프.
@@ -382,7 +396,9 @@ public struct ResolvedPlotThread: Equatable, Sendable, Identifiable {
                     resolvedAtKey: nil,
                     isMain: true,
                     userEdited: overrides.value(.threadTitle, key: PlotThread.mainID) != nil,
-                    confidence: 1))
+                    confidence: 1
+                )
+            )
         }
 
         // 정렬 — 본줄기 먼저, 나머지는 (첫 멤버 담화 위치, ID) — 결정적.

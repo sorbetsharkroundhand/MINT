@@ -11,16 +11,16 @@ import Foundation
 /// 기록은 제안 단위 사건(노출·수락·거절)이라 분당 몇 건 수준 — 키 입력 경로가
 /// 아니다. 그래도 파일 IO는 전용 직렬 큐로 보내 메인을 안 막는다.
 public enum AcceptanceMetrics {
-
     public enum Event: String, Sendable {
-        case shown  // 고스트가 화면에 나타남
-        case acceptedFull = "accepted_full"  // Tab 전체 수락
-        case acceptedWord = "accepted_word"  // → 한 단어 수락 (단어마다 1건)
-        case dismissed  // 편집·Esc·커서 이동으로 사라짐
+        case shown // 고스트가 화면에 나타남
+        case acceptedFull = "accepted_full" // Tab 전체 수락
+        case acceptedWord = "accepted_word" // → 한 단어 수락 (단어마다 1건)
+        case dismissed // 편집·Esc·커서 이동으로 사라짐
     }
 
     private static let queue = DispatchQueue(
-        label: "mint.metrics", qos: .utility)
+        label: "mint.metrics", qos: .utility
+    )
 
     static var fileURL: URL {
         let base = FileManager.default
@@ -43,7 +43,8 @@ public enum AcceptanceMetrics {
             let url = fileURL
             if !FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.createDirectory(
-                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    at: url.deletingLastPathComponent(), withIntermediateDirectories: true
+                )
                 try? data.write(to: url)
                 return
             }
@@ -85,9 +86,9 @@ public enum AcceptanceMetrics {
         }
         for line in text.split(separator: "\n") {
             guard let data = line.data(using: .utf8),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let eventRaw = json["event"] as? String,
-                let event = Event(rawValue: eventRaw)
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let eventRaw = json["event"] as? String,
+                  let event = Event(rawValue: eventRaw)
             else { continue }
             let mode = json["mode"] as? String ?? "?"
             var modeStats = summary.byMode[mode] ?? (0, 0)

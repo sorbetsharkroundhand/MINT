@@ -68,7 +68,7 @@ struct SelectionToolbarView: View {
             }
             NumberField(
                 theme: theme, value: state.fontSize,
-                range: Self.minFontSize...Self.maxFontSize,
+                range: Self.minFontSize ... Self.maxFontSize,
                 help: "글자 크기 (누르면 전체 선택 · 숫자 입력 후 Enter)"
             ) { onAction(.fontSize($0)) }
             iconButton("textformat.size.larger", active: false, help: "글자 크게") {
@@ -87,7 +87,8 @@ struct SelectionToolbarView: View {
                 .fill(theme.pillC)
                 .background(
                     .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)
@@ -129,13 +130,13 @@ struct SelectionToolbarView: View {
             hex.flatMap { NSColor(inlineHex: $0).map(Color.init(nsColor:)) } ?? theme.inkC
         return ToolbarButton(
             theme: theme, active: active,
-            help: hex == nil ? "기본색" : "글자색", action: { onAction(.color(hex)) }
-        ) {
-            Circle()
-                .fill(fill)
-                .frame(width: 11, height: 11)
-                .overlay(Circle().strokeBorder(theme.sepStrongC))
-        }
+            help: hex == nil ? "기본색" : "글자색", action: { onAction(.color(hex)) }, label: {
+                Circle()
+                    .fill(fill)
+                    .frame(width: 11, height: 11)
+                    .overlay(Circle().strokeBorder(theme.sepStrongC))
+            }
+        )
     }
 }
 
@@ -181,7 +182,9 @@ private struct NumberField: View {
             .help(help)
     }
 
-    private func display(_ v: Double) -> String { String(Int(v.rounded())) }
+    private func display(_ v: Double) -> String {
+        String(Int(v.rounded()))
+    }
 
     /// 입력값을 숫자로 파싱해 허용 범위로 자른 뒤 커밋한다. 빈 값·오입력은 되돌린다.
     private func commit() {

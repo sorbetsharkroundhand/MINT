@@ -22,7 +22,7 @@ public struct SettingsView: View {
     @ObservedObject private var palette = PaletteSettings.shared
 
     public init(settings: CompletionSettings = .shared) {
-        self._settings = ObservedObject(wrappedValue: settings)
+        _settings = ObservedObject(wrappedValue: settings)
     }
 
     public var body: some View {
@@ -63,7 +63,8 @@ public struct SettingsView: View {
                 caption(
                     palette.enabled
                         ? "아래에서 고른 색이 배경·툴바·사이드바·배지에 쓰여요 — 글자는 항상 읽히도록 따로 관리돼요."
-                        : "지금은 기본 색을 쓰고 있어요. 켜면 라이트·다크 각각 다섯 색을 직접 고를 수 있어요.")
+                        : "지금은 기본 색을 쓰고 있어요. 켜면 라이트·다크 각각 다섯 색을 직접 고를 수 있어요."
+                )
             }
 
             if palette.enabled {
@@ -75,14 +76,14 @@ public struct SettingsView: View {
                 Stepper(
                     "글자 크기: \(Int(settings.editorFontSize.rounded()))pt",
                     value: $settings.editorFontSize,
-                    in: CompletionSettings.minFontSize...CompletionSettings.maxFontSize,
+                    in: CompletionSettings.minFontSize ... CompletionSettings.maxFontSize,
                     step: 1
                 )
                 caption("본문·제목이 이 크기에 비례해요 (⌘+ / ⌘− / ⌘0).")
                 Stepper(
                     "줄 간격: \(Int(settings.lineSpacing.rounded()))pt",
                     value: $settings.lineSpacing,
-                    in: 0...20,
+                    in: 0 ... 20,
                     step: 1
                 )
                 caption("줄 사이 여백을 조절해요 — 낮추면 촘촘하게, 높이면 시원하게.")
@@ -96,13 +97,14 @@ public struct SettingsView: View {
     /// 팔레트는 **배경·표면에만** 쓰인다. 글자색은 팔레트와 무관하게 유지되고,
     /// 액센트만 팔레트에서 색상을 물려받아 대비에 맞게 명도를 조정한다 —
     /// 그러지 않으면 밝은 색만 고른 순간 글자가 사라진다.
-    @ViewBuilder private func paletteSection(dark: Bool) -> some View {
+    private func paletteSection(dark: Bool) -> some View {
         Section(dark ? "색상 — 다크 모드" : "색상 — 라이트 모드") {
-            ForEach(0..<MintPalette.slotCount, id: \.self) { slot in
+            ForEach(0 ..< MintPalette.slotCount, id: \.self) { slot in
                 ColorPicker(
                     MintPalette.slotLabels[slot],
                     selection: paletteBinding(dark: dark, slot: slot),
-                    supportsOpacity: false)
+                    supportsOpacity: false
+                )
             }
             Button("기본값으로 되돌리기") {
                 palette.reset(dark: dark)
@@ -154,25 +156,25 @@ public struct SettingsView: View {
                 Stepper(
                     "디바운스: \(settings.debounceMilliseconds)ms",
                     value: $settings.debounceMilliseconds,
-                    in: 150...1_000,
+                    in: 150 ... 1000,
                     step: 50
                 )
                 Stepper(
                     "최대 토큰: \(settings.maxTokens)",
                     value: $settings.maxTokens,
-                    in: 4...32
+                    in: 4 ... 32
                 )
             }
 
             Section("생성 파라미터") {
                 VStack(alignment: .leading) {
-                    Slider(value: $settings.temperature, in: 0...1) {
+                    Slider(value: $settings.temperature, in: 0 ... 1) {
                         Text(String(format: "온도: %.2f", settings.temperature))
                     }
                     caption("낮을수록 일관된 제안, 높을수록 다양한 제안.")
                 }
                 VStack(alignment: .leading) {
-                    Slider(value: $settings.topP, in: 0.5...1.0) {
+                    Slider(value: $settings.topP, in: 0.5 ... 1.0) {
                         Text(String(format: "top-p: %.2f", settings.topP))
                     }
                     caption("누적 확률 컷 — 벤치(MINTBench)로 확정하는 값이에요 (PLAN §10).")
@@ -199,7 +201,7 @@ public struct SettingsView: View {
                 Stepper(
                     "소설 컨텍스트: \(settings.novelContextCharacters)자",
                     value: $settings.novelContextCharacters,
-                    in: 1_200...12_000,
+                    in: 1200 ... 12000,
                     step: 400
                 )
                 caption("소설 종류 문서가 커서 앞에서 읽는 최대 분량 — 넓을수록 멀리 기억하지만 첫 제안이 느려질 수 있어요.")
@@ -260,13 +262,15 @@ public struct SettingsView: View {
                     LabeledContent("제안 노출", value: "\(metrics.shown)회")
                     LabeledContent(
                         "전체 수락 (Tab)",
-                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
+                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%"
+                    )
                     LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
                     ForEach(metrics.byMode.keys.sorted(), id: \.self) { mode in
                         let stats = metrics.byMode[mode] ?? (0, 0)
                         LabeledContent(
                             "· \(mode)",
-                            value: "노출 \(stats.shown) · 수락 \(stats.accepted)")
+                            value: "노출 \(stats.shown) · 수락 \(stats.accepted)"
+                        )
                         .font(.caption)
                     }
                 }

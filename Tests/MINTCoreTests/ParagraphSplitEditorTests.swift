@@ -1,15 +1,15 @@
 import AppKit
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 에디터 storage 편집으로서의 긴 문단 나누기 검증 (docs/editor-paragraph-split.md).
 /// 순수 로직(ParagraphSplitterTests)과 별개로, 실제 storage·undo·직렬화를 몬다.
 /// **최우선은 원고 무결성** — 나눈 뒤에도 글자가 그대로여야 한다.
 final class ParagraphSplitEditorTests: XCTestCase {
-
     private var windows: [NSWindow] = []
-    override func tearDown() { windows.removeAll(); super.tearDown() }
+    override func tearDown() {
+        windows.removeAll(); super.tearDown()
+    }
 
     @MainActor
     private func makeEditor() -> BlockTextView {
@@ -17,15 +17,18 @@ final class ParagraphSplitEditorTests: XCTestCase {
         let lm = MintLayoutManager()
         storage.addLayoutManager(lm)
         let c = NSTextContainer(
-            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude))
+            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude)
+        )
         lm.addTextContainer(c)
         let v = BlockTextView(
-            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: c)
+            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: c
+        )
         storage.delegate = v
         v.allowsUndo = true
         let w = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 900),
-            styleMask: [.titled], backing: .buffered, defer: false)
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
         w.contentView = NSView(frame: NSRect(x: 0, y: 0, width: 760, height: 900))
         w.contentView?.addSubview(v)
         w.makeFirstResponder(v)
@@ -34,7 +37,7 @@ final class ParagraphSplitEditorTests: XCTestCase {
     }
 
     private func longProse(_ sentences: Int) -> String {
-        (1...sentences)
+        (1 ... sentences)
             .map { "이것은 \($0)번째 문장이며 대략 스물다섯 자 안팎의 길이를 가진다. " }
             .joined()
     }
@@ -42,7 +45,7 @@ final class ParagraphSplitEditorTests: XCTestCase {
     /// 나눈 뒤 직렬화 결과에서 개행을 빼면 원문에서 개행을 뺀 것과 같아야 한다.
     @MainActor func testSplitPreservesTextExactly() {
         let view = makeEditor()
-        let body = "# 장\n\n" + longProse(400)  // 헤딩 + 거대 산문 문단
+        let body = "# 장\n\n" + longProse(400) // 헤딩 + 거대 산문 문단
         view.load(markdown: body)
 
         let count = view.splitOversizedProseParagraphs()
@@ -52,11 +55,13 @@ final class ParagraphSplitEditorTests: XCTestCase {
         XCTAssertEqual(
             after.replacingOccurrences(of: "\n", with: ""),
             body.replacingOccurrences(of: "\n", with: ""),
-            "개행 외의 글자가 바뀌었다 — 원고 손상")
+            "개행 외의 글자가 바뀌었다 — 원고 손상"
+        )
         // 실제로 문단이 늘었는지(나뉘었는지).
         XCTAssertGreaterThan(
             after.components(separatedBy: "\n\n").count,
-            body.components(separatedBy: "\n\n").count)
+            body.components(separatedBy: "\n\n").count
+        )
     }
 
     /// 나눈 뒤 각 문단이 trigger 이하 — 랙의 근본 원인이 사라진다.
@@ -69,8 +74,9 @@ final class ParagraphSplitEditorTests: XCTestCase {
         while loc < ns.length {
             let p = ns.paragraphRange(for: NSRange(location: loc, length: 0))
             XCTAssertLessThanOrEqual(
-                p.length, ParagraphSplitter.trigger + 200,  // 마지막 병합 여유
-                "나눈 뒤에도 trigger를 넘는 문단이 남았다")
+                p.length, ParagraphSplitter.trigger + 200, // 마지막 병합 여유
+                "나눈 뒤에도 trigger를 넘는 문단이 남았다"
+            )
             loc = p.upperBound
         }
     }

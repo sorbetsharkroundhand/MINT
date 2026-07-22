@@ -33,6 +33,7 @@ struct NarrativeView: View {
         case flow = "흐름"
         case chrono = "시간순"
     }
+
     @State private var projection: Projection = .flow
 
     /// 선택된 정본 사건 — 상세 패널 (Progressive Disclosure의 축).
@@ -82,8 +83,7 @@ struct NarrativeView: View {
                 }
                 .frame(maxHeight: embedded ? .infinity : 380)
                 if let key = selectedEventKey,
-                    let event = snapshot.canonicalEvents.first(where: { $0.canonicalKey == key })
-                {
+                   let event = snapshot.canonicalEvents.first(where: { $0.canonicalKey == key }) {
                     Divider()
                     NarrativeEventDetail(
                         event: event, snapshot: snapshot, theme: theme,
@@ -96,8 +96,10 @@ struct NarrativeView: View {
                             store.setNarrativeOverride(
                                 NarrativeOverride(
                                     kind: .eventImportance, key: event.canonicalKey,
-                                    value: String(value)),
-                                in: store.activeID)
+                                    value: String(value)
+                                ),
+                                in: store.activeID
+                            )
                         },
                         onSetChrono: { otherKey, relation in
                             setChronoEdge(a: event.canonicalKey, b: otherKey, relation: relation)
@@ -107,10 +109,13 @@ struct NarrativeView: View {
                                 NarrativeOverride(
                                     kind: .threadMembership,
                                     key: "\(threadID)|\(event.canonicalKey)",
-                                    value: value),
-                                in: store.activeID)
+                                    value: value
+                                ),
+                                in: store.activeID
+                            )
                         },
-                        onClose: { selectedEventKey = nil })
+                        onClose: { selectedEventKey = nil }
+                    )
                 }
             } else {
                 placeholder
@@ -134,8 +139,10 @@ struct NarrativeView: View {
                         store.setNarrativeOverride(
                             NarrativeOverride(
                                 kind: editing.isStart ? .segmentStart : .segmentEnd,
-                                key: editing.id, value: trimmed),
-                            in: store.activeID)
+                                key: editing.id, value: trimmed
+                            ),
+                            in: store.activeID
+                        )
                     }
                 }
                 editingBoundary = nil
@@ -158,7 +165,8 @@ struct NarrativeView: View {
                     if !trimmed.isEmpty {
                         store.setNarrativeOverride(
                             NarrativeOverride(kind: .threadTitle, key: id, value: trimmed),
-                            in: store.activeID)
+                            in: store.activeID
+                        )
                     }
                 }
                 editingThreadID = nil
@@ -171,14 +179,15 @@ struct NarrativeView: View {
     private var characterNames: [UUID: String] {
         Dictionary(
             uniqueKeysWithValues: (store.activeEntry?.characters ?? [])
-                .map { ($0.id, $0.name) })
+                .map { ($0.id, $0.name) }
+        )
     }
 
     /// 활성 문서의 스냅샷만 — 문서를 막 바꾸면 인덱서 스냅샷이 이전 문서 것일
     /// 수 있다. 남의 작품 그래프를 보여주느니 비워 둔다.
     private var liveSnapshot: KnowledgeSnapshot? {
         guard let snapshot = indexer.snapshot,
-            snapshot.entryID == store.activeEntry?.id
+              snapshot.entryID == store.activeEntry?.id
         else { return nil }
         return snapshot
     }
@@ -231,15 +240,18 @@ struct NarrativeView: View {
             Menu {
                 Button("자동 · \(liveSnapshot?.automaticNarrationProfile.displayText ?? "미상")") {
                     store.removeNarrativeOverride(
-                        kind: .narrationMode, key: "global", in: store.activeID)
+                        kind: .narrationMode, key: "global", in: store.activeID
+                    )
                 }
                 Divider()
                 ForEach(NarrationMode.allCases.filter { $0 != .unknown }, id: \.self) { mode in
                     Button(mode.rawValue) {
                         store.setNarrativeOverride(
                             NarrativeOverride(
-                                kind: .narrationMode, key: "global", value: mode.rawValue),
-                            in: store.activeID)
+                                kind: .narrationMode, key: "global", value: mode.rawValue
+                            ),
+                            in: store.activeID
+                        )
                     }
                 }
             } label: {
@@ -332,7 +344,8 @@ struct NarrativeView: View {
                 Text(thread.status.rawValue)
                     .font(MintFonts.uiFont(8.5))
                     .foregroundStyle(
-                        thread.status == .resolved ? theme.ink3C : color)
+                        thread.status == .resolved ? theme.ink3C : color
+                    )
                 if thread.userEdited { UserEditedMark(theme: theme) }
             }
             .padding(.horizontal, 7)
@@ -344,7 +357,8 @@ struct NarrativeView: View {
         .help(
             thread.summary.isEmpty
                 ? (selected ? "다시 클릭: 강조 해제" : "클릭: 이 플롯의 경로만 강조")
-                : thread.summary)
+                : thread.summary
+        )
         .contextMenu {
             Button("이름 바꾸기…") {
                 draftThreadTitle = thread.title
@@ -357,8 +371,10 @@ struct NarrativeView: View {
                             store.setNarrativeOverride(
                                 NarrativeOverride(
                                     kind: .threadStatus, key: thread.id,
-                                    value: status.rawValue),
-                                in: store.activeID)
+                                    value: status.rawValue
+                                ),
+                                in: store.activeID
+                            )
                         } label: {
                             if thread.status == status {
                                 Label(status.rawValue, systemImage: "checkmark")
@@ -373,9 +389,11 @@ struct NarrativeView: View {
                 Divider()
                 Button("AI 추론으로 되돌리기") {
                     store.removeNarrativeOverride(
-                        kind: .threadTitle, key: thread.id, in: store.activeID)
+                        kind: .threadTitle, key: thread.id, in: store.activeID
+                    )
                     store.removeNarrativeOverride(
-                        kind: .threadStatus, key: thread.id, in: store.activeID)
+                        kind: .threadStatus, key: thread.id, in: store.activeID
+                    )
                 }
             }
         }
@@ -386,7 +404,8 @@ struct NarrativeView: View {
         thread.isMain
             ? theme.novelC
             : FlowPalette.color(
-                seed: thread.colorSeed, theme: theme, dark: colorScheme == .dark)
+                seed: thread.colorSeed, theme: theme, dark: colorScheme == .dark
+            )
     }
 
     // MARK: - 그래프 영역 (두 Projection 공용)
@@ -394,8 +413,8 @@ struct NarrativeView: View {
     @ViewBuilder private func graphArea(_ snapshot: KnowledgeSnapshot) -> some View {
         let rows =
             projection == .flow
-            ? GraphRow.flowRows(from: snapshot, expandedMinors: expandedMinors)
-            : GraphRow.chronoRows(from: snapshot)
+                ? GraphRow.flowRows(from: snapshot, expandedMinors: expandedMinors)
+                : GraphRow.chronoRows(from: snapshot)
         if rows.isEmpty {
             Text("사건이 아직 없어요. 「지금 읽기」를 누르면 사건이 추출돼요.")
                 .font(MintFonts.uiFont(11))
@@ -407,7 +426,8 @@ struct NarrativeView: View {
             ThreadGraphArea(
                 rows: rows,
                 layout: ThreadGraphLayout.compute(
-                    rows: rows, threads: snapshot.plotThreads),
+                    rows: rows, threads: snapshot.plotThreads
+                ),
                 snapshot: snapshot,
                 theme: theme,
                 dark: colorScheme == .dark,
@@ -447,29 +467,36 @@ struct NarrativeView: View {
                 },
                 onSetSceneType: { hash, start, type in
                     setSceneOverride(
-                        .sceneType, sceneHash: hash, start: start, value: type.rawValue)
+                        .sceneType, sceneHash: hash, start: start, value: type.rawValue
+                    )
                 },
                 onResetScene: { hash in
                     store.removeNarrativeOverride(
-                        kind: .sceneTitle, key: hash, in: store.activeID)
+                        kind: .sceneTitle, key: hash, in: store.activeID
+                    )
                     store.removeNarrativeOverride(
-                        kind: .sceneType, key: hash, in: store.activeID)
+                        kind: .sceneType, key: hash, in: store.activeID
+                    )
                 },
                 onSetImportance: { key, value in
                     store.setNarrativeOverride(
                         NarrativeOverride(
-                            kind: .eventImportance, key: key, value: String(value)),
-                        in: store.activeID)
+                            kind: .eventImportance, key: key, value: String(value)
+                        ),
+                        in: store.activeID
+                    )
                 },
                 onRenameBranch: { branch, name in
                     setSceneOverride(
                         .branchName, sceneHash: branch.anchorHash,
-                        start: branchStart(branch, snapshot), value: name)
+                        start: branchStart(branch, snapshot), value: name
+                    )
                 },
                 onSetBranchChrono: { branch, chrono in
                     setSceneOverride(
                         .branchChrono, sceneHash: branch.anchorHash,
-                        start: branchStart(branch, snapshot), value: chrono.rawValue)
+                        start: branchStart(branch, snapshot), value: chrono.rawValue
+                    )
                 },
                 onMergeBranch: { branch in
                     // 브랜치 해제 = 구간 씬 전부를 '현재'로.
@@ -478,18 +505,21 @@ struct NarrativeView: View {
                         setSceneOverride(
                             .sceneType, sceneHash: scene.contentHash,
                             start: scene.utf16Range.lowerBound,
-                            value: SceneNarrativeType.present.rawValue)
+                            value: SceneNarrativeType.present.rawValue
+                        )
                     }
                 },
                 onSegmentOverride: { id, kind, value in
                     store.setNarrativeOverride(
                         NarrativeOverride(kind: kind, key: id, value: value),
-                        in: store.activeID)
+                        in: store.activeID
+                    )
                 },
                 onEditSegmentBoundary: { id, isStart, current in
                     draftBoundary = current
                     editingBoundary = (id, isStart)
-                })
+                }
+            )
         }
     }
 
@@ -519,7 +549,8 @@ struct NarrativeView: View {
         return Set(
             snapshot.canonicalEvents
                 .filter { !$0.participants.contains(characterID) }
-                .map(\.canonicalKey))
+                .map(\.canonicalKey)
+        )
     }
 
     private func branchStart(_ branch: NarrativeBranch, _ snapshot: KnowledgeSnapshot) -> Int {
@@ -533,7 +564,7 @@ struct NarrativeView: View {
     /// 스토리지는 렌더된 텍스트라 좌표가 어긋날 수 있다 (requestSearchJump 통로).
     private func jump(toUTF16 offset: Int) {
         guard let body = store.activeEntry?.body,
-            let snippet = Self.jumpSnippet(in: body, atUTF16: offset)
+              let snippet = Self.jumpSnippet(in: body, atUTF16: offset)
         else { return }
         store.requestSearchJump(store.activeID, query: snippet)
     }
@@ -562,9 +593,8 @@ struct NarrativeView: View {
         var start = min(max(0, offset), ns.length)
         // 마커·공백 건너뛰기 — "# 1장"의 "#·공백"은 에디터 스토리지에 없다.
         while start < ns.length,
-            "#>*- \t\n".unicodeScalars.map({ UInt16($0.value) })
-                .contains(ns.character(at: start))
-        {
+              "#>*- \t\n".unicodeScalars.map({ UInt16($0.value) })
+              .contains(ns.character(at: start)) {
             start += 1
         }
         guard start < ns.length else { return nil }
@@ -587,14 +617,16 @@ struct NarrativeView: View {
             ? Self.jumpSnippet(in: store.activeEntry!.body, atUTF16: start) : nil
         store.setNarrativeOverride(
             NarrativeOverride(kind: kind, key: sceneHash, value: value, anchor: anchor),
-            in: store.activeID)
+            in: store.activeID
+        )
     }
 
     /// 시간 간선 오버라이드 — "a가 b보다 relation" (요구사항 §29).
     private func setChronoEdge(a: String, b: String, relation: ChronoRelation) {
         store.setNarrativeOverride(
             NarrativeOverride(kind: .chronoEdge, key: "\(a)|\(b)", value: relation.rawValue),
-            in: store.activeID)
+            in: store.activeID
+        )
     }
 
     // MARK: - 검토 필요 영역 (경고·시간 모순 — 접이)
@@ -645,7 +677,7 @@ struct NarrativeView: View {
 
     // MARK: 일관성 경고 (M7 — 결정적 검사)
 
-    @ViewBuilder private func warningsList(_ warnings: [ConsistencyWarning]) -> some View {
+    private func warningsList(_ warnings: [ConsistencyWarning]) -> some View {
         ForEach(warnings) { warning in
             Button {
                 jump(toUTF16: warning.utf16Position)
@@ -668,7 +700,8 @@ struct NarrativeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(theme.novelBgC))
+                        .fill(theme.novelBgC)
+                )
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
@@ -694,11 +727,10 @@ struct NarrativeView: View {
     // MARK: 시간 관계 모순 (요구사항 §29)
 
     /// 모순 간선 나열 + 그 자리에서 관계 수정 — 임의 확정 대신 사용자 판정.
-    @ViewBuilder private func chronoConflictList(_ snapshot: KnowledgeSnapshot) -> some View {
+    private func chronoConflictList(_ snapshot: KnowledgeSnapshot) -> some View {
         ForEach(snapshot.chronoConflicts) { edge in
             if let a = snapshot.canonicalEvent(for: edge.aKey),
-                let b = snapshot.canonicalEvent(for: edge.bKey)
-            {
+               let b = snapshot.canonicalEvent(for: edge.bKey) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
                         Image(systemName: "clock.badge.exclamationmark")
@@ -726,7 +758,8 @@ struct NarrativeView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .fill(theme.novelBgC))
+                        .fill(theme.novelBgC)
+                )
             }
         }
     }
@@ -740,7 +773,8 @@ struct NarrativeView: View {
                     format: "지식 %.1fKB · 씬 %d (씬당 %.1fKB) · 로드 %.0fms · 저장 %.0fms · 조립 %.0fms",
                     Double(metrics.sidecarBytes) / 1024, metrics.sceneCount,
                     Double(metrics.bytesPerScene) / 1024,
-                    metrics.loadMs, metrics.saveMs, metrics.deriveMs)
+                    metrics.loadMs, metrics.saveMs, metrics.deriveMs
+                )
             )
             .font(MintFonts.monoUI(8.5))
             .foregroundStyle(theme.ink3C)
@@ -794,14 +828,14 @@ struct ManualIndexButton: View {
 /// 선명한 8색 (형광 금지, 라이트/다크 두 벌).
 enum FlowPalette {
     static let hues: [(light: UInt32, dark: UInt32)] = [
-        (0x2F80D0, 0x5AA7F0),  // 청
-        (0xD9930D, 0xF0B429),  // 호박
-        (0xC2255C, 0xEC5F94),  // 자홍
-        (0x6741D9, 0x9775FA),  // 보라
-        (0x099268, 0x2FCB9B),  // 청록
-        (0xD9480F, 0xFF8B4D),  // 주황
-        (0x3B5BDB, 0x7B95FF),  // 남
-        (0x5C940D, 0x94D82D),  // 연두
+        (0x2F80D0, 0x5AA7F0), // 청
+        (0xD9930D, 0xF0B429), // 호박
+        (0xC2255C, 0xEC5F94), // 자홍
+        (0x6741D9, 0x9775FA), // 보라
+        (0x099268, 0x2FCB9B), // 청록
+        (0xD9480F, 0xFF8B4D), // 주황
+        (0x3B5BDB, 0x7B95FF), // 남
+        (0x5C940D, 0x94D82D) // 연두
     ]
 
     /// seed nil = 본줄기/서술 — 앱 액센트색.
@@ -851,15 +885,15 @@ enum GraphRow: Identifiable {
 
     var id: String {
         switch self {
-        case .sceneMarker(let scene): "s-\(scene.hash)"
-        case .branchOpen(let branch): "bo-\(branch.anchorHash)"
-        case .branchClose(let branch): "bc-\(branch.anchorHash)"
-        case .segmentBracket(let segment, _, _): "g-\(segment.persistentID)"
-        case .event(let id, _, _): "e-\(id)"
-        case .perspectiveRef(let id, _, _): "r-\(id)"
-        case .minorGroup(let id, _, _, _): "m-\(id)"
-        case .truncated(let id, _, _): "t-\(id)"
-        case .pending(let id): "p-\(id)"
+        case let .sceneMarker(scene): "s-\(scene.hash)"
+        case let .branchOpen(branch): "bo-\(branch.anchorHash)"
+        case let .branchClose(branch): "bc-\(branch.anchorHash)"
+        case let .segmentBracket(segment, _, _): "g-\(segment.persistentID)"
+        case let .event(id, _, _): "e-\(id)"
+        case let .perspectiveRef(id, _, _): "r-\(id)"
+        case let .minorGroup(id, _, _, _): "m-\(id)"
+        case let .truncated(id, _, _): "t-\(id)"
+        case let .pending(id): "p-\(id)"
         }
     }
 
@@ -870,14 +904,14 @@ enum GraphRow: Identifiable {
         case .sceneMarker: 24
         case .minorGroup: 18
         case .branchOpen, .branchClose, .segmentBracket, .perspectiveRef,
-            .truncated, .pending:
+             .truncated, .pending:
             16
         }
     }
 
     /// 그래프 노드가 붙는 사건 키 (event 행만).
     var eventKey: String? {
-        if case .event(_, let event, _) = self { return event.canonicalKey }
+        if case let .event(_, event, _) = self { return event.canonicalKey }
         return nil
     }
 
@@ -932,7 +966,10 @@ enum GraphRow: Identifiable {
                             summary: snapshot.summariesByHash[scene.contentHash],
                             type: meta?.type ?? .present,
                             typeUserEdited: meta?.typeUserEdited ?? false,
-                            start: scene.utf16Range.lowerBound)))
+                            start: scene.utf16Range.lowerBound
+                        )
+                    )
+                )
             }
 
             // 씬 내부 traversal 구간 — bracket (플롯 branch가 아니다).
@@ -940,13 +977,15 @@ enum GraphRow: Identifiable {
                 let edited = [
                     NarrativeOverride.Kind.segmentLayer, .segmentPOV, .segmentNarrator,
                     .segmentFocal, .segmentChrono, .segmentReliability, .segmentSubject,
-                    .segmentStart, .segmentEnd,
+                    .segmentStart, .segmentEnd
                 ].contains { snapshot.overrides.value($0, key: segment.persistentID) != nil }
                 rows.append(
                     .segmentBracket(
                         segment: segment,
                         sceneStart: scene.utf16Range.lowerBound,
-                        userEdited: edited))
+                        userEdited: edited
+                    )
+                )
             }
             // 사건 — 사소(중요도 ≤2)라도 본줄기 밖 플롯에 속하면 접지 않는다
             // (topology에 구멍이 나면 안 된다).
@@ -968,19 +1007,23 @@ enum GraphRow: Identifiable {
             }
             for (offset, event) in charted.enumerated() {
                 rows.append(
-                    .event(id: "\(scene.contentHash)-\(offset)", event: event, start: start))
+                    .event(id: "\(scene.contentHash)-\(offset)", event: event, start: start)
+                )
             }
             if !minor.isEmpty {
                 let groupID = "\(scene.contentHash)-minor"
                 let expanded = expandedMinors.contains(groupID)
                 rows.append(
-                    .minorGroup(id: groupID, events: minor, start: start, expanded: expanded))
+                    .minorGroup(id: groupID, events: minor, start: start, expanded: expanded)
+                )
                 if expanded {
                     for (offset, event) in minor.enumerated() {
                         rows.append(
                             .event(
                                 id: "\(scene.contentHash)-minor\(offset)", event: event,
-                                start: start))
+                                start: start
+                            )
+                        )
                     }
                 }
             }
@@ -989,11 +1032,12 @@ enum GraphRow: Identifiable {
                     .perspectiveRef(
                         id: "\(scene.contentHash)-ref\(offset)",
                         canonicalKey: ref.canonical.canonicalKey,
-                        perspective: ref.perspective))
+                        perspective: ref.perspective
+                    )
+                )
             }
             if scene.segmentIndex == 0, events.isEmpty, refs.isEmpty,
-                snapshot.summariesByHash[scene.contentHash] == nil
-            {
+               snapshot.summariesByHash[scene.contentHash] == nil {
                 rows.append(.pending(id: "\(scene.contentHash)-\(index)"))
             }
 
@@ -1010,16 +1054,19 @@ enum GraphRow: Identifiable {
     /// 같은 정본 사건·같은 스레드 identity를 순서만 바꿔 투영한다 (요구사항 §6).
     static func chronoRows(from snapshot: KnowledgeSnapshot) -> [GraphRow] {
         let byKey = Dictionary(
-            uniqueKeysWithValues: snapshot.canonicalEvents.map { ($0.canonicalKey, $0) })
+            uniqueKeysWithValues: snapshot.canonicalEvents.map { ($0.canonicalKey, $0) }
+        )
         let startByScene = Dictionary(
             uniqueKeysWithValues: snapshot.outline.scenes.map {
                 ($0.contentHash, $0.utf16Range.lowerBound)
-            })
+            }
+        )
         return snapshot.eventChronoOrder.enumerated().compactMap { offset, key in
             guard let event = byKey[key] else { return nil }
             return .event(
                 id: "c-\(offset)", event: event,
-                start: startByScene[event.sceneHash] ?? 0)
+                start: startByScene[event.sceneHash] ?? 0
+            )
         }
     }
 }
@@ -1059,7 +1106,9 @@ struct ThreadGraphLayout {
         var opensSlots: [Int]
         /// 이 사건에서 **해결되는** 레인 슬롯 (merge-in 곡선의 근거).
         var resolvesSlots: [Int]
-        var isJunction: Bool { laneSlots.count >= 2 }
+        var isJunction: Bool {
+            laneSlots.count >= 2
+        }
     }
 
     var lanes: [Lane]
@@ -1095,7 +1144,9 @@ struct ThreadGraphLayout {
             lanes.append(
                 Lane(
                     thread: thread, slot: slot, openRow: open,
-                    resolveRow: resolveRow, memberRows: memberRows))
+                    resolveRow: resolveRow, memberRows: memberRows
+                )
+            )
         }
 
         // 노드 — 참여 레인의 최소 슬롯에 놓고, 열림/해결 곡선 슬롯을 기록한다.
@@ -1115,12 +1166,14 @@ struct ThreadGraphLayout {
             nodes[key] = Node(
                 key: key, row: row, slot: slot, laneSlots: laneSlots,
                 opensSlots: opens.filter { $0 != slot },
-                resolvesSlots: resolves.filter { $0 != slot })
+                resolvesSlots: resolves.filter { $0 != slot }
+            )
         }
 
         return ThreadGraphLayout(
             lanes: lanes, nodes: nodes,
-            slotCount: (lanes.map(\.slot).max() ?? 0) + 1)
+            slotCount: (lanes.map(\.slot).max() ?? 0) + 1
+        )
     }
 }
 
@@ -1144,7 +1197,7 @@ struct GraphRowGeometry {
             y += row.height
         }
         self.centers = centers
-        self.totalHeight = y
+        totalHeight = y
     }
 }
 
@@ -1231,7 +1284,7 @@ private struct ThreadGraphArea: View {
 
     /// 행의 그래프 거터 — 레인 히트 스트립 위에 사건 노드를 놓는다.
     /// 좌표는 예전 절대 배치와 동일 (x = 레인 중심, y = 행 중심).
-    @ViewBuilder private func graphGutter(row: GraphRow, index: Int) -> some View {
+    private func graphGutter(row: GraphRow, index: Int) -> some View {
         ZStack(alignment: .topLeading) {
             Color.clear
             // 레인 선 자체도 클릭 대상이다 — 노드가 드문 구간에서는 선이
@@ -1245,10 +1298,9 @@ private struct ThreadGraphArea: View {
                     .position(x: x(of: lane.slot), y: row.height / 2)
                     .onTapGesture { onSelectThread(lane.thread.id) }
             }
-            if case .event(_, let event, _) = row,
-                let node = layout.nodes[event.canonicalKey],
-                node.row == index
-            {
+            if case let .event(_, event, _) = row,
+               let node = layout.nodes[event.canonicalKey],
+               node.row == index {
                 // 노드는 스트립보다 **위**에 — 같은 x를 공유하므로 아래 깔리면
                 // 사건 선택(상세 패널)이 레인 선택에 먹힌다.
                 nodeView(node, event: event)
@@ -1303,7 +1355,8 @@ private struct ThreadGraphArea: View {
             solid.addLine(to: CGPoint(x: laneX, y: solidEndY))
             context.stroke(
                 solid, with: .color(color.opacity(baseOpacity)),
-                style: StrokeStyle(lineWidth: width, lineCap: .round))
+                style: StrokeStyle(lineWidth: width, lineCap: .round)
+            )
 
             // 미해결 스레드의 꼬리 — 아직 열려 있음을 점선으로 (DORMANT 포함).
             if lane.resolveRow == nil, solidEndY < bottom - 2 {
@@ -1312,42 +1365,44 @@ private struct ThreadGraphArea: View {
                 tail.addLine(to: CGPoint(x: laneX, y: bottom))
                 context.stroke(
                     tail, with: .color(color.opacity(baseOpacity * 0.45)),
-                    style: StrokeStyle(lineWidth: width * 0.8, dash: [3, 4]))
+                    style: StrokeStyle(lineWidth: width * 0.8, dash: [3, 4])
+                )
             }
 
             // ② 열림 곡선 — 여는 사건 노드에서 이 레인으로 갈라져 나온다.
             if let openNode = layout.nodes[
-                lane.thread.memberKeys.first ?? ""],
-                openNode.slot != lane.slot
-            {
+                lane.thread.memberKeys.first ?? ""
+            ],
+                openNode.slot != lane.slot {
                 let from = CGPoint(x: x(of: openNode.slot), y: centers[openNode.row])
                 let to = CGPoint(x: laneX, y: min(centers[openNode.row] + 18, bottom))
                 context.stroke(
                     curve(from: from, to: to),
                     with: .color(color.opacity(baseOpacity)),
-                    style: StrokeStyle(lineWidth: width, lineCap: .round))
+                    style: StrokeStyle(lineWidth: width, lineCap: .round)
+                )
             }
 
             // ③ 해결 곡선 — 레인이 해결 사건 노드로 합류하며 끝난다 (merge).
             if let resolveRow = lane.resolveRow,
-                let resolveKey = lane.thread.resolvedAtKey,
-                let node = layout.nodes[resolveKey],
-                node.slot != lane.slot
-            {
+               let resolveKey = lane.thread.resolvedAtKey,
+               let node = layout.nodes[resolveKey],
+               node.slot != lane.slot {
                 let from = CGPoint(x: laneX, y: max(centers[resolveRow] - 18, 0))
                 let to = CGPoint(x: x(of: node.slot), y: centers[resolveRow])
                 context.stroke(
                     curve(from: from, to: to),
                     with: .color(color.opacity(baseOpacity)),
-                    style: StrokeStyle(lineWidth: width, lineCap: .round))
+                    style: StrokeStyle(lineWidth: width, lineCap: .round)
+                )
             }
 
             // ④ 교차 곡선 — 중간 멤버 사건이 다른 슬롯의 노드에 놓이면 레인이
             //    그 노드에 닿았다 돌아온다 (두 이야기가 만나는 지점).
             for memberRow in lane.memberRows {
                 guard memberRow != lane.openRow, memberRow != lane.resolveRow,
-                    let key = rowKey(at: memberRow),
-                    let node = layout.nodes[key], node.slot != lane.slot
+                      let key = rowKey(at: memberRow),
+                      let node = layout.nodes[key], node.slot != lane.slot
                 else { continue }
                 let nodePoint = CGPoint(x: x(of: node.slot), y: centers[memberRow])
                 let inFrom = CGPoint(x: laneX, y: max(centers[memberRow] - 16, 0))
@@ -1355,19 +1410,21 @@ private struct ThreadGraphArea: View {
                 context.stroke(
                     curve(from: inFrom, to: nodePoint),
                     with: .color(color.opacity(baseOpacity)),
-                    style: StrokeStyle(lineWidth: width * 0.9, lineCap: .round))
+                    style: StrokeStyle(lineWidth: width * 0.9, lineCap: .round)
+                )
                 context.stroke(
                     curve(from: nodePoint, to: outTo),
                     with: .color(color.opacity(baseOpacity)),
-                    style: StrokeStyle(lineWidth: width * 0.9, lineCap: .round))
+                    style: StrokeStyle(lineWidth: width * 0.9, lineCap: .round)
+                )
             }
         }
 
         // 노드 자리의 헤일로 — 선을 지워 노드가 읽히는 틈을 만든다.
         context.blendMode = .destinationOut
         for (row, graphRow) in rows.enumerated() {
-            guard case .event(_, let event, _) = graphRow,
-                let node = layout.nodes[event.canonicalKey], node.row == row
+            guard case let .event(_, event, _) = graphRow,
+                  let node = layout.nodes[event.canonicalKey], node.row == row
             else { continue }
             let radius = nodeSize(event) / 2 + 1.5
             let center = CGPoint(x: x(of: node.slot), y: centers[row])
@@ -1375,8 +1432,11 @@ private struct ThreadGraphArea: View {
                 Path(
                     ellipseIn: CGRect(
                         x: center.x - radius, y: center.y - radius,
-                        width: radius * 2, height: radius * 2)),
-                with: .color(.black))
+                        width: radius * 2, height: radius * 2
+                    )
+                ),
+                with: .color(.black)
+            )
         }
         context.blendMode = .normal
     }
@@ -1395,7 +1455,8 @@ private struct ThreadGraphArea: View {
         path.addCurve(
             to: to,
             control1: CGPoint(x: from.x, y: midY),
-            control2: CGPoint(x: to.x, y: midY))
+            control2: CGPoint(x: to.x, y: midY)
+        )
         return path
     }
 
@@ -1418,7 +1479,7 @@ private struct ThreadGraphArea: View {
         let threadIDs = Set(snapshot.threadIDsByEvent[event.canonicalKey] ?? [])
         let dimmed =
             (emphasizedThreadIDs.map { $0.isDisjoint(with: threadIDs) } ?? false)
-            || (dimmedKeys?.contains(event.canonicalKey) ?? false)
+                || (dimmedKeys?.contains(event.canonicalKey) ?? false)
         let opacity: Double = dimmed ? 0.25 : 1
         let size = nodeSize(event)
 
@@ -1461,17 +1522,18 @@ private struct ThreadGraphArea: View {
             laneThreadID != nil && laneThreadID == selectedThreadID
                 ? "\(event.summary)\n다시 클릭: 플롯 강조 해제"
                 : laneThreadID != nil
-                    ? "\(event.summary)\n클릭: 이 플롯의 경로만 강조"
-                : event.summary)
+                ? "\(event.summary)\n클릭: 이 플롯의 경로만 강조"
+                : event.summary
+        )
     }
 
     // MARK: 행 콘텐츠 (그래프 오른쪽 열)
 
     @ViewBuilder private func rowContent(_ row: GraphRow) -> some View {
         switch row {
-        case .sceneMarker(let scene):
+        case let .sceneMarker(scene):
             sceneMarkerContent(scene)
-        case .branchOpen(let branch):
+        case let .branchOpen(branch):
             bracketContent(
                 icon: "chevron.down.2", text: "\(branch.name) · \(branch.chrono.rawValue)",
                 userEdited: branch.userEdited
@@ -1479,13 +1541,13 @@ private struct ThreadGraphArea: View {
             .contextMenu { branchMenu(branch) }
         case .branchClose:
             bracketContent(icon: "chevron.up.2", text: "복귀", userEdited: false)
-        case .segmentBracket(let segment, let sceneStart, let userEdited):
+        case let .segmentBracket(segment, sceneStart, userEdited):
             segmentBracketContent(segment, sceneStart: sceneStart, userEdited: userEdited)
-        case .event(_, let event, let start):
+        case let .event(_, event, start):
             eventContent(event, start: start)
-        case .perspectiveRef(_, let canonicalKey, let perspective):
+        case let .perspectiveRef(_, canonicalKey, perspective):
             perspectiveRefContent(perspective, canonicalKey: canonicalKey)
-        case .minorGroup(let id, let events, _, let expanded):
+        case let .minorGroup(id, events, _, expanded):
             Button {
                 onToggleMinor(id)
             } label: {
@@ -1499,7 +1561,7 @@ private struct ThreadGraphArea: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-        case .truncated(_, let total, let read):
+        case let .truncated(_, total, read):
             // ⚠️ 헤딩 없는 장편이 씬 하나가 되면 여기서 대부분이 잘린다 (PLAN §8).
             Text("앞 \(read.formatted())자만 이해됨 — \((total - read).formatted())자는 지식에 없어요")
                 .font(MintFonts.uiFont(9.5))
@@ -1514,7 +1576,7 @@ private struct ThreadGraphArea: View {
 
     // MARK: 씬 marker — section 구분선 수준 (요구사항 §7)
 
-    @ViewBuilder private func sceneMarkerContent(_ scene: GraphRow.SceneInfo) -> some View {
+    private func sceneMarkerContent(_ scene: GraphRow.SceneInfo) -> some View {
         HStack(spacing: 6) {
             if isEditingTitle(scene.hash) {
                 TextField(
@@ -1574,7 +1636,7 @@ private struct ThreadGraphArea: View {
 
     // MARK: traversal bracket (회상·꿈 — 플롯 branch와 다른 시각 문법)
 
-    @ViewBuilder private func bracketContent(
+    private func bracketContent(
         icon: String, text: String, userEdited: Bool
     ) -> some View {
         HStack(spacing: 4) {
@@ -1593,7 +1655,9 @@ private struct ThreadGraphArea: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .strokeBorder(
                     theme.blueC.opacity(0.35),
-                    style: StrokeStyle(lineWidth: 1, dash: [2, 2])))
+                    style: StrokeStyle(lineWidth: 1, dash: [2, 2])
+                )
+        )
     }
 
     @ViewBuilder private func branchMenu(_ branch: NarrativeBranch) -> some View {
@@ -1613,7 +1677,7 @@ private struct ThreadGraphArea: View {
         Button("회상 아님 — 본줄기로 합치기") { onMergeBranch(branch) }
     }
 
-    @ViewBuilder private func segmentBracketContent(
+    private func segmentBracketContent(
         _ segment: NarrativeSegment, sceneStart: Int, userEdited: Bool
     ) -> some View {
         HStack(spacing: 4) {
@@ -1621,7 +1685,8 @@ private struct ThreadGraphArea: View {
                 icon: "arrow.uturn.down",
                 text: segment.subjectCharacter.map { "\(segment.layer.rawValue) · \($0)" }
                     ?? segment.layer.rawValue,
-                userEdited: userEdited)
+                userEdited: userEdited
+            )
             if segment.returnState == .uncertain {
                 Text("복귀 불확실")
                     .font(MintFonts.uiFont(8))
@@ -1701,7 +1766,7 @@ private struct ThreadGraphArea: View {
         let threadIDs = Set(snapshot.threadIDsByEvent[event.canonicalKey] ?? [])
         let dimmed =
             (emphasizedThreadIDs.map { $0.isDisjoint(with: threadIDs) } ?? false)
-            || (dimmedKeys?.contains(event.canonicalKey) ?? false)
+                || (dimmedKeys?.contains(event.canonicalKey) ?? false)
         HStack(alignment: .center, spacing: 6) {
             Text(event.summary)
                 .font(MintFonts.uiFont(11, event.importance >= 4 ? .semibold : .regular))
@@ -1737,7 +1802,7 @@ private struct ThreadGraphArea: View {
         .help("클릭: 사건 상세 보기")
         .contextMenu {
             Menu("중요도") {
-                ForEach(1...5, id: \.self) { level in
+                ForEach(1 ... 5, id: \.self) { level in
                     Button {
                         onSetImportance(event.canonicalKey, level)
                     } label: {
@@ -1755,7 +1820,7 @@ private struct ThreadGraphArea: View {
 
     // MARK: 관점 참조 행 (같은 사건의 재서술)
 
-    @ViewBuilder private func perspectiveRefContent(
+    private func perspectiveRefContent(
         _ perspective: EventPerspective, canonicalKey: String
     ) -> some View {
         HStack(spacing: 5) {
@@ -1803,7 +1868,7 @@ private struct NarrativeEventDetail: View {
                         .foregroundStyle(theme.inkC)
                         .fixedSize(horizontal: false, vertical: true)
                     Menu {
-                        ForEach(1...5, id: \.self) { level in
+                        ForEach(1 ... 5, id: \.self) { level in
                             Button {
                                 onSetImportance(level)
                             } label: {
@@ -1836,7 +1901,8 @@ private struct NarrativeEventDetail: View {
 
                 // 참여 인물·흐름.
                 let names = Dictionary(
-                    uniqueKeysWithValues: snapshot.characters.map { ($0.id, $0.name) })
+                    uniqueKeysWithValues: snapshot.characters.map { ($0.id, $0.name) }
+                )
                 let who = event.participants.compactMap { names[$0] }
                 if !who.isEmpty {
                     detailLine("인물", who.joined(separator: " · "))
@@ -1846,8 +1912,7 @@ private struct NarrativeEventDetail: View {
 
                 // 상태 델타 — 원본 StoryEvent 역추적.
                 if let member = snapshot.storyEvent(forMember: event.canonicalKey),
-                    let rendered = deltaLine(member.deltas)
-                {
+                   let rendered = deltaLine(member.deltas) {
                     detailLine("상태", rendered)
                 }
 
@@ -1961,9 +2026,9 @@ private struct NarrativeEventDetail: View {
                 Text(
                     [
                         discourse.map { "본문 \($0 + 1)번째" },
-                        rank.map { "시간순 \($0 + 1)번째" },
+                        rank.map { "시간순 \($0 + 1)번째" }
                     ]
-                    .compactMap { $0 }.joined(separator: " · ")
+                    .compactMap(\.self).joined(separator: " · ")
                 )
                 .font(MintFonts.uiFont(10))
                 .foregroundStyle(theme.ink2C)
@@ -2018,7 +2083,7 @@ private struct NarrativeEventDetail: View {
         return pieces.isEmpty ? nil : pieces.joined(separator: " · ")
     }
 
-    @ViewBuilder private func perspectiveRow(_ perspective: EventPerspective) -> some View {
+    private func perspectiveRow(_ perspective: EventPerspective) -> some View {
         Button {
             if let quote = perspective.quote { onJump(quote) }
         } label: {
@@ -2034,8 +2099,7 @@ private struct NarrativeEventDetail: View {
                     .font(MintFonts.uiFont(8.5))
                     .foregroundStyle(theme.ink3C)
                 if let segment = perspective.segmentID
-                    .flatMap({ snapshot.segment(withID: $0) })
-                {
+                    .flatMap({ snapshot.segment(withID: $0) }) {
                     Text(segment.layer.rawValue)
                         .font(MintFonts.uiFont(8.5))
                         .foregroundStyle(theme.blueC)
@@ -2099,7 +2163,7 @@ private struct NarrativeEventDetail: View {
         }
     }
 
-    @ViewBuilder private func detailLine(_ key: String, _ value: String) -> some View {
+    private func detailLine(_ key: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(key)
                 .font(MintFonts.uiFont(9.5, .semibold))
@@ -2131,7 +2195,7 @@ private struct ImportanceDots: View {
 
     var body: some View {
         HStack(spacing: 1.5) {
-            ForEach(1...5, id: \.self) { level in
+            ForEach(1 ... 5, id: \.self) { level in
                 Circle()
                     .fill(level <= importance ? theme.novelC.opacity(0.55) : theme.sepC)
                     .frame(width: 3, height: 3)

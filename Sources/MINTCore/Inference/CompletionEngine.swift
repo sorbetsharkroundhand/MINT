@@ -17,7 +17,6 @@ import Tokenizers
 ///   새 토큰만 증분 프리필한다 (PLAN §12 — `PromptCacheBox`).
 /// - 토큰 상한(기본 12) + **문장 경계 조기 종료**로 단어/구 단위 제안을 보장.
 public actor CompletionEngine {
-
     /// 한 번의 자동완성 결과 + 지연 측정치(M2 로그·상태 바 표시용).
     public struct Completion: Sendable {
         /// 고스트로 띄울 제안 텍스트(후처리 완료). 비어 있으면 "제안 없음".
@@ -75,17 +74,18 @@ public actor CompletionEngine {
         parameters: CompletionParameters,
         onLoadProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws -> Completion {
-        if case .continuation(let text) = prompt,
-            text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        {
+        if case let .continuation(text) = prompt,
+           text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return .empty
         }
         let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: onLoadProgress)
+            modelID: parameters.modelID, onProgress: onLoadProgress
+        )
         try Task.checkCancellation()
         return try await Self.runGeneration(
             in: container, prompt: prompt, parameters: parameters,
-            promptCache: promptCache)
+            promptCache: promptCache
+        )
     }
 
     /// 구 API 호환(MINTBench 단발 측정 등) — 조립기 없이 prefix만으로 생성.
@@ -97,7 +97,8 @@ public actor CompletionEngine {
     ) async throws -> Completion {
         try await complete(
             prompt: ContextAssembler.assemble(
-                prefix: prefix, document: nil, style: parameters.promptStyle),
+                prefix: prefix, document: nil, style: parameters.promptStyle
+            ),
             parameters: parameters,
             onLoadProgress: onLoadProgress
         )
@@ -117,15 +118,17 @@ public actor CompletionEngine {
             return ""
         }
         let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: nil)
+            modelID: parameters.modelID, onProgress: nil
+        )
         try Task.checkCancellation()
         return try await container.perform { context in
             let chat: [Chat.Message] = [
                 .system(Prompting.folderNameSystem),
-                .user(Prompting.folderNameUser(content: content)),
+                .user(Prompting.folderNameUser(content: content))
             ]
             let userInput = UserInput(
-                chat: chat, additionalContext: ["enable_thinking": false])
+                chat: chat, additionalContext: ["enable_thinking": false]
+            )
             let input = try await context.processor.prepare(input: userInput)
             try Task.checkCancellation()
 
@@ -137,16 +140,16 @@ public actor CompletionEngine {
 
             var text = ""
             let (stream, generationTask) = try Self.generationTask(
-                input: input, parameters: generateParameters, context: context)
+                input: input, parameters: generateParameters, context: context
+            )
             for await generation in stream {
                 if Task.isCancelled { break }
-                if case .chunk(let chunk) = generation {
+                if case let .chunk(chunk) = generation {
                     text += chunk
                     // 이름은 한 줄 — 내용이 생긴 뒤 줄바꿈이 나오면 그만 받는다
                     // (문장 경계 로직은 이름의 마침표 오검출 위험이 있어 안 쓴다).
                     if text.contains("\n"),
-                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
+                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         break
                     }
                 }
@@ -182,12 +185,14 @@ public actor CompletionEngine {
             return ""
         }
         let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: nil)
+            modelID: parameters.modelID, onProgress: nil
+        )
         try Task.checkCancellation()
         return try await container.perform { context in
             let chat: [Chat.Message] = [.system(system), .user(user)]
             let userInput = UserInput(
-                chat: chat, additionalContext: ["enable_thinking": false])
+                chat: chat, additionalContext: ["enable_thinking": false]
+            )
             let input = try await context.processor.prepare(input: userInput)
             try Task.checkCancellation()
 
@@ -199,17 +204,17 @@ public actor CompletionEngine {
 
             var text = ""
             let (stream, generationTask) = try Self.generationTask(
-                input: input, parameters: generateParameters, context: context)
+                input: input, parameters: generateParameters, context: context
+            )
             for await generation in stream {
                 if Task.isCancelled { break }
-                if case .chunk(let chunk) = generation {
+                if case let .chunk(chunk) = generation {
                     text += chunk
                     // 요약은 한 문단 — 내용이 생긴 뒤 빈 줄(문단 경계)이 나오면
                     // 그만 받는다 (설명·부연이 이어지는 걸 끊는다).
                     if stopAtBlankLine,
-                        text.contains("\n\n"),
-                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
+                       text.contains("\n\n"),
+                       !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                         break
                     }
                 }
@@ -233,7 +238,8 @@ public actor CompletionEngine {
         onChunk: @Sendable @escaping (String) -> Void
     ) async throws -> AgentModelTurn {
         let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: nil)
+            modelID: parameters.modelID, onProgress: nil
+        )
         try Task.checkCancellation()
         return try await container.perform { context in
             let chat: [Chat.Message] = messages.map { message in
@@ -247,30 +253,35 @@ public actor CompletionEngine {
             let toolSpecs: [ToolSpec]? = tools.isEmpty ? nil : tools
             let userInput = UserInput(
                 chat: chat, tools: toolSpecs,
-                additionalContext: ["enable_thinking": false])
+                additionalContext: ["enable_thinking": false]
+            )
             let input = try await context.processor.prepare(input: userInput)
             try Task.checkCancellation()
 
             let generateParameters = GenerateParameters(
-                maxTokens: min(1_024, max(64, parameters.maxTokens)),
+                maxTokens: min(1024, max(64, parameters.maxTokens)),
                 temperature: Float(parameters.temperature),
-                topP: Float(parameters.topP))
+                topP: Float(parameters.topP)
+            )
             let (stream, generationTask) = try Self.generationTask(
                 input: input, parameters: generateParameters, context: context,
-                tools: toolSpecs)
+                tools: toolSpecs
+            )
             var text = ""
             var calls: [AgentToolCall] = []
             for await generation in stream {
                 if Task.isCancelled { break }
                 switch generation {
-                case .chunk(let chunk):
+                case let .chunk(chunk):
                     text += chunk
                     onChunk(chunk)
-                case .toolCall(let call):
+                case let .toolCall(call):
                     calls.append(
                         AgentToolCall(
                             name: call.function.name,
-                            arguments: call.function.arguments))
+                            arguments: call.function.arguments
+                        )
+                    )
                 case .info:
                     break
                 }
@@ -281,7 +292,8 @@ public actor CompletionEngine {
             return AgentModelTurn(
                 text: Self.stripThinking(text)
                     .trimmingCharacters(in: .whitespacesAndNewlines),
-                toolCalls: calls)
+                toolCalls: calls
+            )
         }
     }
 
@@ -340,14 +352,15 @@ public actor CompletionEngine {
         modelID: String,
         onProgress: (@Sendable (Double) -> Void)?
     ) async throws -> ModelContainer {
-        _ = Self.mlxConfigured
+        _ = mlxConfigured
         let configuration = ModelConfiguration(id: modelID)
         // 허브 다운로드(캐시됨) + 토크나이저 로드 + 가중치 로드.
         return try await #huggingFaceLoadModelContainer(
             configuration: configuration,
             progressHandler: { progress in
                 onProgress?(progress.fractionCompleted)
-            })
+            }
+        )
     }
 
     /// MLX GPU 캐시 상한 — 타이핑마다 생성이 반복되므로 캐시가 무한히
@@ -381,7 +394,7 @@ public actor CompletionEngine {
             var cacheInUse = false
 
             switch prompt {
-            case .continuation(let text):
+            case let .continuation(text):
                 style = .continuation
                 // 챗 템플릿을 거치지 않고 조립된 텍스트를 그대로 이어쓴다.
                 // 어절 중간("나는 오…")에서도 이어짐 + 선행 공백이 보존된다.
@@ -396,10 +409,10 @@ public actor CompletionEngine {
                 promptTokens = tokens
                 promptTokenCount = tokens.count
                 if parameters.kvCacheEnabled,
-                    let reuse = promptCache.begin(
-                        modelID: parameters.modelID, tokens: tokens,
-                        model: context.model, parameters: generateParameters)
-                {
+                   let reuse = promptCache.begin(
+                       modelID: parameters.modelID, tokens: tokens,
+                       model: context.model, parameters: generateParameters
+                   ) {
                     kvCache = reuse.cache
                     reusedPromptTokens = reuse.reusedTokens
                     cacheInUse = true
@@ -407,12 +420,13 @@ public actor CompletionEngine {
                 } else {
                     input = LMInput(tokens: MLXArray(tokens))
                 }
-            case .instruct(let system, let user):
+            case let .instruct(system, user):
                 style = .instruct
                 let chat: [Chat.Message] = [.system(system), .user(user)]
                 // Qwen3 계열의 사고(thinking) 모드는 자동완성에 불필요 — 끈다.
                 let userInput = UserInput(
-                    chat: chat, additionalContext: ["enable_thinking": false])
+                    chat: chat, additionalContext: ["enable_thinking": false]
+                )
                 input = try await context.processor.prepare(input: userInput)
                 promptTokenCount = input.text.tokens.size
                 // instruct는 챗 템플릿이 본문 뒤에도 토큰을 붙여 LCP 이득이 작다 —
@@ -429,11 +443,12 @@ public actor CompletionEngine {
 
                 let (stream, generationTask) = try Self.generationTask(
                     input: input, cache: kvCache,
-                    parameters: generateParameters, context: context)
+                    parameters: generateParameters, context: context
+                )
                 for await generation in stream {
                     if Task.isCancelled { break }
                     switch generation {
-                    case .chunk(let chunk):
+                    case let .chunk(chunk):
                         if timeToFirstChunk == nil {
                             timeToFirstChunk = Date().timeIntervalSince(start)
                         }
@@ -442,12 +457,12 @@ public actor CompletionEngine {
                         // 발화 끝(닫는 따옴표) — 대사 중간의 마침표에서 끊지 않는다.
                         let cut =
                             parameters.stopAtUtteranceEnd
-                            ? cutAtUtteranceEnd(text) : cutAtSentenceBoundary(text)
+                                ? cutAtUtteranceEnd(text) : cutAtSentenceBoundary(text)
                         if let cut {
                             text = cut
                             stoppedAtBoundary = true
                         }
-                    case .info(let generationInfo):
+                    case let .info(generationInfo):
                         info = generationInfo
                     case .toolCall:
                         break
@@ -498,23 +513,25 @@ public actor CompletionEngine {
     ) throws -> (AsyncStream<Generation>, Task<Void, Never>) {
         let iterator = try TokenIterator(
             input: input, model: context.model, cache: cache,
-            parameters: parameters)
+            parameters: parameters
+        )
         return MLXLMCommon.generateTask(
             promptTokenCount: input.text.tokens.size,
             modelConfiguration: context.configuration,
             tokenizer: context.tokenizer,
             iterator: iterator,
-            tools: tools)
+            tools: tools
+        )
     }
 
     // MARK: - 프롬프트 (폴더 명명 전용 — 자동완성 프롬프트는 ContextAssembler 소유)
 
     private enum Prompting {
         static let folderNameSystem = """
-            너는 문서 묶음에 어울리는 폴더 이름을 짓는 도우미다. \
-            문서들의 공통 주제를 담은 짧은 한국어 폴더 이름(2~5단어, 명사형)을 \
-            하나만 출력한다. 설명·번호·따옴표·마침표 없이 이름만 출력한다.
-            """
+        너는 문서 묶음에 어울리는 폴더 이름을 짓는 도우미다. \
+        문서들의 공통 주제를 담은 짧은 한국어 폴더 이름(2~5단어, 명사형)을 \
+        하나만 출력한다. 설명·번호·따옴표·마침표 없이 이름만 출력한다.
+        """
 
         static func folderNameUser(content: String) -> String {
             """
@@ -530,7 +547,7 @@ public actor CompletionEngine {
     /// 문장 경계 문자(포함)까지 자른다. 없으면 nil.
     /// 단어/구 단위 제안 원칙 — 최대 한 문장에서 멈춘다 (PLAN §10 정지 사다리).
     private static let sentenceBoundaries: Set<Character> = [
-        ".", "!", "?", "…", "。", "！", "？", "\n",
+        ".", "!", "?", "…", "。", "！", "？", "\n"
     ]
 
     private static func cutAtSentenceBoundary(_ text: String) -> String? {
@@ -542,7 +559,7 @@ public actor CompletionEngine {
     /// 발화 끝 문자 — 대화 모드의 정지 조건 (PLAN §10). 닫는 따옴표(포함)까지
     /// 자른다. 개행은 안전 바닥 — 모델이 따옴표를 안 닫고 문단을 넘어가면 끊는다.
     private static let utteranceBoundaries: Set<Character> = [
-        "”", "\"", "」", "』", "\n",
+        "”", "\"", "」", "』", "\n"
     ]
 
     private static func cutAtUtteranceEnd(_ text: String) -> String? {
@@ -582,17 +599,19 @@ public actor CompletionEngine {
         // "2024.03 회고"처럼 숫자·점으로 시작하는 정상 이름은 건드리지 않는다.
         text = text.replacingOccurrences(
             of: #"^(?:#{1,6}\s+|[-*•]\s+|\d+[.)]\s+|>\s+)+"#,
-            with: "", options: .regularExpression)
+            with: "", options: .regularExpression
+        )
         // 끝쪽 문장부호·공백 정리 — "이름만" 규칙을 모델이 어겨도 복구.
         let trailing: Set<Character> = [
-            ".", "。", "!", "！", "?", "？", "…", ",", "，", ":", "：",
+            ".", "。", "!", "！", "?", "？", "…", ",", "，", ":", "："
         ]
         while let last = text.last, trailing.contains(last) || last.isWhitespace {
             text.removeLast()
         }
         // 내부 공백 뭉치는 하나로.
         text = text.replacingOccurrences(
-            of: #"\s+"#, with: " ", options: .regularExpression)
+            of: #"\s+"#, with: " ", options: .regularExpression
+        )
         return String(text.prefix(20)).trimmingCharacters(in: .whitespaces)
     }
 
@@ -609,8 +628,8 @@ public actor CompletionEngine {
     private static func stripSurroundingQuotes(_ text: String) -> String {
         let quotes: Set<Character> = ["\"", "“", "”", "'", "‘", "’"]
         guard text.count >= 2,
-            let first = text.first, let last = text.last,
-            quotes.contains(first), quotes.contains(last)
+              let first = text.first, let last = text.last,
+              quotes.contains(first), quotes.contains(last)
         else { return text }
         return String(text.dropFirst().dropLast())
     }

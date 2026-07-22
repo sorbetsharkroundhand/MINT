@@ -12,10 +12,10 @@ import AppKit
 public enum MintImageStore {
     /// 지원 이미지 확장자 (붙여넣기·드롭·파일 선택 공통 필터).
     public static let imageExtensions: Set<String> = [
-        "png", "jpg", "jpeg", "gif", "heic", "heif", "tiff", "tif", "webp", "bmp",
+        "png", "jpg", "jpeg", "gif", "heic", "heif", "tiff", "tif", "webp", "bmp"
     ]
 
-    nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
+    private nonisolated(unsafe) static var cache: [String: NSImage] = [:]
 
     /// `~/Documents/MINT/` — 없으면 만든다.
     private static func mintDirectory() -> URL {
@@ -63,7 +63,7 @@ public enum MintImageStore {
         guard let image = NSImage(contentsOf: fileURL), image.size.width > 0 else {
             return nil
         }
-        if cache.count > 128 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
+        if cache.count > 128 { cache.removeAll() } // 폭주 방지 — 단순 전체 비움
         cache[relativePath] = image
         return image
     }
@@ -73,7 +73,8 @@ public enum MintImageStore {
     public static func pruneUnreferenced(keeping referenced: Set<String>) {
         let dir = imagesDirectory()
         guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil)
+            at: dir, includingPropertiesForKeys: nil
+        )
         else { return }
         for file in files {
             let relative = "images/\(file.lastPathComponent)"

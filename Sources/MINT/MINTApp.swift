@@ -1,15 +1,15 @@
-import SwiftUI
 import AppKit
 import MINTCore
+import SwiftUI
 
 /// MINT — 한글 장편 소설을 위한 온디바이스 예측 글쓰기 엔진의 진입점.
 /// (저널·일반 문서는 같은 엔진의 가벼운 모드 — CLAUDE.md §1.)
 @main
 struct MINTApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    // 저장소·자동완성은 앱 수명 동안 하나만 — 예전 WindowGroup은 ⌘N마다 새 창을
-    // 열고 각 창이 같은 entries.json에 별도 EntryStore로 써서 저장이 충돌했다.
-    // 단일 Window로 바꿔 그 위험을 없애고, ⌘N을 "새 저널"로 되돌린다(MintCommands).
+    /// 저장소·자동완성은 앱 수명 동안 하나만 — 예전 WindowGroup은 ⌘N마다 새 창을
+    /// 열고 각 창이 같은 entries.json에 별도 EntryStore로 써서 저장이 충돌했다.
+    /// 단일 Window로 바꿔 그 위험을 없애고, ⌘N을 "새 저널"로 되돌린다(MintCommands).
     @StateObject private var store = EntryStore()
     // 단일 모델 원칙 (CLAUDE.md §2-6) — 예측과 백그라운드 이해가 같은 엔진
     // (같은 상주 모델)을 쓴다. 인덱서는 예측에 항상 양보한다 (PLAN §9 선점).
@@ -22,7 +22,8 @@ struct MINTApp: App {
         Window("MINT", id: "main") {
             ContentView(
                 store: store, completion: completion, indexer: indexer,
-                agent: agent)
+                agent: agent
+            )
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)
@@ -36,23 +37,22 @@ struct MINTApp: App {
     }
 }
 
-
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    func applicationDidFinishLaunching(_ notification: Notification) {
+    func applicationDidFinishLaunching(_: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+    func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {
         true
     }
 
-    // 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
-    func applicationWillTerminate(_ notification: Notification) {
+    /// 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
+    func applicationWillTerminate(_: Notification) {
         MainActor.assumeIsolated { EntryStore.current?.flush() }
     }
 
-    func applicationDidResignActive(_ notification: Notification) {
+    func applicationDidResignActive(_: Notification) {
         MainActor.assumeIsolated { EntryStore.current?.flush() }
     }
 }

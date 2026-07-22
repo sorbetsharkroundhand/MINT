@@ -169,10 +169,10 @@ public struct MintCommands: Commands {
     /// 시스템 외형으로 판단한다.
     private var effectiveDark: Bool {
         switch appearance {
-        case "dark": return true
-        case "light": return false
+        case "dark": true
+        case "light": false
         default:
-            return NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
         }
     }
 }

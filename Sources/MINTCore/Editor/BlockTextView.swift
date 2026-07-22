@@ -59,7 +59,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         focusRequest: Int = 0,
         searchJump: EntryStore.SearchJump? = nil
     ) {
-        self._text = text
+        _text = text
         self.controller = controller
         self.theme = theme
         self.lineSpacing = lineSpacing
@@ -75,7 +75,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         let layoutManager = MintLayoutManager()
         storage.addLayoutManager(layoutManager)
         let container = NSTextContainer(
-            containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude))
+            containerSize: NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        )
         container.widthTracksTextView = true
         layoutManager.addTextContainer(container)
 
@@ -86,7 +87,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(
             width: CGFloat.greatestFiniteMagnitude,
-            height: CGFloat.greatestFiniteMagnitude)
+            height: CGFloat.greatestFiniteMagnitude
+        )
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
@@ -107,7 +109,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.isIncrementalSearchingEnabled = true
         // 이미지 파일 드롭 수락 — NSTextView 기본 타입에 이미지 타입을 더한다.
         textView.registerForDraggedTypes(
-            textView.registeredDraggedTypes + [.fileURL, .png, .tiff])
+            textView.registeredDraggedTypes + [.fileURL, .png, .tiff]
+        )
 
         textView.isAutomaticQuoteSubstitutionEnabled = false
         textView.isAutomaticDashSubstitutionEnabled = false
@@ -190,7 +193,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         }
         // 검색 결과 클릭 — reload·레이아웃이 끝난 다음 틱에 매치 위치로 이동·표시.
         if let jump = searchJump, jump.seq != context.coordinator.lastSearchJumpSeq,
-            jump.entryID == entryID {
+           jump.entryID == entryID {
             context.coordinator.lastSearchJumpSeq = jump.seq
             DispatchQueue.main.async { [weak textView] in
                 textView?.revealMatch(of: jump.query)
@@ -232,7 +235,8 @@ public struct MintBlockEditor: NSViewRepresentable {
                 let (count, maxLen) = textView.oversizedProseParagraphs()
                 return .init(
                     count: count, maxLength: maxLen,
-                    typicalLength: textView.typicalProseParagraphLength())
+                    typicalLength: textView.typicalProseParagraphLength()
+                )
             }
             parent.controller?.splitLongParagraphs = { [weak textView] in
                 textView?.splitOversizedProseParagraphs() ?? 0
@@ -277,7 +281,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             }
         }
 
-        public func textDidEndEditing(_ notification: Notification) {
+        public func textDidEndEditing(_: Notification) {
             parent.controller?.dismissSuggestion()
         }
 
@@ -294,7 +298,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             if commandSelector == #selector(NSStandardKeyBindingResponding.moveRight(_:)) {
                 let range = textView.selectedRange()
                 guard range.length == 0,
-                    let word = controller.acceptWord(insertionLocation: range.location)
+                      let word = controller.acceptWord(insertionLocation: range.location)
                 else { return false }
                 textView.insertText(word, replacementRange: range)
                 return true
@@ -327,7 +331,8 @@ public struct MintBlockEditor: NSViewRepresentable {
 
             controller.noteEdit(
                 prefix: Self.prefix(
-                    of: storage, before: caret, limit: controller.effectiveContextCharacters),
+                    of: storage, before: caret, limit: controller.effectiveContextCharacters
+                ),
                 caretLocation: caret,
                 isComposing: textView.hasMarkedText(),
                 caretAtParagraphEnd: allowed && Self.isCaretAtParagraphEnd(storage, caret: caret)
@@ -351,20 +356,23 @@ public struct MintBlockEditor: NSViewRepresentable {
             if searchLength > 0 {
                 let newline = storage.range(
                     of: "\n", options: [],
-                    range: NSRange(location: start, length: searchLength))
+                    range: NSRange(location: start, length: searchLength)
+                )
                 if newline.location != NSNotFound, newline.location + 1 < caret {
                     start = newline.location + 1
                 }
             }
             return storage.substring(
-                with: NSRange(location: start, length: caret - start))
+                with: NSRange(location: start, length: caret - start)
+            )
         }
 
         private static func isCaretAtParagraphEnd(_ storage: NSString, caret: Int) -> Bool {
             let paragraph = storage.paragraphRange(for: NSRange(location: caret, length: 0))
             guard paragraph.upperBound > caret else { return true }
             let tail = storage.substring(
-                with: NSRange(location: caret, length: paragraph.upperBound - caret))
+                with: NSRange(location: caret, length: paragraph.upperBound - caret)
+            )
             return tail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
     }
@@ -446,13 +454,12 @@ extension NSAttributedString.Key {
 
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
-
     /// 레이아웃 매니저(nonisolated 드로잉)에서도 읽는다 — 쓰기는 메인 스레드뿐.
     nonisolated(unsafe) var palette: MintTheme = .light
 
     /// 문서 끝 빈 문단(typingAttributes에만 존재)의 블록 스냅샷 —
     /// 레이아웃 매니저가 nonisolated 드로잉 중에 읽는다.
-    nonisolated(unsafe) private(set) var tailBlockInfo:
+    private(set) nonisolated(unsafe) var tailBlockInfo:
         (block: String?, checked: Bool, marker: String?) = (nil, false, nil)
 
     /// typingAttributes 변경 후 호출해 스냅샷을 갱신한다.
@@ -477,12 +484,14 @@ final class BlockTextView: NSTextView {
     private(set) var bodyFont = MintFonts.serif(20)
 
     /// 디자인 기준(20pt) 대비 배율 — 제목·코드·수식 크기를 함께 확대/축소한다.
-    private var fontScale: CGFloat { baseFontSize / 20 }
+    private var fontScale: CGFloat {
+        baseFontSize / 20
+    }
 
     /// 본문 줄 간격(pt) — 설정에서 주입. `lineHeightMultiple` 대신 `lineSpacing`을
     /// 쓰는 이유: 배수는 여백을 라인 위쪽에 몰아 글자가 커서 아래쪽에 붙지만,
     /// lineSpacing은 자연 줄 높이를 유지해 글자·커서 높이가 일치한다 (요구 1·4).
-    var lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing)
+    var lineSpacing: CGFloat = .init(CompletionSettings.defaultLineSpacing)
 
     /// 고스트 페이드 인 진행도(0…1) — 없던 제안이 새로 뜰 때만 0에서 1로 올린다.
     /// AI 제안이 커서 옆에 "쿵" 나타나 시선을 때리지 않고 부드럽게 스며들게 하려는 것.
@@ -511,7 +520,9 @@ final class BlockTextView: NSTextView {
     private var isTransforming = false
 
     /// 수식 렌더 폰트 크기 — 본문 크기와 맞춘다.
-    var mathFontSize: CGFloat { baseFontSize }
+    var mathFontSize: CGFloat {
+        baseFontSize
+    }
 
     /// 수식 배경 박스가 렌더된 수식보다 사방으로 확보하는 여백(pt) — 항상 글씨보다
     /// 이만큼 크게, 분수처럼 세로로 큰 수식이면 박스도 그만큼 커진다 (요구 5).
@@ -520,12 +531,12 @@ final class BlockTextView: NSTextView {
 
     /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
     /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
-    nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
+    private(set) nonisolated(unsafe) var mathRenders: [(range: NSRange, image: NSImage)] = []
 
     /// 현재 렌더 모드인 이미지 문단들 — 문단 range·이미지·표시 크기·정렬·선택 여부.
     /// 정렬/크기는 소스(`![](src){width=NN align=X}`)에서 파싱해 담고, 레이아웃
     /// 매니저의 `drawImage`가 그대로 쓴다 (요구 3).
-    nonisolated(unsafe) private(set) var imageRenders: [ImageRender] = []
+    private(set) nonisolated(unsafe) var imageRenders: [ImageRender] = []
 
     /// 객체로 선택된 이미지 문단의 시작 위치 — 클릭하면 소스(![](…)) 대신 이미지가
     /// 선택 테두리와 함께 남고, 정렬·줄바꿈 툴바가 뜬다 (요구 3).
@@ -573,7 +584,8 @@ final class BlockTextView: NSTextView {
         let range = selectedRange()
         guard range.length > 0, let layoutManager, let textContainer else { return nil }
         let glyphRange = layoutManager.glyphRange(
-            forCharacterRange: range, actualCharacterRange: nil)
+            forCharacterRange: range, actualCharacterRange: nil
+        )
         var rect = layoutManager.boundingRect(forGlyphRange: glyphRange, in: textContainer)
         // 문서 끝 개행까지 선택되면 여분 라인 프래그먼트에도 하이라이트가 걸친다.
         if range.upperBound >= (string as NSString).length {
@@ -593,9 +605,9 @@ final class BlockTextView: NSTextView {
     /// 상한 걸어, 줄 간격을 좁혀도 밴드가 옆 줄 글자를 침범하지 않는다.
     private func activeLineRect() -> NSRect? {
         guard let window, window.firstResponder === self,
-            selectedRange().length == 0,
-            selectedImageLocation == nil,  // 이미지 객체 선택 중엔 줄 하이라이트 없음
-            let textContainer, let cr = caretRectInView()
+              selectedRange().length == 0,
+              selectedImageLocation == nil, // 이미지 객체 선택 중엔 줄 하이라이트 없음
+              let textContainer, let cr = caretRectInView()
         else { return nil }
         // 캐럿과 **같은 기준**(시스템 캐럿 rect + 폰트 메트릭)에서 만든다.
         // 시스템 캐럿 rect.top = ascender 라인 → baseline = top + ascender.
@@ -604,7 +616,7 @@ final class BlockTextView: NSTextView {
         let baseline = cr.minY + font.ascender
         let vpad: CGFloat = 2
         let top = baseline - font.ascender - vpad
-        let bottom = baseline - font.descender + vpad  // descender 음수 → 아래로
+        let bottom = baseline - font.descender + vpad // descender 음수 → 아래로
         let x = textContainerOrigin.x + textContainer.lineFragmentPadding - 8
         let w = textContainer.size.width - textContainer.lineFragmentPadding * 2 + 16
         return NSRect(x: x, y: top, width: w, height: bottom - top)
@@ -618,7 +630,7 @@ final class BlockTextView: NSTextView {
         guard !didInitialFocus, window != nil else { return }
         didInitialFocus = true
         DispatchQueue.main.async { [weak self] in
-            guard let self, let window = self.window else { return }
+            guard let self, let window else { return }
             window.makeFirstResponder(self)
         }
     }
@@ -692,7 +704,7 @@ final class BlockTextView: NSTextView {
                 block = .bullet; line = String(line.dropFirst(2))
             } else if let match = line.range(of: #"^(\d+)\.\s"#, options: .regularExpression) {
                 block = .number
-                marker = String(line[line.startIndex..<match.upperBound])
+                marker = String(line[line.startIndex ..< match.upperBound])
                     .trimmingCharacters(in: .whitespaces)
                 line = String(line[match.upperBound...])
             } else if line.range(of: #"^---+\s*$"#, options: .regularExpression) != nil {
@@ -701,7 +713,8 @@ final class BlockTextView: NSTextView {
                 block = .math; line = String(line.dropFirst(2).dropLast(2))
             } else if line.range(
                 of: #"^!\[[^\]]*\]\([^)\s]+\)(?:\{[^}]*\})?$"#,
-                options: .regularExpression) != nil {
+                options: .regularExpression
+            ) != nil {
                 // 한 줄 전체가 이미지 마크다운 — 원문(![](src){…})을 소스로 보관하고
                 // 커서가 밖이면 렌더 이미지로 덮어 그린다 (수식과 같은 방식).
                 block = .image
@@ -726,7 +739,9 @@ final class BlockTextView: NSTextView {
             default:
                 for segment in InlineMarkdown.parse(line) {
                     var merged = attrs
-                    for (key, value) in segment.attrs { merged[key] = value }
+                    for (key, value) in segment.attrs {
+                        merged[key] = value
+                    }
                     result.append(NSAttributedString(string: segment.text, attributes: merged))
                 }
                 result.append(NSAttributedString(string: suffix, attributes: attrs))
@@ -770,7 +785,8 @@ final class BlockTextView: NSTextView {
         if let layoutManager, let textContainer {
             layoutManager.ensureLayout(for: textContainer)
             let glyphs = layoutManager.glyphRange(
-                forCharacterRange: match, actualCharacterRange: nil)
+                forCharacterRange: match, actualCharacterRange: nil
+            )
             let rect = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
                 .offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
             _ = scrollToVisible(rect.insetBy(dx: 0, dy: -140))
@@ -789,9 +805,13 @@ final class BlockTextView: NSTextView {
         scrollRangeToVisible(selectedRange())
     }
 
+    // 정적 리터럴 실패는 프로그래머 오류라 복구할 수 없다.
+    // swiftlint:disable force_try
     /// `<p align="center|right">…</p>` — 정렬 저장 래퍼 (.p 문단 전용).
     private static let alignWrapper = try! NSRegularExpression(
-        pattern: #"^<p align="(center|right)">(.*)</p>$"#)
+        pattern: #"^<p align="(center|right)">(.*)</p>$"#
+    )
+    // swiftlint:enable force_try
 
     /// storage를 순수 마크다운으로 되돌린다 (저장 경로).
     ///
@@ -832,7 +852,7 @@ final class BlockTextView: NSTextView {
         case .todo: return ("- [" + (info.checked ? "x" : " ") + "] " + content, false)
         case .math: return ("$$" + content + "$$", false)
         case .divider: return ("---", false)
-        case .image: return (content, false)  // content = 원문 ![](src)
+        case .image: return (content, false) // content = 원문 ![](src)
         default:
             if let align = alignValue(at: para) {
                 return ("<p align=\"\(align)\">\(content)</p>", false)
@@ -934,8 +954,7 @@ final class BlockTextView: NSTextView {
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             if para.length > ParagraphSplitter.trigger,
-                storageBlockInfo(in: para).block == .p
-            {
+               storageBlockInfo(in: para).block == .p {
                 count += 1
                 maxLength = max(maxLength, para.length)
             }
@@ -954,8 +973,7 @@ final class BlockTextView: NSTextView {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             let len = para.length
             if len > 20, len <= ParagraphSplitter.trigger,
-                storageBlockInfo(in: para).block == .p
-            {
+               storageBlockInfo(in: para).block == .p {
                 lengths.append(len)
             }
             location = para.upperBound
@@ -981,8 +999,7 @@ final class BlockTextView: NSTextView {
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             if para.length > ParagraphSplitter.trigger,
-                storageBlockInfo(in: para).block == .p
-            {
+               storageBlockInfo(in: para).block == .p {
                 targets.append(para)
             }
             location = para.upperBound
@@ -1003,10 +1020,11 @@ final class BlockTextView: NSTextView {
             for offset in offsets.reversed() {
                 let at = para.location + offset
                 if shouldChangeText(
-                    in: NSRange(location: at, length: 0), replacementString: "\n\n")
-                {
+                    in: NSRange(location: at, length: 0), replacementString: "\n\n"
+                ) {
                     textStorage?.replaceCharacters(
-                        in: NSRange(location: at, length: 0), with: "\n\n")
+                        in: NSRange(location: at, length: 0), with: "\n\n"
+                    )
                     didChangeText()
                 }
             }
@@ -1030,14 +1048,14 @@ final class BlockTextView: NSTextView {
     /// 예약한다. `shouldChangeText`를 거치지 않는 프로그래matic 편집(마커 변환 등)은
     /// `serialPendingTracked == false`라 자동으로 전체 재구축된다.
     fileprivate func updateSerialCacheState(
-        editedMask: NSTextStorageEditActions, editedRange: NSRange, delta: Int
+        editedMask: NSTextStorageEditActions, editedRange: NSRange, delta _: Int
     ) {
         let tracked = serialPendingTracked
         let removedNewlines = serialPendingRemovedNewlines
         serialPendingTracked = false
         serialPendingRemovedNewlines = 0
 
-        guard serialLinesValid else { return }  // 이미 재구축 예약됨
+        guard serialLinesValid else { return } // 이미 재구축 예약됨
 
         let ns = string as NSString
         // 안전 조건 ①: 이 편집이 shouldChangeText를 거쳤고, 개행을 지우지 않았다.
@@ -1048,27 +1066,27 @@ final class BlockTextView: NSTextView {
         // 안전 조건 ②: 삽입된 새 텍스트에 개행이 없다(문단 분할 없음).
         let clamped = NSRange(
             location: min(editedRange.location, ns.length),
-            length: min(editedRange.length, max(0, ns.length - editedRange.location)))
+            length: min(editedRange.length, max(0, ns.length - editedRange.location))
+        )
         if clamped.length > 0,
-            ns.rangeOfCharacter(from: .newlines, options: [], range: clamped).location != NSNotFound
-        {
+           ns.rangeOfCharacter(from: .newlines, options: [], range: clamped).location != NSNotFound {
             serialLinesValid = false
             return
         }
         // 안전 조건 ③: 편집이 추적 중인 문단 안이다.
         let para = ns.paragraphRange(
-            for: NSRange(location: min(editedRange.location, max(0, ns.length)), length: 0))
+            for: NSRange(location: min(editedRange.location, max(0, ns.length)), length: 0)
+        )
         if para.location == serialFastStart {
             serialFastDirty = true
         } else {
-            serialLinesValid = false  // 다른 문단 — 재구축이 새 커서 문단으로 재조준
+            serialLinesValid = false // 다른 문단 — 재구축이 새 커서 문단으로 재조준
         }
     }
 
     /// storage 속성만으로 읽는 블록 정보 — 직렬화 전용 (문자 없는 문단은 항상 p).
     private func storageBlockInfo(in paragraph: NSRange)
-        -> (block: MintBlock, checked: Bool, marker: String?)
-    {
+        -> (block: MintBlock, checked: Bool, marker: String?) {
         guard let storage = textStorage, paragraph.location < storage.length else {
             return (.p, false, nil)
         }
@@ -1079,11 +1097,10 @@ final class BlockTextView: NSTextView {
 
     /// 문단의 블록 정보. 빈 마지막 문단은 typingAttributes에서 읽는다 (편집 규칙용).
     func blockInfo(in paragraph: NSRange) -> (block: MintBlock, checked: Bool, marker: String?) {
-        let attrs: [NSAttributedString.Key: Any]
-        if let storage = textStorage, paragraph.location < storage.length {
-            attrs = storage.attributes(at: paragraph.location, effectiveRange: nil)
+        let attrs: [NSAttributedString.Key: Any] = if let storage = textStorage, paragraph.location < storage.length {
+            storage.attributes(at: paragraph.location, effectiveRange: nil)
         } else {
-            attrs = typingAttributes
+            typingAttributes
         }
         let block = (attrs[.mintBlock] as? String).flatMap(MintBlock.init(rawValue:)) ?? .p
         return (block, attrs[.mintChecked] as? Bool ?? false, attrs[.mintMarker] as? String)
@@ -1101,10 +1118,11 @@ final class BlockTextView: NSTextView {
     private func serializedContent(of paragraph: NSRange, block: MintBlock) -> String {
         let plain = paragraphContent(paragraph)
         guard let storage = textStorage,
-            ![MintBlock.code, .math, .divider, .image].contains(block)
+              ![MintBlock.code, .math, .divider, .image].contains(block)
         else { return plain }
         let contentRange = NSRange(
-            location: paragraph.location, length: (plain as NSString).length)
+            location: paragraph.location, length: (plain as NSString).length
+        )
         return InlineMarkdown.serialize(storage, in: contentRange)
     }
 
@@ -1163,7 +1181,8 @@ final class BlockTextView: NSTextView {
             let info = blockInfo(in: para)
             applyBlock(
                 info.block, checked: info.checked, marker: info.marker,
-                to: para, registerUndo: false)
+                to: para, registerUndo: false
+            )
             location = para.upperBound
         }
         syncTypingAttributes()
@@ -1183,7 +1202,8 @@ final class BlockTextView: NSTextView {
             // 굵게 같은 인라인 서식이 커서 앞 글자에서 이어지도록 caret-1 기준 —
             // 블록 속성은 문단 안에서 균일해 어디를 읽어도 같다.
             let anchor = min(
-                max(para.location, min(caret, ns.length) - 1), storage.length - 1)
+                max(para.location, min(caret, ns.length) - 1), storage.length - 1
+            )
             typingAttributes = storage.attributes(at: anchor, effectiveRange: nil)
         }
         updateTailSnapshot()
@@ -1213,23 +1233,26 @@ final class BlockTextView: NSTextView {
             var base = attrs[.font] as? NSFont ?? bodyFont
             // 크기 조절은 블록 기본 폰트를 리사이즈한 것 위에 굵게·기울임을 쌓는다.
             if let size = attrs[.mintFontSize] as? Double,
-                abs(base.pointSize - CGFloat(size)) > 0.1 {
+               abs(base.pointSize - CGFloat(size)) > 0.1 {
                 base = NSFontManager.shared.convert(base, toSize: CGFloat(size))
                 addition[.font] = base
             }
             if attrs[.mintCode] as? Bool == true {
                 addition[.font] = NSFont.monospacedSystemFont(
-                    ofSize: base.pointSize * 0.78, weight: .regular)
+                    ofSize: base.pointSize * 0.78, weight: .regular
+                )
                 addition[.backgroundColor] = palette.codeBg
             } else {
                 if attrs[.mintBold] as? Bool == true {
                     let converted = NSFontManager.shared.convert(
-                        base, toHaveTrait: .boldFontMask)
+                        base, toHaveTrait: .boldFontMask
+                    )
                     if converted != base { addition[.font] = converted }
                     // 시스템 serif(New York) 폴백은 볼드가 한글 글리프에
                     // 적용되지 않는다 — 커버하지 못하면 스트로크로 가짜 볼드.
                     if !converted.coveredCharacterSet.contains(
-                        UnicodeScalar(0xAC00)!) {
+                        UnicodeScalar(0xAC00)!
+                    ) {
                         addition[.strokeWidth] = -2.5
                     }
                 }
@@ -1251,10 +1274,11 @@ final class BlockTextView: NSTextView {
         base attrs: [NSAttributedString.Key: Any], in paragraph: NSRange
     ) {
         guard let storage = textStorage, paragraph.location < storage.length,
-            let align = storage.attribute(
-                .mintAlign, at: paragraph.location, effectiveRange: nil) as? String,
-            let ps = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy()
-                as? NSMutableParagraphStyle
+              let align = storage.attribute(
+                  .mintAlign, at: paragraph.location, effectiveRange: nil
+              ) as? String,
+              let ps = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy()
+              as? NSMutableParagraphStyle
         else { return }
         ps.alignment = align == "right" ? .right : .center
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
@@ -1264,12 +1288,13 @@ final class BlockTextView: NSTextView {
     /// 정렬 반영(applyStoredAlignment) 뒤에 호출해 현재 문단 스타일을 이어받는다.
     private func applyStoredLineSpacing(in paragraph: NSRange) {
         guard let storage = textStorage, paragraph.location < storage.length,
-            let spacing = storage.attribute(
-                .mintLineSpacing, at: paragraph.location, effectiveRange: nil) as? Double
+              let spacing = storage.attribute(
+                  .mintLineSpacing, at: paragraph.location, effectiveRange: nil
+              ) as? Double
         else { return }
         let current =
             storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
-            as? NSParagraphStyle ?? .default
+                as? NSParagraphStyle ?? .default
         guard let ps = current.mutableCopy() as? NSMutableParagraphStyle else { return }
         ps.lineSpacing = CGFloat(spacing)
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
@@ -1347,7 +1372,7 @@ final class BlockTextView: NSTextView {
         var attrs: [NSAttributedString.Key: Any] = [
             .font: font,
             .foregroundColor: color,
-            .paragraphStyle: ps,
+            .paragraphStyle: ps
         ]
         if block == .todo, checked {
             attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
@@ -1375,7 +1400,7 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         mayHaveMarkers =
             ns.range(of: "$$").location != NSNotFound
-            || ns.range(of: "![").location != NSNotFound
+                || ns.range(of: "![").location != NSNotFound
     }
 
     // MARK: 직렬화 증분 캐시 (docs/editor-perf.md)
@@ -1409,8 +1434,7 @@ final class BlockTextView: NSTextView {
     /// storage만 보므로 "무엇이 지워졌는지"를 알 수 없다. 이 훅은 타이핑·IME·
     /// 붙여넣기·삭제·undo 등 NSText 경로 전부에서 편집 전에 불린다.
     override func shouldChangeText(in affectedCharRange: NSRange, replacementString: String?)
-        -> Bool
-    {
+        -> Bool {
         let ns = string as NSString
         if affectedCharRange.length > 0, affectedCharRange.upperBound <= ns.length {
             let old = ns.substring(with: affectedCharRange)
@@ -1449,28 +1473,34 @@ final class BlockTextView: NSTextView {
 
         for rule in InlineMarkdown.typingRules {
             let matches = rule.pattern.matches(
-                in: text, range: NSRange(location: 0, length: nsText.length))
+                in: text, range: NSRange(location: 0, length: nsText.length)
+            )
             // 방금 타이핑으로 닫힌 마커만 — 커서 위치에서 끝나는 매치.
             guard let match = matches.first(where: { $0.range.upperBound == caretInPara })
             else { continue }
             let inner = nsText.substring(with: match.range(at: 1))
             let markerRange = NSRange(
-                location: para.location + match.range.location, length: match.range.length)
+                location: para.location + match.range.location, length: match.range.length
+            )
             isTransforming = true
             if shouldChangeText(in: markerRange, replacementString: inner) {
                 storage.replaceCharacters(in: markerRange, with: inner)
                 storage.addAttributes(
                     rule.attrs,
                     range: NSRange(
-                        location: markerRange.location, length: (inner as NSString).length))
+                        location: markerRange.location, length: (inner as NSString).length
+                    )
+                )
                 didChangeText()
             }
             isTransforming = false
             let newPara = (string as NSString).paragraphRange(
-                for: NSRange(location: para.location, length: 0))
+                for: NSRange(location: para.location, length: 0)
+            )
             applyBlock(
                 info.block, checked: info.checked, marker: info.marker,
-                to: newPara, registerUndo: false)
+                to: newPara, registerUndo: false
+            )
             // 변환 직후 이어지는 타이핑은 일반 글씨 — 서식이 계속 번지지 않게.
             var typing = styleAttributes(for: info.block, checked: info.checked)
             typing[.mintBlock] = info.block.rawValue
@@ -1494,8 +1524,9 @@ final class BlockTextView: NSTextView {
             // "- [ ] "를 두 단계로 쓰는 경우: bullet 상태에서 "[ ] " → todo.
             if let match = text.range(of: #"^\[\s?\]\s"#, options: .regularExpression) {
                 consumeMarker(
-                    length: text[text.startIndex..<match.upperBound].utf16.count,
-                    in: para, block: .todo)
+                    length: text[text.startIndex ..< match.upperBound].utf16.count,
+                    in: para, block: .todo
+                )
             }
             return
         }
@@ -1519,18 +1550,20 @@ final class BlockTextView: NSTextView {
             consumeMarker(length: 2, in: para, block: .h1)
         } else if let match = text.range(of: #"^\[\s?\]\s"#, options: .regularExpression) {
             consumeMarker(
-                length: text[text.startIndex..<match.upperBound].utf16.count,
-                in: para, block: .todo)
+                length: text[text.startIndex ..< match.upperBound].utf16.count,
+                in: para, block: .todo
+            )
         } else if text.hasPrefix("> ") {
             consumeMarker(length: 2, in: para, block: .quote)
         } else if text.hasPrefix("- ") || text.hasPrefix("* ") {
             consumeMarker(length: 2, in: para, block: .bullet)
         } else if let match = text.range(of: #"^(\d+)\.\s"#, options: .regularExpression) {
-            let marker = String(text[text.startIndex..<match.upperBound])
+            let marker = String(text[text.startIndex ..< match.upperBound])
                 .trimmingCharacters(in: .whitespaces)
             consumeMarker(
-                length: text[text.startIndex..<match.upperBound].utf16.count,
-                in: para, block: .number, marker: marker)
+                length: text[text.startIndex ..< match.upperBound].utf16.count,
+                in: para, block: .number, marker: marker
+            )
         }
     }
 
@@ -1558,14 +1591,16 @@ final class BlockTextView: NSTextView {
         let inner = String(text.dropFirst(2).dropLast(2))
         isTransforming = true
         let contentRange = NSRange(
-            location: paragraph.location, length: (text as NSString).length)
+            location: paragraph.location, length: (text as NSString).length
+        )
         if shouldChangeText(in: contentRange, replacementString: inner) {
             storage.replaceCharacters(in: contentRange, with: inner)
             didChangeText()
         }
         isTransforming = false
         let newPara = (string as NSString).paragraphRange(
-            for: NSRange(location: paragraph.location, length: 0))
+            for: NSRange(location: paragraph.location, length: 0)
+        )
         applyBlock(.math, to: newPara)
         refreshRenderedBlocks()
     }
@@ -1584,10 +1619,11 @@ final class BlockTextView: NSTextView {
         applyBlock(.divider, to: dividerPara)
         // 디자인처럼 아래에 새 문단을 만들고 커서를 옮긴다.
         setSelectedRange(NSRange(location: dividerPara.upperBound > dividerPara.location
-            ? dividerPara.upperBound - 1 : dividerPara.location, length: 0))
+                ? dividerPara.upperBound - 1 : dividerPara.location, length: 0))
         insertText("\n", replacementRange: selectedRange())
         let caretPara = (string as NSString).paragraphRange(
-            for: NSRange(location: selectedRange().location, length: 0))
+            for: NSRange(location: selectedRange().location, length: 0)
+        )
         applyBlock(.p, to: caretPara)
     }
 
@@ -1598,7 +1634,8 @@ final class BlockTextView: NSTextView {
         // (그림 블럭 완성도). insertText가 막혀 있어 기본 경로로는 아무 일도 없다.
         if let loc = selectedImageLocation {
             let para = (string as NSString).paragraphRange(
-                for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+                for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+            )
             imageLineBreak(after: para)
             return
         }
@@ -1610,7 +1647,7 @@ final class BlockTextView: NSTextView {
 
         // 빈 목록/코드 블록에서 Enter → 블록 해제 (디자인 동작).
         if sel.length == 0, paragraphContent(para).isEmpty,
-            [.bullet, .number, .todo, .code].contains(info.block) {
+           [.bullet, .number, .todo, .code].contains(info.block) {
             applyBlock(.p, to: para)
             return
         }
@@ -1619,7 +1656,8 @@ final class BlockTextView: NSTextView {
 
         // 새 문단의 블록 상속 규칙.
         let caretPara = (string as NSString).paragraphRange(
-            for: NSRange(location: selectedRange().location, length: 0))
+            for: NSRange(location: selectedRange().location, length: 0)
+        )
         switch info.block {
         case .h1, .h2, .h3, .quote, .math, .divider, .image:
             applyBlock(.p, to: caretPara)
@@ -1641,7 +1679,8 @@ final class BlockTextView: NSTextView {
         // 이미지가 객체 선택된 상태면 백스페이스로 문단째 지운다 (요구 3).
         if let loc = selectedImageLocation {
             let para = (string as NSString).paragraphRange(
-                for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+                for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+            )
             deleteImageParagraph(para)
             return
         }
@@ -1665,14 +1704,17 @@ final class BlockTextView: NSTextView {
         let point = convert(event.locationInWindow, from: nil)
         if let layoutManager, let textContainer {
             let containerPoint = NSPoint(
-                x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+                x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y
+            )
             let index = layoutManager.characterIndex(
                 for: containerPoint, in: textContainer,
-                fractionOfDistanceBetweenInsertionPoints: nil)
+                fractionOfDistanceBetweenInsertionPoints: nil
+            )
             let ns = string as NSString
             if ns.length > 0, index <= ns.length {
                 let para = ns.paragraphRange(
-                    for: NSRange(location: min(index, ns.length), length: 0))
+                    for: NSRange(location: min(index, ns.length), length: 0)
+                )
                 let info = blockInfo(in: para)
                 // 체크박스 히트 존: 문단 들여쓰기(32px) 안쪽 (디자인: left+28).
                 if info.block == .todo, containerPoint.x < 28 {
@@ -1688,9 +1730,9 @@ final class BlockTextView: NSTextView {
                 // 렌더된 수식 박스 클릭 — 끌면 블록 이동, 그 자리에서 떼면
                 // 기존처럼 소스 편집 모드 (요구 6).
                 if info.block == .math,
-                    let mathBox = mathDrawnRect(forParagraphAt: para.location)?
-                        .insetBy(dx: -Self.mathBoxMargin, dy: -Self.mathBoxMargin),
-                    mathBox.contains(point) {
+                   let mathBox = mathDrawnRect(forParagraphAt: para.location)?
+                   .insetBy(dx: -Self.mathBoxMargin, dy: -Self.mathBoxMargin),
+                   mathBox.contains(point) {
                     clearImageSelection()
                     trackMathDrag(from: event, paragraph: para)
                     return
@@ -1711,7 +1753,7 @@ final class BlockTextView: NSTextView {
     }
 
     /// 툴바 버튼용 — 리스폰더 체인(NSApp.sendAction)으로 도달한다.
-    @objc func insertImageFromMenu(_ sender: Any?) {
+    @objc func insertImageFromMenu(_: Any?) {
         presentImagePicker()
     }
 
@@ -1724,13 +1766,15 @@ final class BlockTextView: NSTextView {
             UTType(filenameExtension: $0)
         }
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls { insertImageFile(url) }
+        for url in panel.urls {
+            insertImageFile(url)
+        }
     }
 
     /// 파일 URL 하나를 읽어 images 폴더에 복사한 뒤 이미지 블록으로 삽입한다.
     private func insertImageFile(_ url: URL) {
         guard let data = try? Data(contentsOf: url),
-            let relative = MintImageStore.save(data, ext: url.pathExtension)
+              let relative = MintImageStore.save(data, ext: url.pathExtension)
         else { return }
         insertImageBlock(relativePath: relative)
     }
@@ -1740,7 +1784,8 @@ final class BlockTextView: NSTextView {
     private func insertImages(from pasteboard: NSPasteboard) -> Bool {
         // 1) 이미지 파일 URL — 원본 확장자를 유지해 복사한다.
         if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL] {
             let images = urls.filter {
                 MintImageStore.imageExtensions.contains($0.pathExtension.lowercased())
             }
@@ -1751,14 +1796,14 @@ final class BlockTextView: NSTextView {
         }
         // 2) 비트맵 데이터(스크린샷·복사한 이미지) — PNG로 정규화해 저장한다.
         if let data = pasteboard.data(forType: .png),
-            let relative = MintImageStore.save(data, ext: "png") {
+           let relative = MintImageStore.save(data, ext: "png") {
             insertImageBlock(relativePath: relative)
             return true
         }
         if let tiff = pasteboard.data(forType: .tiff),
-            let rep = NSBitmapImageRep(data: tiff),
-            let png = rep.representation(using: .png, properties: [:]),
-            let relative = MintImageStore.save(png, ext: "png") {
+           let rep = NSBitmapImageRep(data: tiff),
+           let png = rep.representation(using: .png, properties: [:]),
+           let relative = MintImageStore.save(png, ext: "png") {
             insertImageBlock(relativePath: relative)
             return true
         }
@@ -1768,7 +1813,8 @@ final class BlockTextView: NSTextView {
     /// 페이스트보드에 삽입 가능한 이미지가 있는지 (드래그 수락 판정용).
     private func pasteboardHasImage(_ pasteboard: NSPasteboard) -> Bool {
         if let urls = pasteboard.readObjects(
-            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+            forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]
+        ) as? [URL],
             urls.contains(where: {
                 MintImageStore.imageExtensions.contains($0.pathExtension.lowercased())
             }) {
@@ -1776,7 +1822,7 @@ final class BlockTextView: NSTextView {
         }
         return pasteboard.canReadItem(withDataConformingToTypes: [
             NSPasteboard.PasteboardType.png.rawValue,
-            NSPasteboard.PasteboardType.tiff.rawValue,
+            NSPasteboard.PasteboardType.tiff.rawValue
         ])
     }
 
@@ -1795,11 +1841,13 @@ final class BlockTextView: NSTextView {
         // 방금 삽입한 이미지 문단(커서 바로 앞 줄)을 찾아 블록을 지정한다.
         let caret = selectedRange().location
         let imagePara = (string as NSString).paragraphRange(
-            for: NSRange(location: max(0, caret - 1), length: 0))
+            for: NSRange(location: max(0, caret - 1), length: 0)
+        )
         applyBlock(.image, to: imagePara)
         // 커서가 놓인 새 문단은 일반 문단으로.
         let caretPara = (string as NSString).paragraphRange(
-            for: NSRange(location: selectedRange().location, length: 0))
+            for: NSRange(location: selectedRange().location, length: 0)
+        )
         applyBlock(.p, to: caretPara)
         // 커서는 이미지 다음 문단에 있으므로 이미지가 곧바로 렌더된다.
         refreshRenderedBlocks()
@@ -1814,8 +1862,8 @@ final class BlockTextView: NSTextView {
         setSelectedRange(NSRange(location: para.location, length: 0))
         window?.makeFirstResponder(self)
         refreshRenderedBlocks()
-        showImageBox(for: para.location)  // 박스를 먼저 얹고
-        presentImageToolbar(for: para)  // 툴바를 그 위에 올린다
+        showImageBox(for: para.location) // 박스를 먼저 얹고
+        presentImageToolbar(for: para) // 툴바를 그 위에 올린다
     }
 
     /// 이미지 박스 오버레이를 만들고(또는 갱신) 이미지 위에 얹는다.
@@ -1851,7 +1899,8 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let sel = selectedRange()
         let caretPara = ns.paragraphRange(
-            for: NSRange(location: min(sel.location, ns.length), length: 0))
+            for: NSRange(location: min(sel.location, ns.length), length: 0)
+        )
 
         if let loc = selectedImageLocation, sel.length != 0 || caretPara.location != loc {
             clearImageSelection()
@@ -1859,12 +1908,13 @@ final class BlockTextView: NSTextView {
         // 이미지 문단에 커서가 놓였는데 객체 선택이 아니면 자동 선택.
         // (로드·프로그램적 변경 중인 isTransforming 때는 건너뛴다.)
         guard sel.length == 0, !isTransforming, window?.firstResponder === self,
-            caretPara.location < ns.length,
-            selectedImageLocation != caretPara.location,
-            blockInfo(in: caretPara).block == .image,
-            Self.imageAttrs(
-                from: paragraphContent(caretPara).trimmingCharacters(in: .whitespaces))
-                .flatMap({ MintImageStore.image(for: $0.src) }) != nil
+              caretPara.location < ns.length,
+              selectedImageLocation != caretPara.location,
+              blockInfo(in: caretPara).block == .image,
+              Self.imageAttrs(
+                  from: paragraphContent(caretPara).trimmingCharacters(in: .whitespaces)
+              )
+              .flatMap({ MintImageStore.image(for: $0.src) }) != nil
         else { return }
         // 커서는 그대로 두고(어차피 숨김) 객체 선택만 채택 — setSelectedRange
         // 재귀를 피한다. refresh가 뒤이어 렌더를 유지한다.
@@ -1902,7 +1952,8 @@ final class BlockTextView: NSTextView {
         if let loc = selectedImageLocation {
             guard copySelectedImage(atParagraph: loc) else { return }
             let para = (string as NSString).paragraphRange(
-                for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+                for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+            )
             deleteImageParagraph(para)
             return
         }
@@ -1914,7 +1965,8 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
         guard let attrs = Self.imageAttrs(
-                from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces)
+        ),
             let image = MintImageStore.image(for: attrs.src)
         else { return false }
         let pasteboard = NSPasteboard.general
@@ -1935,7 +1987,8 @@ final class BlockTextView: NSTextView {
             if let rect = mathDrawnRect(forParagraphAt: render.range.location) {
                 addCursorRect(
                     rect.insetBy(dx: -Self.mathBoxMargin, dy: -Self.mathBoxMargin),
-                    cursor: .openHand)
+                    cursor: .openHand
+                )
             }
         }
     }
@@ -1946,8 +1999,8 @@ final class BlockTextView: NSTextView {
         let ns = string as NSString
         let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
         switch action {
-        case .align(let a): rewriteImage(para, setAlign: a)
-        case .width(let w): rewriteImage(para, setWidth: w)
+        case let .align(a): rewriteImage(para, setAlign: a)
+        case let .width(w): rewriteImage(para, setWidth: w)
         case .lineBreak: imageLineBreak(after: para)
         case .delete: deleteImageParagraph(para)
         }
@@ -1958,21 +2011,24 @@ final class BlockTextView: NSTextView {
         guard let storage = textStorage else { return }
         let content = paragraphContent(para)
         guard var attrs = Self.imageAttrs(
-            from: content.trimmingCharacters(in: .whitespaces))
+            from: content.trimmingCharacters(in: .whitespaces)
+        )
         else { return }
         if let a = setAlign { attrs.align = a }
         if let w = setWidth { attrs.width = w }
         let newLine = attrs.markdown
         let contentRange = NSRange(
-            location: para.location, length: (content as NSString).length)
+            location: para.location, length: (content as NSString).length
+        )
         guard newLine != content,
-            shouldChangeText(in: contentRange, replacementString: newLine)
+              shouldChangeText(in: contentRange, replacementString: newLine)
         else { return }
         isTransforming = true
         storage.replaceCharacters(in: contentRange, with: newLine)
         isTransforming = false
         let newPara = (string as NSString).paragraphRange(
-            for: NSRange(location: para.location, length: 0))
+            for: NSRange(location: para.location, length: 0)
+        )
         applyBlock(.image, to: newPara, registerUndo: false)
         selectedImageLocation = newPara.location
         setSelectedRange(NSRange(location: newPara.location, length: 0))
@@ -1991,7 +2047,8 @@ final class BlockTextView: NSTextView {
         insertText("\n", replacementRange: selectedRange())
         let caret = selectedRange().location
         let newPara = (string as NSString).paragraphRange(
-            for: NSRange(location: caret, length: 0))
+            for: NSRange(location: caret, length: 0)
+        )
         applyBlock(.p, to: newPara)
         refreshRenderedBlocks()
     }
@@ -2014,9 +2071,10 @@ final class BlockTextView: NSTextView {
     /// `overrideWidth`는 드래그 리사이즈 중 실시간 % 표시용.
     private func presentImageToolbar(for para: NSRange, overrideWidth: Int? = nil) {
         guard imageRenders.contains(where: { $0.range.location == para.location }),
-            let attrs = Self.imageAttrs(
-                from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
-            let rect = paragraphRectInView(para)
+              let attrs = Self.imageAttrs(
+                  from: paragraphContent(para).trimmingCharacters(in: .whitespaces)
+              ),
+              let rect = paragraphRectInView(para)
         else { return }
 
         let view = ImageObjectToolbarView(
@@ -2065,22 +2123,24 @@ final class BlockTextView: NSTextView {
     /// 핸들 히트 테스트·그리기의 기준.
     func imageDrawnRect(forParagraphAt loc: Int) -> NSRect? {
         guard let render = imageRenders.first(where: { $0.range.location == loc }),
-            let row = paragraphRectInView(
-                (string as NSString).paragraphRange(
-                    for: NSRange(location: min(loc, (string as NSString).length), length: 0)))
+              let row = paragraphRectInView(
+                  (string as NSString).paragraphRange(
+                      for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+                  )
+              )
         else { return nil }
         let box = row.insetBy(dx: 8, dy: 6)
         guard render.size.width > 0, render.size.height > 0 else { return nil }
         let scale = min(box.width / render.size.width, box.height / render.size.height, 1)
         let size = NSSize(width: render.size.width * scale, height: render.size.height * scale)
-        let x: CGFloat
-        switch render.align {
-        case "left": x = box.minX
-        case "right": x = box.maxX - size.width
-        default: x = row.midX - size.width / 2
+        let x: CGFloat = switch render.align {
+        case "left": box.minX
+        case "right": box.maxX - size.width
+        default: row.midX - size.width / 2
         }
         return NSRect(
-            x: x, y: row.midY - size.height / 2, width: size.width, height: size.height)
+            x: x, y: row.midY - size.height / 2, width: size.width, height: size.height
+        )
     }
 
     /// 100% 표시 너비 — 드래그 델타를 %로 환산할 때의 기준.
@@ -2093,9 +2153,11 @@ final class BlockTextView: NSTextView {
     /// 이미지 소스에서 현재 너비(%)를 읽는다.
     func imageWidthPercent(at loc: Int) -> Int {
         let para = (string as NSString).paragraphRange(
-            for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+            for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+        )
         return Self.imageAttrs(
-            from: paragraphContent(para).trimmingCharacters(in: .whitespaces))?.width ?? 100
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces)
+        )?.width ?? 100
     }
 
     // MARK: - 이미지 박스 오버레이 연동 (요구 A·B)
@@ -2103,7 +2165,7 @@ final class BlockTextView: NSTextView {
     /// 오버레이(있으면)를 이미지 위치에 맞춰 다시 배치한다.
     func repositionImageBox() {
         guard let box = imageBox, let loc = selectedImageLocation,
-            let rect = imageDrawnRect(forParagraphAt: loc)
+              let rect = imageDrawnRect(forParagraphAt: loc)
         else { return }
         box.frame = rect.insetBy(dx: -box.inset, dy: -box.inset)
         box.needsDisplay = true
@@ -2116,9 +2178,10 @@ final class BlockTextView: NSTextView {
         let pct = Int(((startDisplayW + deltaWidth) / fitW * 100).rounded())
         let clamped = min(100, max(10, pct))
         resizePreview = (loc, clamped)
-        refreshRenderedBlocks()  // 끝에서 repositionImageBox 호출됨
+        refreshRenderedBlocks() // 끝에서 repositionImageBox 호출됨
         let para = (string as NSString).paragraphRange(
-            for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+            for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+        )
         presentImageToolbar(for: para, overrideWidth: clamped)
     }
 
@@ -2127,7 +2190,8 @@ final class BlockTextView: NSTextView {
         let finalWidth = resizePreview?.width
         resizePreview = nil
         let para = (string as NSString).paragraphRange(
-            for: NSRange(location: min(loc, (string as NSString).length), length: 0))
+            for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+        )
         if let finalWidth, finalWidth != imageWidthPercent(at: loc) {
             rewriteImage(para, setWidth: finalWidth)
         } else {
@@ -2140,7 +2204,8 @@ final class BlockTextView: NSTextView {
     func updateImageDropIndicator(toViewPoint p: NSPoint) {
         let idx = min(characterIndexForInsertion(at: p), (string as NSString).length)
         let dropPara = (string as NSString).paragraphRange(
-            for: NSRange(location: idx, length: 0))
+            for: NSRange(location: idx, length: 0)
+        )
         imageDropIndicatorY = paragraphRectInView(dropPara)?.minY
         needsDisplay = true
     }
@@ -2168,15 +2233,17 @@ final class BlockTextView: NSTextView {
         var removeRange = para
         let endsNL =
             para.length > 0
-            && ns.substring(
-                with: NSRange(location: para.location + para.length - 1, length: 1)) == "\n"
+                && ns.substring(
+                    with: NSRange(location: para.location + para.length - 1, length: 1)
+                ) == "\n"
         if !endsNL, para.location > 0 {
             removeRange = NSRange(location: para.location - 1, length: para.length + 1)
         }
         var insertLoc = dropPara.location
 
         guard shouldChangeText(
-            in: NSRange(location: 0, length: ns.length), replacementString: nil)
+            in: NSRange(location: 0, length: ns.length), replacementString: nil
+        )
         else { return }
         isTransforming = true
         storage.replaceCharacters(in: removeRange, with: "")
@@ -2188,11 +2255,13 @@ final class BlockTextView: NSTextView {
         }
         insertLoc = min(max(0, insertLoc), (string as NSString).length)
         storage.replaceCharacters(
-            in: NSRange(location: insertLoc, length: 0), with: lineText + "\n")
+            in: NSRange(location: insertLoc, length: 0), with: lineText + "\n"
+        )
         isTransforming = false
 
         let newPara = (string as NSString).paragraphRange(
-            for: NSRange(location: insertLoc, length: 0))
+            for: NSRange(location: insertLoc, length: 0)
+        )
         applyBlock(block, to: newPara, registerUndo: false)
         if block == .image {
             setSelectedRange(NSRange(location: newPara.location, length: 0))
@@ -2203,7 +2272,8 @@ final class BlockTextView: NSTextView {
             // 커서는 블록 **다음** 문단에 — 수식은 커서가 들어오면 소스로 풀리므로
             // 옮긴 직후에도 렌더 상태를 유지한다.
             setSelectedRange(NSRange(
-                location: min(newPara.upperBound, (string as NSString).length), length: 0))
+                location: min(newPara.upperBound, (string as NSString).length), length: 0
+            ))
             didChangeText()
             refreshRenderedBlocks()
         }
@@ -2215,9 +2285,11 @@ final class BlockTextView: NSTextView {
     /// 히트 판정·커서 rect의 기준.
     func mathDrawnRect(forParagraphAt loc: Int) -> NSRect? {
         guard let render = mathRenders.first(where: { $0.range.location == loc }),
-            let row = paragraphRectInView(
-                (string as NSString).paragraphRange(
-                    for: NSRange(location: min(loc, (string as NSString).length), length: 0)))
+              let row = paragraphRectInView(
+                  (string as NSString).paragraphRange(
+                      for: NSRange(location: min(loc, (string as NSString).length), length: 0)
+                  )
+              )
         else { return nil }
         var size = render.image.size
         guard size.width > 0, size.height > 0 else { return nil }
@@ -2228,7 +2300,8 @@ final class BlockTextView: NSTextView {
         }
         return NSRect(
             x: row.midX - size.width / 2, y: row.midY - size.height / 2,
-            width: size.width, height: size.height)
+            width: size.width, height: size.height
+        )
     }
 
     /// 수식 클릭/드래그 판별 루프 — 3pt 이상 끌면 이동 모드(드롭 표시선 + 손 커서),
@@ -2245,7 +2318,8 @@ final class BlockTextView: NSTextView {
                 if moved {
                     NSCursor.closedHand.set()
                     updateImageDropIndicator(
-                        toViewPoint: convert(next.locationInWindow, from: nil))
+                        toViewPoint: convert(next.locationInWindow, from: nil)
+                    )
                 }
                 continue
             }
@@ -2254,7 +2328,8 @@ final class BlockTextView: NSTextView {
             if moved {
                 moveParagraph(
                     at: para.location, as: .math,
-                    toViewPoint: convert(next.locationInWindow, from: nil))
+                    toViewPoint: convert(next.locationInWindow, from: nil)
+                )
                 NSCursor.arrow.set()
             } else {
                 let p = convert(event.locationInWindow, from: nil)
@@ -2313,10 +2388,11 @@ final class BlockTextView: NSTextView {
         // 남아 있지 않다 — 커서 문단이 수식/이미지면 마커 검사와 무관하게 전체
         // 경로를 타야 한다 (안 그러면 편집 후 렌더로 영영 못 돌아가는 버그).
         if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil,
-            !mayHaveMarkers {
+           !mayHaveMarkers {
             let source = storage.string as NSString
             let caretPara = source.paragraphRange(
-                for: NSRange(location: min(selectedRange().location, source.length), length: 0))
+                for: NSRange(location: min(selectedRange().location, source.length), length: 0)
+            )
             let caretBlock = blockInfo(in: caretPara).block
             if caretBlock != .math, caretBlock != .image {
                 hideMathPreview()
@@ -2325,7 +2401,8 @@ final class BlockTextView: NSTextView {
         }
         layoutManager.removeTemporaryAttribute(
             .foregroundColor,
-            forCharacterRange: NSRange(location: 0, length: storage.length))
+            forCharacterRange: NSRange(location: 0, length: storage.length)
+        )
         var maths: [(range: NSRange, image: NSImage)] = []
         var images: [ImageRender] = []
         // 편집 모드인 수식 문단 — 루프 뒤 라이브 미리보기 패널을 붙인다.
@@ -2349,9 +2426,9 @@ final class BlockTextView: NSTextView {
             // 수식만 커서가 닿으면 편집 모드(소스)로 전환한다.
             let editing =
                 block == .math && !forceRender && focused
-                && ((sel.length == 0 && sel.location >= para.location
-                    && sel.location <= contentEnd)
-                    || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0))
+                    && ((sel.length == 0 && sel.location >= para.location
+                            && sel.location <= contentEnd)
+                        || (sel.length > 0 && NSIntersectionRange(sel, para).length > 0))
             let source = content.trimmingCharacters(in: .whitespaces)
 
             let rendered: NSImage?
@@ -2359,7 +2436,8 @@ final class BlockTextView: NSTextView {
             switch block {
             case .math:
                 rendered = source.isEmpty ? nil : MathRenderer.image(
-                    latex: source, color: palette.ink, fontSize: mathFontSize)
+                    latex: source, color: palette.ink, fontSize: mathFontSize
+                )
             case .image:
                 attrs = Self.imageAttrs(from: source)
                 rendered = attrs.flatMap { MintImageStore.image(for: $0.src) }
@@ -2377,12 +2455,13 @@ final class BlockTextView: NSTextView {
                     if !editing {
                         maths.append((para, image))
                         layoutManager.addTemporaryAttribute(
-                            .foregroundColor, value: NSColor.clear, forCharacterRange: para)
+                            .foregroundColor, value: NSColor.clear, forCharacterRange: para
+                        )
                     }
                 } else if source.isEmpty {
-                    updateRenderedLineHeight(nil, block: .math, in: para)  // 빈 수식만 기본
+                    updateRenderedLineHeight(nil, block: .math, in: para) // 빈 수식만 기본
                 }
-                // 소스가 있는데 파싱 불가면 직전 높이를 유지(아무것도 안 한다).
+            // 소스가 있는데 파싱 불가면 직전 높이를 유지(아무것도 안 한다).
             case .image:
                 guard let image = rendered else {
                     updateRenderedLineHeight(nil, block: .image, in: para)
@@ -2396,10 +2475,13 @@ final class BlockTextView: NSTextView {
                 images.append(
                     ImageRender(
                         range: para, image: image, size: size, align: a.align,
-                        selected: objectSelected))
+                        selected: objectSelected
+                    )
+                )
                 updateRenderedLineHeight(size.height, block: .image, in: para)
                 layoutManager.addTemporaryAttribute(
-                    .foregroundColor, value: NSColor.clear, forCharacterRange: para)
+                    .foregroundColor, value: NSColor.clear, forCharacterRange: para
+                )
             default:
                 break
             }
@@ -2410,7 +2492,7 @@ final class BlockTextView: NSTextView {
         // 마커 캐시를 실측으로 되돌린다. 마커를 지운 뒤 빠른 경로로 복귀하는 길이자,
         // 델리게이트가 보수적으로 true를 켠 오탐을 정리하는 자리다.
         syncMarkerFlag()
-        repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
+        repositionImageBox() // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
         // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다.
         if let (para, source) = editingMath {
             presentMathPreview(source: source, below: para)
@@ -2449,7 +2531,8 @@ final class BlockTextView: NSTextView {
             isError = true
         }
         let view = MathPreviewView(
-            theme: palette, image: image, message: message, isError: isError)
+            theme: palette, image: image, message: message, isError: isError
+        )
         let host: NSHostingView<MathPreviewView>
         if let existing = mathPreviewHost {
             existing.rootView = view
@@ -2479,7 +2562,8 @@ final class BlockTextView: NSTextView {
     static func imageAttrs(from line: String) -> ImageAttrs? {
         let ns = line as NSString
         guard let match = imageLinePattern.firstMatch(
-            in: line, range: NSRange(location: 0, length: ns.length))
+            in: line, range: NSRange(location: 0, length: ns.length)
+        )
         else { return nil }
         let src = ns.substring(with: match.range(at: 1))
         guard !src.isEmpty else { return nil }
@@ -2501,8 +2585,11 @@ final class BlockTextView: NSTextView {
         return attrs
     }
 
+    // 정적 리터럴 실패는 프로그래머 오류라 복구할 수 없다.
+    // swiftlint:disable:next force_try
     private static let imageLinePattern = try! NSRegularExpression(
-        pattern: #"^!\[[^\]]*\]\(([^)\s]+)\)(?:\{([^}]*)\})?$"#)
+        pattern: #"^!\[[^\]]*\]\(([^)\s]+)\)(?:\{([^}]*)\})?$"#
+    )
 
     /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 수식 높이를 구한다.
     private func displayHeight(of image: NSImage) -> CGFloat {
@@ -2523,16 +2610,15 @@ final class BlockTextView: NSTextView {
         guard image.size.width > 0, image.size.height > 0 else { return image.size }
         let rectWidth =
             (textContainer.map { $0.size.width - $0.lineFragmentPadding * 2 })
-            ?? bounds.width
+                ?? bounds.width
         let maxHeight: CGFloat = 480
         let pct = CGFloat(min(100, max(10, widthPercent))) / 100
         // 컬럼 폭이 아직 안 잡혔으면(레이아웃 전·전환 순간) 세로 상한만 적용 — 폭
         // 축소로 크기가 붕괴하지 않게.
-        let fit: CGFloat
-        if rectWidth > 120 {
-            fit = min(1, min((rectWidth - 16) / image.size.width, maxHeight / image.size.height))
+        let fit: CGFloat = if rectWidth > 120 {
+            min(1, min((rectWidth - 16) / image.size.width, maxHeight / image.size.height))
         } else {
-            fit = min(1, maxHeight / image.size.height)
+            min(1, maxHeight / image.size.height)
         }
         let scale = fit * pct
         return NSSize(width: image.size.width * scale, height: image.size.height * scale)
@@ -2544,9 +2630,9 @@ final class BlockTextView: NSTextView {
         _ height: CGFloat?, block: MintBlock, in paragraph: NSRange
     ) {
         guard let storage = textStorage, paragraph.length > 0,
-            paragraph.location < storage.length,
-            let ps = (styleAttributes(for: block, checked: false)[.paragraphStyle]
-                as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+              paragraph.location < storage.length,
+              let ps = (styleAttributes(for: block, checked: false)[.paragraphStyle]
+                  as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
         else { return }
         if let height {
             switch block {
@@ -2561,7 +2647,7 @@ final class BlockTextView: NSTextView {
         }
         let current =
             storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
-            as? NSParagraphStyle
+                as? NSParagraphStyle
         guard current?.minimumLineHeight != ps.minimumLineHeight else { return }
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
     }
@@ -2596,7 +2682,7 @@ final class BlockTextView: NSTextView {
         // 공백만 있는(단어 삭제용 같은) 사소한 선택이나 IME 조합 중이면 띄우지 않는다.
         let selected = sel.length > 0 ? (string as NSString).substring(with: sel) : ""
         guard sel.length > 0, !hasMarkedText(),
-            !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+              !selected.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
             hideSelectionToolbar()
             return
@@ -2645,7 +2731,8 @@ final class BlockTextView: NSTextView {
             let old = host.frame
             host.frame = NSRect(
                 x: old.midX - size.width / 2, y: old.minY,
-                width: size.width, height: size.height)
+                width: size.width, height: size.height
+            )
             return
         }
         // 선택 위 중앙 — 문서 맨 위라 걸리면 선택 아래로 내린다 (flipped 좌표).
@@ -2667,7 +2754,7 @@ final class BlockTextView: NSTextView {
         state.lineSpacing =
             (para.location < storage.length
                 ? storage.attribute(.mintLineSpacing, at: para.location, effectiveRange: nil)
-                    as? Double : nil) ?? Double(lineSpacing)
+                as? Double : nil) ?? Double(lineSpacing)
         guard sel.location < storage.length else { return state }
         let attrs = storage.attributes(at: sel.location, effectiveRange: nil)
         state.bold = attrs[.mintBold] as? Bool == true
@@ -2677,7 +2764,7 @@ final class BlockTextView: NSTextView {
         state.colorHex = attrs[.mintColor] as? String
         state.fontSize =
             (attrs[.mintFontSize] as? Double)
-            ?? Double((attrs[.font] as? NSFont ?? bodyFont).pointSize)
+                ?? Double((attrs[.font] as? NSFont ?? bodyFont).pointSize)
         return state
     }
 
@@ -2687,11 +2774,11 @@ final class BlockTextView: NSTextView {
         case .toggleBold: toggleInlineStyle(.mintBold)
         case .toggleItalic: toggleInlineStyle(.mintItalic)
         case .toggleCode: toggleInlineStyle(.mintCode)
-        case .color(let hex): applyInlineColor(hex)
-        case .fontSize(let size): applyInlineFontSize(size)
-        case .lineSpacing(let v): applyLineSpacing(v)
-        case .align(let align): applyAlignment(align)
-        case .block(let block): convertSelectionBlock(to: block)
+        case let .color(hex): applyInlineColor(hex)
+        case let .fontSize(size): applyInlineFontSize(size)
+        case let .lineSpacing(v): applyLineSpacing(v)
+        case let .align(align): applyAlignment(align)
+        case let .block(block): convertSelectionBlock(to: block)
         }
         window?.makeFirstResponder(self)
         presentSelectionToolbar()
@@ -2756,7 +2843,7 @@ final class BlockTextView: NSTextView {
         let info = blockInfo(in: para)
         let baseSize =
             (styleAttributes(for: info.block, checked: info.checked)[.font] as? NSFont)?
-            .pointSize ?? bodyFont.pointSize
+                .pointSize ?? bodyFont.pointSize
         isTransforming = true
         if abs(CGFloat(size) - baseSize) < 0.5 {
             storage.removeAttribute(.mintFontSize, range: sel)
@@ -2777,7 +2864,8 @@ final class BlockTextView: NSTextView {
         var location = sel.location
         repeat {
             let para = ns.paragraphRange(
-                for: NSRange(location: min(location, ns.length), length: 0))
+                for: NSRange(location: min(location, ns.length), length: 0)
+            )
             if para.length > 0, para.location < storage.length {
                 _ = shouldChangeText(in: para, replacementString: nil)
                 isTransforming = true
@@ -2789,7 +2877,8 @@ final class BlockTextView: NSTextView {
                 let info = blockInfo(in: para)
                 applyBlock(
                     info.block, checked: info.checked, marker: info.marker,
-                    to: para, registerUndo: false)
+                    to: para, registerUndo: false
+                )
                 isTransforming = false
                 didChangeText()
             }
@@ -2806,7 +2895,8 @@ final class BlockTextView: NSTextView {
         var location = sel.location
         repeat {
             let para = ns.paragraphRange(
-                for: NSRange(location: min(location, ns.length), length: 0))
+                for: NSRange(location: min(location, ns.length), length: 0)
+            )
             if para.length > 0, para.location < storage.length {
                 _ = shouldChangeText(in: para, replacementString: nil)
                 isTransforming = true
@@ -2814,7 +2904,8 @@ final class BlockTextView: NSTextView {
                 let info = blockInfo(in: para)
                 applyBlock(
                     info.block, checked: info.checked, marker: info.marker,
-                    to: para, registerUndo: false)
+                    to: para, registerUndo: false
+                )
                 isTransforming = false
                 didChangeText()
             }
@@ -2827,12 +2918,14 @@ final class BlockTextView: NSTextView {
         let sel = selectedRange()
         let ns = string as NSString
         let firstPara = ns.paragraphRange(
-            for: NSRange(location: min(sel.location, ns.length), length: 0))
+            for: NSRange(location: min(sel.location, ns.length), length: 0)
+        )
         let resolved: MintBlock = blockInfo(in: firstPara).block == target ? .p : target
         var location = sel.location
         repeat {
             let para = ns.paragraphRange(
-                for: NSRange(location: min(location, ns.length), length: 0))
+                for: NSRange(location: min(location, ns.length), length: 0)
+            )
             applyBlock(resolved, to: para)
             location = para.upperBound
         } while location < sel.upperBound
@@ -2845,11 +2938,13 @@ final class BlockTextView: NSTextView {
         var location = range.location
         repeat {
             let para = ns.paragraphRange(
-                for: NSRange(location: min(location, ns.length), length: 0))
+                for: NSRange(location: min(location, ns.length), length: 0)
+            )
             let info = blockInfo(in: para)
             applyBlock(
                 info.block, checked: info.checked, marker: info.marker,
-                to: para, registerUndo: false)
+                to: para, registerUndo: false
+            )
             location = para.upperBound
         } while location < range.upperBound
     }
@@ -2880,31 +2975,81 @@ final class BlockTextView: NSTextView {
         return super.performKeyEquivalent(with: event)
     }
 
-    // 메뉴(보기 ▸ 문서에서 찾기)용 리스폰더 체인 진입점 — 단축키가 IME 사정으로
-    // 뷰에 닿지 못해도 메뉴 경로로는 항상 열리게 한다.
-    @objc func mintFindInDocument(_ sender: Any?) { performFind(.showFindInterface) }
-    @objc func mintFindNext(_ sender: Any?) { performFind(.nextMatch) }
-    @objc func mintFindPrevious(_ sender: Any?) { performFind(.previousMatch) }
+    /// 메뉴(보기 ▸ 문서에서 찾기)용 리스폰더 체인 진입점 — 단축키가 IME 사정으로
+    /// 뷰에 닿지 못해도 메뉴 경로로는 항상 열리게 한다.
+    @objc func mintFindInDocument(_: Any?) {
+        performFind(.showFindInterface)
+    }
+
+    @objc func mintFindNext(_: Any?) {
+        performFind(.nextMatch)
+    }
+
+    @objc func mintFindPrevious(_: Any?) {
+        performFind(.previousMatch)
+    }
 
     // MARK: 메뉴 명령 (리스폰더 체인 — MintCommands가 NSApp.sendAction으로 호출)
+
     //
     // 선택이 있으면 선택에, 없으면 커서 문단에 적용된다(convert/align은 문단 단위,
     // toggleInlineStyle은 선택이 있어야 동작). 에디터가 first responder일 때만 도달한다.
 
-    @objc func mintFormatBold(_ sender: Any?) { toggleInlineStyle(.mintBold) }
-    @objc func mintFormatItalic(_ sender: Any?) { toggleInlineStyle(.mintItalic) }
-    @objc func mintFormatCode(_ sender: Any?) { toggleInlineStyle(.mintCode) }
-    @objc func mintHeading1(_ sender: Any?) { convertSelectionBlock(to: .h1) }
-    @objc func mintHeading2(_ sender: Any?) { convertSelectionBlock(to: .h2) }
-    @objc func mintHeading3(_ sender: Any?) { convertSelectionBlock(to: .h3) }
-    @objc func mintBodyText(_ sender: Any?) { convertSelectionBlock(to: .p) }
-    @objc func mintBulletList(_ sender: Any?) { convertSelectionBlock(to: .bullet) }
-    @objc func mintNumberedList(_ sender: Any?) { convertSelectionBlock(to: .number) }
-    @objc func mintQuoteBlock(_ sender: Any?) { convertSelectionBlock(to: .quote) }
-    @objc func mintCodeBlock(_ sender: Any?) { convertSelectionBlock(to: .code) }
-    @objc func mintAlignLeft(_ sender: Any?) { applyAlignment(nil) }
-    @objc func mintAlignCenter(_ sender: Any?) { applyAlignment("center") }
-    @objc func mintAlignRight(_ sender: Any?) { applyAlignment("right") }
+    @objc func mintFormatBold(_: Any?) {
+        toggleInlineStyle(.mintBold)
+    }
+
+    @objc func mintFormatItalic(_: Any?) {
+        toggleInlineStyle(.mintItalic)
+    }
+
+    @objc func mintFormatCode(_: Any?) {
+        toggleInlineStyle(.mintCode)
+    }
+
+    @objc func mintHeading1(_: Any?) {
+        convertSelectionBlock(to: .h1)
+    }
+
+    @objc func mintHeading2(_: Any?) {
+        convertSelectionBlock(to: .h2)
+    }
+
+    @objc func mintHeading3(_: Any?) {
+        convertSelectionBlock(to: .h3)
+    }
+
+    @objc func mintBodyText(_: Any?) {
+        convertSelectionBlock(to: .p)
+    }
+
+    @objc func mintBulletList(_: Any?) {
+        convertSelectionBlock(to: .bullet)
+    }
+
+    @objc func mintNumberedList(_: Any?) {
+        convertSelectionBlock(to: .number)
+    }
+
+    @objc func mintQuoteBlock(_: Any?) {
+        convertSelectionBlock(to: .quote)
+    }
+
+    @objc func mintCodeBlock(_: Any?) {
+        convertSelectionBlock(to: .code)
+    }
+
+    @objc func mintAlignLeft(_: Any?) {
+        applyAlignment(nil)
+    }
+
+    @objc func mintAlignCenter(_: Any?) {
+        applyAlignment("center")
+    }
+
+    @objc func mintAlignRight(_: Any?) {
+        applyAlignment("right")
+    }
 
     /// NSTextFinder 액션 실행 — performTextFinderAction은 sender의 tag로 동작을 읽는다.
     private func performFind(_ action: NSTextFinder.Action) {
@@ -2922,12 +3067,14 @@ final class BlockTextView: NSTextView {
     /// 붙으므로, 프레임을 옮기면 페이드 중이던 픽셀까지 통째로 따라와
     /// 잔상이 구조적으로 불가능하다.
     /// 이 오버라이드는 시스템 캐럿을 비활성화하는 스위치 역할만 한다.
-    override func drawInsertionPoint(in rect: NSRect, color: NSColor, turnedOn flag: Bool) {}
+    override func drawInsertionPoint(in _: NSRect, color _: NSColor, turnedOn _: Bool) {}
 
     /// 클릭을 통과시키는 장식 뷰 — 줄 하이라이트 밴드는 줄 전체 폭이라, hitTest를
     /// 막지 않으면 그 줄의 텍스트 클릭·선택이 통째로 밴드에 먹힌다.
     private final class PassthroughView: NSView {
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func hitTest(_: NSPoint) -> NSView? {
+            nil
+        }
     }
 
     /// 커서 줄 하이라이트 뷰 — 단일 서브뷰라 위치를 옮기면 이전 밴드가 자동
@@ -2992,8 +3139,8 @@ final class BlockTextView: NSTextView {
     private func syncCaretView() {
         let visible =
             window?.firstResponder === self
-            && selectedRange().length == 0
-            && selectedImageLocation == nil
+                && selectedRange().length == 0
+                && selectedImageLocation == nil
         guard visible, let rect = caretRectInView() else {
             caretBlinkTimer?.invalidate()
             caretBlinkTimer = nil
@@ -3005,8 +3152,8 @@ final class BlockTextView: NSTextView {
         let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
         caret.origin.y = baseline - glyphTop
-        caret.size.height = max(1, glyphTop - font.descender)  // descender 음수
-        caret.size.width = 2  // firstRect의 캐럿 폭은 0 — 얇은 표준 폭으로.
+        caret.size.height = max(1, glyphTop - font.descender) // descender 음수
+        caret.size.width = 2 // firstRect의 캐럿 폭은 0 — 얇은 표준 폭으로.
         caretView.layer?.backgroundColor = insertionPointColor.cgColor
         caretView.frame = caret
         caretView.isHidden = false
@@ -3053,8 +3200,8 @@ final class BlockTextView: NSTextView {
             while true {
                 guard !Task.isCancelled, let self else { return }
                 let t = min(1, Date().timeIntervalSince(start) / duration)
-                self.ghostOpacity = CGFloat(t * (2 - t))  // ease-out quad
-                self.needsDisplay = true
+                ghostOpacity = CGFloat(t * (2 - t)) // ease-out quad
+                needsDisplay = true
                 if t >= 1 { break }
                 try? await Task.sleep(for: .milliseconds(12))
             }
@@ -3081,16 +3228,16 @@ final class BlockTextView: NSTextView {
         }
 
         guard let ghost = ghostText, !ghost.isEmpty,
-            !hasMarkedText(),
-            selectedRange().length == 0,
-            let caretRect = caretRectInView()
+              !hasMarkedText(),
+              selectedRange().length == 0,
+              let caretRect = caretRectInView()
         else { return }
 
         // 커서 문단의 실제 폰트로 그린다 — 제목 줄에서도 크기가 맞는다.
         let font = (typingAttributes[.font] as? NSFont) ?? bodyFont
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: palette.ghost.withAlphaComponent(ghostOpacity),
+            .foregroundColor: palette.ghost.withAlphaComponent(ghostOpacity)
         ]
         // 프래그먼트 top(caretRect.minY)이 아니라 본문 글리프와 같은
         // 베이스라인에 맞춰야 실제 글자 높이와 일치한다 (줄 간격과 무관하게).
@@ -3132,7 +3279,7 @@ final class BlockTextView: NSTextView {
         let n = rects.count
 
         // 이웃 줄이 정확히 맞닿아야 경계 추적이 성립한다 — 줄 간격 틈을 메운다.
-        for i in 0..<(n - 1) {
+        for i in 0 ..< (n - 1) {
             rects[i].size.height = rects[i + 1].minY - rects[i].minY
         }
         // 전체 모양의 위·아래 가장자리만 0.5pt 물려 이전(insetBy dy: 0.5)과 동일하게.
@@ -3145,8 +3292,8 @@ final class BlockTextView: NSTextView {
         // 잔계단이 되므로, 바깥쪽 가장자리에 맞춰 붙인다. 스냅이 새 잔계단을
         // 만들 수 있어(가운데 줄이 좁은 경우) 두 번 돌려 수렴시킨다.
         let snap = radius * 2 + 2
-        for _ in 0..<2 {
-            for i in 0..<(n - 1) {
+        for _ in 0 ..< 2 {
+            for i in 0 ..< (n - 1) {
                 if abs(rects[i].minX - rects[i + 1].minX) < snap {
                     let x = min(rects[i].minX, rects[i + 1].minX)
                     rects[i].size.width = rects[i].maxX - x
@@ -3166,7 +3313,7 @@ final class BlockTextView: NSTextView {
         // 플립 좌표 기준 시계 방향 폐곡선. 폭이 같은 이웃 줄 사이엔 꼭짓점이 없다.
         var corners: [CGPoint] = []
         corners.append(CGPoint(x: rects[0].maxX, y: rects[0].minY))
-        for i in 0..<(n - 1) where abs(rects[i].maxX - rects[i + 1].maxX) > 0.5 {
+        for i in 0 ..< (n - 1) where abs(rects[i].maxX - rects[i + 1].maxX) > 0.5 {
             corners.append(CGPoint(x: rects[i].maxX, y: rects[i].maxY))
             corners.append(CGPoint(x: rects[i + 1].maxX, y: rects[i].maxY))
         }
@@ -3184,20 +3331,21 @@ final class BlockTextView: NSTextView {
         let first = corners[0]
         let last = corners[corners.count - 1]
         path.move(to: CGPoint(x: (first.x + last.x) / 2, y: (first.y + last.y) / 2))
-        for i in 0..<corners.count {
+        for i in 0 ..< corners.count {
             let prev = i == 0 ? last : corners[i - 1]
             let c = corners[i]
             let next = corners[(i + 1) % corners.count]
             let r = min(
                 radius,
                 hypot(c.x - prev.x, c.y - prev.y) / 2,
-                hypot(next.x - c.x, next.y - c.y) / 2)
+                hypot(next.x - c.x, next.y - c.y) / 2
+            )
             path.addArc(tangent1End: c, tangent2End: next, radius: max(r, 0))
         }
         path.closeSubpath()
 
         guard path.boundingBoxOfPath.intersects(dirtyRect),
-            let ctx = NSGraphicsContext.current?.cgContext
+              let ctx = NSGraphicsContext.current?.cgContext
         else { return }
         ctx.saveGState()
         ctx.addPath(path)
@@ -3215,7 +3363,8 @@ final class BlockTextView: NSTextView {
         let caret = selectedRange().location
         guard caret != NSNotFound else { return nil }
         let screenRect = firstRect(
-            forCharacterRange: NSRange(location: caret, length: 0), actualRange: nil)
+            forCharacterRange: NSRange(location: caret, length: 0), actualRange: nil
+        )
         guard screenRect.height > 0 else { return nil }
         let windowRect = window.convertFromScreen(screenRect)
         return convert(windowRect, from: nil)
@@ -3233,7 +3382,8 @@ final class BlockTextView: NSTextView {
         let charIndex = min(caret, ns.length - 1)
         let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
         let fragment = layoutManager.lineFragmentRect(
-            forGlyphAt: glyphIndex, effectiveRange: nil)
+            forGlyphAt: glyphIndex, effectiveRange: nil
+        )
         guard fragment.height > 0 else { return nil }
         var lineTop = fragment.minY
         var baselineOffset = layoutManager.location(forGlyphAt: glyphIndex).y
@@ -3275,20 +3425,21 @@ final class BlockTextView: NSTextView {
         _ = scrollToVisible(
             NSRect(
                 x: inView.minX, y: inView.minY,
-                width: max(1, inView.width), height: inView.height + gutter))
+                width: max(1, inView.width), height: inView.height + gutter
+            )
+        )
     }
 }
 
 // MARK: - 블록 장식 레이아웃 매니저
 
-/// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·이미지를 그린다.
-/// 전부 text storage 밖 — 문서·undo·IME에 흔적이 없다.
+// 불릿·번호·체크박스·인용 바·코드/수식 배경·구분선·이미지를 그린다.
+// 전부 text storage 밖 — 문서·undo·IME에 흔적이 없다.
 // MARK: - 마커 증분 감지 (NSTextStorageDelegate)
 
-// storage 편집은 실제로 메인 스레드에서만 일어난다 (에디터 조작 경로뿐) —
-// SidebarDragDrop의 DropDelegate와 같은 관용구로 격리를 넘긴다.
+/// storage 편집은 실제로 메인 스레드에서만 일어난다 (에디터 조작 경로뿐) —
+/// SidebarDragDrop의 DropDelegate와 같은 관용구로 격리를 넘긴다.
 extension BlockTextView: @preconcurrency NSTextStorageDelegate {
-
     /// 편집된 범위에 수식·이미지 마커가 들어왔는지만 본다 — 문서 길이와 무관.
     ///
     /// 범위를 **양옆 1글자 넓혀** 검사하는 이유: `$`를 치고 다음 키에 `$`를 치면
@@ -3297,7 +3448,7 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
     ///
     /// 삭제로 마커가 사라지는 경우는 여기서 알 수 없다 — 플래그가 true인 채 남아
     /// 전체 경로를 한 번 더 타고, 거기서 `syncMarkerFlag`가 정확히 되돌린다.
-    public func textStorage(
+    func textStorage(
         _ textStorage: NSTextStorage,
         didProcessEditing editedMask: NSTextStorageEditActions,
         range editedRange: NSRange,
@@ -3319,7 +3470,6 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
 }
 
 final class MintLayoutManager: NSLayoutManager {
-
     private var view: BlockTextView? {
         firstTextView as? BlockTextView
     }
@@ -3355,9 +3505,11 @@ final class MintLayoutManager: NSLayoutManager {
 
         let shown = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         let firstPara = ns.paragraphRange(
-            for: NSRange(location: min(shown.location, ns.length - 1), length: 0))
+            for: NSRange(location: min(shown.location, ns.length - 1), length: 0)
+        )
         let lastPara = ns.paragraphRange(
-            for: NSRange(location: min(shown.upperBound, ns.length - 1), length: 0))
+            for: NSRange(location: min(shown.upperBound, ns.length - 1), length: 0)
+        )
 
         // 코드 런은 여러 문단을 하나의 라운드 사각형으로 병합해 그린다 (디자인).
         // 화면 위/아래로 이어지는 런은 잘린 배경이 되므로 런의 시작·끝까지만
@@ -3376,7 +3528,7 @@ final class MintLayoutManager: NSLayoutManager {
         }
 
         var location = start
-        var codeStart: Int? = nil
+        var codeStart: Int?
         while location < end {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             let block = blockInfo(storage, in: para, view: view).block
@@ -3386,7 +3538,8 @@ final class MintLayoutManager: NSLayoutManager {
                 if let runStart = codeStart {
                     drawGroupBackground(
                         charRange: NSRange(location: runStart, length: para.location - runStart),
-                        origin: origin, color: theme.codeBg)
+                        origin: origin, color: theme.codeBg
+                    )
                     codeStart = nil
                 }
                 if block == .math {
@@ -3397,7 +3550,8 @@ final class MintLayoutManager: NSLayoutManager {
                     }
                     if !rendered {
                         drawGroupBackground(
-                            charRange: para, origin: origin, color: theme.codeBg)
+                            charRange: para, origin: origin, color: theme.codeBg
+                        )
                     }
                 }
             }
@@ -3407,7 +3561,8 @@ final class MintLayoutManager: NSLayoutManager {
             // end까지 넓혀 둔 덕에 여기가 곧 런의 끝이다.
             drawGroupBackground(
                 charRange: NSRange(location: runStart, length: end - runStart),
-                origin: origin, color: theme.codeBg)
+                origin: origin, color: theme.codeBg
+            )
         }
     }
 
@@ -3447,13 +3602,15 @@ final class MintLayoutManager: NSLayoutManager {
                     .map { $0 - MintFonts.serif(20).capHeight / 2 } ?? firstLine.midY
                 drawCheckbox(
                     checked: info.checked, theme: theme,
-                    at: NSPoint(x: leftEdge(origin) + 4, y: centerY - 8))
+                    at: NSPoint(x: leftEdge(origin) + 4, y: centerY - 8)
+                )
             case .divider:
                 theme.sepStrong.setFill()
                 NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: 1).fill()
             case .math:
                 if let render = view.mathRenders.first(
-                    where: { $0.range.location == para.location }) {
+                    where: { $0.range.location == para.location }
+                ) {
                     drawMath(render.image, in: rect, theme: theme)
                 } else {
                     // 편집 중이거나 아직 파싱 안 되는 소스 — "수식" 태그만.
@@ -3461,24 +3618,28 @@ final class MintLayoutManager: NSLayoutManager {
                         string: "수식",
                         attributes: [
                             .font: MintFonts.ui(10), .foregroundColor: theme.ink3,
-                            .kern: 0.6,
-                        ])
+                            .kern: 0.6
+                        ]
+                    )
                     tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
                 }
             case .image:
                 if let render = view.imageRenders.first(
-                    where: { $0.range.location == para.location }) {
+                    where: { $0.range.location == para.location }
+                ) {
                     drawImage(
                         render.image, in: rect, display: render.size,
-                        align: render.align, selected: render.selected, theme: theme)
+                        align: render.align, selected: render.selected, theme: theme
+                    )
                 } else {
                     // 편집 중이거나 파일을 못 읽음 — "이미지" 태그만.
                     let tag = NSAttributedString(
                         string: "이미지",
                         attributes: [
                             .font: MintFonts.ui(10), .foregroundColor: theme.ink3,
-                            .kern: 0.6,
-                        ])
+                            .kern: 0.6
+                        ]
+                    )
                     tag.draw(at: NSPoint(x: rect.maxX - tag.size().width - 12, y: rect.minY + 6))
                 }
             default:
@@ -3547,7 +3708,8 @@ final class MintLayoutManager: NSLayoutManager {
         let font = MintFonts.serif(size)
         let attr = NSAttributedString(
             string: marker,
-            attributes: [.font: font, .foregroundColor: color])
+            attributes: [.font: font, .foregroundColor: color]
+        )
         let y = baseline.map { $0 - font.ascender }
             ?? line.minY + (line.height - attr.size().height) / 2
         attr.draw(at: NSPoint(x: x, y: y))
@@ -3566,21 +3728,24 @@ final class MintLayoutManager: NSLayoutManager {
         }
         let target = NSRect(
             x: rect.midX - size.width / 2, y: rect.midY - size.height / 2,
-            width: size.width, height: size.height)
+            width: size.width, height: size.height
+        )
         let box = target.insetBy(
-            dx: -BlockTextView.mathBoxMargin, dy: -BlockTextView.mathBoxMargin)
+            dx: -BlockTextView.mathBoxMargin, dy: -BlockTextView.mathBoxMargin
+        )
         theme.codeBg.setFill()
         NSBezierPath(roundedRect: box, xRadius: 12, yRadius: 12).fill()
         image.draw(
             in: target, from: .zero, operation: .sourceOver, fraction: 1,
-            respectFlipped: true, hints: nil)
+            respectFlipped: true, hints: nil
+        )
     }
 
     /// 렌더된 이미지를 지정 크기(`display`)·정렬(`align`)로 그린다. 객체 선택 시엔
     /// 선택 테두리도 두른다 (요구 3). display는 뷰의 `imageDisplaySize`가 계산한 값.
     private func drawImage(
         _ image: NSImage, in rect: NSRect, display: NSSize,
-        align: String, selected: Bool, theme: MintTheme
+        align: String, selected _: Bool, theme _: MintTheme
     ) {
         guard display.width > 0, display.height > 0 else { return }
         // 줄 높이(=display 높이+여유)를 넘지 않게 안전하게 한 번 더 맞춘다.
@@ -3588,17 +3753,18 @@ final class MintLayoutManager: NSLayoutManager {
         let scale = min(box.width / display.width, box.height / display.height, 1)
         let size = NSSize(width: display.width * scale, height: display.height * scale)
         // 가로 정렬 — 좌/우는 살짝 안쪽(8pt)에서 시작한다.
-        let x: CGFloat
-        switch align {
-        case "left": x = box.minX
-        case "right": x = box.maxX - size.width
-        default: x = rect.midX - size.width / 2
+        let x: CGFloat = switch align {
+        case "left": box.minX
+        case "right": box.maxX - size.width
+        default: rect.midX - size.width / 2
         }
         let target = NSRect(
-            x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height)
+            x: x, y: rect.midY - size.height / 2, width: size.width, height: size.height
+        )
         image.draw(
             in: target, from: .zero, operation: .sourceOver, fraction: 1,
-            respectFlipped: true, hints: nil)
+            respectFlipped: true, hints: nil
+        )
         // 선택 테두리·핸들은 ImageBoxOverlay(별도 뷰)가 그린다.
     }
 
@@ -3612,11 +3778,13 @@ final class MintLayoutManager: NSLayoutManager {
             let check = NSAttributedString(
                 string: "✓",
                 attributes: [
-                    .font: MintFonts.ui(10.5, weight: .bold), .foregroundColor: NSColor.white,
-                ])
+                    .font: MintFonts.ui(10.5, weight: .bold), .foregroundColor: NSColor.white
+                ]
+            )
             let size = check.size()
             check.draw(at: NSPoint(
-                x: box.midX - size.width / 2, y: box.midY - size.height / 2))
+                x: box.midX - size.width / 2, y: box.midY - size.height / 2
+            ))
         } else {
             theme.ink3.setStroke()
             path.stroke()
@@ -3635,7 +3803,6 @@ final class MintLayoutManager: NSLayoutManager {
         color.setFill()
         NSBezierPath(roundedRect: rect, xRadius: 12, yRadius: 12).fill()
     }
-
 }
 
 // MARK: - LaTeX 렌더러 (SwiftMath)
@@ -3643,17 +3810,18 @@ final class MintLayoutManager: NSLayoutManager {
 /// 수식 블록의 LaTeX → NSImage 렌더 캐시. 메인 스레드에서만 접근한다
 /// (편집 갱신·드로잉 모두 메인).
 enum MathRenderer {
-    nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
+    private nonisolated(unsafe) static var cache: [String: NSImage] = [:]
 
     /// LaTeX가 파싱되지 않으면 nil — 뷰는 소스 텍스트를 그대로 보여준다.
     static func image(latex: String, color: NSColor, fontSize: CGFloat) -> NSImage? {
         let key = "\(fontSize)|\(color.description)|\(latex)"
         if let hit = cache[key] { return hit }
         let renderer = MTMathImage(
-            latex: latex, fontSize: fontSize, textColor: color, labelMode: .display)
+            latex: latex, fontSize: fontSize, textColor: color, labelMode: .display
+        )
         let (error, image) = renderer.asImage()
         guard error == nil, let image, image.size.width > 0 else { return nil }
-        if cache.count > 256 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
+        if cache.count > 256 { cache.removeAll() } // 폭주 방지 — 단순 전체 비움
         cache[key] = image
         return image
     }

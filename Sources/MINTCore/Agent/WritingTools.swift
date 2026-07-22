@@ -37,7 +37,7 @@ public struct AgentToolParameter: Sendable {
     var schema: [String: any Sendable] {
         var result: [String: any Sendable] = [
             "type": type.rawValue,
-            "description": description,
+            "description": description
         ]
         if !allowedValues.isEmpty { result["enum"] = allowedValues }
         return result
@@ -68,8 +68,8 @@ public struct ClosureWritingTool: WritingTool {
         description: String,
         parameters: [AgentToolParameter] = [],
         sideEffect: Bool = false,
-        handler: @Sendable @escaping
-            ([String: JSONValue], AgentContext) async throws -> AgentToolResult
+        handler: @escaping @Sendable
+        ([String: JSONValue], AgentContext) async throws -> AgentToolResult
     ) {
         self.name = name
         self.description = description
@@ -79,8 +79,7 @@ public struct ClosureWritingTool: WritingTool {
     }
 
     public func run(arguments: [String: JSONValue], context: AgentContext) async throws
-        -> AgentToolResult
-    {
+        -> AgentToolResult {
         try await handler(arguments, context)
     }
 }
@@ -102,8 +101,7 @@ public struct AnyWritingTool: WritingTool {
     }
 
     public func run(arguments: [String: JSONValue], context: AgentContext) async throws
-        -> AgentToolResult
-    {
+        -> AgentToolResult {
         try await handler(arguments, context)
     }
 }
@@ -115,12 +113,15 @@ public struct ToolRegistry: Sendable {
         toolsByName = Dictionary(uniqueKeysWithValues: tools.map { ($0.name, $0) })
     }
 
-    public var names: [String] { toolsByName.keys.sorted() }
+    public var names: [String] {
+        toolsByName.keys.sorted()
+    }
 
     public var specs: [ToolSpec] {
         toolsByName.values.sorted { $0.name < $1.name }.map { tool in
             let properties = Dictionary(
-                uniqueKeysWithValues: tool.parameters.map { ($0.name, $0.schema) })
+                uniqueKeysWithValues: tool.parameters.map { ($0.name, $0.schema) }
+            )
             return [
                 "type": "function",
                 "function": [
@@ -130,9 +131,9 @@ public struct ToolRegistry: Sendable {
                         "type": "object",
                         "properties": properties,
                         "required": tool.parameters.filter(\.required).map(\.name),
-                        "additionalProperties": false,
-                    ] as [String: any Sendable],
-                ] as [String: any Sendable],
+                        "additionalProperties": false
+                    ] as [String: any Sendable]
+                ] as [String: any Sendable]
             ] as ToolSpec
         }
     }
@@ -162,7 +163,8 @@ public struct ToolRegistry: Sendable {
         _ arguments: [String: JSONValue], for tool: AnyWritingTool
     ) -> String? {
         let definitions = Dictionary(
-            uniqueKeysWithValues: tool.parameters.map { ($0.name, $0) })
+            uniqueKeysWithValues: tool.parameters.map { ($0.name, $0) }
+        )
         for parameter in tool.parameters where parameter.required {
             guard let value = arguments[parameter.name], value != .null else {
                 return "\(tool.name): 필수 인자 '\(parameter.name)'이(가) 없어요."
@@ -172,18 +174,16 @@ public struct ToolRegistry: Sendable {
             guard let definition = definitions[name] else {
                 return "\(tool.name): 허용되지 않은 인자 '\(name)'이에요."
             }
-            let valid: Bool
-            switch (definition.type, value) {
-            case (.string, .string), (.integer, .int), (.boolean, .bool): valid = true
-            default: valid = false
+            let valid = switch (definition.type, value) {
+            case (.string, .string), (.integer, .int), (.boolean, .bool): true
+            default: false
             }
             guard valid else {
                 return "\(tool.name): '\(name)' 인자 형식이 \(definition.type.rawValue)이(가) 아니에요."
             }
             if !definition.allowedValues.isEmpty,
-                let string = value.agentString,
-                !definition.allowedValues.contains(string)
-            {
+               let string = value.agentString,
+               !definition.allowedValues.contains(string) {
                 return "\(tool.name): '\(name)' 값은 \(definition.allowedValues.joined(separator: ", ")) 중 하나여야 해요."
             }
         }
@@ -194,7 +194,7 @@ public struct ToolRegistry: Sendable {
 // MARK: - MVP 조회 도구 12종
 
 public enum DefaultWritingTools {
-    public static let readOnlyMVP: ToolRegistry = ToolRegistry(tools: [
+    public static let readOnlyMVP: ToolRegistry = .init(tools: [
         AnyWritingTool(activeDocument),
         AnyWritingTool(outline),
         AnyWritingTool(readScene),
@@ -206,12 +206,13 @@ public enum DefaultWritingTools {
         AnyWritingTool(relation),
         AnyWritingTool(timeline),
         AnyWritingTool(consistency),
-        AnyWritingTool(contextAtCursor),
+        AnyWritingTool(contextAtCursor)
     ])
 
     private static let beforeParameter = AgentToolParameter(
         "before", type: .integer,
-        description: "특정 시점 질의의 UTF-16 상한. 생략하면 작품 전체를 조회합니다.")
+        description: "특정 시점 질의의 UTF-16 상한. 생략하면 작품 전체를 조회합니다."
+    )
 
     private static let activeDocument = ClosureWritingTool(
         name: "get_active_document",
@@ -230,11 +231,12 @@ public enum DefaultWritingTools {
             "key_scene_count": .int(context.visibleKeyScenes.count),
             "chapter_count": .int(context.chapters.count),
             "narration_mode": narration.map { .string($0.mode.rawValue) } ?? .null,
-            "narrator": narration?.narratorName.map(JSONValue.string) ?? .null,
+            "narrator": narration?.narratorName.map(JSONValue.string) ?? .null
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "‘\(entry.title)’ · 핵심 장면 \(context.visibleKeyScenes.count)개")
+            summary: "‘\(entry.title)’ · 핵심 장면 \(context.visibleKeyScenes.count)개"
+        )
     }
 
     private static let outline = ClosureWritingTool(
@@ -246,7 +248,7 @@ public enum DefaultWritingTools {
                 "chapter_ref": .string(chapter.reference),
                 "heading": .string(chapter.title),
                 "path": .array(chapter.path.map(JSONValue.string)),
-                "range": .array([.int(chapter.range.lowerBound), .int(chapter.range.upperBound)]),
+                "range": .array([.int(chapter.range.lowerBound), .int(chapter.range.upperBound)])
             ])
         }
         let scenes = context.visibleKeyScenes.enumerated().map { index, scene -> JSONValue in
@@ -263,14 +265,15 @@ public enum DefaultWritingTools {
                 "importance": .int(scene.importance),
                 "author_confirmed": .bool(scene.authorConfirmed),
                 "stale": .bool(context.knowledge?.staleKeySceneIDs.contains(scene.id) == true),
-                "summary": .string(scene.summary),
+                "summary": .string(scene.summary)
             ])
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object([
-                "chapters": .array(chapters), "key_scenes": .array(scenes),
+                "chapters": .array(chapters), "key_scenes": .array(scenes)
             ])),
-            summary: "장·절 \(chapters.count)개와 핵심 장면 \(scenes.count)개를 확인했어요.")
+            summary: "장·절 \(chapters.count)개와 핵심 장면 \(scenes.count)개를 확인했어요."
+        )
     }
 
     private static let readScene = ClosureWritingTool(
@@ -280,9 +283,10 @@ public enum DefaultWritingTools {
             AgentToolParameter(
                 "scene_ref", type: .string,
                 description: "chapter_ref, 핵심 장면 UUID·번호·제목",
-                required: true),
+                required: true
+            ),
             AgentToolParameter("offset", type: .integer, description: "장면 범위 안 시작 위치(기본 0)"),
-            AgentToolParameter("limit", type: .integer, description: "읽을 UTF-16 길이(기본 1200, 최대 3000)"),
+            AgentToolParameter("limit", type: .integer, description: "읽을 UTF-16 길이(기본 1200, 최대 3000)")
         ]
     ) { arguments, context in
         guard let reference = arguments["scene_ref"]?.agentString else {
@@ -290,36 +294,39 @@ public enum DefaultWritingTools {
         }
         let target: AgentReadableTarget
         switch context.resolveKeyScene(reference) {
-        case .success(let resolved):
+        case let .success(resolved):
             guard let source = resolved.scene.sourceRange else {
                 return .error("계획 단계 핵심 장면은 아직 연결된 원문이 없어요.")
             }
             target = AgentReadableTarget(
                 reference: resolved.scene.id.uuidString,
-                title: resolved.scene.title, range: source)
+                title: resolved.scene.title, range: source
+            )
         case .failure:
             guard let chapter = context.resolveChapter(reference) else {
                 return .error("장·절 또는 핵심 장면 '\(reference)'을 찾지 못했어요.")
             }
             target = AgentReadableTarget(
-                reference: chapter.reference, title: chapter.title, range: chapter.range)
+                reference: chapter.reference, title: chapter.title, range: chapter.range
+            )
         }
         let offset = max(0, arguments["offset"]?.agentInt ?? 0)
-        let limit = min(3_000, max(1, arguments["limit"]?.agentInt ?? 1_200))
+        let limit = min(3000, max(1, arguments["limit"]?.agentInt ?? 1200))
         let lower = min(target.range.upperBound, target.range.lowerBound + offset)
         let upper = min(target.range.upperBound, lower + limit)
         guard upper > lower else { return .error("이 범위에서 더 읽을 원문이 없어요.") }
-        let text = context.text(in: lower..<upper)
+        let text = context.text(in: lower ..< upper)
         let value: JSONValue = .object([
             "scene_ref": .string(target.reference),
             "title": .string(target.title),
             "offset": .int(offset),
             "has_more": .bool(upper < target.range.upperBound),
-            "text": .string(text),
+            "text": .string(text)
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "\(target.title) · \(text.count)자를 읽었어요.")
+            summary: "\(target.title) · \(text.count)자를 읽었어요."
+        )
     }
 
     private static let searchText = ClosureWritingTool(
@@ -327,12 +334,15 @@ public enum DefaultWritingTools {
         description: "문서 원문에서 정확한 문자열을 찾아 위치와 짧은 문맥을 반환합니다.",
         parameters: [
             AgentToolParameter(
-                "query", type: .string, description: "찾을 문자열", required: true),
+                "query", type: .string, description: "찾을 문자열", required: true
+            ),
             AgentToolParameter(
                 "all_documents", type: .boolean,
-                description: "true면 다른 문서도 함께 검색합니다. 현재 문서도 작품 전체를 검색합니다."),
+                description: "true면 다른 문서도 함께 검색합니다. 현재 문서도 작품 전체를 검색합니다."
+            ),
             AgentToolParameter(
-                "limit", type: .integer, description: "결과 상한(기본 12, 최대 30)"),
+                "limit", type: .integer, description: "결과 상한(기본 12, 최대 30)"
+            )
         ]
     ) { arguments, context in
         guard let query = arguments["query"]?.agentString?
@@ -346,13 +356,15 @@ public enum DefaultWritingTools {
             if matches.count >= limit { break }
             let body = entry.body
             matches.append(contentsOf: context.matches(
-                query: query, in: body, entry: entry, remaining: limit - matches.count))
+                query: query, in: body, entry: entry, remaining: limit - matches.count
+            ))
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object([
-                "query": .string(query), "matches": .array(matches),
+                "query": .string(query), "matches": .array(matches)
             ])),
-            summary: "‘\(query)’ 일치 \(matches.count)건을 찾았어요.")
+            summary: "‘\(query)’ 일치 \(matches.count)건을 찾았어요."
+        )
     }
 
     private static let findCharacter = ClosureWritingTool(
@@ -361,7 +373,8 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
-                required: true)
+                required: true
+            )
         ]
     ) { arguments, context in
         guard let reference = arguments["character_ref"]?.agentString else {
@@ -374,14 +387,15 @@ public enum DefaultWritingTools {
                 "name": .string(card.name),
                 "aliases": .array(context.aliases(of: card).map(JSONValue.string)),
                 "note": .string(card.note),
-                "auto_registered": .bool(card.autoRegistered == true),
+                "auto_registered": .bool(card.autoRegistered == true)
             ])
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object(["characters": .array(values)])),
             summary: matches.isEmpty
                 ? "‘\(reference)’에 해당하는 등록 인물이 없어요."
-                : "인물 \(matches.map(\.name).joined(separator: ", "))을 찾았어요.")
+                : "인물 \(matches.map(\.name).joined(separator: ", "))을 찾았어요."
+        )
     }
 
     private static let characterState = ClosureWritingTool(
@@ -390,8 +404,9 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
-                required: true),
-            beforeParameter,
+                required: true
+            ),
+            beforeParameter
         ]
     ) { arguments, context in
         guard let resolved = context.uniqueCharacter(arguments["character_ref"]?.agentString)
@@ -400,7 +415,7 @@ public enum DefaultWritingTools {
         let before = context.boundedOffset(arguments["before"]?.agentInt)
         let state = knowledge.stateAt(of: resolved.id, before: before)
         var object: [String: JSONValue] = [
-            "character": .string(resolved.name), "before": .int(before),
+            "character": .string(resolved.name), "before": .int(before)
         ]
         for field in StateDelta.Field.allCases {
             object[field.rawValue] = state[field].map(JSONValue.string) ?? .null
@@ -408,7 +423,8 @@ public enum DefaultWritingTools {
         return AgentToolResult(
             content: AgentJSON.encode(.object(object)),
             summary: state.isEmpty ? "\(resolved.name)의 확정 상태가 아직 없어요."
-                : "\(resolved.name)의 상태 \(state.count)항목을 확인했어요.")
+                : "\(resolved.name)의 상태 \(state.count)항목을 확인했어요."
+        )
     }
 
     private static let characterEvents = ClosureWritingTool(
@@ -417,8 +433,9 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
-                required: true),
-            beforeParameter,
+                required: true
+            ),
+            beforeParameter
         ]
     ) { arguments, context in
         guard let character = context.uniqueCharacter(arguments["character_ref"]?.agentString)
@@ -432,14 +449,15 @@ public enum DefaultWritingTools {
                 "importance": .int(event.importance),
                 "scene_ref": .string(event.sceneHash),
                 "heading": .string(context.heading(forHash: event.sceneHash)),
-                "quote": event.quote.map(JSONValue.string) ?? .null,
+                "quote": event.quote.map(JSONValue.string) ?? .null
             ])
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object([
-                "character": .string(character.name), "events": .array(values),
+                "character": .string(character.name), "events": .array(values)
             ])),
-            summary: "\(character.name)의 사건 \(events.count)개를 확인했어요.")
+            summary: "\(character.name)의 사건 \(events.count)개를 확인했어요."
+        )
     }
 
     private static let characterDialogues = ClosureWritingTool(
@@ -448,8 +466,9 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "character_ref", type: .string, description: "인물 이름·별칭·UUID",
-                required: true),
-            beforeParameter,
+                required: true
+            ),
+            beforeParameter
         ]
     ) { arguments, context in
         guard let character = context.uniqueCharacter(arguments["character_ref"]?.agentString)
@@ -471,7 +490,7 @@ public enum DefaultWritingTools {
             return .object([
                 "text": .string(utterance.text),
                 "position": .int(utterance.utf16Start),
-                "politeness": politeness,
+                "politeness": politeness
             ])
         }
         let conversationValues: [JSONValue] = conversations.map { conversation in
@@ -479,18 +498,19 @@ public enum DefaultWritingTools {
                 "first_line": .string(conversation.firstLine),
                 "position": .int(conversation.utf16Start),
                 "topic": conversation.topic.map(JSONValue.string) ?? .null,
-                "tone": conversation.tone.map(JSONValue.string) ?? .null,
+                "tone": conversation.tone.map(JSONValue.string) ?? .null
             ])
         }
         let value: JSONValue = .object([
             "character": .string(character.name),
             "default_politeness": defaultPoliteness,
             "utterances": .array(utteranceValues),
-            "conversations": .array(conversationValues),
+            "conversations": .array(conversationValues)
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "\(character.name)의 최근 대사 \(utterances.count)개를 확인했어요.")
+            summary: "\(character.name)의 최근 대사 \(utterances.count)개를 확인했어요."
+        )
     }
 
     private static let relation = ClosureWritingTool(
@@ -499,11 +519,13 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "from_character", type: .string, description: "관계를 바라보는 인물",
-                required: true),
+                required: true
+            ),
             AgentToolParameter(
                 "to_character", type: .string, description: "관계 대상 인물",
-                required: true),
-            beforeParameter,
+                required: true
+            ),
+            beforeParameter
         ]
     ) { arguments, context in
         guard let from = context.uniqueCharacter(arguments["from_character"]?.agentString)
@@ -524,18 +546,19 @@ public enum DefaultWritingTools {
                 "value": .string(delta.value),
                 "scene_ref": .string(delta.sceneHash),
                 "heading": .string(context.heading(forHash: delta.sceneHash)),
-                "quote": delta.quote.map(JSONValue.string) ?? .null,
+                "quote": delta.quote.map(JSONValue.string) ?? .null
             ])
         }
         let value: JSONValue = .object([
             "from": .string(from.name), "to": .string(to.name),
             "current": currentValue,
             "honorific": honorificValue,
-            "history": .array(historyValues),
+            "history": .array(historyValues)
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "\(from.name) → \(to.name) 관계 변화 \(history.count)건을 확인했어요.")
+            summary: "\(from.name) → \(to.name) 관계 변화 \(history.count)건을 확인했어요."
+        )
     }
 
     private static let timeline = ClosureWritingTool(
@@ -544,8 +567,9 @@ public enum DefaultWritingTools {
         parameters: [
             AgentToolParameter(
                 "order", type: .string, description: "discourse 또는 chronological",
-                allowedValues: ["discourse", "chronological"]),
-            beforeParameter,
+                allowedValues: ["discourse", "chronological"]
+            ),
+            beforeParameter
         ]
     ) { arguments, context in
         guard let knowledge = context.knowledge else { return .error("준비된 Story Intelligence가 없어요.") }
@@ -557,13 +581,13 @@ public enum DefaultWritingTools {
             let visibleKeys = Set(visibleEvents.map(\.stableKey))
             values = knowledge.eventChronoOrder.compactMap { key in
                 guard let canonical = knowledge.canonicalEvent(for: key),
-                    canonical.perspectives.contains(where: { visibleKeys.contains($0.eventKey) })
+                      canonical.perspectives.contains(where: { visibleKeys.contains($0.eventKey) })
                 else { return nil }
                 return .object([
                     "event_key": .string(canonical.canonicalKey),
                     "summary": .string(canonical.summary),
                     "scene_ref": .string(canonical.sceneHash),
-                    "heading": .string(context.heading(forHash: canonical.sceneHash)),
+                    "heading": .string(context.heading(forHash: canonical.sceneHash))
                 ])
             }
         } else {
@@ -572,22 +596,23 @@ public enum DefaultWritingTools {
                     "event_key": .string(event.stableKey),
                     "summary": .string(event.summary),
                     "scene_ref": .string(event.sceneHash),
-                    "heading": .string(context.heading(forHash: event.sceneHash)),
+                    "heading": .string(context.heading(forHash: event.sceneHash))
                 ])
             }
         }
         let conflicts = knowledge.chronoConflicts.map { edge in
             JSONValue.object([
                 "a": .string(edge.aKey), "b": .string(edge.bKey),
-                "relation": .string(edge.relation.rawValue),
+                "relation": .string(edge.relation.rawValue)
             ])
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object([
                 "order": .string(order), "events": .array(values),
-                "chrono_conflicts": .array(conflicts),
+                "chrono_conflicts": .array(conflicts)
             ])),
-            summary: "\(order == "chronological" ? "시간순" : "담화순") 사건 \(values.count)개를 확인했어요.")
+            summary: "\(order == "chronological" ? "시간순" : "담화순") 사건 \(values.count)개를 확인했어요."
+        )
     }
 
     private static let consistency = ClosureWritingTool(
@@ -598,19 +623,21 @@ public enum DefaultWritingTools {
         guard let knowledge = context.knowledge else { return .error("준비된 Story Intelligence가 없어요.") }
         let before = context.boundedOffset(arguments["before"]?.agentInt)
         let warnings = ConsistencyChecker.check(
-            snapshot: knowledge, characters: context.activeEntry.characters ?? [])
-            .filter { $0.utf16Position < before }
+            snapshot: knowledge, characters: context.activeEntry.characters ?? []
+        )
+        .filter { $0.utf16Position < before }
         let values = warnings.map { warning in
             JSONValue.object([
                 "kind": .string(warning.kind.rawValue),
                 "position": .int(warning.utf16Position),
-                "message": .string(warning.message),
+                "message": .string(warning.message)
             ])
         }
         return AgentToolResult(
             content: AgentJSON.encode(.object(["warnings": .array(values)])),
             summary: warnings.isEmpty ? "결정적 일관성 경고가 없어요."
-                : "일관성 경고 \(warnings.count)건을 찾았어요.")
+                : "일관성 경고 \(warnings.count)건을 찾았어요."
+        )
     }
 
     private static let contextAtCursor = ClosureWritingTool(
@@ -619,15 +646,17 @@ public enum DefaultWritingTools {
     ) { _, context in
         let cursor = context.caretUTF16
         let start = max(0, cursor - CompletionSettings.defaultNovelContextCharacters)
-        let prefix = context.text(in: start..<cursor)
+        let prefix = context.text(in: start ..< cursor)
         let document = DocumentContext(
             title: context.activeEntry.title,
             kind: context.activeEntry.resolvedKind,
             genre: context.activeEntry.genre,
-            characters: context.activeEntry.characters ?? [])
+            characters: context.activeEntry.characters ?? []
+        )
         let (_, report) = ContextAssembler.assembleWithReport(
             prefix: prefix, document: document, knowledge: context.knowledge,
-            prefixStartUTF16: start, style: .continuation)
+            prefixStartUTF16: start, style: .continuation
+        )
         let position = context.knowledge?.position(at: cursor)
         let sceneIndex = context.outline.sceneIndex(at: cursor)
         let scene = sceneIndex.map { context.outline.scenes[$0] }
@@ -644,13 +673,14 @@ public enum DefaultWritingTools {
                 .object([
                     "kind": .string(item.kind.rawValue),
                     "text": .string(item.text),
-                    "pinned": .bool(item.pinned),
+                    "pinned": .bool(item.pinned)
                 ])
-            }),
+            })
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
-            summary: "현재 위치와 컨텍스트 \(report.items.count)항목을 확인했어요.")
+            summary: "현재 위치와 컨텍스트 \(report.items.count)항목을 확인했어요."
+        )
     }
 }
 
@@ -677,7 +707,7 @@ private extension AgentContext {
         for scene in outline.scenes {
             let path = Array(scene.headingPath.prefix(2))
             if let last = grouped.indices.last, grouped[last].path == path {
-                grouped[last].range = grouped[last].range.lowerBound..<scene.utf16Range.upperBound
+                grouped[last].range = grouped[last].range.lowerBound ..< scene.utf16Range.upperBound
             } else {
                 grouped.append((path, scene.utf16Range))
             }
@@ -687,7 +717,8 @@ private extension AgentContext {
             return AgentChapter(
                 reference: "chapter:\(index + 1)",
                 title: parts.isEmpty ? "문서 전체" : parts.joined(separator: " > "),
-                path: item.path, range: item.range)
+                path: item.path, range: item.range
+            )
         }
     }
 
@@ -740,8 +771,7 @@ private extension AgentContext {
             return .success(.init(index: number - 1, scene: visibleKeyScenes[number - 1]))
         }
         if let id = UUID(uuidString: trimmed),
-            let match = visibleKeyScenes.enumerated().first(where: { $0.element.id == id })
-        {
+           let match = visibleKeyScenes.enumerated().first(where: { $0.element.id == id }) {
             return .success(.init(index: match.offset, scene: match.element))
         }
         let matches = visibleKeyScenes.enumerated().filter {
@@ -810,13 +840,14 @@ private extension AgentContext {
             let snippetStart = max(0, found.location - 45)
             let snippetEnd = min(source.length, NSMaxRange(found) + 65)
             let snippet = source.substring(
-                with: NSRange(location: snippetStart, length: snippetEnd - snippetStart))
-                .replacingOccurrences(of: "\n", with: " ")
+                with: NSRange(location: snippetStart, length: snippetEnd - snippetStart)
+            )
+            .replacingOccurrences(of: "\n", with: " ")
             result.append(.object([
                 "document_id": .string(entry.id.uuidString),
                 "document_title": .string(entry.title),
                 "position": .int(found.location),
-                "snippet": .string(snippet),
+                "snippet": .string(snippet)
             ]))
             let next = NSMaxRange(found)
             if next >= source.length { break }

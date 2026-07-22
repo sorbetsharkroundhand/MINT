@@ -1,0 +1,31 @@
+excluded:
+  - .build
+
+# 기존 장편 편집기 구조는 크기 기반 규칙보다 PLAN의 모듈 경계를 따른다.
+disabled_rules:
+  - closure_parameter_position
+  - cyclomatic_complexity
+  - file_length
+  - function_body_length
+  - function_parameter_count
+  - type_body_length
+
+# 좌표·색상·정렬 클로저에는 한두 글자 이름이 더 읽기 쉽다.
+identifier_name:
+  min_length: 1
+  allowed_symbols: ["_"]
+  excluded:
+    - "^id$"
+    - "^[가-힣]+[0-9]*$"
+
+large_tuple:
+  warning: 4
+  error: 5
+
+line_length:
+  warning: 180
+  error: 240
+
+nesting:
+  type_level: 2
+  function_level: 5

@@ -1,14 +1,14 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 대화 귀속·존대 매트릭스·대화 모드 회귀 테스트 (M6, PLAN §6.4·§7·§10).
 /// 전부 결정적 로직이라 모델 없이 돈다.
 final class DialogueAttributionTests: XCTestCase {
-
     private let seoyeon = CharacterCard(name: "서연", aliases: "연이")
     private let minjun = CharacterCard(name: "민준")
-    private var cards: [CharacterCard] { [seoyeon, minjun] }
+    private var cards: [CharacterCard] {
+        [seoyeon, minjun]
+    }
 
     // MARK: - 존대 판정 (닫힌 종결어미 규칙)
 
@@ -35,15 +35,16 @@ final class DialogueAttributionTests: XCTestCase {
 
     func test혼재_발화는_nil() {
         XCTAssertEqual(
-            DialogueAttribution.politeness(of: "알겠습니다. 근데 왜 그랬어?"), nil)
+            DialogueAttribution.politeness(of: "알겠습니다. 근데 왜 그랬어?"), nil
+        )
     }
 
     // MARK: - 귀속: 인접 서술
 
     func test발화_동사_옆_이름이_화자() {
         let body = """
-            "먼저 갈게." 서연이 말했다.
-            """
+        "먼저 갈게." 서연이 말했다.
+        """
         let result = DialogueAttribution.utterances(in: body, cards: cards)
         XCTAssertEqual(result.count, 1)
         XCTAssertEqual(result.first?.speakerID, seoyeon.id)
@@ -53,8 +54,8 @@ final class DialogueAttributionTests: XCTestCase {
 
     func test서술의_유일한_이름이_화자() {
         let body = """
-            민준은 고개를 저었다. "그건 아닙니다."
-            """
+        민준은 고개를 저었다. "그건 아닙니다."
+        """
         let result = DialogueAttribution.utterances(in: body, cards: cards)
         XCTAssertEqual(result.first?.speakerID, minjun.id)
         XCTAssertEqual(result.first?.politeness, .honorific)
@@ -62,8 +63,8 @@ final class DialogueAttributionTests: XCTestCase {
 
     func test이름_둘이면_발화_동사에_가까운_쪽() {
         let body = """
-            민준을 바라보던 서연이 말했다. "이제 그만하자."
-            """
+        민준을 바라보던 서연이 말했다. "이제 그만하자."
+        """
         let result = DialogueAttribution.utterances(in: body, cards: cards)
         XCTAssertEqual(result.first?.speakerID, seoyeon.id)
     }
@@ -71,35 +72,36 @@ final class DialogueAttributionTests: XCTestCase {
     func test대사_안_이름은_귀속에_안_쓴다() {
         // 대사 속 "민준"은 호명이지 화자 단서가 아니다.
         let body = """
-            "민준, 이리 와." 서연이 말했다.
-            """
+        "민준, 이리 와." 서연이 말했다.
+        """
         let result = DialogueAttribution.utterances(in: body, cards: cards)
         XCTAssertEqual(result.first?.speakerID, seoyeon.id)
     }
 
     func test미등록_인물은_귀속_안_됨() {
         let body = """
-            "안녕하세요." 지훈이 말했다.
-            """
+        "안녕하세요." 지훈이 말했다.
+        """
         XCTAssertTrue(DialogueAttribution.utterances(in: body, cards: cards).isEmpty)
     }
 
     // MARK: - 귀속: 교대 규칙 + 청자 방향
 
     private let conversation = """
-        "먼저 가 있어." 서연이 말했다.
-        "알겠습니다, 선배."
-        서연은 잠시 망설였다.
-        "정말 괜찮겠어?"
-        "괜찮습니다." 민준이 대답했다.
-        """
+    "먼저 가 있어." 서연이 말했다.
+    "알겠습니다, 선배."
+    서연은 잠시 망설였다.
+    "정말 괜찮겠어?"
+    "괜찮습니다." 민준이 대답했다.
+    """
 
     func test교대_규칙으로_미귀속_채움() {
         let result = DialogueAttribution.utterances(in: conversation, cards: cards)
         XCTAssertEqual(result.count, 4)
         XCTAssertEqual(
             result.map(\.speakerID),
-            [seoyeon.id, minjun.id, seoyeon.id, minjun.id])
+            [seoyeon.id, minjun.id, seoyeon.id, minjun.id]
+        )
     }
 
     func test이인_런은_청자_방향이_붙는다() {
@@ -110,10 +112,10 @@ final class DialogueAttributionTests: XCTestCase {
 
     func test화자_하나뿐인_런은_교대_안_함() {
         let body = """
-            "혼잣말이야."
-            "누구한테 하는 말인지."
-            서연이 중얼거렸다.
-            """
+        "혼잣말이야."
+        "누구한테 하는 말인지."
+        서연이 중얼거렸다.
+        """
         // 확정 화자가 1명 — 나머지를 추정으로 채우지 않는다 (품질 > 적극성).
         let result = DialogueAttribution.utterances(in: body, cards: cards)
         XCTAssertTrue(result.allSatisfy { $0.speakerID == seoyeon.id })
@@ -127,16 +129,19 @@ final class DialogueAttributionTests: XCTestCase {
             entryID: UUID(),
             outline: DocumentOutline.parse(body),
             summariesByHash: [:],
-            utterances: DialogueAttribution.utterances(in: body, cards: cards))
+            utterances: DialogueAttribution.utterances(in: body, cards: cards)
+        )
     }
 
     func test존대_매트릭스_비대칭() {
         let snapshot = makeSnapshot()
         // 서연→민준 반말, 민준→서연 존댓말 — PLAN §6.4의 핵심 신호.
         XCTAssertEqual(
-            snapshot.honorific(from: seoyeon.id, to: minjun.id, before: .max), .plain)
+            snapshot.honorific(from: seoyeon.id, to: minjun.id, before: .max), .plain
+        )
         XCTAssertEqual(
-            snapshot.honorific(from: minjun.id, to: seoyeon.id, before: .max), .honorific)
+            snapshot.honorific(from: minjun.id, to: seoyeon.id, before: .max), .honorific
+        )
     }
 
     func test말투_프로필과_예문() {
@@ -175,10 +180,12 @@ final class DialogueAttributionTests: XCTestCase {
     func test대화_블록_조립() {
         let snapshot = makeSnapshot()
         let document = DocumentContext(
-            title: "시험작", kind: .novel, characters: cards)
+            title: "시험작", kind: .novel, characters: cards
+        )
         let cursor = (conversation as NSString).length
         let block = ContextAssembler.dialogueText(
-            snapshot, document: document, cursor: cursor)
+            snapshot, document: document, cursor: cursor
+        )
         XCTAssertTrue(block.contains("다음 발화: 서연"), block)
         XCTAssertTrue(block.contains("민준에게 반말"), block)
         XCTAssertTrue(block.contains("말투 예"), block)
@@ -187,8 +194,10 @@ final class DialogueAttributionTests: XCTestCase {
     func test대화_블록_추정_불가면_빈_문자열() {
         let snapshot = makeSnapshot(cursorBody: "대사 없는 서술만 있는 본문.")
         let document = DocumentContext(
-            title: "시험작", kind: .novel, characters: cards)
+            title: "시험작", kind: .novel, characters: cards
+        )
         XCTAssertEqual(
-            ContextAssembler.dialogueText(snapshot, document: document, cursor: 100), "")
+            ContextAssembler.dialogueText(snapshot, document: document, cursor: 100), ""
+        )
     }
 }

@@ -58,7 +58,7 @@ struct ContextInspectorView: View {
         .padding(14)
     }
 
-    @ViewBuilder private func itemRow(_ item: ContextReport.Item) -> some View {
+    private func itemRow(_ item: ContextReport.Item) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Text(item.kind.rawValue)
@@ -118,7 +118,8 @@ struct ContextInspectorView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(theme.chipC))
+                .fill(theme.chipC)
+        )
     }
 
     // MARK: - Pin / Exclude (요구사항 §31)
@@ -126,18 +127,21 @@ struct ContextInspectorView: View {
     private func togglePin(_ item: ContextReport.Item) {
         if item.pinned {
             store.removeNarrativeOverride(
-                kind: .contextPin, key: item.stableKey, in: store.activeID)
+                kind: .contextPin, key: item.stableKey, in: store.activeID
+            )
         } else {
             store.setNarrativeOverride(
                 NarrativeOverride(kind: .contextPin, key: item.stableKey, value: "고정"),
-                in: store.activeID)
+                in: store.activeID
+            )
         }
     }
 
     private func exclude(_ item: ContextReport.Item) {
         store.setNarrativeOverride(
             NarrativeOverride(kind: .contextExclude, key: item.stableKey, value: "제외"),
-            in: store.activeID)
+            in: store.activeID
+        )
     }
 
     /// 제외 중인 항목 목록 — 복원 통로 (조용히 사라진 채 잊히지 않게).
@@ -159,7 +163,8 @@ struct ContextInspectorView: View {
                         Button("복원") {
                             store.removeNarrativeOverride(
                                 kind: .contextExclude, key: override.key,
-                                in: store.activeID)
+                                in: store.activeID
+                            )
                         }
                         .font(MintFonts.uiFont(9.5))
                         .buttonStyle(.bordered)
@@ -184,9 +189,8 @@ struct ContextInspectorView: View {
             } ?? quote
             store.requestSearchJump(store.activeID, query: query)
         } else if let offset = item.jumpUTF16,
-            let body = store.activeEntry?.body,
-            let snippet = NarrativeView.jumpSnippet(in: body, atUTF16: offset)
-        {
+                  let body = store.activeEntry?.body,
+                  let snippet = NarrativeView.jumpSnippet(in: body, atUTF16: offset) {
             store.requestSearchJump(store.activeID, query: snippet)
         }
     }

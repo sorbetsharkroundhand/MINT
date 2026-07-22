@@ -15,7 +15,6 @@ import MLXLMCommon
 /// 겹침)으로 생성이 겹치는 드문 경우엔 busy 가드가 재사용을 포기한다 —
 /// 겹친 쪽은 캐시 없이 생성한다. 틀린 캐시보다 느린 프리필이 낫다.
 final class PromptCacheBox: @unchecked Sendable {
-
     struct Reuse {
         let cache: [KVCache]
         /// 이번에 프리필할 토큰 — 전체 프롬프트에서 재사용분을 뺀 서픽스.
@@ -45,10 +44,9 @@ final class PromptCacheBox: @unchecked Sendable {
         busy = true
 
         if self.modelID == modelID,
-            let cache,
-            !promptTokens.isEmpty,
-            let reuse = reusableSuffix(cache: cache, tokens: tokens)
-        {
+           let cache,
+           !promptTokens.isEmpty,
+           let reuse = reusableSuffix(cache: cache, tokens: tokens) {
             return reuse
         }
         // 재사용 불가 — 새 캐시로 전체 프리필 (다음 요청부터 재사용된다).

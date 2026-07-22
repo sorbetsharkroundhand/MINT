@@ -48,7 +48,7 @@ public enum ModelPresets {
 
     public static let all: [String] = [
         ternaryBonsai27B, glm4_7_flash, qwen3_6_35B_A3B,
-        qwen3_30B_A3B, qwen2_5_3B, qwen2_5_1_5B,
+        qwen3_30B_A3B, qwen2_5_3B, qwen2_5_1_5B
     ]
 }
 
@@ -76,13 +76,16 @@ public struct ModelChoice: Identifiable, Sendable {
 
     public static let mint = ModelChoice(
         id: ModelPresets.ternaryBonsai27B, name: "MINT", sizeLabel: "27B·2bit",
-        detail: "27B 밀집 · 가장 작은 설치(8.5GB)", latencyLabel: "측정 전")
+        detail: "27B 밀집 · 가장 작은 설치(8.5GB)", latencyLabel: "측정 전"
+    )
     public static let basil = ModelChoice(
         id: ModelPresets.glm4_7_flash, name: "Basil", sizeLabel: "30B·A3B",
-        detail: "MoE · 활성 3B로 가벼운 디코딩", latencyLabel: "측정 전")
+        detail: "MoE · 활성 3B로 가벼운 디코딩", latencyLabel: "측정 전"
+    )
     public static let peppermint = ModelChoice(
         id: ModelPresets.qwen3_6_35B_A3B, name: "Peppermint", sizeLabel: "35B·A3B",
-        detail: "MoE · 가장 큰 이해(20GB)", latencyLabel: "~420ms")
+        detail: "MoE · 가장 큰 이해(20GB)", latencyLabel: "~420ms"
+    )
 
     public static let all: [ModelChoice] = [mint, basil, peppermint]
 
@@ -125,7 +128,7 @@ public struct CompletionParameters: Sendable, Equatable {
         maxTokens: Int = 12,
         temperature: Double = 0.3,
         topP: Double = 0.9,
-        maxPromptTokens: Int = 3_072,
+        maxPromptTokens: Int = 3072,
         kvCacheEnabled: Bool = true,
         stopAtUtteranceEnd: Bool = false
     ) {
@@ -149,10 +152,10 @@ public final class CompletionSettings: ObservableObject {
     /// 입력이 멈춘 뒤 제안을 트리거하기까지 대기(ms) — PLAN §5 "수백 ms".
     public static let defaultDebounceMilliseconds = 350
     /// 커서 앞에서 프롬프트로 쓰는 최대 문자 수 (저널 = Fast 모드, PLAN §10).
-    public static let defaultContextCharacters = 1_200
+    public static let defaultContextCharacters = 1200
     /// 소설의 컨텍스트 창 상한 (Smart/Story, PLAN §10) — KV 재사용(PLAN §12)이
     /// 있어야 부담 없는 크기라 M5에서 함께 도입한다.
-    nonisolated public static let defaultNovelContextCharacters = 4_000
+    public nonisolated static let defaultNovelContextCharacters = 4000
     /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
     public static let defaultLineSpacing = 7.0
     /// 본문 기본 글자 크기(pt) 기본값 — 디자인 기준. 모든 블록이 이 값에 비례한다.
@@ -188,44 +191,56 @@ public final class CompletionSettings: ObservableObject {
     @Published public var autocompleteEnabled: Bool {
         didSet { defaults.set(autocompleteEnabled, forKey: Keys.enabled) }
     }
+
     @Published public var modelID: String {
         didSet { defaults.set(modelID, forKey: Keys.modelID) }
     }
+
     @Published public var promptStyle: PromptStyle {
         didSet { defaults.set(promptStyle.rawValue, forKey: Keys.promptStyle) }
     }
+
     @Published public var debounceMilliseconds: Int {
         didSet { defaults.set(debounceMilliseconds, forKey: Keys.debounceMilliseconds) }
     }
+
     @Published public var maxTokens: Int {
         didSet { defaults.set(maxTokens, forKey: Keys.maxTokens) }
     }
+
     @Published public var temperature: Double {
         didSet { defaults.set(temperature, forKey: Keys.temperature) }
     }
+
     @Published public var topP: Double {
         didSet { defaults.set(topP, forKey: Keys.topP) }
     }
+
     @Published public var contextCharacters: Int {
         didSet { defaults.set(contextCharacters, forKey: Keys.contextCharacters) }
     }
+
     /// 소설 종류 문서의 컨텍스트 창 상한 (PLAN §10).
     @Published public var novelContextCharacters: Int {
         didSet { defaults.set(novelContextCharacters, forKey: Keys.novelContextCharacters) }
     }
+
     /// KV 프리필 재사용 (PLAN §12) — 이상 동작 시 사용자가 끌 수 있는 킬 스위치.
     @Published public var kvCacheEnabled: Bool {
         didSet { defaults.set(kvCacheEnabled, forKey: Keys.kvCache) }
     }
+
     /// 본문 줄 간격(pt) — 에디터 표시용(추론과 무관). 낮추면 줄이 촘촘해진다.
     @Published public var lineSpacing: Double {
         didSet { defaults.set(lineSpacing, forKey: Keys.lineSpacing) }
     }
+
     /// 저자 이름(필명) — EPUB 내보내기의 `<dc:creator>`에 실린다. 비워 두면
     /// 저자 정보를 아예 넣지 않는다(빈 저자명보다 없는 편이 낫다).
     @Published public var authorName: String {
         didSet { defaults.set(authorName, forKey: Keys.authorName) }
     }
+
     /// 본문 기본 글자 크기(pt) — 모든 블록이 이 값에 비례한다(⌘+/⌘−).
     @Published public var editorFontSize: Double {
         didSet {
@@ -238,33 +253,33 @@ public final class CompletionSettings: ObservableObject {
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = CompletionParameters()
-        self.autocompleteEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
-        self.modelID = defaults.string(forKey: Keys.modelID) ?? base.modelID
-        self.promptStyle =
+        autocompleteEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
+        modelID = defaults.string(forKey: Keys.modelID) ?? base.modelID
+        promptStyle =
             defaults.string(forKey: Keys.promptStyle)
-            .flatMap(PromptStyle.init(rawValue:)) ?? base.promptStyle
-        self.debounceMilliseconds =
+                .flatMap(PromptStyle.init(rawValue:)) ?? base.promptStyle
+        debounceMilliseconds =
             defaults.object(forKey: Keys.debounceMilliseconds) as? Int
-            ?? Self.defaultDebounceMilliseconds
-        self.maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? base.maxTokens
-        self.temperature =
+                ?? Self.defaultDebounceMilliseconds
+        maxTokens = defaults.object(forKey: Keys.maxTokens) as? Int ?? base.maxTokens
+        temperature =
             defaults.object(forKey: Keys.temperature) as? Double ?? base.temperature
-        self.topP = defaults.object(forKey: Keys.topP) as? Double ?? base.topP
-        self.contextCharacters =
+        topP = defaults.object(forKey: Keys.topP) as? Double ?? base.topP
+        contextCharacters =
             defaults.object(forKey: Keys.contextCharacters) as? Int
-            ?? Self.defaultContextCharacters
-        self.novelContextCharacters =
+                ?? Self.defaultContextCharacters
+        novelContextCharacters =
             defaults.object(forKey: Keys.novelContextCharacters) as? Int
-            ?? Self.defaultNovelContextCharacters
-        self.kvCacheEnabled =
+                ?? Self.defaultNovelContextCharacters
+        kvCacheEnabled =
             defaults.object(forKey: Keys.kvCache) as? Bool ?? base.kvCacheEnabled
-        self.lineSpacing =
+        lineSpacing =
             defaults.object(forKey: Keys.lineSpacing) as? Double
-            ?? Self.defaultLineSpacing
-        self.editorFontSize =
+                ?? Self.defaultLineSpacing
+        editorFontSize =
             defaults.object(forKey: Keys.fontSize) as? Double
-            ?? Self.defaultFontSize
-        self.authorName = defaults.string(forKey: Keys.authorName) ?? ""
+                ?? Self.defaultFontSize
+        authorName = defaults.string(forKey: Keys.authorName) ?? ""
     }
 
     /// 추론 엔진으로 넘기는 값 스냅샷.

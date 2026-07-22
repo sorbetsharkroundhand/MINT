@@ -22,13 +22,13 @@ public enum AgentToolCallParser {
         // Hermes 태그. 닫는 태그가 빠졌어도 문자열 끝까지 한 번 복구한다.
         while let start = remaining.range(of: "<tool_call>") {
             let payloadStart = start.upperBound
-            let end = remaining.range(of: "</tool_call>", range: payloadStart..<remaining.endIndex)
+            let end = remaining.range(of: "</tool_call>", range: payloadStart ..< remaining.endIndex)
             let payloadEnd = end?.lowerBound ?? remaining.endIndex
-            if let call = decode(String(remaining[payloadStart..<payloadEnd])) {
+            if let call = decode(String(remaining[payloadStart ..< payloadEnd])) {
                 calls.append(call)
             }
             let removalEnd = end?.upperBound ?? remaining.endIndex
-            remaining.removeSubrange(start.lowerBound..<removalEnd)
+            remaining.removeSubrange(start.lowerBound ..< removalEnd)
         }
 
         // 단순 줄 폴백: TOOL: get_outline {} / TOOL: name {"x":1}
@@ -42,14 +42,12 @@ public enum AgentToolCallParser {
             let content = trimmed.dropFirst(5).trimmingCharacters(in: .whitespaces)
             let name = content.prefix { !$0.isWhitespace && $0 != "{" }
             let jsonStart = content.firstIndex(of: "{")
-            let arguments: [String: JSONValue]
-            if let jsonStart,
-                let value = decodeJSON(String(content[jsonStart...])),
-                case .object(let object) = value
-            {
-                arguments = object
+            let arguments: [String: JSONValue] = if let jsonStart,
+                                                    let value = decodeJSON(String(content[jsonStart...])),
+                                                    case let .object(object) = value {
+                object
             } else {
-                arguments = [:]
+                [:]
             }
             if !name.isEmpty {
                 calls.append(AgentToolCall(name: String(name), arguments: arguments))
@@ -61,38 +59,36 @@ public enum AgentToolCallParser {
 
         // 모델이 wrapper 없이 {"name":...,"arguments":...} 하나만 낸 경우.
         if calls.isEmpty, let call = decode(remaining),
-            remaining.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{")
-        {
+           remaining.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("{") {
             calls.append(call)
             remaining = ""
         }
 
         return Parsed(
             calls: calls,
-            remainingText: remaining.trimmingCharacters(in: .whitespacesAndNewlines))
+            remainingText: remaining.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
     }
 
     public static func tagged(_ call: AgentToolCall) -> String {
         let payload: JSONValue = .object([
             "name": .string(call.name),
-            "arguments": .object(call.arguments),
+            "arguments": .object(call.arguments)
         ])
         return "<tool_call>\(AgentJSON.encode(payload))</tool_call>"
     }
 
     private static func decode(_ raw: String) -> AgentToolCall? {
-        guard let value = decodeJSON(raw), case .object(let object) = value,
-            let name = object["name"]?.agentString, !name.isEmpty
+        guard let value = decodeJSON(raw), case let .object(object) = value,
+              let name = object["name"]?.agentString, !name.isEmpty
         else { return nil }
-        let arguments: [String: JSONValue]
-        if case .object(let object)? = object["arguments"] {
-            arguments = object
-        } else if case .string(let string)? = object["arguments"],
-            let decoded = decodeJSON(string), case .object(let object) = decoded
-        {
-            arguments = object
+        let arguments: [String: JSONValue] = if case let .object(object)? = object["arguments"] {
+            object
+        } else if case let .string(string)? = object["arguments"],
+                  let decoded = decodeJSON(string), case let .object(object) = decoded {
+            object
         } else {
-            arguments = [:]
+            [:]
         }
         return AgentToolCall(name: name, arguments: arguments)
     }
@@ -109,9 +105,10 @@ public enum AgentToolCallParser {
         }
         candidate = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         candidate = candidate.replacingOccurrences(
-            of: #",\s*([}\]])"#, with: "$1", options: .regularExpression)
-        let opens = candidate.filter { $0 == "{" }.count
-        let closes = candidate.filter { $0 == "}" }.count
+            of: #",\s*([}\]])"#, with: "$1", options: .regularExpression
+        )
+        let opens = candidate.count(where: { $0 == "{" })
+        let closes = candidate.count(where: { $0 == "}" })
         if opens > closes { candidate += String(repeating: "}", count: opens - closes) }
         guard let data = candidate.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(JSONValue.self, from: data)

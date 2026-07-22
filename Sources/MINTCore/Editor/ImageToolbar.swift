@@ -55,7 +55,8 @@ struct ImageObjectToolbarView: View {
                 .fill(theme.pillC)
                 .background(
                     .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous)
+                )
         )
         .overlay(
             RoundedRectangle(cornerRadius: 11, style: .continuous)

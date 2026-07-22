@@ -1,7 +1,6 @@
 import AppKit
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 원고 무결성 회귀 테스트 — 직렬화는 **저장 경로**다. 여기가 틀리면 원고가
 /// 손상되고 되돌릴 수 없다 (CLAUDE.md §5-5).
@@ -13,7 +12,6 @@ import XCTest
 ///
 /// `swift test`로 돈다 — MLX 커널을 건드리지 않아 metallib 없이 안전하다.
 final class SerializationTests: XCTestCase {
-
     /// 테스트 수명 동안 창을 살려 둔다 — `undoManager`는 응답자 사슬(창)에서 오므로
     /// 창이 없으면 nil이 되어 undo 테스트가 **조용히 통과**해 버린다.
     private var windows: [NSWindow] = []
@@ -30,18 +28,21 @@ final class SerializationTests: XCTestCase {
         let layoutManager = MintLayoutManager()
         storage.addLayoutManager(layoutManager)
         let container = NSTextContainer(
-            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude))
+            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude)
+        )
         container.widthTracksTextView = true
         layoutManager.addTextContainer(container)
         let view = BlockTextView(
-            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: container)
+            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: container
+        )
         storage.delegate = view
-        view.allowsUndo = true  // makeNSView와 동일
+        view.allowsUndo = true // makeNSView와 동일
 
         // 창에 넣어야 undoManager가 생긴다 (앱과 같은 조건).
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 760, height: 900),
-            styleMask: [.titled], backing: .buffered, defer: false)
+            styleMask: [.titled], backing: .buffered, defer: false
+        )
         window.contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
         window.contentView?.addSubview(view)
         window.makeFirstResponder(view)
@@ -137,7 +138,8 @@ final class SerializationTests: XCTestCase {
             - 둘째
 
             **굵은** 문장과 보통 문장.
-            """)
+            """
+        )
     }
 
     // MARK: - 기존 문서 포맷 호환 (실제 저널)
@@ -147,8 +149,8 @@ final class SerializationTests: XCTestCase {
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("MINT/entries.json")
         guard let data = try? Data(contentsOf: url),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let entries = json["entries"] as? [[String: Any]]
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let entries = json["entries"] as? [[String: Any]]
         else { throw XCTSkip("로컬 저널 없음 — 이 검사는 실기기 전용") }
         return entries.compactMap { entry in
             guard let body = entry["body"] as? String, !body.isEmpty else { return nil }
@@ -166,16 +168,18 @@ final class SerializationTests: XCTestCase {
             let view = makeEditor()
             view.load(markdown: body)
             _ = view.serialize()
-            // 화면에 보이는 텍스트(= storage 문자열)에 원문의 글자가 살아 있는가.
-            // 마크업을 걷어낸 뒤 비교한다.
+            /// 화면에 보이는 텍스트(= storage 문자열)에 원문의 글자가 살아 있는가.
+            /// 마크업을 걷어낸 뒤 비교한다.
             func visible(_ s: String) -> String {
                 s.replacingOccurrences(
-                    of: "<[^>]+>", with: "", options: .regularExpression)
-                    .filter { !$0.isWhitespace }
+                    of: "<[^>]+>", with: "", options: .regularExpression
+                )
+                .filter { !$0.isWhitespace }
             }
             XCTAssertEqual(
                 visible(view.serialize()), visible(body),
-                "본문 글자가 왕복에서 바뀌었다: \(title)")
+                "본문 글자가 왕복에서 바뀌었다: \(title)"
+            )
         }
     }
 
@@ -184,12 +188,12 @@ final class SerializationTests: XCTestCase {
     /// 첫 저장이 서식을 정리하는 건 받아들이지만, 열 때마다 결과가 또 바뀌면
     /// 문서가 저장할 때마다 자라거나 흔들린다 — 원고가 조용히 변형된다.
     /// 이것이 왕복 비대칭을 안전하게 만드는 진짜 불변조건이다.
-    @MainActor func testSerializationIsIdempotent() throws {
+    @MainActor func testSerializationIsIdempotent() {
         var cases: [(String, String)] = [
             ("코드블록", "```\nlet x = 1\n```"),
             ("헤딩+본문", "# 1장\n본문이다.\n\n둘째."),
             ("연속 개행", "가\n\n\n\n나"),
-            ("인라인 서식", "**굵게** 그리고 *기울임*."),
+            ("인라인 서식", "**굵게** 그리고 *기울임*.")
         ]
         cases += (try? realJournalBodies()) ?? []
 
@@ -234,7 +238,7 @@ final class SerializationTests: XCTestCase {
     @MainActor func testLargePaste() {
         let view = makeEditor()
         view.load(markdown: "시작.")
-        let big = (1...200).map { "\($0)번째 문단이다." }.joined(separator: "\n")
+        let big = (1 ... 200).map { "\($0)번째 문단이다." }.joined(separator: "\n")
         let end = (view.string as NSString).length
         view.insertText("\n" + big, replacementRange: NSRange(location: end, length: 0))
         XCTAssertEqual(view.serialize(), "시작.\n" + big)
@@ -252,7 +256,8 @@ final class SerializationTests: XCTestCase {
         let view = makeEditor()
         view.load(markdown: "# 제목\n본문\n\n더 많은 본문")
         view.insertText(
-            "", replacementRange: NSRange(location: 0, length: (view.string as NSString).length))
+            "", replacementRange: NSRange(location: 0, length: (view.string as NSString).length)
+        )
         XCTAssertEqual(view.serialize(), "")
     }
 
@@ -266,13 +271,15 @@ final class SerializationTests: XCTestCase {
         let end = (view.string as NSString).length
         view.setMarkedText(
             "ㄹ", selectedRange: NSRange(location: 1, length: 0),
-            replacementRange: NSRange(location: end, length: 0))
+            replacementRange: NSRange(location: end, length: 0)
+        )
         XCTAssertTrue(view.hasMarkedText(), "조합 상태여야 한다")
         XCTAssertEqual(view.serialize(), "가나다ㄹ", "조합 중 글자도 직렬화에 보인다")
 
         view.setMarkedText(
             "라", selectedRange: NSRange(location: 1, length: 0),
-            replacementRange: view.markedRange())
+            replacementRange: view.markedRange()
+        )
         XCTAssertEqual(view.serialize(), "가나다라")
 
         view.unmarkText()
@@ -285,13 +292,16 @@ final class SerializationTests: XCTestCase {
         view.load(markdown: "")
         view.setMarkedText(
             "ㅎ", selectedRange: NSRange(location: 1, length: 0),
-            replacementRange: NSRange(location: 0, length: 0))
+            replacementRange: NSRange(location: 0, length: 0)
+        )
         view.setMarkedText(
             "한", selectedRange: NSRange(location: 1, length: 0),
-            replacementRange: view.markedRange())
+            replacementRange: view.markedRange()
+        )
         view.unmarkText()
         view.insertText(
-            "글", replacementRange: NSRange(location: (view.string as NSString).length, length: 0))
+            "글", replacementRange: NSRange(location: (view.string as NSString).length, length: 0)
+        )
         XCTAssertEqual(view.serialize(), "한글")
     }
 
@@ -305,7 +315,8 @@ final class SerializationTests: XCTestCase {
         let before = view.serialize()
 
         view.insertText(
-            "추가", replacementRange: NSRange(location: (view.string as NSString).length, length: 0))
+            "추가", replacementRange: NSRange(location: (view.string as NSString).length, length: 0)
+        )
         let after = view.serialize()
         XCTAssertEqual(after, "원본이다.추가")
 
@@ -330,7 +341,8 @@ final class SerializationTests: XCTestCase {
         let mid = (view.string as NSString).range(of: "둘째").location
         view.insertText("바뀐 ", replacementRange: NSRange(location: mid, length: 0))
         view.insertText(
-            "끝", replacementRange: NSRange(location: (view.string as NSString).length, length: 0))
+            "끝", replacementRange: NSRange(location: (view.string as NSString).length, length: 0)
+        )
         view.insertText("", replacementRange: (view.string as NSString).range(of: "첫 "))
 
         let incremental = view.serialize()
@@ -340,6 +352,7 @@ final class SerializationTests: XCTestCase {
         fresh.load(markdown: incremental)
         XCTAssertEqual(
             fresh.serialize(), incremental,
-            "serialize(증분 상태) != serialize(전체 문서) — 원고 손상")
+            "serialize(증분 상태) != serialize(전체 문서) — 원고 손상"
+        )
     }
 }

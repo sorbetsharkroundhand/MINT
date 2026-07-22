@@ -33,7 +33,6 @@ public struct Utterance: Equatable, Sendable {
 /// 둘 다 실패하면 **귀속하지 않는다** — 모호할 때의 LLM 판정(PLAN §7)은
 /// v2 (docs/m6-dialogue.md 보류 근거).
 public enum DialogueAttribution {
-
     /// 말투 예문으로 쓰는 대사 상한 — 카드·대화 블록 예산 보호 (PLAN §11).
     public static let maxExampleCharacters = 40
 
@@ -43,7 +42,7 @@ public enum DialogueAttribution {
         "말했", "말하", "물었", "묻는", "대답했", "대답하", "답했", "답하",
         "외쳤", "외치", "소리쳤", "소리치", "중얼거렸", "중얼거리",
         "속삭였", "속삭이", "덧붙였", "덧붙이", "되물었", "되묻",
-        "입을 열었", "말을 이었", "말을 꺼냈",
+        "입을 열었", "말을 이었", "말을 꺼냈"
     ]
 
     /// 본문 전체 → 담화 순서의 귀속된 발화들. 등록 카드가 없으면 빈 배열.
@@ -62,7 +61,7 @@ public enum DialogueAttribution {
         var paragraphs: [Paragraph] = []
         var utf16Pos = 0
         for line in body.split(separator: "\n", omittingEmptySubsequences: false) {
-            defer { utf16Pos += line.utf16.count + 1 }  // +1 = 개행
+            defer { utf16Pos += line.utf16.count + 1 } // +1 = 개행
             let quotes = quotedSpans(in: line)
             guard !quotes.isEmpty else {
                 paragraphs.append(Paragraph(quotes: [], speaker: nil))
@@ -70,13 +69,16 @@ public enum DialogueAttribution {
             }
             let narration = narrationText(of: line)
             let speaker = attributeFromNarration(
-                narration, names: names, nameIndex: nameIndex)
+                narration, names: names, nameIndex: nameIndex
+            )
             paragraphs.append(
                 Paragraph(
                     quotes: quotes.map { span in
                         (text: span.text, start: utf16Pos + span.utf16Offset)
                     },
-                    speaker: speaker))
+                    speaker: speaker
+                )
+            )
         }
 
         // ② 대화 런으로 묶어 교대 규칙 적용 + 청자 방향 부여.
@@ -97,7 +99,9 @@ public enum DialogueAttribution {
                             text: quote.text,
                             utf16Start: quote.start,
                             listenerID: listener,
-                            politeness: politeness(of: quote.text)))
+                            politeness: politeness(of: quote.text)
+                        )
+                    )
                 }
             }
         }
@@ -122,18 +126,18 @@ public enum DialogueAttribution {
         }
         if honorific > 0, plain == 0 { return .honorific }
         if plain > 0, honorific == 0 { return .plain }
-        return nil  // 혼재·판정 불가 — 발화 단위에선 침묵
+        return nil // 혼재·판정 불가 — 발화 단위에선 침묵
     }
 
     /// 존대 종결 — "요"로 끝나거나 격식체(-니다/-니까/-십시오 등).
     private static let honorificSuffixes = [
-        "요", "니다", "니까", "십시오", "십시다", "시죠", "소서",
+        "요", "니다", "니까", "십시오", "십시다", "시죠", "소서"
     ]
     /// 반말 종결 — 해체·해라체의 흔한 꼬리. 모호한 음절은 넣지 않는다:
     /// "마" 단독은 "설마"·"엄마"를 먹는다 → 금지 명령은 "지 마"/"지마"로만.
     private static let plainSuffixes = [
         "야", "어", "아", "지", "자", "니", "냐", "래", "라", "지 마", "지마",
-        "걸", "게", "군", "네", "든", "잖아", "거든", "다고", "다니까", "달라고",
+        "걸", "게", "군", "네", "든", "잖아", "거든", "다고", "다니까", "달라고"
     ]
     /// 반말로 오판하기 쉬운 평서형 — "~했다"·"~이다"는 서술이지 반말 대사체가
     /// 아닐 수 있으나, 대사 안에서는 해라체(반말)로 본다. 단 "니다"가 먼저다.
@@ -142,7 +146,8 @@ public enum DialogueAttribution {
     private static func sentencePoliteness(_ sentence: Substring) -> Politeness? {
         // 꼬리 정리 — 공백·물결·반복 부호는 판정에서 뺀다 ("알겠어요~~" → "알겠어요").
         let trimmed = sentence.trimmingCharacters(
-            in: CharacterSet(charactersIn: " \t~ㅋㅎㅠㅜ,"))
+            in: CharacterSet(charactersIn: " \t~ㅋㅎㅠㅜ,")
+        )
         guard !trimmed.isEmpty else { return nil }
         for suffix in honorificSuffixes where trimmed.hasSuffix(suffix) {
             return .honorific
@@ -161,12 +166,14 @@ public enum DialogueAttribution {
     private struct Paragraph {
         var quotes: [(text: String, start: Int)]
         var speaker: UUID?
-        var hasQuotes: Bool { !quotes.isEmpty }
+        var hasQuotes: Bool {
+            !quotes.isEmpty
+        }
     }
 
     /// 여닫는 따옴표 쌍 — 큰따옴표 계열만 대사로 본다 (작은따옴표는 속마음·강조).
     private static let quotePairs: [(open: Character, close: Character)] = [
-        ("“", "”"), ("\"", "\""), ("「", "」"), ("『", "』"),
+        ("“", "”"), ("\"", "\""), ("「", "」"), ("『", "』")
     ]
 
     /// 한 문단에서 따옴표 안 대사들을 뽑는다 (UTF-16 상대 오프셋 포함).
@@ -179,12 +186,12 @@ public enum DialogueAttribution {
             if let pair = quotePairs.first(where: { $0.open == char }) {
                 let contentStart = line.index(after: index)
                 if let closeIndex = line[contentStart...].firstIndex(of: pair.close) {
-                    let text = String(line[contentStart..<closeIndex])
+                    let text = String(line[contentStart ..< closeIndex])
                         .trimmingCharacters(in: .whitespaces)
                     if !text.isEmpty {
                         spans.append((text, utf16Offset + String(char).utf16.count))
                     }
-                    utf16Offset += line[index..<line.index(after: closeIndex)].utf16.count
+                    utf16Offset += line[index ..< line.index(after: closeIndex)].utf16.count
                     index = line.index(after: closeIndex)
                     continue
                 }
@@ -220,10 +227,11 @@ public enum DialogueAttribution {
         for name in mentioned {
             guard let id = nameIndex[name] else { continue }
             var searchStart = narration.startIndex
-            while let range = narration.range(of: name, range: searchStart..<narration.endIndex) {
+            while let range = narration.range(of: name, range: searchStart ..< narration.endIndex) {
                 if range.upperBound <= verbRange.lowerBound {
                     let distance = narration.distance(
-                        from: range.upperBound, to: verbRange.lowerBound)
+                        from: range.upperBound, to: verbRange.lowerBound
+                    )
                     if best == nil || distance < best!.distance {
                         best = (id, distance)
                     }

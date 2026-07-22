@@ -23,7 +23,6 @@ import Foundation
 /// Scene과의 역할 구분 (요구사항 §32): Scene은 비교적 큰 장면 구조(헤딩·분할)
 /// 이고, Segment는 그 안의 시간·관점 변화다. Segment는 항상 씬 하나에 속한다.
 public struct NarrativeSegment: Codable, Equatable, Sendable, Identifiable {
-
     /// 서사 층 — 과거형 문장이 있다는 이유만으로 회상이 되지 않도록
     /// 회상의 결을 구분한다 (요구사항 §7). 닫힌 집합 — 소형 모델의 자유
     /// 서술을 막는다 (StateDelta.Field와 같은 규율).
@@ -71,7 +70,7 @@ public struct NarrativeSegment: Codable, Equatable, Sendable, Identifiable {
             switch self {
             case .present, .mention, .uncertain: false
             case .flashback, .briefMemory, .retelling, .dream, .document,
-                .renarration, .flashforward: true
+                 .renarration, .flashforward: true
             }
         }
 
@@ -135,7 +134,9 @@ public struct NarrativeSegment: Codable, Equatable, Sendable, Identifiable {
     /// 걸린 다른 오버라이드가 고아가 되지 않는다.
     public var persistentID: String
 
-    public var id: String { persistentID }
+    public var id: String {
+        persistentID
+    }
 
     public init(
         sceneHash: String, localStart: Int, localEnd: Int,
@@ -278,7 +279,9 @@ public struct EventIdentity: Codable, Equatable, Sendable, Identifiable {
         self.memberKeys = memberKeys
     }
 
-    public var id: String { canonicalKey }
+    public var id: String {
+        canonicalKey
+    }
 }
 
 /// 정본 사건 하나의 관점 뷰 (파생 — 저장하지 않는다). 멤버 사건 + 그 씬의
@@ -299,7 +302,9 @@ public struct EventPerspective: Equatable, Sendable, Identifiable {
     /// 사건 상세가 Scene/Segment를 보여주는 근거). 파생 전용이라 저장 안 함.
     public var segmentID: String?
 
-    public var id: String { eventKey }
+    public var id: String {
+        eventKey
+    }
 }
 
 /// 정본 사건 (파생) — 여러 흐름·여러 관점이 만나는 그래프의 노드.
@@ -316,7 +321,9 @@ public struct CanonicalEvent: Equatable, Sendable, Identifiable {
     public var perspectives: [EventPerspective]
     public var quote: String?
 
-    public var id: String { canonicalKey }
+    public var id: String {
+        canonicalKey
+    }
 }
 
 // MARK: - 시간 부분 순서 (Chrono Partial Order, 요구사항 §29)
@@ -334,14 +341,15 @@ public struct ChronoEdge: Codable, Equatable, Sendable, Identifiable {
         self.relation = relation
     }
 
-    public var id: String { DocumentOutline.stableHash("chrono|\(aKey)|\(bKey)") }
+    public var id: String {
+        DocumentOutline.stableHash("chrono|\(aKey)|\(bKey)")
+    }
 }
 
 /// 부분 순서 해석기 — 확실한 간선만으로 위상 정렬하고, 모순(사이클)은 Conflict로
 /// 보고한다. 정보가 부족한 항목은 담화 순서를 유지한다 — 임의로 확정 연표를
 /// 만들지 않는다 (요구사항 §29).
 public enum ChronoOrder {
-
     /// 결과 — 정렬된 키 배열 + 모순 간선 쌍.
     public struct Resolution: Equatable, Sendable {
         /// 시간 순서 (부분 순서를 담화 순서로 보완한 안정 정렬).
@@ -355,7 +363,8 @@ public enum ChronoOrder {
     /// 제약 없음으로 둔다.
     public static func resolve(items: [String], edges: [ChronoEdge]) -> Resolution {
         let index = Dictionary(
-            uniqueKeysWithValues: items.enumerated().map { ($0.element, $0.offset) })
+            uniqueKeysWithValues: items.enumerated().map { ($0.element, $0.offset) }
+        )
         // 방향 간선 정규화 — after(a,b)는 before(b,a)와 같다.
         var directed: [(from: String, to: String, edge: ChronoEdge)] = []
         for edge in edges {
@@ -393,9 +402,13 @@ public enum ChronoOrder {
 
         // Kahn 위상 정렬 — 후보가 여럿이면 담화 순서가 이긴다 (안정성).
         var indegree: [String: Int] = [:]
-        for item in items { indegree[item] = 0 }
-        for (_, to) in accepted { indegree[to, default: 0] += 1 }
-        var ready = items.filter { indegree[$0] == 0 }  // 담화 순서 유지
+        for item in items {
+            indegree[item] = 0
+        }
+        for (_, to) in accepted {
+            indegree[to, default: 0] += 1
+        }
+        var ready = items.filter { indegree[$0] == 0 } // 담화 순서 유지
         var ordered: [String] = []
         var remaining = accepted
         while let next = ready.first {
@@ -452,8 +465,10 @@ public struct NarrativeFlow: Equatable, Sendable, Identifiable {
 
     /// 안정 색 인덱스 — persistent ID의 해시. 팔레트 크기는 UI가 정한다.
     public var colorSeed: Int {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
-        for byte in id.utf8 { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3 }
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
+        for byte in id.utf8 {
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
+        }
         return Int(hash % 997)
     }
 
@@ -498,7 +513,9 @@ public struct NarrativeFlow: Equatable, Sendable, Identifiable {
                 name: flowNameOverrides[mainID] ?? "본줄기",
                 eventKeys: allKeys,
                 chrono: .unknown,
-                userEdited: flowNameOverrides[mainID] != nil))
+                userEdited: flowNameOverrides[mainID] != nil
+            )
+        )
 
         for card in characters {
             let keys = canonicalEvents
@@ -513,7 +530,9 @@ public struct NarrativeFlow: Equatable, Sendable, Identifiable {
                     characterID: card.id,
                     eventKeys: keys,
                     chrono: .unknown,
-                    userEdited: flowNameOverrides[flowID] != nil))
+                    userEdited: flowNameOverrides[flowID] != nil
+                )
+            )
         }
 
         for branch in branches {
@@ -528,7 +547,9 @@ public struct NarrativeFlow: Equatable, Sendable, Identifiable {
                     characterID: linkedCharacter,
                     sceneRange: branch.sceneRange,
                     chrono: branch.chrono,
-                    userEdited: branch.userEdited || flowNameOverrides[flowID] != nil))
+                    userEdited: branch.userEdited || flowNameOverrides[flowID] != nil
+                )
+            )
         }
         return flows
     }

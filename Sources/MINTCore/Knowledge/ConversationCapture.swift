@@ -83,7 +83,6 @@ public struct ConversationMeta: Codable, Equatable, Sendable {
 /// - 빈 줄 2연속·헤딩·긴 서술은 대화를 끊는다.
 /// - 스캔 창 상한(기본 4,000 UTF-16)을 두어 키 입력 경로 예산을 지킨다.
 public enum ConversationDetector {
-
     /// 감지된 대화 블록 — 아직 기록 전의 제안 재료.
     public struct Block: Equatable, Sendable {
         /// 본문 전체 기준 UTF-16 범위 (첫 발화 문단 시작 … 마지막 발화 문단 끝).
@@ -100,7 +99,7 @@ public enum ConversationDetector {
     /// 제안을 띄우는 최소 발화 수 — 한 마디로는 "대화"가 아니다 (품질 > 적극성).
     public static let minUtterances = 2
     /// 커서에서 위로 스캔하는 최대 창 (UTF-16).
-    public static let maxScanUTF16 = 4_000
+    public static let maxScanUTF16 = 4000
     /// 발화 사이에 허용하는 서술 문단 길이 상한 — 이보다 길면 장면이 전환됐다.
     static let maxInterleavedNarration = 200
 
@@ -134,7 +133,9 @@ public enum ConversationDetector {
                     quotes: quotes,
                     isBlank: trimmed.isEmpty,
                     isHeading: trimmed.hasPrefix("#"),
-                    length: (trimmed as NSString).length))
+                    length: (trimmed as NSString).length
+                )
+            )
             location = lineRange.location
             // 발화 없는 문단이 이미 여럿 쌓였고 발화도 못 찾았다면 조기 종료.
             if paragraphs.count > 60 { break }
@@ -145,7 +146,7 @@ public enum ConversationDetector {
         var blankRun = 0
         while index < paragraphs.count, paragraphs[index].isBlank {
             blankRun += 1
-            if blankRun >= 2 { return nil }  // 빈 줄 2연속 아래는 대화가 끝난 지 오래다
+            if blankRun >= 2 { return nil } // 빈 줄 2연속 아래는 대화가 끝난 지 오래다
             index += 1
         }
         guard index < paragraphs.count else { return nil }
@@ -180,15 +181,14 @@ public enum ConversationDetector {
 
         let utterances = runParagraphs.flatMap(\.quotes)
         guard utterances.count >= minUtterances else { return nil }
-        guard let last = runParagraphs.first?.range,  // 아래→위라 first가 마지막 문단
-            let first = runParagraphs.last?.range
+        guard let last = runParagraphs.first?.range, // 아래→위라 first가 마지막 문단
+              let first = runParagraphs.last?.range
         else { return nil }
         let start = first.location
         var end = last.location + last.length
         // 문단 range는 개행 포함 — 끝 개행은 블록 밖으로.
         while end > start,
-            text.character(at: end - 1) == 0x0A
-        {
+              text.character(at: end - 1) == 0x0A {
             end -= 1
         }
         guard end > start else { return nil }
@@ -196,11 +196,12 @@ public enum ConversationDetector {
         // quotes는 문단별 원문 순서인데 runParagraphs가 아래→위라 뒤집는다.
         let ordered = runParagraphs.reversed().flatMap(\.quotes)
         return Block(
-            utf16Range: start..<end,
+            utf16Range: start ..< end,
             utteranceCount: utterances.count,
             firstLine: String((ordered.first ?? "").prefix(60)),
             lastLine: String((ordered.last ?? "").prefix(60)),
-            contentHash: DocumentOutline.stableHash(content))
+            contentHash: DocumentOutline.stableHash(content)
+        )
     }
 
     /// 기록의 재앵커 (PLAN §6.6) — 현재 범위와 해시가 여전히 맞으면 그대로
@@ -211,12 +212,13 @@ public enum ConversationDetector {
     ) -> RecordedConversation? {
         guard !record.firstLine.isEmpty else { return nil }
         if record.utf16Start >= 0, record.utf16End > record.utf16Start,
-            record.utf16End <= body.length
-        {
+           record.utf16End <= body.length {
             let current = body.substring(
                 with: NSRange(
                     location: record.utf16Start,
-                    length: record.utf16End - record.utf16Start))
+                    length: record.utf16End - record.utf16Start
+                )
+            )
             if DocumentOutline.stableHash(current) == record.contentHash { return record }
         }
 
@@ -225,7 +227,8 @@ public enum ConversationDetector {
         while searchStart < body.length {
             let found = body.range(
                 of: record.firstLine, options: [],
-                range: NSRange(location: searchStart, length: body.length - searchStart))
+                range: NSRange(location: searchStart, length: body.length - searchStart)
+            )
             guard found.location != NSNotFound else { break }
             candidates.append(found)
             searchStart = found.location + max(1, found.length)
@@ -244,7 +247,8 @@ public enum ConversationDetector {
         while searchStart < body.length {
             let found = body.range(
                 of: record.lastLine, options: [],
-                range: NSRange(location: searchStart, length: body.length - searchStart))
+                range: NSRange(location: searchStart, length: body.length - searchStart)
+            )
             guard found.location != NSNotFound else { break }
             lastCandidates.append(found)
             searchStart = found.location + max(1, found.length)
@@ -256,7 +260,9 @@ public enum ConversationDetector {
         }) else { return nil }
         let lastParagraph = body.lineRange(for: last)
         var end = lastParagraph.location + lastParagraph.length
-        while end > updated.utf16Start, body.character(at: end - 1) == 0x0A { end -= 1 }
+        while end > updated.utf16Start, body.character(at: end - 1) == 0x0A {
+            end -= 1
+        }
         updated.utf16End = end
         return updated
     }
@@ -275,7 +281,8 @@ public enum ConversationDetector {
             utf16End: block.utf16Range.upperBound,
             firstLine: block.firstLine,
             lastLine: block.lastLine,
-            contentHash: block.contentHash)
+            contentHash: block.contentHash
+        )
     }
 
     /// 새 감지 결과를 기존 자동 기록에 합친다. 같은 해시는 무시하고, 이어 쓰기로

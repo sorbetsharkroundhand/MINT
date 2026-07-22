@@ -106,7 +106,7 @@ struct CharacterBibleView: View {
     /// 기준으로 접는다. 사용자가 보는 것과 예측이 아는 것이 같은 소스다.
     private func understanding(of card: CharacterCard) -> [String] {
         guard let snapshot = indexer?.snapshot,
-            snapshot.entryID == store.activeID
+              snapshot.entryID == store.activeID
         else { return [] }
         var lines: [String] = []
         let state = snapshot.stateAt(of: card.id, before: .max)
@@ -133,8 +133,8 @@ struct CharacterBibleView: View {
     /// (PLAN §7 — 상태를 덮어썼다면 역사가 없어 연대기도 없다).
     private func chronicle(of card: CharacterCard) -> [String] {
         guard let snapshot = indexer?.snapshot,
-            snapshot.entryID == store.activeID,
-            let offsets = snapshot.eventIndexByCharacter[card.id]
+              snapshot.entryID == store.activeID,
+              let offsets = snapshot.eventIndexByCharacter[card.id]
         else { return [] }
         return offsets.map { offset in
             let event = snapshot.events[offset]
@@ -170,19 +170,20 @@ struct CharacterBibleView: View {
     private func relationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
         guard let snapshot else { return [] }
         let names = Dictionary(
-            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
+            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) }
+        )
         // 방향 쌍별 그룹 (담화 순서 유지).
         var order: [String] = []
         var grouped: [String: [RelationDelta]] = [:]
         for delta in snapshot.relationDeltas
-        where delta.fromID == card.id || delta.toID == card.id {
+            where delta.fromID == card.id || delta.toID == card.id {
             let key = "\(delta.fromID.uuidString)>\(delta.toID.uuidString)"
             if grouped[key] == nil { order.append(key) }
             grouped[key, default: []].append(delta)
         }
         return order.compactMap { key in
             guard let deltas = grouped[key], let first = deltas.first,
-                let from = names[first.fromID], let to = names[first.toID]
+                  let from = names[first.fromID], let to = names[first.toID]
             else { return nil }
             let evolution = deltas.map(\.value).joined(separator: " → ")
             return ("\(from)→\(to): \(evolution)", deltas.last?.quote)
@@ -194,7 +195,8 @@ struct CharacterBibleView: View {
     private func conversationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
         guard let snapshot else { return [] }
         let names = Dictionary(
-            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
+            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) }
+        )
         return snapshot.conversations(involving: card.id).map { conversation in
             let others = conversation.participants
                 .filter { $0 != card.id }
@@ -270,7 +272,8 @@ struct CharacterBibleView: View {
                 } else {
                     store.setNarrativeOverride(
                         NarrativeOverride(kind: .narrationMode, key: "global", value: value),
-                        in: id)
+                        in: id
+                    )
                 }
             }
         )
@@ -330,8 +333,7 @@ private struct CandidateReviewList: View {
 
     var body: some View {
         if indexer.candidatesEntryID == store.activeID,
-            !indexer.characterCandidates.isEmpty
-        {
+           !indexer.characterCandidates.isEmpty {
             VStack(spacing: 4) {
                 ForEach(indexer.characterCandidates, id: \.name) { candidate in
                     HStack(spacing: 8) {
@@ -445,7 +447,8 @@ private struct CharacterCardRow: View {
                 .help(
                     card.locked == true
                         ? "잠김 — 자동 이해가 이 카드를 고치지 않아요"
-                        : "열림 — 소개가 비어 있으면 자동 이해가 채울 수 있어요")
+                        : "열림 — 소개가 비어 있으면 자동 이해가 채울 수 있어요"
+                )
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -458,10 +461,10 @@ private struct CharacterCardRow: View {
                 .help("인물 삭제")
             }
             TextField("성격·말투·관계 — 짧게 (예: 신중하고 직설적. 반말, \"…거든\" 버릇)",
-                text: $card.note, axis: .vertical)
+                      text: $card.note, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .font(MintFonts.uiFont(12))
-                .lineLimit(2...4)
+                .lineLimit(2 ... 4)
             // 자동 이해 — 예측 카드 줄과 같은 질의 결과의 열람 (CLAUDE.md §1-5).
             // 편집은 원문·카드에서 한다 — 파생 지식을 직접 고치게 하면 원문과
             // 어긋난 채 다음 패스가 도로 덮는다 (원문이 유일한 진실, §2-1).
@@ -513,15 +516,18 @@ private struct CharacterCardRow: View {
             // 앎 (v4) — 이 인물이 아는 것만이 예측 대사에 실린다 (§11).
             jumpSection(
                 title: "앎", count: knowledge.count,
-                expanded: $knowledgeExpanded, entries: knowledge)
+                expanded: $knowledgeExpanded, entries: knowledge
+            )
             // 관계 변화 (v4, §12) — 방향 쌍별 변화 이력.
             jumpSection(
                 title: "관계", count: relations.count,
-                expanded: $relationsExpanded, entries: relations)
+                expanded: $relationsExpanded, entries: relations
+            )
             // 대화 인덱스 (v4, §13) — 클릭하면 원문 대화로 이동.
             jumpSection(
                 title: "대화", count: conversations.count,
-                expanded: $conversationsExpanded, entries: conversations)
+                expanded: $conversationsExpanded, entries: conversations
+            )
         }
         .padding(8)
         .background(

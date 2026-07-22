@@ -10,7 +10,6 @@ import Foundation
 /// - 씬별 콘텐츠 해시는 M6 증분 파이프라인(더티 추적·추출 메모이제이션)의
 ///   키가 된다 (PLAN §9) — 프로세스 간 안정성이 필요해 Hasher가 아닌 SHA-256.
 public struct DocumentOutline: Equatable, Sendable {
-
     /// 헤딩과 다음 헤딩 사이의 연속 본문 한 덩어리 — 단, **크기 상한을 함께
     /// 지킨다** (docs/m6-scene-split.md). 헤딩 본문이 상한을 넘으면 문장 경계에서
     /// 여러 세그먼트로 쪼개져 각각이 씬이 된다. 헤딩 없는 문서(저널의 보통
@@ -51,7 +50,7 @@ public struct DocumentOutline: Equatable, Sendable {
     /// "쪼갰는데 또 잘리는" 일이 없다 (`BackgroundIndexer.maxSceneCharacters`가
     /// 이 값을 참조한다). UTF-16 단위 ≤ 1500이면 문자 수도 ≤ 1500이라
     /// `.prefix(1500)`이 절대 자르지 않는다.
-    public static let maxSegmentUTF16 = 1_500
+    public static let maxSegmentUTF16 = 1500
     /// 세그먼트 크기 하한 — 이보다 작으면 경계를 찾지 않는다 (토막 씬 방지).
     static let minSegmentUTF16 = 800
     /// CDC 경계 확률 = 1/8 (문장당). [800,1500] 여유 ≈ 20문장에서 경계를 못
@@ -66,7 +65,7 @@ public struct DocumentOutline: Equatable, Sendable {
     /// 30만 자 장편도 밀리초 단위라 편집 직후 백그라운드에서 부담 없이 돈다.
     public static func parse(_ body: String) -> DocumentOutline {
         var scenes: [Scene] = []
-        /// 현재 헤딩 경로 스택 (레벨 1…3).
+        // 현재 헤딩 경로 스택 (레벨 1…3).
         var stack: [String] = []
         var sceneLevel = 0
         var scenePath: [String] = []
@@ -79,10 +78,9 @@ public struct DocumentOutline: Equatable, Sendable {
         /// 진입점 — docs/m6-scene-split.md).
         func closeScene(endUTF16: Int, endIndex: String.Index) {
             guard endUTF16 > sceneStartUTF16 else { return }
-            let text = body[sceneStartIndex..<endIndex]
+            let text = body[sceneStartIndex ..< endIndex]
             if sceneLevel == 0,
-                text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            {
+               text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return
             }
             // 상한 이하 + 명시적 장면 구분자 없음 = 통째로 하나 — 대부분의 씬이
@@ -95,9 +93,10 @@ public struct DocumentOutline: Equatable, Sendable {
                     Scene(
                         level: sceneLevel,
                         headingPath: scenePath,
-                        utf16Range: sceneStartUTF16..<endUTF16,
+                        utf16Range: sceneStartUTF16 ..< endUTF16,
                         contentHash: hash(text)
-                    ))
+                    )
+                )
                 return
             }
             // 세그먼트는 **원문에 대한 범위**로만 정의한다 — 문자열을 쪼갰다
@@ -111,10 +110,11 @@ public struct DocumentOutline: Equatable, Sendable {
                     Scene(
                         level: sceneLevel,
                         headingPath: scenePath,
-                        utf16Range: utf16Cursor..<(utf16Cursor + length),
+                        utf16Range: utf16Cursor ..< (utf16Cursor + length),
                         contentHash: hash(segmentText),
                         segmentIndex: index
-                    ))
+                    )
+                )
                 utf16Cursor += length
             }
             assert(utf16Cursor == endUTF16, "세그먼트 타일링이 원문을 빈틈없이 덮어야 한다")
@@ -125,15 +125,17 @@ public struct DocumentOutline: Equatable, Sendable {
         while lineStart < body.endIndex {
             let lineEnd =
                 body[lineStart...].firstIndex(of: "\n")
-                .map { body.index(after: $0) } ?? body.endIndex
-            let line = body[lineStart..<lineEnd]
+                    .map { body.index(after: $0) } ?? body.endIndex
+            let line = body[lineStart ..< lineEnd]
             if let (level, title) = headingLine(line) {
                 closeScene(endUTF16: utf16Pos, endIndex: lineStart)
                 // 경로 갱신 — 상위 레벨은 유지, 같은/하위 레벨은 잘라내고 대체.
                 if stack.count >= level {
                     stack.removeSubrange((level - 1)...)
                 }
-                while stack.count < level - 1 { stack.append("") }
+                while stack.count < level - 1 {
+                    stack.append("")
+                }
                 stack.append(title)
                 sceneLevel = level
                 scenePath = stack
@@ -198,7 +200,7 @@ public struct DocumentOutline: Equatable, Sendable {
             let length = text[piece].utf16.count
             // 상한 보호 — 이 조각을 더하면 넘친다 → 조각 앞에서 강제로 끊는다.
             if segmentLength > 0, segmentLength + length > maxSegmentUTF16 {
-                segments.append(segmentStart..<piece.lowerBound)
+                segments.append(segmentStart ..< piece.lowerBound)
                 segmentStart = piece.lowerBound
                 segmentLength = 0
             }
@@ -207,16 +209,15 @@ public struct DocumentOutline: Equatable, Sendable {
             // 내용에 매인 경계라 CDC의 국소성(앞 편집이 뒤 경계를 안 민다)을
             // 그대로 갖는다.
             if segmentLength >= minBreakSegmentUTF16, isSceneBreakLine(text[piece]) {
-                segments.append(segmentStart..<piece.upperBound)
+                segments.append(segmentStart ..< piece.upperBound)
                 segmentStart = piece.upperBound
                 segmentLength = 0
                 continue
             }
             // 내용 정의 경계 — 하한을 넘겼고, 이 문장의 해시가 1/8에 걸리면 끊는다.
             if segmentLength >= minSegmentUTF16,
-                fnv1a(text[piece]) % boundaryDivisor == 0
-            {
-                segments.append(segmentStart..<piece.upperBound)
+               fnv1a(text[piece]) % boundaryDivisor == 0 {
+                segments.append(segmentStart ..< piece.upperBound)
                 segmentStart = piece.upperBound
                 segmentLength = 0
             }
@@ -224,7 +225,7 @@ public struct DocumentOutline: Equatable, Sendable {
         // 꼬리는 하한 미만이어도 붙인다 — 공백뿐이어도 버리지 않는다
         // (조용한 원문 유실이 이 설계가 없애려는 바로 그 결함이다).
         if segmentStart < text.endIndex {
-            segments.append(segmentStart..<text.endIndex)
+            segments.append(segmentStart ..< text.endIndex)
         }
         return segments
     }
@@ -246,7 +247,7 @@ public struct DocumentOutline: Equatable, Sendable {
                 while end < text.endIndex, text[end] == "\n" {
                     end = text.index(after: end)
                 }
-                pieces.append(start..<end)
+                pieces.append(start ..< end)
                 start = end
                 index = end
                 continue
@@ -254,17 +255,17 @@ public struct DocumentOutline: Equatable, Sendable {
             if terminals.contains(char) {
                 var end = text.index(after: index)
                 while end < text.endIndex, terminals.contains(text[end]) {
-                    end = text.index(after: end)  // "?!"·"…!" 연속 종결부호
+                    end = text.index(after: end) // "?!"·"…!" 연속 종결부호
                 }
                 while end < text.endIndex, closers.contains(text[end]) {
-                    end = text.index(after: end)  // 닫는 따옴표는 문장에 붙인다
+                    end = text.index(after: end) // 닫는 따옴표는 문장에 붙인다
                 }
                 if end == text.endIndex || text[end].isWhitespace {
                     // 꼬리 공백(개행 제외 — 개행 뭉치는 위에서 제 조각이 된다)까지 포함.
                     while end < text.endIndex, text[end].isWhitespace, text[end] != "\n" {
                         end = text.index(after: end)
                     }
-                    pieces.append(start..<end)
+                    pieces.append(start ..< end)
                     start = end
                     index = end
                     continue
@@ -274,7 +275,7 @@ public struct DocumentOutline: Equatable, Sendable {
             }
             index = text.index(after: index)
         }
-        if start < text.endIndex { pieces.append(start..<text.endIndex) }
+        if start < text.endIndex { pieces.append(start ..< text.endIndex) }
         return pieces
     }
 
@@ -293,7 +294,7 @@ public struct DocumentOutline: Equatable, Sendable {
             // 어절 경계(공백 뭉치 뒤)에서 상한 이하로 욱여넣는다.
             var chunkStart = piece.lowerBound
             var chunkLength = 0
-            var lastBreak: String.Index?  // 마지막 어절 경계 (공백 직후)
+            var lastBreak: String.Index? // 마지막 어절 경계 (공백 직후)
             var index = piece.lowerBound
             var previousWasSpace = false
             while index < piece.upperBound {
@@ -304,16 +305,16 @@ public struct DocumentOutline: Equatable, Sendable {
                 if chunkLength + charLength > maxSegmentUTF16 {
                     // 어절 경계가 있으면 거기서, 없으면 여기서 강제 절단.
                     let cut = (lastBreak.map { $0 > chunkStart ? $0 : index }) ?? index
-                    result.append(chunkStart..<cut)
+                    result.append(chunkStart ..< cut)
                     chunkStart = cut
-                    chunkLength = text[cut..<index].utf16.count
+                    chunkLength = text[cut ..< index].utf16.count
                     lastBreak = nil
                 }
                 chunkLength += charLength
                 index = text.index(after: index)
             }
             if chunkStart < piece.upperBound {
-                result.append(chunkStart..<piece.upperBound)
+                result.append(chunkStart ..< piece.upperBound)
             }
         }
         return result
@@ -323,9 +324,9 @@ public struct DocumentOutline: Equatable, Sendable {
     /// 실행마다 시드가 달라 경계가 매 실행 바뀌고, 그러면 콘텐츠 해시 메모가
     /// 전부 빗나가 매 실행 전체 재요약이 된다. FNV-1a는 결정적이고 싸다.
     static func fnv1a(_ text: Substring) -> UInt64 {
-        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        var hash: UInt64 = 0xCBF2_9CE4_8422_2325
         for byte in text.utf8 {
-            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+            hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3
         }
         return hash
     }
@@ -339,7 +340,7 @@ public struct DocumentOutline: Equatable, Sendable {
             level += 1
             index = line.index(after: index)
         }
-        guard (1...3).contains(level), index < line.endIndex, line[index] == " "
+        guard (1 ... 3).contains(level), index < line.endIndex, line[index] == " "
         else { return nil }
         let title = line[line.index(after: index)...]
             .trimmingCharacters(in: .whitespacesAndNewlines)

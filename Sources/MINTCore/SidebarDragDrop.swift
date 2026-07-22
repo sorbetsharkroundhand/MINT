@@ -26,19 +26,19 @@ enum SidebarDnD {
 }
 
 /// 드래그 중인 항목 — 저널·폴더가 UUID 공간을 공유하므로 종류를 함께 든다.
-enum SidebarDragNode: Equatable, Sendable {
+enum SidebarDragNode: Equatable {
     case entry(id: UUID)
     case folder(id: UUID)
 
     var id: UUID {
         switch self {
-        case .entry(let id), .folder(let id): id
+        case let .entry(id), let .folder(id): id
         }
     }
 }
 
 /// 드롭 시각 피드백 — 어느 행의 어느 위치에 내려앉을지.
-enum SidebarDropIndicator: Equatable, Sendable {
+enum SidebarDropIndicator: Equatable {
     /// 행 위쪽 삽입선.
     case before(UUID)
     /// 행 아래쪽 삽입선.
@@ -69,7 +69,7 @@ final class SidebarDragModel: ObservableObject {
     /// 이 행을 가리키는 표시만 지운다 — 다른 행이 이미 새 표시를 세웠을 수 있다.
     func clearIndicator(for id: UUID) {
         switch indicator {
-        case .before(let x), .after(let x), .into(let x):
+        case let .before(x), let .after(x), let .into(x):
             if x == id { indicator = nil }
         case .root, nil:
             break
@@ -139,7 +139,7 @@ struct EntryRowDropDelegate: DropDelegate {
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
-        guard case .entry(let draggedID) = model.dragged, draggedID != entry.id else {
+        guard case let .entry(draggedID) = model.dragged, draggedID != entry.id else {
             // 폴더는 저널 행 사이에 놓일 수 없다(폴더 먼저 불변식) — 자기 자신도 금지.
             model.clearIndicator(for: entry.id)
             return DropProposal(operation: .forbidden)
@@ -148,12 +148,12 @@ struct EntryRowDropDelegate: DropDelegate {
         return DropProposal(operation: .move)
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
         model.clearIndicator(for: entry.id)
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        guard case .entry(let draggedID) = model.dragged, draggedID != entry.id else {
+        guard case let .entry(draggedID) = model.dragged, draggedID != entry.id else {
             model.endDrag()
             return false
         }
@@ -174,8 +174,8 @@ struct EntryRowDropDelegate: DropDelegate {
                     store.moveEntry(draggedID, toFolder: target.folderID, before: next?.id)
                 case .into, .root:
                     if let folderID = store.createFolder(
-                        merging: draggedID, onto: target.id)
-                    {
+                        merging: draggedID, onto: target.id
+                    ) {
                         requestNaming(folderID)
                     }
                 }
@@ -210,7 +210,7 @@ struct FolderRowDropDelegate: DropDelegate {
         model.dragged != nil && info.hasItemsConforming(to: [.plainText])
     }
 
-    func dropEntered(info: DropInfo) {
+    func dropEntered(info _: DropInfo) {
         // 접힌 폴더 위에 머무르면 펼쳐서 안으로 계속 드래그할 수 있게.
         if model.dragged != nil, !expanded {
             model.scheduleSpringLoad(of: folder.id, in: store)
@@ -224,7 +224,7 @@ struct FolderRowDropDelegate: DropDelegate {
             // 끼는 삽입선은 거짓 약속이라 그리지 않는다.
             model.setIndicator(.into(folder.id))
             return DropProposal(operation: .move)
-        case .folder(let draggedID):
+        case let .folder(draggedID):
             guard draggedID != folder.id else {
                 model.clearIndicator(for: folder.id)
                 return DropProposal(operation: .forbidden)
@@ -241,7 +241,7 @@ struct FolderRowDropDelegate: DropDelegate {
         }
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
         model.cancelSpringLoad()
         model.clearIndicator(for: folder.id)
     }
@@ -250,7 +250,7 @@ struct FolderRowDropDelegate: DropDelegate {
         model.cancelSpringLoad()
         defer { model.endDrag() }
         switch model.dragged {
-        case .entry(let draggedID):
+        case let .entry(draggedID):
             let target = folder
             let store = store
             let requestNaming = requestNaming
@@ -264,9 +264,9 @@ struct FolderRowDropDelegate: DropDelegate {
                     requestNaming(target.id)
                 }
             }
-        case .folder(let draggedID):
+        case let .folder(draggedID):
             guard draggedID != folder.id,
-                let zone = zoneForFolderDrag(draggedID: draggedID, y: info.location.y)
+                  let zone = zoneForFolderDrag(draggedID: draggedID, y: info.location.y)
             else { return false }
             let target = folder
             let store = store
@@ -275,13 +275,15 @@ struct FolderRowDropDelegate: DropDelegate {
                     switch zone {
                     case .before:
                         store.moveFolder(
-                            draggedID, toParent: target.parentID, before: target.id)
+                            draggedID, toParent: target.parentID, before: target.id
+                        )
                     case .after:
                         let siblings = store.childFolders(of: target.parentID)
                         let next = siblings.drop(while: { $0.id != target.id })
                             .dropFirst().first
                         store.moveFolder(
-                            draggedID, toParent: target.parentID, before: next?.id)
+                            draggedID, toParent: target.parentID, before: next?.id
+                        )
                     case .into, .root:
                         store.moveFolder(draggedID, toParent: target.id, before: nil)
                     }
@@ -327,13 +329,13 @@ struct RootAreaDropDelegate: DropDelegate {
         model.dragged != nil && info.hasItemsConforming(to: [.plainText])
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
+    func dropUpdated(info _: DropInfo) -> DropProposal? {
         guard model.dragged != nil else { return DropProposal(operation: .forbidden) }
         model.setIndicator(.root)
         return DropProposal(operation: .move)
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
         model.clearRootIndicator()
     }
 
@@ -344,9 +346,9 @@ struct RootAreaDropDelegate: DropDelegate {
         return applyVerified(info: info, expecting: dragged) {
             withAnimation(.spring(duration: 0.25)) {
                 switch dragged {
-                case .entry(let id):
+                case let .entry(id):
                     store.moveEntry(id, toFolder: nil, before: nil)
-                case .folder(let id):
+                case let .folder(id):
                     store.moveFolder(id, toParent: nil, before: nil)
                 }
             }

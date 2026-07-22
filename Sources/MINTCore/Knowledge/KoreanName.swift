@@ -10,16 +10,16 @@ public enum KoreanName {
     /// 마지막 음절에 받침이 있는가 — 받침 이름 뒤 매개 "이"만 벗기기 위한 관문.
     public static func hasFinalConsonant(_ syllable: Character) -> Bool {
         guard syllable.unicodeScalars.count == 1,
-            let scalar = syllable.unicodeScalars.first,
-            (0xAC00...0xD7A3).contains(scalar.value)
+              let scalar = syllable.unicodeScalars.first,
+              (0xAC00 ... 0xD7A3).contains(scalar.value)
         else { return false }
         return (scalar.value - 0xAC00) % 28 != 0
     }
 
     /// 순수 한글 2–4자인 이름꼴인가.
     public static func isNameShape(_ value: String) -> Bool {
-        guard (minLength...maxLength).contains(value.count) else { return false }
-        return value.unicodeScalars.allSatisfy { (0xAC00...0xD7A3).contains($0.value) }
+        guard (minLength ... maxLength).contains(value.count) else { return false }
+        return value.unicodeScalars.allSatisfy { (0xAC00 ... 0xD7A3).contains($0.value) }
     }
 
     /// 표면형에서 가능한 이름 표기를 모두 펼친다. 가장 긴 조사 하나만 벗기며,

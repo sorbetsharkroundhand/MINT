@@ -15,7 +15,9 @@ public struct ConsistencyWarning: Equatable, Sendable, Identifiable {
     /// 사용자에게 보여줄 한 줄 설명 — 단정이 아니라 확인 요청의 어조.
     public var message: String
 
-    public var id: String { "\(kind.rawValue)-\(characterID.uuidString)-\(utf16Position)" }
+    public var id: String {
+        "\(kind.rawValue)-\(characterID.uuidString)-\(utf16Position)"
+    }
 }
 
 /// 일관성 검사기 (M7, PLAN §14) — **결정적, LLM 없음** (CLAUDE.md §2-5).
@@ -28,7 +30,6 @@ public struct ConsistencyWarning: Equatable, Sendable, Identifiable {
 /// 팝업을 띄우지 않는다 — 회상·의도적 반말 트기처럼 **작가가 옳은 경우**가
 /// 항상 있으므로, 경고는 단정이 아니라 "확인해 보세요"다 (품질 > 적극성).
 public enum ConsistencyChecker {
-
     /// 존대 붕괴 판정에 필요한 최소 선행 발화 수 — 두어 번의 우연으로
     /// "확립됐다"고 단정하지 않는다.
     static let minEstablishedUtterances = 3
@@ -63,7 +64,9 @@ public enum ConsistencyChecker {
                     kind: .deadSpeaker,
                     characterID: utterance.speakerID,
                     utf16Position: utterance.utf16Start,
-                    message: "\(name)이(가) '\(vitality)' 상태로 기록된 뒤에 대사가 있어요 — 회상이 아니라면 확인해 보세요"))
+                    message: "\(name)이(가) '\(vitality)' 상태로 기록된 뒤에 대사가 있어요 — 회상이 아니라면 확인해 보세요"
+                )
+            )
         }
 
         // ② 존대 붕괴 — (화자→청자) 쌍에서 같은 존대가 3회 이상 이어진 뒤
@@ -74,7 +77,7 @@ public enum ConsistencyChecker {
         var breakReported: Set<PairKey> = []
         for utterance in snapshot.utterances {
             guard let listener = utterance.listenerID,
-                let politeness = utterance.politeness
+                  let politeness = utterance.politeness
             else { continue }
             let key = PairKey(speaker: utterance.speakerID, listener: listener)
             if let current = streak[key] {
@@ -82,8 +85,7 @@ public enum ConsistencyChecker {
                     streak[key] = (politeness, current.count + 1)
                 } else {
                     if current.count >= minEstablishedUtterances,
-                        !breakReported.contains(key)
-                    {
+                       !breakReported.contains(key) {
                         breakReported.insert(key)
                         let speaker = names[utterance.speakerID] ?? "등장인물"
                         let target = names[listener] ?? "상대"
@@ -92,9 +94,11 @@ public enum ConsistencyChecker {
                                 kind: .honorificBreak,
                                 characterID: utterance.speakerID,
                                 utf16Position: utterance.utf16Start,
-                                message: "\(speaker)이(가) \(target)에게 \(current.politeness.rawValue)을 쓰다 \(politeness.rawValue)로 바뀌었어요 — 의도한 변화가 아니라면 확인해 보세요"))
+                                message: "\(speaker)이(가) \(target)에게 \(current.politeness.rawValue)을 쓰다 \(politeness.rawValue)로 바뀌었어요 — 의도한 변화가 아니라면 확인해 보세요"
+                            )
+                        )
                     }
-                    streak[key] = (politeness, 1)  // 전환 후는 새 확립의 시작
+                    streak[key] = (politeness, 1) // 전환 후는 새 확립의 시작
                 }
             } else {
                 streak[key] = (politeness, 1)

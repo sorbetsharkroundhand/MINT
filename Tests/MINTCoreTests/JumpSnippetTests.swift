@@ -1,12 +1,10 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 타임라인 점프 스니펫 회귀 테스트 (M7) — 마크다운 오프셋에서 에디터
 /// 스토리지에도 존재할 산문 토막을 뽑는지 고정한다.
 @MainActor
 final class JumpSnippetTests: XCTestCase {
-
     func test헤딩_마커는_건너뛴다() {
         // "# 1장"의 "#·공백"은 에디터 스토리지에 없다 — 제목 텍스트부터.
         let body = "# 1장\n서연은 창밖을 바라보았다."
@@ -17,7 +15,8 @@ final class JumpSnippetTests: XCTestCase {
         let body = "앞 문장이다. 뒤 문장이 이어진다."
         let offset = ("앞 문장이다. " as NSString).length
         XCTAssertEqual(
-            NarrativeView.jumpSnippet(in: body, atUTF16: offset), "뒤 문장이 이어진다.")
+            NarrativeView.jumpSnippet(in: body, atUTF16: offset), "뒤 문장이 이어진다."
+        )
     }
 
     func test개행을_넘지_않는다() {

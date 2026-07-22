@@ -20,7 +20,6 @@ import Foundation
 /// 하나도 없으면 침묵한다. 원고가 자라며 발화·여격이 생기면 다음 패스가 잡는다.
 /// **등록은 언제나 사용자 확인**을 거치므로(CLAUDE.md §3) 남은 소수 오탐도 안전하다.
 public enum CharacterDetector {
-
     /// 후보 신뢰도 (요구사항 §16) — HIGH만 자동 등록, MEDIUM은 사용자 확인,
     /// LOW는 목록에도 올리지 않는다 (품질 > 적극성).
     public enum Confidence: String, Equatable, Sendable {
@@ -61,7 +60,7 @@ public enum CharacterDetector {
         var mentions = 0
         var scenes: Set<Int> = []
         var caseRoles: Set<CharacterLexicon.Role> = []
-        var animacyHits = 0  // 여격 + 호격 + 발화 귀속
+        var animacyHits = 0 // 여격 + 호격 + 발화 귀속
     }
 
     public static func detect(
@@ -79,32 +78,36 @@ public enum CharacterDetector {
             let sceneText = text.substring(
                 with: NSRange(
                     location: scene.utf16Range.lowerBound,
-                    length: scene.utf16Range.count))
+                    length: scene.utf16Range.count
+                )
+            )
             accumulate(
                 sceneText, sceneIndex: sceneIndex,
-                lexicon: lexicon, into: &evidence)
+                lexicon: lexicon, into: &evidence
+            )
         }
 
         let excluded = lexicon.excluded
         let sceneThreshold = min(minScenes, outline.scenes.count)
 
         var candidates = evidence.compactMap { stem, ev -> Candidate? in
-            guard (minStemLength...maxStemLength).contains(stem.count),
-                ev.mentions >= minMentions,
-                ev.scenes.count >= sceneThreshold,
-                // ── 정밀도 레버: 유정 신호(사람만 받는 것)가 반드시 있어야 한다.
-                // 없으면 LOW — 목록에도 올리지 않는다 (요구사항 §16: 대명사·
-                // 일반명사·오분석 토큰의 자동 등록 차단은 이 관문이 담당한다).
-                ev.animacyHits >= 1,
-                // ── 명사다움: 격조사를 취하는 체언이어야 한다(고정 낱말 배제).
-                !ev.caseRoles.isEmpty,
-                !known.contains(stem), !rejected.contains(stem),
-                !excluded.contains(stem)
+            guard (minStemLength ... maxStemLength).contains(stem.count),
+                  ev.mentions >= minMentions,
+                  ev.scenes.count >= sceneThreshold,
+                  // ── 정밀도 레버: 유정 신호(사람만 받는 것)가 반드시 있어야 한다.
+                  // 없으면 LOW — 목록에도 올리지 않는다 (요구사항 §16: 대명사·
+                  // 일반명사·오분석 토큰의 자동 등록 차단은 이 관문이 담당한다).
+                  ev.animacyHits >= 1,
+                  // ── 명사다움: 격조사를 취하는 체언이어야 한다(고정 낱말 배제).
+                  !ev.caseRoles.isEmpty,
+                  !known.contains(stem), !rejected.contains(stem),
+                  !excluded.contains(stem)
             else { return nil }
             return Candidate(
                 name: stem, mentions: ev.mentions, sceneCount: ev.scenes.count,
                 animacyHits: ev.animacyHits, caseRoleCount: ev.caseRoles.count,
-                confidence: tier(of: ev))
+                confidence: tier(of: ev)
+            )
         }
 
         // 표기 변형 병합 (요구사항 §17) — "김재형"과 "재형"("재형이")은 같은
@@ -133,7 +136,8 @@ public enum CharacterDetector {
                         > ($1.confidence == .high ? 1 : 0, $1.animacyHits,
                            $1.caseRoleCount, $1.mentions, $1.name)
                 }
-                .prefix(5))
+                .prefix(5)
+        )
     }
 
     /// 신뢰도 판정 (요구사항 §16) — HIGH는 사람임이 구조적으로 여러 번 확인된
@@ -153,14 +157,15 @@ public enum CharacterDetector {
         var parent = Array(candidates.indices)
         func root(_ index: Int) -> Int {
             var index = index
-            while parent[index] != index { index = parent[index] }
+            while parent[index] != index {
+                index = parent[index]
+            }
             return index
         }
         for a in candidates.indices {
             for b in candidates.indices where a < b {
                 if isAliasShape(candidates[a].name, of: candidates[b].name)
-                    || isAliasShape(candidates[b].name, of: candidates[a].name)
-                {
+                    || isAliasShape(candidates[b].name, of: candidates[a].name) {
                     parent[root(b)] = root(a)
                 }
             }
@@ -183,7 +188,8 @@ public enum CharacterDetector {
                 caseRoleCount: members.map(\.caseRoleCount).max() ?? 0,
                 confidence: members.contains { $0.confidence == .high } ? .high : .medium,
                 aliasForms: others.map(\.name).sorted(),
-                aliasOfKnown: representative.aliasOfKnown)
+                aliasOfKnown: representative.aliasOfKnown
+            )
         }
         .sorted { $0.name < $1.name }
     }
@@ -215,7 +221,7 @@ public enum CharacterDetector {
             }
             // 대화 귀속 — 주어 표지가 붙은 이름 뒤 1~2 토큰에 발화 동사가 오면 화자.
             if let role = parsed.role, role == .subject || role == .topic {
-                let followers = words[(i + 1)..<min(i + 3, words.count)]
+                let followers = words[(i + 1) ..< min(i + 3, words.count)]
                 if followers.contains(where: { next in
                     lexicon.speechVerbPrefixes.contains { next.hasPrefix($0) }
                 }) {
@@ -249,7 +255,7 @@ public enum CharacterDetector {
         var result: [String] = []
         var current = ""
         for scalar in text.unicodeScalars {
-            if (0xAC00...0xD7A3).contains(scalar.value) {
+            if (0xAC00 ... 0xD7A3).contains(scalar.value) {
                 current.unicodeScalars.append(scalar)
             } else if !current.isEmpty {
                 result.append(current)

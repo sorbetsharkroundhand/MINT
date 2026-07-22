@@ -196,10 +196,12 @@ struct AgentView: View {
                     }
                     traceLine(
                         title: "판단",
-                        text: traceReason(for: trace.toolName, fallback: trace.label))
+                        text: traceReason(for: trace.toolName, fallback: trace.label)
+                    )
                     traceLine(
                         title: "입력",
-                        text: AgentTraceFormatter.arguments(trace.arguments))
+                        text: AgentTraceFormatter.arguments(trace.arguments)
+                    )
                     traceLine(title: "결과", text: trace.resultSummary)
                 }
                 .padding(7)
@@ -285,7 +287,7 @@ struct AgentView: View {
                 .textFieldStyle(.plain)
                 .font(MintFonts.uiFont(11))
                 .foregroundStyle(theme.inkC)
-                .lineLimit(1...4)
+                .lineLimit(1 ... 4)
                 .focused($inputFocused)
                 .onSubmit(submit)
                 .disabled(agent.isRunning)

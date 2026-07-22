@@ -75,7 +75,8 @@ public final class AgentController: ObservableObject {
         let prior = messages.map { message in
             AgentChatMessage(
                 role: message.role == .user ? .user : .assistant,
-                content: message.text)
+                content: message.text
+            )
         }
         var parameters = parametersProvider?() ?? CompletionSettings.shared.parameters
         parameters.maxTokens = 512
@@ -96,25 +97,30 @@ public final class AgentController: ObservableObject {
                     parameters: parameters,
                     onEvent: { event in
                         Task { @MainActor [weak self] in self?.consume(event) }
-                    })
+                    }
+                )
                 guard !Task.isCancelled else { return }
-                self.streamingText = ""
-                self.messages.append(
+                streamingText = ""
+                messages.append(
                     TranscriptMessage(
                         role: .assistant, text: result.text,
-                        toolTrace: result.toolTrace))
-                self.setRunning(false)
+                        toolTrace: result.toolTrace
+                    )
+                )
+                setRunning(false)
             } catch is CancellationError {
-                self.streamingText = ""
-                self.setRunning(false)
+                streamingText = ""
+                setRunning(false)
             } catch {
-                self.streamingText = ""
-                self.lastError = error.localizedDescription
-                self.messages.append(
+                streamingText = ""
+                lastError = error.localizedDescription
+                messages.append(
                     TranscriptMessage(
                         role: .assistant,
-                        text: "요청을 마치지 못했어요: \(error.localizedDescription)"))
-                self.setRunning(false)
+                        text: "요청을 마치지 못했어요: \(error.localizedDescription)"
+                    )
+                )
+                setRunning(false)
             }
         }
     }
@@ -147,16 +153,19 @@ public final class AgentController: ObservableObject {
         case .stepStarted:
             // 도구를 고르는 중간 출력은 다음 턴의 최종 답변과 섞지 않는다.
             streamingText = ""
-        case .textChunk(let chunk):
+        case let .textChunk(chunk):
             streamingText += chunk
-        case .toolStarted(let name, let label, let arguments):
+        case let .toolStarted(name, label, arguments):
             streamingText = ""
             activities.append(
                 Activity(
                     toolName: name, text: label,
                     argumentsText: AgentTraceFormatter.arguments(
-                        arguments, empty: "입력 없음")))
-        case .toolFinished(let name, let summary):
+                        arguments, empty: "입력 없음"
+                    )
+                )
+            )
+        case let .toolFinished(name, summary):
             if let index = activities.lastIndex(where: {
                 $0.toolName == name && !$0.isFinished
             }) {
@@ -164,13 +173,15 @@ public final class AgentController: ObservableObject {
                 activities[index].isFinished = true
             } else {
                 activities.append(
-                    Activity(toolName: name, text: summary, isFinished: true))
+                    Activity(toolName: name, text: summary, isFinished: true)
+                )
             }
         case .repairingToolCall:
             activities.append(
                 Activity(
-                    toolName: "repair", text: "도구 호출 형식을 한 번 바로잡는 중…"))
+                    toolName: "repair", text: "도구 호출 형식을 한 번 바로잡는 중…"
+                )
+            )
         }
     }
-
 }

@@ -49,7 +49,9 @@ public struct KnowledgeDelta: Codable, Equatable, Sendable {
         self.quote = quote
     }
 
-    public var evidenceKind: EvidenceKind { quote == nil ? .inferred : .direct }
+    public var evidenceKind: EvidenceKind {
+        quote == nil ? .inferred : .direct
+    }
 }
 
 // MARK: - 인물 관계 (방향 있는 관계 변화)
@@ -168,7 +170,9 @@ public struct NarrativeBranch: Equatable, Sendable, Identifiable {
     public var chrono: ChronoRelation
     public var userEdited: Bool
 
-    public var id: String { anchorHash }
+    public var id: String {
+        anchorHash
+    }
 
     /// 씬 유형 배열 → 브랜치 목록 (main은 브랜치로 만들지 않는다 — 레일 자체가 main).
     public static func derive(
@@ -186,16 +190,20 @@ public struct NarrativeBranch: Equatable, Sendable, Identifiable {
                 continue
             }
             var end = index + 1
-            while end < types.count, types[end] == type { end += 1 }
+            while end < types.count, types[end] == type {
+                end += 1
+            }
             let anchor = anchorHashes[index]
             branches.append(
                 NarrativeBranch(
                     type: type,
-                    sceneRange: index..<end,
+                    sceneRange: index ..< end,
                     anchorHash: anchor,
                     name: nameOverrides[anchor] ?? type.rawValue,
                     chrono: chronoOverrides[anchor] ?? type.defaultChrono,
-                    userEdited: nameOverrides[anchor] != nil || chronoOverrides[anchor] != nil))
+                    userEdited: nameOverrides[anchor] != nil || chronoOverrides[anchor] != nil
+                )
+            )
             index = end
         }
         return branches
@@ -222,7 +230,9 @@ public struct Conversation: Equatable, Sendable, Identifiable {
     public var topic: String?
     public var tone: String?
 
-    public var id: String { "\(utf16Start)-\(utteranceCount)" }
+    public var id: String {
+        "\(utf16Start)-\(utteranceCount)"
+    }
 
     public init(
         participants: [UUID], sceneHash: String?, utf16Start: Int, utf16End: Int,
@@ -264,7 +274,9 @@ public struct Conversation: Equatable, Sendable, Identifiable {
                     utf16Start: first.utf16Start,
                     utf16End: last.utf16Start + (last.text as NSString).length,
                     utteranceCount: current.count,
-                    firstLine: String(first.text.prefix(40))))
+                    firstLine: String(first.text.prefix(40))
+                )
+            )
             current = []
         }
 
@@ -374,7 +386,9 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         self.updatedAt = updatedAt
     }
 
-    public var id: String { "\(kind.rawValue)|\(key)" }
+    public var id: String {
+        "\(kind.rawValue)|\(key)"
+    }
 }
 
 /// 오버라이드 목록의 질의 헬퍼 — 스냅샷 조립·UI가 같은 해석을 쓴다.
@@ -383,10 +397,11 @@ public struct NarrativeOverrides: Equatable, Sendable {
     private let byID: [String: NarrativeOverride]
 
     public init(_ overrides: [NarrativeOverride]) {
-        self.all = overrides
-        self.byID = Dictionary(
+        all = overrides
+        byID = Dictionary(
             overrides.map { ($0.id, $0) },
-            uniquingKeysWith: { a, b in a.updatedAt > b.updatedAt ? a : b })
+            uniquingKeysWith: { a, b in a.updatedAt > b.updatedAt ? a : b }
+        )
     }
 
     public static let empty = NarrativeOverrides([])
@@ -423,20 +438,20 @@ public struct NarrativeOverrides: Equatable, Sendable {
             }
             // 앵커 스니펫으로 새 씬 찾기 — 스니펫을 포함하는 첫 씬으로 재키.
             if let anchor = override.anchor, !anchor.isEmpty,
-                let scene = outline.scenes.first(where: { scene in
-                    let range = NSRange(
-                        location: scene.utf16Range.lowerBound,
-                        length: scene.utf16Range.count)
-                    return text.range(of: anchor, options: [], range: range).location
-                        != NSNotFound
-                })
-            {
+               let scene = outline.scenes.first(where: { scene in
+                   let range = NSRange(
+                       location: scene.utf16Range.lowerBound,
+                       length: scene.utf16Range.count
+                   )
+                   return text.range(of: anchor, options: [], range: range).location
+                       != NSNotFound
+               }) {
                 var rekeyed = override
                 rekeyed.key = scene.contentHash
                 updated.append(rekeyed)
             } else {
                 stale.append(override)
-                updated.append(override)  // 보존 — 원문이 돌아오면 다시 산다
+                updated.append(override) // 보존 — 원문이 돌아오면 다시 산다
             }
         }
         return (NarrativeOverrides(updated), stale)
@@ -465,8 +480,7 @@ public enum SentenceClamp {
             if terminals.contains(head[index]) {
                 var end = head.index(after: index)
                 while end < head.endIndex,
-                    terminals.contains(head[end]) || closers.contains(head[end])
-                {
+                      terminals.contains(head[end]) || closers.contains(head[end]) {
                     end = head.index(after: end)
                 }
                 cut = end

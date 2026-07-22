@@ -71,7 +71,9 @@ public struct StoryEventCandidate: Equatable, Sendable, Identifiable {
     public var confidence: Double
     public var inputHash: String
 
-    public var id: String { ephemeralID }
+    public var id: String {
+        ephemeralID
+    }
 }
 
 /// M11 P0의 결정적 후보 감지기. 기존 사건·상태 변화만 재사용하며 LLM을 부르지 않는다.
@@ -79,27 +81,29 @@ public enum KeySceneCandidateDetector {
     public static let ruleVersion = "keyscene-candidate-v1"
 
     public static func detect(
-        outline: DocumentOutline, events: [StoryEvent], body: String,
+        outline: DocumentOutline, events: [StoryEvent], body _: String,
         existing: [KeyScene], ignoredInputHashes: Set<String> = []
     ) -> [StoryEventCandidate] {
         let existingKeys = Set(existing.flatMap(\.linkedEventKeys))
         let sceneByHash = Dictionary(
-            uniqueKeysWithValues: outline.scenes.map { ($0.contentHash, $0) })
+            uniqueKeysWithValues: outline.scenes.map { ($0.contentHash, $0) }
+        )
         return events.compactMap { event in
             guard event.importance >= 4 || !event.deltas.isEmpty,
-                !existingKeys.contains(event.stableKey),
-                let scene = sceneByHash[event.sceneHash],
-                !existing.contains(where: {
-                    $0.summary == event.summary
-                        || ($0.sourceRange?.overlaps(scene.utf16Range) == true
-                            && $0.title == SentenceClamp.clamp(event.summary, to: 24))
-                })
+                  !existingKeys.contains(event.stableKey),
+                  let scene = sceneByHash[event.sceneHash],
+                  !existing.contains(where: {
+                      $0.summary == event.summary
+                          || ($0.sourceRange?.overlaps(scene.utf16Range) == true
+                              && $0.title == SentenceClamp.clamp(event.summary, to: 24))
+                  })
             else { return nil }
             var signals: [String] = []
             if event.importance >= 4 { signals.append("중요도 \(event.importance)") }
             if !event.deltas.isEmpty { signals.append("상태 변화 \(event.deltas.count)개") }
             let inputHash = DocumentOutline.stableHash(
-                "\(ruleVersion)|\(scene.contentHash)|\(event.stableKey)")
+                "\(ruleVersion)|\(scene.contentHash)|\(event.stableKey)"
+            )
             guard !ignoredInputHashes.contains(inputHash) else { return nil }
             return StoryEventCandidate(
                 ephemeralID: inputHash,
@@ -109,7 +113,8 @@ public enum KeySceneCandidateDetector {
                 evidence: event.quote.map { [$0] } ?? [],
                 importanceSignals: signals,
                 confidence: event.importance >= 5 ? 0.9 : 0.75,
-                inputHash: inputHash)
+                inputHash: inputHash
+            )
         }
     }
 }
@@ -127,7 +132,8 @@ public enum KeySceneReconciler {
         let reconciled = scenes.map { scene -> KeyScene in
             guard scene.sourceRange != nil else { return scene }
             guard let snippet = scene.anchorSnippet?.trimmingCharacters(
-                in: .whitespacesAndNewlines), !snippet.isEmpty
+                in: .whitespacesAndNewlines
+            ), !snippet.isEmpty
             else {
                 if !isValid(scene.sourceRange, length: text.length) { stale.insert(scene.id) }
                 return scene
@@ -142,7 +148,7 @@ public enum KeySceneReconciler {
             let best = matches.min { abs($0.location - oldStart) < abs($1.location - oldStart) }!
             var updated = scene
             let oldLength = max(scene.sourceRange?.count ?? best.length, best.length)
-            updated.sourceRange = best.location..<min(text.length, best.location + oldLength)
+            updated.sourceRange = best.location ..< min(text.length, best.location + oldLength)
             return updated
         }
         return Result(scenes: reconciled, staleIDs: stale)

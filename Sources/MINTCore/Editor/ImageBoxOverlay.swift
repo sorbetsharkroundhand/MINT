@@ -14,7 +14,9 @@ final class ImageBoxOverlay: NSView {
 
     /// 핸들 한 변(pt)과, 핸들이 프레임 밖으로 삐져나오지 않도록 두는 여유.
     private let handle: CGFloat = 12
-    var inset: CGFloat { handle / 2 + 2 }
+    var inset: CGFloat {
+        handle / 2 + 2
+    }
 
     private enum Corner: CaseIterable { case tl, tr, bl, br }
     private enum Drag { case none, resize(Corner), move }
@@ -23,24 +25,32 @@ final class ImageBoxOverlay: NSView {
     private var startWidth: Int = 100
     private var didMove = false
 
-    override var isFlipped: Bool { true }
+    override var isFlipped: Bool {
+        true
+    }
 
     init(textView: BlockTextView, theme: MintTheme) {
         self.textView = textView
         self.theme = theme
         super.init(frame: .zero)
     }
-    required init?(coder: NSCoder) { nil }
+
+    required init?(coder _: NSCoder) {
+        nil
+    }
 
     /// 이미지가 실제로 그려지는 영역(오버레이 좌표계) — 프레임에서 inset만큼 안쪽.
-    private var imageRect: NSRect { bounds.insetBy(dx: inset, dy: inset) }
+    private var imageRect: NSRect {
+        bounds.insetBy(dx: inset, dy: inset)
+    }
 
     // MARK: 그리기 — 테두리 + 네 모서리 핸들
 
-    override func draw(_ dirtyRect: NSRect) {
+    override func draw(_: NSRect) {
         let box = imageRect
         let border = NSBezierPath(
-            roundedRect: box.insetBy(dx: -2, dy: -2), xRadius: 6, yRadius: 6)
+            roundedRect: box.insetBy(dx: -2, dy: -2), xRadius: 6, yRadius: 6
+        )
         border.lineWidth = 2
         theme.blue.setStroke()
         border.stroke()
@@ -56,16 +66,16 @@ final class ImageBoxOverlay: NSView {
 
     private func handleRect(_ c: Corner) -> NSRect {
         let box = imageRect
-        let center: NSPoint
-        switch c {
-        case .tl: center = NSPoint(x: box.minX, y: box.minY)
-        case .tr: center = NSPoint(x: box.maxX, y: box.minY)
-        case .bl: center = NSPoint(x: box.minX, y: box.maxY)
-        case .br: center = NSPoint(x: box.maxX, y: box.maxY)
+        let center = switch c {
+        case .tl: NSPoint(x: box.minX, y: box.minY)
+        case .tr: NSPoint(x: box.maxX, y: box.minY)
+        case .bl: NSPoint(x: box.minX, y: box.maxY)
+        case .br: NSPoint(x: box.maxX, y: box.maxY)
         }
         return NSRect(
             x: center.x - handle / 2, y: center.y - handle / 2,
-            width: handle, height: handle)
+            width: handle, height: handle
+        )
     }
 
     private func corner(at p: NSPoint) -> Corner? {
@@ -105,7 +115,7 @@ final class ImageBoxOverlay: NSView {
         let dy = event.locationInWindow.y - startWinPoint.y
         if abs(dx) > 2 || abs(dy) > 2 { didMove = true }
         switch drag {
-        case .resize(let c):
+        case let .resize(c):
             // 오른쪽 모서리는 오른쪽으로, 왼쪽 모서리는 왼쪽으로 끌면 커진다.
             let grow: CGFloat = (c == .tr || c == .br) ? dx : -dx
             tv.previewImageResize(at: paraLocation, startWidth: startWidth, deltaWidth: grow)
@@ -124,9 +134,10 @@ final class ImageBoxOverlay: NSView {
         case .move:
             if didMove {
                 tv.moveImageParagraph(
-                    at: paraLocation, toViewPoint: tv.convert(event.locationInWindow, from: nil))
+                    at: paraLocation, toViewPoint: tv.convert(event.locationInWindow, from: nil)
+                )
             } else {
-                tv.imageDropIndicatorY = nil  // 클릭만 — 표시선 제거
+                tv.imageDropIndicatorY = nil // 클릭만 — 표시선 제거
                 tv.needsDisplay = true
             }
             NSCursor.openHand.set()

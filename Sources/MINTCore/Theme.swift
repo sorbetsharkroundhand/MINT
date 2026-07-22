@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// 값은 목업의 CSS 변수(themeVars)를 그대로 옮긴 것 — 라이트/다크 두 벌.
 /// 에디터(NSTextView)와 SwiftUI 크롬이 같은 팔레트를 공유한다.
-public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
+public struct MintTheme: @unchecked Sendable { // NSColor 불변 보관만 하므로 안전
     public let ink: NSColor
     public let ink2: NSColor
     public let ink3: NSColor
@@ -117,27 +117,86 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
         of(scheme).tinted(with: palette, dark: scheme == .dark)
     }
 
-    // SwiftUI 크롬용 브리지.
-    public var inkC: Color { Color(nsColor: ink) }
-    public var ink2C: Color { Color(nsColor: ink2) }
-    public var ink3C: Color { Color(nsColor: ink3) }
-    public var ghostC: Color { Color(nsColor: ghost) }
-    public var blueC: Color { Color(nsColor: blue) }
-    public var sepC: Color { Color(nsColor: sep) }
-    public var sepStrongC: Color { Color(nsColor: sepStrong) }
-    public var hoverC: Color { Color(nsColor: hover) }
-    public var activeBgC: Color { Color(nsColor: activeBg) }
-    public var chipC: Color { Color(nsColor: chip) }
-    public var chipBorderC: Color { Color(nsColor: chipBorder) }
-    public var pillC: Color { Color(nsColor: pill) }
-    public var pillBorderC: Color { Color(nsColor: pillBorder) }
-    public var kbdC: Color { Color(nsColor: kbd) }
-    public var glassWinC: Color { Color(nsColor: glassWin) }
-    public var toolbarC: Color { Color(nsColor: toolbar) }
-    public var sidebarTintC: Color { Color(nsColor: sidebarTint) }
-    public var statusbarC: Color { Color(nsColor: statusbar) }
-    public var novelC: Color { Color(nsColor: novel) }
-    public var novelBgC: Color { Color(nsColor: novelBg) }
+    /// SwiftUI 크롬용 브리지.
+    public var inkC: Color {
+        Color(nsColor: ink)
+    }
+
+    public var ink2C: Color {
+        Color(nsColor: ink2)
+    }
+
+    public var ink3C: Color {
+        Color(nsColor: ink3)
+    }
+
+    public var ghostC: Color {
+        Color(nsColor: ghost)
+    }
+
+    public var blueC: Color {
+        Color(nsColor: blue)
+    }
+
+    public var sepC: Color {
+        Color(nsColor: sep)
+    }
+
+    public var sepStrongC: Color {
+        Color(nsColor: sepStrong)
+    }
+
+    public var hoverC: Color {
+        Color(nsColor: hover)
+    }
+
+    public var activeBgC: Color {
+        Color(nsColor: activeBg)
+    }
+
+    public var chipC: Color {
+        Color(nsColor: chip)
+    }
+
+    public var chipBorderC: Color {
+        Color(nsColor: chipBorder)
+    }
+
+    public var pillC: Color {
+        Color(nsColor: pill)
+    }
+
+    public var pillBorderC: Color {
+        Color(nsColor: pillBorder)
+    }
+
+    public var kbdC: Color {
+        Color(nsColor: kbd)
+    }
+
+    public var glassWinC: Color {
+        Color(nsColor: glassWin)
+    }
+
+    public var toolbarC: Color {
+        Color(nsColor: toolbar)
+    }
+
+    public var sidebarTintC: Color {
+        Color(nsColor: sidebarTint)
+    }
+
+    public var statusbarC: Color {
+        Color(nsColor: statusbar)
+    }
+
+    public var novelC: Color {
+        Color(nsColor: novel)
+    }
+
+    public var novelBgC: Color {
+        Color(nsColor: novelBg)
+    }
 }
 
 extension NSColor {
@@ -190,7 +249,7 @@ extension NSColor {
         var brightness = hsb.brightnessComponent
         var result = self
         // 0.02씩 옮기며 목표 대비를 처음 넘는 지점에서 멈춘다 (최대 50회).
-        for _ in 0..<50 {
+        for _ in 0 ..< 50 {
             if result.contrastRatio(against: background) >= target { return result }
             brightness += darken ? -0.02 : 0.02
             if brightness < 0 || brightness > 1 { break }
@@ -198,7 +257,8 @@ extension NSColor {
                 hue: hsb.hueComponent,
                 saturation: hsb.saturationComponent,
                 brightness: brightness,
-                alpha: hsb.alphaComponent)
+                alpha: hsb.alphaComponent
+            )
         }
         return result
     }
@@ -232,10 +292,12 @@ public struct MintPalette: Equatable, Sendable, Codable {
     }
 
     public static let lightDefault = MintPalette(
-        hexes: [0xFFEC87, 0xE8E164, 0xE9FF7A, 0xB2EB7F, 0x9FFF92])
+        hexes: [0xFFEC87, 0xE8E164, 0xE9FF7A, 0xB2EB7F, 0x9FFF92]
+    )
 
     public static let darkDefault = MintPalette(
-        hexes: [0x618C03, 0x4F7302, 0x465902, 0x252601, 0x402929])
+        hexes: [0x618C03, 0x4F7302, 0x465902, 0x252601, 0x402929]
+    )
 
     public static func `default`(dark: Bool) -> MintPalette {
         dark ? .darkDefault : .lightDefault
@@ -246,20 +308,21 @@ public struct MintPalette: Equatable, Sendable, Codable {
     }
 }
 
-extension MintTheme {
+public extension MintTheme {
     /// 팔레트를 입힌 테마 — 배경·표면 슬롯만 갈아 끼운다.
     ///
     /// 알파는 기존 값의 구조를 따른다(넓은 면은 옅게, 좁은 면은 진하게) —
     /// 유리 배경 위에 얹히는 반투명 레이어라는 성질을 잃으면 창 전체가
     /// 납작해진다. 색만 바뀌고 레이어 관계는 그대로다.
-    public func tinted(with palette: MintPalette, dark: Bool) -> MintTheme {
+    func tinted(with palette: MintPalette, dark: Bool) -> MintTheme {
         // 액센트는 팔레트의 색상을 물려받되 대비를 맞춰 파생한다 — 라이트는
         // 어둡게(흰 바탕), 다크는 밝게(검은 바탕). 글자·아이콘에 쓰이므로
         // 팔레트 원색을 그대로 쓰면 읽히지 않는다.
         let accentBase = palette.color(3)
         let accent = accentBase.adjustedForContrast(
             against: dark ? NSColor(hex: 0x141416) : .white,
-            target: 4.5, darken: !dark)
+            target: 4.5, darken: !dark
+        )
 
         return MintTheme(
             // 글자 계열 — 그대로.
@@ -302,6 +365,7 @@ public final class PaletteSettings: ObservableObject {
     @Published public var light: MintPalette {
         didSet { save(light, key: Keys.light) }
     }
+
     @Published public var dark: MintPalette {
         didSet { save(dark, key: Keys.dark) }
     }
@@ -345,7 +409,8 @@ public final class PaletteSettings: ObservableObject {
 
     private func save(_ palette: MintPalette, key: String) {
         UserDefaults.standard.set(
-            palette.hexes.map { String(format: "%06X", $0) }, forKey: key)
+            palette.hexes.map { String(format: "%06X", $0) }, forKey: key
+        )
     }
 }
 
@@ -362,23 +427,23 @@ public enum MintFonts {
     /// Nanum Myeongjo·AppleMyungjo는 macOS 한국어 지원에 딸려 오는 명조체다
     /// (Nanum은 Bold 보유, AppleMyungjo는 Regular뿐이라 뒤에 둔다).
     static let serifFamily: String? = [
-        "Noto Serif KR", "NotoSerifKR", "Nanum Myeongjo", "AppleMyungjo",
+        "Noto Serif KR", "NotoSerifKR", "Nanum Myeongjo", "AppleMyungjo"
     ]
     .first { NSFontManager.shared.availableFontFamilies.contains($0) }
 
     /// UI 산세리프. Apple SD Gothic Neo는 한글 9종 굵기로 macOS에 항상 있다.
     static let uiFamily: String? = [
-        "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo",
+        "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo"
     ]
     .first { NSFontManager.shared.availableFontFamilies.contains($0) }
 
     /// 본문 세리프 (AppKit).
     public static func serif(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         if let family = serifFamily,
-            let font = NSFontManager.shared.font(
-                withFamily: family, traits: [], weight: Self.fontManagerWeight(weight),
-                size: size)
-        {
+           let font = NSFontManager.shared.font(
+               withFamily: family, traits: [], weight: fontManagerWeight(weight),
+               size: size
+           ) {
             return font
         }
         let base = NSFont.systemFont(ofSize: size, weight: weight)
@@ -389,10 +454,10 @@ public enum MintFonts {
     /// UI 산세리프 (AppKit).
     public static func ui(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
         if let family = uiFamily,
-            let font = NSFontManager.shared.font(
-                withFamily: family, traits: [], weight: Self.fontManagerWeight(weight),
-                size: size)
-        {
+           let font = NSFontManager.shared.font(
+               withFamily: family, traits: [], weight: fontManagerWeight(weight),
+               size: size
+           ) {
             return font
         }
         return NSFont.systemFont(ofSize: size, weight: weight)

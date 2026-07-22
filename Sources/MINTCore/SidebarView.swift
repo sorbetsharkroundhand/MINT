@@ -6,13 +6,13 @@ import UniformTypeIdentifiers
 /// 문자열 raw값은 `@AppStorage("mint.sidebarSection")` 키의 값 — 툴바(소설 배지)와
 /// 사이드바가 같은 키로 섹션을 전환한다.
 enum SidebarSection: String {
-    case files  // 문서(폴더 트리) — 기존 사이드바
-    case bible  // 스토리 바이블 (PLAN §7)
+    case files // 문서(폴더 트리) — 기존 사이드바
+    case bible // 스토리 바이블 (PLAN §7)
     /// 서사 (v5 통합) — 이해 타임라인 + 서사 그래프가 하나의 화면이 됐다
     /// (PLAN §6.6). raw값 "timeline" 유지 — 기존 사용자의 저장된 섹션이 살아남는다.
     case narrative = "timeline"
-    case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
-    case agent  // 읽기 전용 Writing Agent (PLAN §14 M10)
+    case context // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
+    case agent // 읽기 전용 Writing Agent (PLAN §14 M10)
 }
 
 /// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
@@ -24,8 +24,7 @@ private struct WarningDot: View {
     var body: some View {
         // 일관성 경고 — "확인해 보세요" 신호.
         if indexer.snapshot?.entryID == store.activeID,
-            !indexer.warnings.isEmpty
-        {
+           !indexer.warnings.isEmpty {
             Circle()
                 .fill(theme.novelC)
                 .frame(width: 5, height: 5)
@@ -161,7 +160,8 @@ struct SidebarView: View {
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
             sectionTab(
                 .narrative, icon: "arrow.triangle.branch",
-                help: "서사 — 씬·사건·흐름·시간")
+                help: "서사 — 씬·사건·흐름·시간"
+            )
             sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
             if agent != nil {
                 sectionTab(.agent, icon: "sparkles", help: "Writing Agent — 작품 조회와 조언")
@@ -262,9 +262,9 @@ struct SidebarView: View {
                     } else {
                         ForEach(items) { item in
                             switch item {
-                            case .folder(let folder, let depth):
+                            case let .folder(folder, depth):
                                 folderRow(folder, depth: depth)
-                            case .entry(let entry, let depth):
+                            case let .entry(entry, depth):
                                 row(entry, depth: depth)
                             }
                         }
@@ -281,7 +281,9 @@ struct SidebarView: View {
                             .onDrop(
                                 of: [.plainText],
                                 delegate: RootAreaDropDelegate(
-                                    store: store, model: dragModel))
+                                    store: store, model: dragModel
+                                )
+                            )
                     }
                 }
                 .padding(.horizontal, 10)
@@ -292,7 +294,8 @@ struct SidebarView: View {
             // 행 위 드롭은 더 깊은 히트 테스트가 이기므로 충돌하지 않는다.
             .onDrop(
                 of: [.plainText],
-                delegate: RootAreaDropDelegate(store: store, model: dragModel))
+                delegate: RootAreaDropDelegate(store: store, model: dragModel)
+            )
         }
     }
 
@@ -304,8 +307,8 @@ struct SidebarView: View {
 
         var id: UUID {
             switch self {
-            case .folder(let folder, _): folder.id
-            case .entry(let entry, _): entry.id
+            case let .folder(folder, _): folder.id
+            case let .entry(entry, _): entry.id
             }
         }
     }
@@ -409,10 +412,12 @@ struct SidebarView: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.chipC))
+            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.chipC)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(theme.chipBorderC))
+                .strokeBorder(theme.chipBorderC)
+        )
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
@@ -474,7 +479,8 @@ struct SidebarView: View {
             .padding(.horizontal, 11)
             .background(
                 RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(active ? theme.activeBgC : .clear))
+                    .fill(active ? theme.activeBgC : .clear)
+            )
             .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
         .buttonStyle(.plain)
@@ -484,15 +490,15 @@ struct SidebarView: View {
     private static func snippet(_ body: String, query: String) -> String? {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty,
-            let range = body.range(of: q, options: .caseInsensitive)
+              let range = body.range(of: q, options: .caseInsensitive)
         else { return nil }
         let start =
             body.index(range.lowerBound, offsetBy: -24, limitedBy: body.startIndex)
-            ?? body.startIndex
+                ?? body.startIndex
         let end =
             body.index(range.upperBound, offsetBy: 24, limitedBy: body.endIndex)
-            ?? body.endIndex
-        var text = String(body[start..<end])
+                ?? body.endIndex
+        var text = String(body[start ..< end])
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespaces)
         if start != body.startIndex { text = "…" + text }
@@ -606,7 +612,9 @@ struct SidebarView: View {
             of: [.plainText],
             delegate: FolderRowDropDelegate(
                 folder: folder, expanded: expanded, store: store, model: dragModel,
-                requestNaming: { completion.requestFolderName(for: $0, in: store) }))
+                requestNaming: { completion.requestFolderName(for: $0, in: store) }
+            )
+        )
         .contextMenu {
             Button("새 저널") { store.newEntry(in: folder.id) }
             Button("새 소설") { store.newEntry(in: folder.id, kind: .novel) }
@@ -633,7 +641,8 @@ struct SidebarView: View {
                     Image(systemName: "book.closed.fill")
                         .font(.system(size: 10.5))
                         .foregroundStyle(
-                            active ? theme.novelC : theme.novelC.opacity(0.6))
+                            active ? theme.novelC : theme.novelC.opacity(0.6)
+                        )
                 } else {
                     Image(systemName: "doc.text")
                         .font(.system(size: 10.5, weight: .medium))
@@ -671,7 +680,7 @@ struct SidebarView: View {
 
             Spacer(minLength: 6)
 
-            if active && !editing {
+            if active, !editing {
                 DeleteButton(theme: theme) { requestDelete(entry) }
             } else if !editing {
                 Text(store.dayLabel(for: entry))
@@ -687,8 +696,8 @@ struct SidebarView: View {
                 .fill(dropTarget
                     ? theme.activeBgC
                     : active
-                        ? (entry.resolvedKind == .novel ? theme.novelBgC : theme.activeBgC)
-                        : (hovered ? theme.hoverC : .clear))
+                    ? (entry.resolvedKind == .novel ? theme.novelBgC : theme.activeBgC)
+                    : (hovered ? theme.hoverC : .clear))
         )
         // 드롭 "안으로"(= 두 저널을 새 폴더로 병합) 대상 표시 — 파란 링.
         .overlay {
@@ -726,7 +735,9 @@ struct SidebarView: View {
             of: [.plainText],
             delegate: EntryRowDropDelegate(
                 entry: entry, store: store, model: dragModel,
-                requestNaming: { completion.requestFolderName(for: $0, in: store) }))
+                requestNaming: { completion.requestFolderName(for: $0, in: store) }
+            )
+        )
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
             // 작성일 바꾸기 (L9) — 상단바 달력 버튼이 사라진 뒤의 유일한 진입점.
@@ -768,7 +779,6 @@ struct SidebarView: View {
     }
 
     /// 저널을 다른 폴더/루트로 옮기는 문맥 메뉴 — 이미 만든 글도 정리할 수 있게 (M3).
-    @ViewBuilder
     private func moveMenu(for entry: JournalEntry) -> some View {
         Menu("이동") {
             Button("루트로 이동") { store.move(entry.id, toFolder: nil) }

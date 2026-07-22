@@ -9,7 +9,6 @@ import HuggingFace
 /// 같게 유지해 캐시가 정확히 겹치게 한다.
 @MainActor
 public final class ModelDownloadManager: ObservableObject {
-
     public enum State: Equatable {
         case notDownloaded
         /// 진행률 0...1.
@@ -78,7 +77,8 @@ public final class ModelDownloadManager: ObservableObject {
         guard let repo = repoID(modelID) else { return false }
         let snapshots = HubCache.default.snapshotsDirectory(repo: repo, kind: .model)
         guard let enumerator = FileManager.default.enumerator(
-            at: snapshots, includingPropertiesForKeys: nil)
+            at: snapshots, includingPropertiesForKeys: nil
+        )
         else { return false }
         for case let url as URL in enumerator where url.pathExtension == "safetensors" {
             return true

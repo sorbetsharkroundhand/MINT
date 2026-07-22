@@ -1,17 +1,15 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// 상태 바 통계 회귀 테스트 — 단일 패스 `TextStats.compute`가 기존 상태 바
 /// 공식(`filter`/`split` 각각 문서 전체 순회)과 **결과 동일**함을 고정한다.
 /// 그 공식들이 키 입력마다 3번 돌던 것이 대형 문서 타이핑 랙의 주범이었다
 /// (docs/editor-perf.md).
 final class TextStatsTests: XCTestCase {
-
     /// 기존 상태 바 공식 그대로 — 비교 기준.
     private func legacy(_ text: String) -> (chars: Int, words: Int) {
         (
-            text.filter { !$0.isWhitespace }.count,
+            text.count(where: { !$0.isWhitespace }),
             text.split(whereSeparator: { $0.isWhitespace }).count
         )
     }
@@ -41,6 +39,6 @@ final class TextStatsTests: XCTestCase {
     func test읽기_시간_라벨() {
         XCTAssertEqual(TextStats(characters: 0).readingLabel, "")
         XCTAssertEqual(TextStats(characters: 100).readingLabel, "1분 미만")
-        XCTAssertEqual(TextStats(characters: 1_500).readingLabel, "약 3분")
+        XCTAssertEqual(TextStats(characters: 1500).readingLabel, "약 3분")
     }
 }

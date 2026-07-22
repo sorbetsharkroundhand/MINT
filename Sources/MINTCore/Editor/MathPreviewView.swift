@@ -26,7 +26,8 @@ struct MathPreviewView: View {
                     .interpolation(.high)
                     .frame(
                         width: image.size.width * scale,
-                        height: image.size.height * scale)
+                        height: image.size.height * scale
+                    )
             } else if let message {
                 Text(message)
                     .font(MintFonts.uiFont(11.5))

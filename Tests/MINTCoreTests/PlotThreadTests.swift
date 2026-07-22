@@ -1,16 +1,14 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 /// Plot Thread (v6, Narrative Graph) — 파서·stable identity·상태 파생·레이아웃의
 /// 결정적 로직 검증 (LLM 호출 없음). 최종 성공 기준(요구사항 §14):
 /// 직선 소설은 직선, 서브플롯은 시작점에서 branch, 만나는 사건에서 merge,
 /// 휴면 플롯은 레인 유지, 재분석에도 identity 유지.
 final class PlotThreadTests: XCTestCase {
-
     /// 사건 키 k1…kN (요약 해시 기반 stableKey와 같은 규격의 임의 키).
     private func keys(_ count: Int) -> [String] {
-        (1...count).map { "key-\($0)" }
+        (1 ... count).map { "key-\($0)" }
     }
 
     /// 사건 행만으로 구성된 rows — 레이아웃 단위 테스트용.
@@ -20,8 +18,10 @@ final class PlotThreadTests: XCTestCase {
                 id: "r\(offset)",
                 event: CanonicalEvent(
                     canonicalKey: key, sceneHash: "scene", summary: key,
-                    importance: 3, participants: [], perspectives: [], quote: nil),
-                start: 0)
+                    importance: 3, participants: [], perspectives: [], quote: nil
+                ),
+                start: 0
+            )
         }
     }
 
@@ -31,16 +31,20 @@ final class PlotThreadTests: XCTestCase {
         ResolvedPlotThread(
             id: id, title: id, summary: "", status: resolvedAt == nil ? .active : .resolved,
             memberKeys: members, roleByKey: [:], resolvedAtKey: resolvedAt,
-            isMain: main, userEdited: false, confidence: 0.6)
+            isMain: main, userEdited: false, confidence: 0.6
+        )
     }
 
     func test_플롯분석_동일stableKey는_첫등장하나로_정규화한다() {
         let first = StoryEvent(
-            sceneHash: "scene-1", participants: [], summary: "문이 열린다", importance: 3)
+            sceneHash: "scene-1", participants: [], summary: "문이 열린다", importance: 3
+        )
         let repeated = StoryEvent(
-            sceneHash: "scene-2", participants: [], summary: "문이 열린다", importance: 5)
+            sceneHash: "scene-2", participants: [], summary: "문이 열린다", importance: 5
+        )
         let next = StoryEvent(
-            sceneHash: "scene-3", participants: [], summary: "안으로 들어간다", importance: 4)
+            sceneHash: "scene-3", participants: [], summary: "안으로 들어간다", importance: 4
+        )
 
         let normalized = BackgroundIndexer.uniqueEventsForAnalysis([first, repeated, next])
 
@@ -54,11 +58,11 @@ final class PlotThreadTests: XCTestCase {
     func test_파서_플롯_제목_해결_역할() {
         let ks = keys(8)
         let output = """
-            플롯: 1,3,5,8 | 제목: 살인사건의 진실 | 요약: 남편의 죽음을 파헤친다 | 해결: 8
-            플롯: 2,4 | 제목: 연애 관계 | 요약: 두 사람의 거리
-            플롯: 6 | 제목: 사건하나 | 요약: 멤버 부족 — 버려져야 한다
-            잡담: 무시될 줄
-            """
+        플롯: 1,3,5,8 | 제목: 살인사건의 진실 | 요약: 남편의 죽음을 파헤친다 | 해결: 8
+        플롯: 2,4 | 제목: 연애 관계 | 요약: 두 사람의 거리
+        플롯: 6 | 제목: 사건하나 | 요약: 멤버 부족 — 버려져야 한다
+        잡담: 무시될 줄
+        """
         let threads = PlotThreadParser.parse(output, keys: ks)
         XCTAssertEqual(threads.count, 2)
         XCTAssertEqual(threads[0].title, "살인사건의 진실")
@@ -84,17 +88,20 @@ final class PlotThreadTests: XCTestCase {
     func test_reconcile_멤버겹침이면_이전ID_유지() {
         let old = PlotThread(
             stableID: "thr-OLD", title: "복수",
-            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2"), .init(eventKey: "key-3")])
+            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2"), .init(eventKey: "key-3")]
+        )
         // 재분석 — 앞에 새 사건이 붙어 여는 사건이 바뀌었지만 과반이 겹친다.
         let renewed = PlotThread(
             title: "복수의 준비",
-            memberships: [.init(eventKey: "key-0"), .init(eventKey: "key-2"), .init(eventKey: "key-3")])
+            memberships: [.init(eventKey: "key-0"), .init(eventKey: "key-2"), .init(eventKey: "key-3")]
+        )
         let result = PlotThreadParser.reconcile(new: [renewed], previous: [old])
         XCTAssertEqual(result[0].stableID, "thr-OLD")
         // 겹침 없는 새 플롯은 새 ID.
         let fresh = PlotThread(
             title: "새 갈등",
-            memberships: [.init(eventKey: "key-8"), .init(eventKey: "key-9")])
+            memberships: [.init(eventKey: "key-8"), .init(eventKey: "key-9")]
+        )
         let mixed = PlotThreadParser.reconcile(new: [renewed, fresh], previous: [old])
         XCTAssertEqual(mixed[0].stableID, "thr-OLD")
         XCTAssertNotEqual(mixed[1].stableID, "thr-OLD")
@@ -103,14 +110,17 @@ final class PlotThreadTests: XCTestCase {
     func test_reconcile_이전ID는_한_플롯에만() {
         let old = PlotThread(
             stableID: "thr-OLD", title: "미스터리",
-            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")])
+            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")]
+        )
         // 두 새 플롯이 같은 이전 플롯과 겹친다 — 겹침 큰 쪽만 물려받는다.
         let bigger = PlotThread(
             title: "미스터리A",
-            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2"), .init(eventKey: "key-3")])
+            memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2"), .init(eventKey: "key-3")]
+        )
         let smaller = PlotThread(
             title: "미스터리B",
-            memberships: [.init(eventKey: "key-2"), .init(eventKey: "key-9")])
+            memberships: [.init(eventKey: "key-2"), .init(eventKey: "key-9")]
+        )
         let result = PlotThreadParser.reconcile(new: [smaller, bigger], previous: [old])
         XCTAssertEqual(result[1].stableID, "thr-OLD")
         XCTAssertNotEqual(result[0].stableID, "thr-OLD")
@@ -122,7 +132,8 @@ final class PlotThreadTests: XCTestCase {
         // 직선 소설 — 플롯 분석이 없으면(또는 못 묶으면) 본줄기 하나 = 직선.
         let order = keys(4)
         let threads = ResolvedPlotThread.derive(
-            analysis: nil, canonicalOrder: order, memberMap: [:], overrides: .empty)
+            analysis: nil, canonicalOrder: order, memberMap: [:], overrides: .empty
+        )
         XCTAssertEqual(threads.count, 1)
         XCTAssertTrue(threads[0].isMain)
         XCTAssertEqual(threads[0].memberKeys, order)
@@ -135,18 +146,22 @@ final class PlotThreadTests: XCTestCase {
             PlotThread(
                 stableID: "thr-A", title: "해결플롯",
                 memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-3", role: .resolves)],
-                resolvedAtKey: "key-3"),
+                resolvedAtKey: "key-3"
+            ),
             // 마지막 멤버(key-2) 뒤로 사건 8개 — 휴면. 레인은 유지된다.
             PlotThread(
                 stableID: "thr-B", title: "휴면플롯",
-                memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")]),
+                memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")]
+            ),
             // 끝까지 진행 중.
             PlotThread(
                 stableID: "thr-C", title: "진행플롯",
-                memberships: [.init(eventKey: "key-5"), .init(eventKey: "key-10")]),
+                memberships: [.init(eventKey: "key-5"), .init(eventKey: "key-10")]
+            )
         ])
         let threads = ResolvedPlotThread.derive(
-            analysis: analysis, canonicalOrder: order, memberMap: [:], overrides: .empty)
+            analysis: analysis, canonicalOrder: order, memberMap: [:], overrides: .empty
+        )
         func status(_ id: String) -> ThreadStatus? {
             threads.first { $0.id == id }?.status
         }
@@ -161,7 +176,8 @@ final class PlotThreadTests: XCTestCase {
             analysis: analysis, canonicalOrder: order, memberMap: [:],
             overrides: NarrativeOverrides([
                 NarrativeOverride(kind: .threadStatus, key: "thr-B", value: "해결")
-            ]))
+            ])
+        )
         XCTAssertEqual(overridden.first { $0.id == "thr-B" }?.status, .resolved)
     }
 
@@ -170,14 +186,16 @@ final class PlotThreadTests: XCTestCase {
         let analysis = PlotThreadAnalysis(threads: [
             PlotThread(
                 stableID: "thr-A", title: "갈등",
-                memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")])
+                memberships: [.init(eventKey: "key-1"), .init(eventKey: "key-2")]
+            )
         ])
         let threads = ResolvedPlotThread.derive(
             analysis: analysis, canonicalOrder: order, memberMap: [:],
             overrides: NarrativeOverrides([
                 NarrativeOverride(kind: .threadMembership, key: "thr-A|key-4", value: "진행"),
-                NarrativeOverride(kind: .threadMembership, key: "thr-A|key-2", value: "제외"),
-            ]))
+                NarrativeOverride(kind: .threadMembership, key: "thr-A|key-2", value: "제외")
+            ])
+        )
         let a = threads.first { $0.id == "thr-A" }
         XCTAssertEqual(a?.memberKeys, ["key-1", "key-4"])
         XCTAssertTrue(a?.userEdited == true)
@@ -193,12 +211,14 @@ final class PlotThreadTests: XCTestCase {
                 stableID: "thr-A", title: "미스터리",
                 memberships: [
                     .init(eventKey: "key-1"), .init(eventKey: "key-2"),
-                    .init(eventKey: "key-3"),
-                ])
+                    .init(eventKey: "key-3")
+                ]
+            )
         ])
         let threads = ResolvedPlotThread.derive(
             analysis: analysis, canonicalOrder: order,
-            memberMap: ["key-2": "key-1"], overrides: .empty)
+            memberMap: ["key-2": "key-1"], overrides: .empty
+        )
         XCTAssertEqual(threads.first { $0.id == "thr-A" }?.memberKeys, ["key-1", "key-3"])
     }
 
@@ -207,7 +227,8 @@ final class PlotThreadTests: XCTestCase {
     func test_직선소설은_레인_하나() {
         let order = keys(4)
         let threads = ResolvedPlotThread.derive(
-            analysis: nil, canonicalOrder: order, memberMap: [:], overrides: .empty)
+            analysis: nil, canonicalOrder: order, memberMap: [:], overrides: .empty
+        )
         let layout = ThreadGraphLayout.compute(rows: eventRows(order), threads: threads)
         XCTAssertEqual(layout.slotCount, 1)
         XCTAssertEqual(layout.lanes.count, 1)
@@ -221,7 +242,8 @@ final class PlotThreadTests: XCTestCase {
         let main = thread(id: PlotThread.mainID, members: ["A", "C", "E"], main: true)
         let sub = thread(id: "thr-S", members: ["B", "D"], resolvedAt: "D")
         let layout = ThreadGraphLayout.compute(
-            rows: eventRows(order), threads: [main, sub])
+            rows: eventRows(order), threads: [main, sub]
+        )
         // 본줄기 슬롯 0 고정, 서브플롯은 슬롯 1.
         XCTAssertEqual(layout.lanes.first { $0.thread.isMain }?.slot, 0)
         let subLane = layout.lanes.first { $0.thread.id == "thr-S" }
@@ -232,7 +254,8 @@ final class PlotThreadTests: XCTestCase {
         // 해결된 슬롯은 회수된다 — 그 뒤에 여는 플롯이 슬롯 1을 재사용.
         let late = thread(id: "thr-L", members: ["E"])
         let reuse = ThreadGraphLayout.compute(
-            rows: eventRows(order), threads: [main, sub, late])
+            rows: eventRows(order), threads: [main, sub, late]
+        )
         XCTAssertEqual(reuse.lanes.first { $0.thread.id == "thr-L" }?.slot, 1)
     }
 
@@ -242,7 +265,8 @@ final class PlotThreadTests: XCTestCase {
         let main = thread(id: PlotThread.mainID, members: ["A", "C", "D"], main: true)
         let sub = thread(id: "thr-S", members: ["B", "C"], resolvedAt: "C")
         let layout = ThreadGraphLayout.compute(
-            rows: eventRows(order), threads: [main, sub])
+            rows: eventRows(order), threads: [main, sub]
+        )
         let junction = layout.nodes["C"]
         XCTAssertEqual(junction?.isJunction, true)
         XCTAssertEqual(junction?.laneSlots, [0, 1])
@@ -258,14 +282,16 @@ final class PlotThreadTests: XCTestCase {
         let main = thread(id: PlotThread.mainID, members: order.filter { $0 != "key-2" }, main: true)
         let dormant = thread(id: "thr-U", members: ["key-2", "key-3"])
         let layout = ThreadGraphLayout.compute(
-            rows: eventRows(order), threads: [main, dormant])
+            rows: eventRows(order), threads: [main, dormant]
+        )
         let lane = layout.lanes.first { $0.thread.id == "thr-U" }
         XCTAssertNotNil(lane)
-        XCTAssertNil(lane?.resolveRow)  // 닫히지 않는다
+        XCTAssertNil(lane?.resolveRow) // 닫히지 않는다
         // 휴면 레인의 슬롯은 미해결인 동안 회수되지 않는다 — 뒤에 여는 플롯은 다음 슬롯.
         let late = thread(id: "thr-L", members: ["key-8", "key-9"])
         let both = ThreadGraphLayout.compute(
-            rows: eventRows(order), threads: [main, dormant, late])
+            rows: eventRows(order), threads: [main, dormant, late]
+        )
         XCTAssertEqual(both.lanes.first { $0.thread.id == "thr-L" }?.slot, 2)
     }
 
@@ -279,19 +305,21 @@ final class PlotThreadTests: XCTestCase {
         XCTAssertEqual(a.lanes.map(\.slot), b.lanes.map(\.slot))
         XCTAssertEqual(a.slotCount, b.slotCount)
         XCTAssertEqual(
-            a.nodes.mapValues(\.slot), b.nodes.mapValues(\.slot))
+            a.nodes.mapValues(\.slot), b.nodes.mapValues(\.slot)
+        )
     }
 
     func test_projection이_바뀌어도_thread_identity_유지() {
         // 흐름(담화)과 시간순은 행 순서만 다르다 — 레인의 스레드 ID 집합은 같다.
         let discourse = ["A", "B", "C", "D"]
-        let chrono = ["C", "A", "B", "D"]  // 회상 속 사건 C가 시간상 먼저
+        let chrono = ["C", "A", "B", "D"] // 회상 속 사건 C가 시간상 먼저
         let main = thread(id: PlotThread.mainID, members: ["A", "B", "D"], main: true)
         let sub = thread(id: "thr-S", members: ["C", "D"])
         let flow = ThreadGraphLayout.compute(rows: eventRows(discourse), threads: [main, sub])
         let time = ThreadGraphLayout.compute(rows: eventRows(chrono), threads: [main, sub])
         XCTAssertEqual(
-            Set(flow.lanes.map(\.thread.id)), Set(time.lanes.map(\.thread.id)))
+            Set(flow.lanes.map(\.thread.id)), Set(time.lanes.map(\.thread.id))
+        )
         // 시간순에서는 서브플롯이 행 0(C)에서 열린다 — 순서는 달라도 identity는 같다.
         XCTAssertEqual(time.lanes.first { $0.thread.id == "thr-S" }?.openRow, 0)
     }
@@ -300,12 +328,12 @@ final class PlotThreadTests: XCTestCase {
 
     func test_스냅샷이_플롯을_싣는다() {
         let body = """
-            # 1장
-            사건이 있었다.
+        # 1장
+        사건이 있었다.
 
-            # 2장
-            더 있었다.
-            """
+        # 2장
+        더 있었다.
+        """
         let outline = DocumentOutline.parse(body)
         let h1 = outline.scenes[0].contentHash
         let h2 = outline.scenes[1].contentHash
@@ -314,14 +342,16 @@ final class PlotThreadTests: XCTestCase {
         let analysis = PlotThreadAnalysis(threads: [
             PlotThread(
                 stableID: "thr-X", title: "갈등",
-                memberships: [.init(eventKey: e1.stableKey), .init(eventKey: e2.stableKey)])
+                memberships: [.init(eventKey: e1.stableKey), .init(eventKey: e2.stableKey)]
+            )
         ])
         let snapshot = KnowledgeSnapshot(
             entryID: UUID(), outline: outline, summariesByHash: [:],
             events: [h1: [e1], h2: [e2]],
             plotThreadAnalysis: analysis,
-            overrides: .empty)
-        XCTAssertEqual(snapshot.plotThreads.count, 1)  // 전 사건이 스레드 소속 → 본줄기 없음
+            overrides: .empty
+        )
+        XCTAssertEqual(snapshot.plotThreads.count, 1) // 전 사건이 스레드 소속 → 본줄기 없음
         XCTAssertEqual(snapshot.threads(of: e1.stableKey).first?.id, "thr-X")
         XCTAssertEqual(snapshot.threadIDsByEvent[e2.stableKey], ["thr-X"])
     }

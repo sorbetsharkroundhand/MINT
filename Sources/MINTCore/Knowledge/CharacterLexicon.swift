@@ -13,20 +13,19 @@ import Foundation
 /// 사용자가 그 파일에 한 줄씩 추가하면 재빌드 없이 즉시 반영된다(mtime 캐시).
 /// 격조사·유정 신호 같은 언어 구조는 사용자 튜닝 대상이 아니라 내부 인프라다.
 public struct CharacterLexicon: Sendable {
-
     /// 격조사·보조사의 문법 역할 — 표면형이 아니라 역할로 다양성을 센다
     /// (은/는은 같은 보조사 = 한 역할, 이/가는 같은 주격 = 한 역할). 체언이
     /// 여러 역할로 격변화하는가가 "고정된 낱말이 아니라 명사"라는 구조적 증거다.
     public enum Role: Sendable, Hashable {
-        case subject  // 주격 이/가
-        case object  // 목적격 을/를
-        case topic  // 보조사 은/는/도/만…
-        case genitive  // 속격 의
-        case comitative  // 공동격 과/와/(이)랑/하고
-        case dative  // 여격 에게/한테/께 — **유정물 전용** (사람 신호)
-        case vocative  // 호격 아/야 — **부름 = 사람 신호**
-        case locative  // 처격 에/에서 — 장소·시간이 흔히 취함(사람 신호 아님)
-        case directional  // (으)로
+        case subject // 주격 이/가
+        case object // 목적격 을/를
+        case topic // 보조사 은/는/도/만…
+        case genitive // 속격 의
+        case comitative // 공동격 과/와/(이)랑/하고
+        case dative // 여격 에게/한테/께 — **유정물 전용** (사람 신호)
+        case vocative // 호격 아/야 — **부름 = 사람 신호**
+        case locative // 처격 에/에서 — 장소·시간이 흔히 취함(사람 신호 아님)
+        case directional // (으)로
     }
 
     /// (표면형, 역할) — 긴 조사 우선 매칭을 위해 길이 내림차순으로 정렬해 보관.
@@ -52,9 +51,9 @@ public struct CharacterLexicon: Sendable {
     /// 걸러내므로 이 목록은 작다 — 유정 신호를 우연히 통과하는 소수만 담는다.
     public let stopwords: Set<String>
 
-    /// 동음이의 주의: "소리"(소리=sound / 인물명 윤소리)처럼 문맥에 따라 갈리는
-    /// 낱말은 **불용어에 넣지 않는다** — 발화 귀속 같은 구조 신호가 실제 인물일
-    /// 때만 통과시키기 때문이다(불용어는 이 판단을 뭉갠다).
+    // 동음이의 주의: "소리"(소리=sound / 인물명 윤소리)처럼 문맥에 따라 갈리는
+    // 낱말은 **불용어에 넣지 않는다** — 발화 귀속 같은 구조 신호가 실제 인물일
+    // 때만 통과시키기 때문이다(불용어는 이 판단을 뭉갠다).
 
     // MARK: - 기본값 (컴파일 데이터 — 언어 구조 인프라)
 
@@ -76,25 +75,25 @@ public struct CharacterLexicon: Sendable {
             ("만", .topic), ("조차", .topic), ("마저", .topic), ("까지", .topic),
             ("부터", .topic),
             // 호격 (부름 — 사람 신호). 아/야는 감탄사와 겹칠 수 있어 어간 길이로 방어.
-            ("아", .vocative), ("야", .vocative), ("이여", .vocative),
+            ("아", .vocative), ("야", .vocative), ("이여", .vocative)
         ]),
         subjectMarkers: ["이", "가", "은", "는"],
         speechVerbPrefixes: [
             "말했", "말하", "말한", "말을", "물었", "물으", "묻", "되물었",
             "답했", "답하", "대답", "외쳤", "외치", "중얼", "속삭", "덧붙",
             "내뱉", "소리쳤", "소리치", "읊", "뇌까", "되뇌", "웃으며", "웃었",
-            "울먹", "다그", "타일", "털어놓", "부르짖", "중얼거",
+            "울먹", "다그", "타일", "털어놓", "부르짖", "중얼거"
         ],
         pronouns: [
             "그녀", "그들", "그이", "그대", "당신", "우리", "저희", "자신",
             "자기", "누구", "무엇", "여기", "저기", "거기", "이것", "그것",
-            "저것", "이곳", "그곳", "저곳", "네가", "내가",
+            "저것", "이곳", "그곳", "저곳", "네가", "내가"
         ],
         honorifics: [
             "아버지", "어머니", "아버님", "어머님", "할아버지", "할머니",
             "아저씨", "아주머니", "선생님", "소장님", "사장님", "부장님",
             "과장님", "형님", "누님", "오빠", "언니", "누나", "동생", "아들",
-            "딸", "부인", "영감", "마님", "나리", "도련님", "아가씨",
+            "딸", "부인", "영감", "마님", "나리", "도련님", "아가씨"
         ],
         stopwords: [
             // 사람 관련 일반명사 — 발화 주어가 될 수 있어 구조로 안 걸리는 소수.
@@ -103,7 +102,7 @@ public struct CharacterLexicon: Sendable {
             // 부사·접속사 안전망 (대부분 구조로 이미 걸림 — 이중 방어).
             "그러나", "그리고", "그런데", "하지만", "그래서", "그러면",
             "그러자", "그리하여", "다시", "천천히", "이제", "아직", "이미",
-            "함께", "정말", "그냥", "가장", "물론", "역시", "결국", "마침내",
+            "함께", "정말", "그냥", "가장", "물론", "역시", "결국", "마침내"
         ]
     )
 
@@ -118,7 +117,8 @@ public struct CharacterLexicon: Sendable {
         return CharacterLexicon(
             particles: particles, subjectMarkers: subjectMarkers,
             speechVerbPrefixes: speechVerbPrefixes, pronouns: pronouns,
-            honorifics: honorifics, stopwords: stopwords.union(extra))
+            honorifics: honorifics, stopwords: stopwords.union(extra)
+        )
     }
 
     /// 제외 집합 — 대명사·호칭·불용어 통합 (어간이 이 안에 있으면 후보 아님).
@@ -138,14 +138,15 @@ public struct CharacterLexicon: Sendable {
 /// 한 줄에 한 낱말, `#` 이후는 주석. mtime 캐시로 편집을 재빌드 없이 반영한다.
 enum UserStopwords {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var cached: (mtime: Date, words: Set<String>)?
+    private nonisolated(unsafe) static var cached: (mtime: Date, words: Set<String>)?
 
     static var fileURL: URL {
         let base = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)
             .first ?? FileManager.default.homeDirectoryForCurrentUser
         return base.appendingPathComponent(
-            "MINT/character-stopwords.txt", isDirectory: false)
+            "MINT/character-stopwords.txt", isDirectory: false
+        )
     }
 
     static func load() -> Set<String> {
@@ -154,7 +155,8 @@ enum UserStopwords {
         let url = fileURL
         guard
             let mtime = (try? FileManager.default.attributesOfItem(atPath: url.path))?[
-                .modificationDate] as? Date
+                .modificationDate
+            ] as? Date
         else {
             cached = nil
             return []
@@ -167,7 +169,8 @@ enum UserStopwords {
                     let noComment = line.split(separator: "#", maxSplits: 1).first ?? ""
                     return noComment.trimmingCharacters(in: .whitespaces)
                 }
-                .filter { !$0.isEmpty })
+                .filter { !$0.isEmpty }
+        )
         cached = (mtime, words)
         return words
     }

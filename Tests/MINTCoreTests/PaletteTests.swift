@@ -1,8 +1,7 @@
 import AppKit
+@testable import MINTCore
 import SwiftUI
 import XCTest
-
-@testable import MINTCore
 
 /// 색상 팔레트 — 저장 왕복과 **대비 보장**.
 ///
@@ -10,7 +9,6 @@ import XCTest
 /// 팔레트조차 라이트는 전부 밝고 다크는 전부 어둡다. 액센트가 배경에 묻히면
 /// 화면의 글자·아이콘이 사라지므로, 파생 규칙이 그걸 막는지 확인한다.
 final class PaletteTests: XCTestCase {
-
     // MARK: - 기본 액센트 (팔레트를 켜지 않아도 적용되는 색)
 
     /// 다크 모드는 지정색(#E9FF7A) 그대로 — 어두운 배경에서 충분히 읽힌다.
@@ -19,19 +17,22 @@ final class PaletteTests: XCTestCase {
     }
 
     /// 라이트 모드는 같은 색상(hue)에서 명도만 낮춘 값 — 흰 배경 대비 확보.
-    func test_라이트_기본_액센트는_색상을_지키며_읽힌다() {
-        let seed = NSColor(hex: MintTheme.accentSeed).usingColorSpace(.sRGB)!
-        let accent = MintTheme.light.novel.usingColorSpace(.sRGB)!
+    func test_라이트_기본_액센트는_색상을_지키며_읽힌다() throws {
+        let seed = try XCTUnwrap(NSColor(hex: MintTheme.accentSeed).usingColorSpace(.sRGB))
+        let accent = try XCTUnwrap(MintTheme.light.novel.usingColorSpace(.sRGB))
 
         XCTAssertEqual(
             accent.hueComponent, seed.hueComponent, accuracy: 0.02,
-            "라이트 액센트가 지정색의 색상을 잃었다")
+            "라이트 액센트가 지정색의 색상을 잃었다"
+        )
         XCTAssertLessThan(
             accent.brightnessComponent, seed.brightnessComponent,
-            "흰 배경 대비를 위해 어두워져야 한다")
+            "흰 배경 대비를 위해 어두워져야 한다"
+        )
         XCTAssertGreaterThanOrEqual(
             MintTheme.light.novel.contrastRatio(against: .white), 4.5,
-            "라이트 기본 액센트가 흰 배경에서 안 읽힌다")
+            "라이트 기본 액센트가 흰 배경에서 안 읽힌다"
+        )
     }
 
     /// 원색 그대로 썼다면 읽히지 않았을 것 — 파생이 실제로 일을 하는지 확인.
@@ -45,10 +46,12 @@ final class PaletteTests: XCTestCase {
     func test_기본_팔레트는_지정된_다섯색이다() {
         XCTAssertEqual(
             MintPalette.lightDefault.hexes,
-            [0xFFEC87, 0xE8E164, 0xE9FF7A, 0xB2EB7F, 0x9FFF92])
+            [0xFFEC87, 0xE8E164, 0xE9FF7A, 0xB2EB7F, 0x9FFF92]
+        )
         XCTAssertEqual(
             MintPalette.darkDefault.hexes,
-            [0x618C03, 0x4F7302, 0x465902, 0x252601, 0x402929])
+            [0x618C03, 0x4F7302, 0x465902, 0x252601, 0x402929]
+        )
     }
 
     /// 저장값이 짧거나 길어도 슬롯 수가 맞춰진다 — 구 버전·손상된 값 방어.
@@ -56,7 +59,8 @@ final class PaletteTests: XCTestCase {
         XCTAssertEqual(MintPalette(hexes: [0x111111]).hexes.count, MintPalette.slotCount)
         XCTAssertEqual(
             MintPalette(hexes: Array(repeating: 0x222222, count: 9)).hexes.count,
-            MintPalette.slotCount)
+            MintPalette.slotCount
+        )
     }
 
     // MARK: - hex 왕복
@@ -77,7 +81,8 @@ final class PaletteTests: XCTestCase {
         let ratio = theme.novel.contrastRatio(against: .white)
         XCTAssertGreaterThanOrEqual(
             ratio, 4.5,
-            "라이트 액센트 대비 \(String(format: "%.2f", ratio)) — 흰 배경에서 안 읽힌다")
+            "라이트 액센트 대비 \(String(format: "%.2f", ratio)) — 흰 배경에서 안 읽힌다"
+        )
     }
 
     /// 다크 기본 팔레트는 전부 어둡다 — 액센트는 밝혀져야 한다.
@@ -86,7 +91,8 @@ final class PaletteTests: XCTestCase {
         let ratio = theme.novel.contrastRatio(against: NSColor(hex: 0x141416))
         XCTAssertGreaterThanOrEqual(
             ratio, 4.5,
-            "다크 액센트 대비 \(String(format: "%.2f", ratio)) — 어두운 배경에서 안 읽힌다")
+            "다크 액센트 대비 \(String(format: "%.2f", ratio)) — 어두운 배경에서 안 읽힌다"
+        )
     }
 
     /// 극단적인 사용자 선택(순백/순흑만 고름)에서도 액센트가 배경에 묻히지 않는다.
@@ -104,16 +110,17 @@ final class PaletteTests: XCTestCase {
 
     /// 액센트는 팔레트의 **색상(hue)을 물려받는다** — 명도만 옮긴다.
     /// 이게 깨지면 "팔레트를 바꿨는데 액센트 색감이 그대로"가 된다.
-    func test_액센트는_팔레트의_색상을_물려받는다() {
+    func test_액센트는_팔레트의_색상을_물려받는다() throws {
         // 뚜렷한 색상 셋 — 빨강·초록·파랑.
         for hex: UInt32 in [0xFF0000, 0x00FF00, 0x0000FF] {
             let palette = MintPalette(hexes: Array(repeating: hex, count: 5))
             let accent = MintTheme.of(.light, palette: palette).novel
-            let source = NSColor(hex: hex).usingColorSpace(.sRGB)!
-            let derived = accent.usingColorSpace(.sRGB)!
+            let source = try XCTUnwrap(NSColor(hex: hex).usingColorSpace(.sRGB))
+            let derived = try XCTUnwrap(accent.usingColorSpace(.sRGB))
             XCTAssertEqual(
                 derived.hueComponent, source.hueComponent, accuracy: 0.02,
-                "0x\(String(hex, radix: 16))의 색상이 파생 과정에서 바뀌었다")
+                "0x\(String(hex, radix: 16))의 색상이 파생 과정에서 바뀌었다"
+            )
         }
     }
 
@@ -141,7 +148,8 @@ final class PaletteTests: XCTestCase {
         settings.enabled = true
         XCTAssertNotEqual(
             settings.theme(for: .light).glassWin, MintTheme.light.glassWin,
-            "켰는데도 표면색이 그대로다")
+            "켰는데도 표면색이 그대로다"
+        )
     }
 
     // MARK: - 글자색 불변 (팔레트는 배경·표면에만)
@@ -151,8 +159,7 @@ final class PaletteTests: XCTestCase {
     func test_팔레트가_본문_글자색을_바꾸지_않는다() {
         let base = MintTheme.light
         for palette in [MintPalette.lightDefault,
-                        MintPalette(hexes: Array(repeating: 0x123456, count: 5))]
-        {
+                        MintPalette(hexes: Array(repeating: 0x123456, count: 5))] {
             let tinted = MintTheme.of(.light, palette: palette)
             XCTAssertEqual(tinted.ink, base.ink)
             XCTAssertEqual(tinted.ink2, base.ink2)

@@ -13,7 +13,6 @@ import SwiftUI
 ///   겹쳐 그리지 않기 위한 MVP 단순화 (docs/m3-ghost-text.md 결정 사항).
 @MainActor
 public final class CompletionController: ObservableObject {
-
     /// 모델 준비 상태 — ContentView 상태 바 표시용 (M4).
     public enum EngineState: Equatable {
         case idle
@@ -53,7 +52,9 @@ public final class CompletionController: ObservableObject {
         public var typicalLength: Int
         public static let none = LongParagraphInfo(count: 0, maxLength: 0, typicalLength: 0)
         /// "보통 문단의 N배" — 0으로 나눔 방지, 최소 1배.
-        public var ratio: Int { typicalLength > 0 ? max(1, maxLength / typicalLength) : 0 }
+        public var ratio: Int {
+            typicalLength > 0 ? max(1, maxLength / typicalLength) : 0
+        }
     }
 
     /// 에디터가 배선하는 감지·실행 다리 (`knowledgeProvider`와 같은 패턴).
@@ -81,7 +82,7 @@ public final class CompletionController: ObservableObject {
 
     /// 감지 유휴 대기 — 고스트 디바운스보다 길다. 대화를 쓰는 도중 조각마다
     /// 저장하지 않고, 잠시 멈춘 완결된 런만 자동 수집한다.
-    nonisolated static let conversationIdle: Duration = .milliseconds(1_500)
+    nonisolated static let conversationIdle: Duration = .milliseconds(1500)
 
     private var conversationTask: Task<Void, Never>?
     private var conversationCaret: Int?
@@ -117,18 +118,19 @@ public final class CompletionController: ObservableObject {
             // 프리픽스 좌표 → 스토리지 절대 좌표.
             let prefixStart = caretLocation - text.length
             block.utf16Range =
-                (block.utf16Range.lowerBound + prefixStart)..<(block.utf16Range.upperBound + prefixStart)
-            guard self.recordedConversationHashesProvider?().contains(block.contentHash) != true
+                (block.utf16Range.lowerBound + prefixStart) ..< (block.utf16Range.upperBound + prefixStart)
+            guard recordedConversationHashesProvider?().contains(block.contentHash) != true
             else { return }
             // 스냅샷 갱신을 기다리지 않고 같은 결정적 귀속기를 즉시 적용한다.
             // 프리픽스 상대 좌표를 본문 절대 좌표로 올려 기록 범위와 맞춘다.
-            let cards = self.documentContextProvider?()?.characters ?? []
+            let cards = documentContextProvider?()?.characters ?? []
             var utterances = DialogueAttribution.utterances(in: prefix, cards: cards)
             for index in utterances.indices {
                 utterances[index].utf16Start += prefixStart
             }
-            self.onRecordConversation?(
-                ConversationDetector.record(from: block, utterances: utterances))
+            onRecordConversation?(
+                ConversationDetector.record(from: block, utterances: utterances)
+            )
         }
     }
 
@@ -151,6 +153,7 @@ public final class CompletionController: ObservableObject {
             ? settings.novelContextCharacters
             : settings.contextCharacters
     }
+
     private var pendingTask: Task<Void, Never>?
     /// Agent가 같은 단일 모델을 쓰는 동안 고스트 요청을 보류한다 (ADR-4).
     /// 값은 ContentView의 AgentController 배선에서만 바뀐다.
@@ -214,7 +217,8 @@ public final class CompletionController: ObservableObject {
             handlerP95: p95(handlerSamples),
             totalP95: p95(totalSamples),
             totalMax: totalSamples.max() ?? 0,
-            samples: totalSamples.count)
+            samples: totalSamples.count
+        )
     }
 
     public init(
@@ -328,21 +332,21 @@ public final class CompletionController: ObservableObject {
             // 제안을 다 소진했다 — 아래 일반 경로로 다음 제안을 예약한다.
         }
 
-        invalidate()  // 편집 즉시 고스트 제거 + in-flight 취소 (PLAN §5)
+        invalidate() // 편집 즉시 고스트 제거 + in-flight 취소 (PLAN §5)
 
         // 대화 자동 기록 — 결정적·LLM 없음이라 자동완성 마스터 스위치와 무관하다.
         if !isComposing {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
 
-        guard !agentActive else { return }  // Agent가 단일 모델을 선점 중 (ADR-4)
-        guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
-        guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
+        guard !agentActive else { return } // Agent가 단일 모델을 선점 중 (ADR-4)
+        guard settings.autocompleteEnabled else { return } // 마스터 스위치 꺼짐
+        guard !isComposing else { return } // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
         guard caretAtParagraphEnd else { return }
         // 같은 모델로 실패했으면 재시도 폭주 방지. 모델을 바꿨으면 다시 허용.
         if case .failed = engineState, settings.modelID == failedModelID { return }
         let trimmed = prefix.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count >= 2 else { return }  // 컨텍스트가 너무 빈약하면 스킵
+        guard trimmed.count >= 2 else { return } // 컨텍스트가 너무 빈약하면 스킵
 
         let expected = generation
         let parameters = settings.parameters
@@ -354,7 +358,7 @@ public final class CompletionController: ObservableObject {
             // 입력이 멈출 때까지 대기 — 그 사이 새 입력이 오면 이 태스크가 취소된다.
             try? await Task.sleep(for: debounce)
             guard !Task.isCancelled, let self else { return }
-            await self.runCompletion(
+            await runCompletion(
                 prefix: prefix,
                 caretLocation: caretLocation,
                 parameters: parameters,
@@ -383,7 +387,9 @@ public final class CompletionController: ObservableObject {
 
     // MARK: - 수락 / 거부
 
-    public var hasSuggestion: Bool { suggestion != nil }
+    public var hasSuggestion: Bool {
+        suggestion != nil
+    }
 
     /// `Tab` 수락 — 뷰가 본문에 삽입할 텍스트를 반환. 제안이 없으면 nil.
     public func acceptSuggestion() -> String? {
@@ -443,7 +449,8 @@ public final class CompletionController: ObservableObject {
         if case .failed = engineState { return }
         guard !namingFolderIDs.contains(folderID) else { return }
         let content = store.folderNamingContext(
-            for: folderID, maxCharacters: settings.contextCharacters)
+            for: folderID, maxCharacters: settings.contextCharacters
+        )
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else { return }
 
@@ -452,8 +459,9 @@ public final class CompletionController: ObservableObject {
         // 이름이 도착할 때까지 self를 붙잡는다(수명 유한) — 진행 표시 해제가 목적.
         Task { [engine, weak store] in
             let name =
-                (try? await engine.generateFolderName(
-                    content: content, parameters: parameters)) ?? ""
+                await (try? engine.generateFolderName(
+                    content: content, parameters: parameters
+                )) ?? ""
             self.namingFolderIDs.remove(folderID)
             guard !name.isEmpty, let store else { return }
             // 사용자가 그 사이 직접 이름을 바꿨다면 스토어 쪽 가드가 조용히 무시한다.
@@ -526,7 +534,7 @@ public final class CompletionController: ObservableObject {
                     self?.noteLoadProgress(fraction)
                 }
             }
-            guard expected == generation else { return }  // 그 사이 편집됨 — stale 폐기
+            guard expected == generation else { return } // 그 사이 편집됨 — stale 폐기
             markEngineReady()
             lastLatency = completion.totalTime
             guard !completion.text.isEmpty else { return }
@@ -535,7 +543,8 @@ public final class CompletionController: ObservableObject {
             currentSuggestionMode = mode
             AcceptanceMetrics.log(
                 .shown, mode: mode,
-                latencyMs: Int(completion.totalTime * 1000))
+                latencyMs: Int(completion.totalTime * 1000)
+            )
             suggestionDidChange?(completion.text)
         } catch is CancellationError {
             // 새 입력으로 취소됨 — 정상 흐름.

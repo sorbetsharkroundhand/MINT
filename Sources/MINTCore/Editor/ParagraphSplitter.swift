@@ -13,7 +13,6 @@ import Foundation
 /// 공유**하되, 그쪽은 파생 지식(보이지 않음·내용 정의 경계)이고 이쪽은 원문
 /// (보임·단순 누적)이라 목적이 다르다.
 public enum ParagraphSplitter {
-
     /// 이 크기(UTF-16)를 넘는 문단만 나누기 대상 — IME 3자모가 프레임 예산 절반을
     /// 넘기 시작하는 지점(측정: editor-perf.md). 5000자(쾌적)는 굳이 안 나눈다.
     public static let trigger = 6000
@@ -22,10 +21,14 @@ public enum ParagraphSplitter {
     /// 마지막 조각이 이보다 작으면 앞 조각에 합친다 — 토막 문단 방지.
     public static let minTail = 800
 
+    // 정적 리터럴 실패는 프로그래머 오류라 복구할 수 없다.
+    // swiftlint:disable force_try
     /// 한국어 문장 경계: 종결부호 + 닫는 따옴표(선택) + 공백. 종결어미가 있어
     /// 이 규칙으로 충분하다 — 형태소 분석 불요(PLAN §16-7과 같은 논지).
     static let sentenceBoundary = try! NSRegularExpression(
-        pattern: #"[.!?…]["'”’」』]?\s+"#)
+        pattern: #"[.!?…]["'”’」』]?\s+"#
+    )
+    // swiftlint:enable force_try
 
     /// 문단 평문이 `trigger`를 넘으면, `"\n\n"`을 넣을 UTF-16 오프셋 목록을
     /// 돌려준다(문단 시작 기준, 오름차순). 넣을 곳이 없으면 `[]`(안 나눔).

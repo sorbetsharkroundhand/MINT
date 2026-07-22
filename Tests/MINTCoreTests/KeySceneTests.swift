@@ -1,6 +1,5 @@
-import XCTest
-
 @testable import MINTCore
+import XCTest
 
 final class KeySceneTests: XCTestCase {
     func test레거시JSON과_핵심장면_왕복() throws {
@@ -27,8 +26,9 @@ final class KeySceneTests: XCTestCase {
         let id = UUID()
         let scene = KeyScene(
             id: id, title: "문", summary: "문을 연다",
-            sourceRange: found.location..<(found.location + found.length),
-            anchorSnippet: "서연은 잠긴 문을 힘껏 열었다.", status: .drafted)
+            sourceRange: found.location ..< (found.location + found.length),
+            anchorSnippet: "서연은 잠긴 문을 힘껏 열었다.", status: .drafted
+        )
 
         let inserted = "프롤로그\n" + original
         let result = KeySceneReconciler.reconcile([scene], in: inserted)
@@ -39,8 +39,9 @@ final class KeySceneTests: XCTestCase {
 
     func test재앵커실패는_삭제하지_않고_stale로_보존() {
         let scene = KeyScene(
-            title: "사라진 근거", sourceRange: 0..<4,
-            anchorSnippet: "없는 문장", status: .drafted)
+            title: "사라진 근거", sourceRange: 0 ..< 4,
+            anchorSnippet: "없는 문장", status: .drafted
+        )
         let result = KeySceneReconciler.reconcile([scene], in: "다른 본문")
         XCTAssertEqual(result.scenes, [scene])
         XCTAssertEqual(result.staleIDs, [scene.id])
@@ -60,21 +61,27 @@ final class KeySceneTests: XCTestCase {
         let event = StoryEvent(
             sceneHash: outline.scenes[0].contentHash, participants: [],
             summary: "서연이 떠나기로 결정한다", importance: 5,
-            quote: "서연은 돌아오지 않기로 결정했다.")
+            quote: "서연은 돌아오지 않기로 결정했다."
+        )
         let first = KeySceneCandidateDetector.detect(
-            outline: outline, events: [event], body: body, existing: [])
+            outline: outline, events: [event], body: body, existing: []
+        )
         let second = KeySceneCandidateDetector.detect(
-            outline: outline, events: [event], body: body, existing: [])
+            outline: outline, events: [event], body: body, existing: []
+        )
         XCTAssertEqual(first, second)
         XCTAssertEqual(first.count, 1)
         XCTAssertTrue(KeySceneCandidateDetector.detect(
             outline: outline, events: [event], body: body, existing: [],
-            ignoredInputHashes: [first[0].inputHash]).isEmpty)
+            ignoredInputHashes: [first[0].inputHash]
+        ).isEmpty)
 
         let registered = KeyScene(
             title: first[0].proposedTitle, summary: event.summary,
-            sourceRange: outline.scenes[0].utf16Range, status: .drafted)
+            sourceRange: outline.scenes[0].utf16Range, status: .drafted
+        )
         XCTAssertTrue(KeySceneCandidateDetector.detect(
-            outline: outline, events: [event], body: body, existing: [registered]).isEmpty)
+            outline: outline, events: [event], body: body, existing: [registered]
+        ).isEmpty)
     }
 }
