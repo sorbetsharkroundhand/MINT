@@ -181,15 +181,30 @@ public final class BackgroundIndexer: ObservableObject {
         hydrateTask = Task.detached(priority: .utility) { [weak self] in
             let outline = DocumentOutline.parse(body)
             guard !outline.scenes.isEmpty, !Task.isCancelled else { return }
+            let narratorCard = Self.narratorCardIfNeeded(
+                body: body, outline: outline, characters: characters,
+                rejectedNames: Set(entry.rejectedCharacterNames ?? [])
+            )
+            let liveCharacters = await MainActor.run { [weak self] in
+                if let narratorCard {
+                    self?.autoRegisterNarrator(narratorCard, entryID: entryID)
+                }
+                return self?.store?.entries.first(where: { $0.id == entryID })?
+                    .characters ?? characters
+            }
             let loadStart = CFAbsoluteTimeGetCurrent()
             let sidecar = KnowledgeSidecar.load(entryID: entryID)
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
-            let utterances = DialogueAttribution.utterances(in: body, cards: characters)
+            let dialogues = DialogueAttribution.dialogues(in: body, cards: liveCharacters)
+            let utterances = DialogueAttribution.utterances(
+                from: dialogues
+            )
             let deriveStart = CFAbsoluteTimeGetCurrent()
             let snapshot = Self.makeSnapshot(
                 entryID: entryID, outline: outline, sidecar: sidecar,
-                utterances: utterances, overrides: overrides, body: body,
-                characters: characters, recordedConversations: recorded,
+                dialogues: dialogues, utterances: utterances,
+                overrides: overrides, body: body,
+                characters: liveCharacters, recordedConversations: recorded,
                 keyScenes: keyScenes,
                 rejectedKeySceneCandidateHashes: rejectedKeySceneCandidates
             )
@@ -199,7 +214,7 @@ public final class BackgroundIndexer: ObservableObject {
                 loadMs: loadMs, deriveMs: deriveMs
             )
             let warnings = ConsistencyChecker.check(
-                snapshot: snapshot, characters: characters
+                snapshot: snapshot, characters: liveCharacters
             )
             await MainActor.run { [weak self] in
                 guard let self else { return }
@@ -314,6 +329,10 @@ public final class BackgroundIndexer: ObservableObject {
                 body: body, outline: outline,
                 known: knownNames, rejected: rejectedNames
             )
+            let narratorCard = Self.narratorCardIfNeeded(
+                body: body, outline: outline, characters: characters,
+                rejectedNames: rejectedNames
+            )
             await MainActor.run {
                 // HIGH 신뢰(구조 신호 다수) 후보는 자동 등록한다 (요구사항 §16,
                 // CLAUDE.md §3 갱신) — 카드에 자동 등록 표식이 남고 삭제는 한 번의
@@ -324,6 +343,9 @@ public final class BackgroundIndexer: ObservableObject {
                 }
                 for candidate in auto {
                     self.autoRegister(candidate)
+                }
+                if let narratorCard {
+                    self.autoRegisterNarrator(narratorCard, entryID: entryID)
                 }
                 self.characterCandidates = candidates.filter { candidate in
                     !auto.contains(where: { $0.name == candidate.name })
@@ -378,6 +400,43 @@ public final class BackgroundIndexer: ObservableObject {
         )
         store.upsertCharacter(card, in: entry.id)
         profileInBackground(card: card, name: candidate.name, entry: entry)
+    }
+
+    /// 이름 미상 1인칭 화자는 고유한 구조 신호가 충분하므로 HIGH 후보와 같은
+    /// 자동 등록 대상이다. 일반 이름 프로파일러는 `화자`라는 표면어를 찾지
+    /// 못하므로 LLM 프로파일링 없이 역할·근거만 기록한다.
+    private func autoRegisterNarrator(_ card: CharacterCard, entryID: UUID) {
+        guard let store,
+              let entry = store.entries.first(where: { $0.id == entryID }),
+              (entry.characters ?? []).allSatisfy({ $0.role != .narrator })
+        else { return }
+        store.upsertCharacter(card, in: entryID)
+    }
+
+    /// 원문만으로 재현 가능한 자동 화자 카드 후보. 사용자가 자동 화자를 삭제한
+    /// 거부 표식이 있으면 다시 만들지 않는다 (기억은 사용자의 것, PLAN §7).
+    public nonisolated static func narratorCardIfNeeded(
+        body: String, outline: DocumentOutline, characters: [CharacterCard],
+        rejectedNames: Set<String> = []
+    ) -> CharacterCard? {
+        guard !rejectedNames.contains(CharacterCard.narratorRejectionMarker),
+              !characters.contains(where: { $0.role == .narrator })
+        else { return nil }
+        let narration = NarrationAnalyzer.analyze(
+            body: body, outline: outline, characters: characters
+        )
+        guard narration.mode == .firstPerson, narration.narratorName == nil else {
+            return nil
+        }
+        let used = Set(characters.map(\.name))
+        let preferred = ["화자", "1인칭 화자", "이름 미상 화자"]
+        let name = preferred.first(where: { !used.contains($0) }) ?? "자동 화자"
+        return CharacterCard(
+            name: name,
+            note: "이름이 밝혀지지 않은 1인칭 서술자 · 원문에서 자동 등록",
+            autoRegistered: true,
+            role: .narrator
+        )
     }
 
     /// 후보 등록 — 카드를 즉시 만들고, 소개는 백그라운드 LLM 프로파일링이
@@ -450,14 +509,26 @@ public final class BackgroundIndexer: ObservableObject {
         named name: String, in body: String,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> String? {
-        // 언급 문장 수집 (결정적) — 앞에서부터 최대 8문장·1000자.
+        // 초반 8문장만 보면 후반의 관계 변화가 성격 자체로 굳어진다. 작품 전역의
+        // 언급을 균등 표집해 인물 카드가 한 국면에 과적합되지 않게 한다 (PLAN §7).
+        let candidates = body.split(separator: "\n")
+            .filter { $0.contains(name) }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let indices: [Int]
+        if candidates.count <= 8 {
+            indices = Array(candidates.indices)
+        } else {
+            indices = (0 ..< 8).map { offset in
+                Int((Double(offset) * Double(candidates.count - 1) / 7).rounded())
+            }
+        }
         var snippets: [String] = []
         var total = 0
-        for line in body.split(separator: "\n") where line.contains(name) {
-            let sentence = line.trimmingCharacters(in: .whitespaces)
+        for index in indices {
+            let sentence = candidates[index]
+            guard total + sentence.count <= 1000 || snippets.isEmpty else { continue }
             snippets.append(sentence)
             total += sentence.count
-            if snippets.count >= 8 || total > 1000 { break }
         }
         guard !snippets.isEmpty else { return nil }
         let note =
@@ -465,7 +536,9 @@ public final class BackgroundIndexer: ObservableObject {
                 system: """
                 너는 소설 인물 카드를 쓰는 도우미다. 발췌에 근거해 인물의 \
                 성격·말투·관계를 한국어 1~2문장(최대 140자)으로 쓴다. \
-                발췌에 없는 내용은 지어내지 않는다. 설명·머리말 없이 본문만 출력한다.
+                발췌에 없는 내용은 지어내지 않는다. 관찰된 말·행동과 추정 동기를
+                구분하고, 한 국면의 반응을 인물의 고정 성격으로 단정하지 않는다.
+                설명·머리말 없이 본문만 출력한다.
                 """,
                 user: """
                 인물 '\(name)'에 대한 발췌다. 이 인물의 카드 소개를 써라.
@@ -502,6 +575,15 @@ public final class BackgroundIndexer: ObservableObject {
 
         let outline = DocumentOutline.parse(body)
         guard !outline.scenes.isEmpty else { return }
+        let storyContext = StoryAnalysisContext(
+            narration: NarrationAnalyzer.analyze(
+                body: body, outline: outline, characters: characters
+            ),
+            characters: characters
+        )
+        let explicitFlashbacks = TemporalShiftDetector.explicitFlashbackSegments(
+            in: body, outline: outline, narration: storyContext.narration
+        )
         // 커서 거리순 순회 — 씬 분할로 씬이 수십 개가 되면, 쓰고 있는 자리
         // 근처의 이해가 먼저 준비돼야 한다. 스냅샷·저장은 해시 키라 처리
         // 순서와 무관하고, 선점당해도 "가까운 것부터 남는" 성질이 생긴다.
@@ -516,7 +598,8 @@ public final class BackgroundIndexer: ObservableObject {
         let text = body as NSString
         // 대화 귀속 (PLAN §7·§6.4) — 결정적·LLM 없음이라 패스마다 재계산.
         // 사이드카에 저장하지 않는 파생 — 스냅샷에만 실린다.
-        let utterances = DialogueAttribution.utterances(in: body, cards: characters)
+        let dialogues = DialogueAttribution.dialogues(in: body, cards: characters)
+        let utterances = DialogueAttribution.utterances(from: dialogues)
 
         // ① 더티 씬 요약 — 해시 메모에 없는 씬만, 커서에서 가까운 순.
         var callBudget = deep ? Int.max : fastPassCallBudget
@@ -537,7 +620,8 @@ public final class BackgroundIndexer: ObservableObject {
             else { continue } // 요약할 내용이 없는 토막은 건너뛴다
 
             let analysis = await analyzeScene(
-                sceneText, engine: engine, parameters: parameters
+                sceneText, context: storyContext,
+                engine: engine, parameters: parameters
             )
             callBudget -= 1
             guard let analysis else { continue } // 실패는 다음 패스가 재시도
@@ -557,7 +641,8 @@ public final class BackgroundIndexer: ObservableObject {
             publish(
                 makeSnapshot(
                     entryID: entryID, outline: outline, sidecar: sidecar,
-                    utterances: utterances, overrides: overrides, body: body,
+                    dialogues: dialogues, utterances: utterances,
+                    overrides: overrides, body: body,
                     characters: characters,
                     recordedConversations: recordedConversations,
                     keyScenes: keyScenes,
@@ -585,7 +670,8 @@ public final class BackgroundIndexer: ObservableObject {
                 )
                 let extracted = await extractEvents(
                     sceneText, sceneHash: scene.contentHash,
-                    characters: characters, engine: engine, parameters: parameters
+                    characters: characters, context: storyContext,
+                    engine: engine, parameters: parameters
                 )
                 guard let extracted else { continue } // 실패·인물 미등록 — 재시도 여지
                 sidecar.events[scene.contentHash] = extracted
@@ -609,7 +695,8 @@ public final class BackgroundIndexer: ObservableObject {
                 )
                 let insights = await extractInsights(
                     sceneText, sceneHash: scene.contentHash,
-                    characters: characters, engine: engine, parameters: parameters
+                    characters: characters, context: storyContext,
+                    engine: engine, parameters: parameters
                 )
                 guard let insights else { continue } // 실패 — 다음 패스가 재시도
                 sidecar.insights[scene.contentHash] = insights
@@ -617,7 +704,8 @@ public final class BackgroundIndexer: ObservableObject {
                 publish(
                     makeSnapshot(
                         entryID: entryID, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
+                        dialogues: dialogues, utterances: utterances,
+                        overrides: overrides, body: body,
                         characters: characters,
                         recordedConversations: recordedConversations,
                         keyScenes: keyScenes,
@@ -634,6 +722,11 @@ public final class BackgroundIndexer: ObservableObject {
             for scene in orderedScenes {
                 guard !Task.isCancelled, gateAllows(deep: true) else { return }
                 guard sidecar.segments[scene.contentHash] == nil else { continue }
+                if let segments = explicitFlashbacks[scene.contentHash], !segments.isEmpty {
+                    sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
+                    sidecar.save()
+                    continue
+                }
                 let sceneText = String(
                     text.substring(
                         with: NSRange(
@@ -654,7 +747,7 @@ public final class BackgroundIndexer: ObservableObject {
                 }
                 let segments = await analyzeSegments(
                     sceneText, sceneHash: scene.contentHash,
-                    engine: engine, parameters: parameters
+                    context: storyContext, engine: engine, parameters: parameters
                 )
                 guard let segments else { continue } // 실패 — 다음 패스가 재시도
                 sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
@@ -662,7 +755,8 @@ public final class BackgroundIndexer: ObservableObject {
                 publish(
                     makeSnapshot(
                         entryID: entryID, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
+                        dialogues: dialogues, utterances: utterances,
+                        overrides: overrides, body: body,
                         characters: characters,
                         recordedConversations: recordedConversations,
                         keyScenes: keyScenes,
@@ -773,7 +867,8 @@ public final class BackgroundIndexer: ObservableObject {
         let deriveStart = CFAbsoluteTimeGetCurrent()
         let snapshot = makeSnapshot(
             entryID: entryID, outline: outline, sidecar: sidecar,
-            utterances: utterances, overrides: overrides, body: body,
+            dialogues: dialogues, utterances: utterances,
+            overrides: overrides, body: body,
             characters: characters,
             recordedConversations: recordedConversations,
             keyScenes: keyScenes,
@@ -869,6 +964,33 @@ public final class BackgroundIndexer: ObservableObject {
         public var location: String?
     }
 
+    /// 청크 하나만 보고 주체를 뒤집지 않도록 작품 전역에서 결정적으로 준비한
+    /// 최소 문맥. 원문 전체를 매 호출에 중복하지 않고 서술자·등록 인물의 역할만
+    /// 전달한다. 특히 1인칭의 `나`를 유일한 등록 인물로 오인하는 실패를 막는다.
+    public struct StoryAnalysisContext: Equatable, Sendable {
+        public var narration: NarrationProfile
+        public var characters: [CharacterCard]
+
+        public init(narration: NarrationProfile, characters: [CharacterCard]) {
+            self.narration = narration
+            self.characters = characters
+        }
+
+        fileprivate var promptBlock: String {
+            let names = characters.map(\.name).filter { !$0.isEmpty }
+            var lines = ["전역 서술: \(narration.displayText)"]
+            lines.append("등록 인물: \(names.isEmpty ? "없음" : names.joined(separator: ", "))")
+            if narration.mode == .firstPerson {
+                if let narrator = narration.narratorName {
+                    lines.append("1인칭 나/내가 = 서술자 \(narrator)")
+                } else {
+                    lines.append("1인칭 나/내가 = 이름이 밝혀지지 않은 화자. 등록 인물과 동일시하지 말 것")
+                }
+            }
+            return lines.joined(separator: "\n")
+        }
+    }
+
     /// 씬 요약 길이 상한 — 기존 120자에서 상향. **문장 경계에서만 자른다**
     /// (SentenceClamp) — "감정조차 포즈로 여"처럼 중간에서 끊긴 요약이 저장되던
     /// 문제의 근본 수정 절반 (나머지 절반은 생성 토큰 예산 64→192 상향).
@@ -879,7 +1001,8 @@ public final class BackgroundIndexer: ObservableObject {
     /// public인 이유: 벤치가 **완전히 같은 프롬프트·규격**으로 지식을 만들어야
     /// 측정이 본 경로를 대표한다 (CLAUDE.md §2-7).
     public nonisolated static func analyzeScene(
-        _ text: String, engine: CompletionEngine, parameters: CompletionParameters
+        _ text: String, context: StoryAnalysisContext? = nil,
+        engine: CompletionEngine, parameters: CompletionParameters
     ) async -> SceneAnalysis? {
         // 헤딩 한 줄뿐인 초미니 씬은 요약할 내용이 없다 — 모델에 넣으면 환각
         // 요약이 생긴다 (벤치에서 확인). 인덱서·벤치 공용 가드.
@@ -889,7 +1012,7 @@ public final class BackgroundIndexer: ObservableObject {
         let output =
             await (try? engine.generateOneShot(
                 system: Prompts.sceneSystem,
-                user: Prompts.sceneUser(text),
+                user: Prompts.sceneUser(text, context: context),
                 // 다섯 줄 형식 — 빈 줄 조기 종료를 끄고 토큰 예산으로만 제한한다.
                 // 64토큰이 한국어 120자를 못 채워 요약이 중간에서 잘리던 원인.
                 maxTokens: 192,
@@ -949,6 +1072,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 모델의 형식 준수가 무너진다 (요약/사건 분리와 같은 실패 격리).
     public nonisolated static func extractInsights(
         _ text: String, sceneHash: String, characters: [CharacterCard],
+        context: StoryAnalysisContext? = nil,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> SceneInsights? {
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
@@ -958,7 +1082,9 @@ public final class BackgroundIndexer: ObservableObject {
         let output =
             await (try? engine.generateOneShot(
                 system: Prompts.insightSystem,
-                user: Prompts.insightUser(text, names: nameIndex.keys.sorted()),
+                user: Prompts.insightUser(
+                    text, names: nameIndex.keys.sorted(), context: context
+                ),
                 maxTokens: 384,
                 parameters: parameters,
                 stopAtBlankLine: false
@@ -975,6 +1101,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// public인 이유: 벤치가 같은 프롬프트·규격으로 측정해야 한다 (CLAUDE.md §2-7).
     public nonisolated static func analyzeSegments(
         _ text: String, sceneHash: String,
+        context: StoryAnalysisContext? = nil,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [NarrativeSegment]? {
         guard text.trimmingCharacters(in: .whitespacesAndNewlines).count >= 40 else {
@@ -983,7 +1110,7 @@ public final class BackgroundIndexer: ObservableObject {
         let output =
             await (try? engine.generateOneShot(
                 system: Prompts.segmentSystem,
-                user: Prompts.segmentUser(text),
+                user: Prompts.segmentUser(text, context: context),
                 maxTokens: 384,
                 parameters: parameters,
                 stopAtBlankLine: false
@@ -1175,6 +1302,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 벤치가 같은 프롬프트를 쓰도록 public (요약 경로와 같은 이유).
     public nonisolated static func extractEvents(
         _ text: String, sceneHash: String, characters: [CharacterCard],
+        context: StoryAnalysisContext? = nil,
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [StoryEvent]? {
         let nameIndex = EventParser.nameIndex(characters)
@@ -1185,7 +1313,9 @@ public final class BackgroundIndexer: ObservableObject {
         let output =
             await (try? engine.generateOneShot(
                 system: Prompts.eventSystem,
-                user: Prompts.eventUser(text, names: nameIndex.keys.sorted()),
+                user: Prompts.eventUser(
+                    text, names: nameIndex.keys.sorted(), context: context
+                ),
                 // 5b에서 줄마다 `상태:` 필드가, v4에서 `근거:`가 붙어 길어졌다 —
                 // 마지막 줄이 중간에서 잘리면 그 사건·델타를 통째로 잃는다.
                 maxTokens: 384,
@@ -1241,7 +1371,8 @@ public final class BackgroundIndexer: ObservableObject {
 
     private nonisolated static func makeSnapshot(
         entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
-        utterances: [Utterance], overrides: [NarrativeOverride] = [],
+        dialogues: [DialogueLine], utterances: [Utterance],
+        overrides: [NarrativeOverride] = [],
         body: String = "", characters: [CharacterCard] = [],
         recordedConversations: [RecordedConversation] = [],
         keyScenes: [KeyScene] = [],
@@ -1273,6 +1404,7 @@ public final class BackgroundIndexer: ObservableObject {
             ),
             workSummary: sidecar.workSummary?.summary,
             events: sidecar.events,
+            dialogues: dialogues,
             utterances: utterances,
             sceneSummaries: sidecar.sceneSummaries,
             insights: sidecar.insights,
@@ -1326,7 +1458,9 @@ public final class BackgroundIndexer: ObservableObject {
         static let sceneSystem = """
         너는 소설 장면을 분석하는 도우미다. 주어진 장면을 읽고 아래 형식으로 \
         한 줄씩 출력한다. 인물 이름을 유지하고, 장면에 없는 내용은 지어내지 \
-        않는다. 설명·머리말 없이 아래 줄들만 출력한다.
+        않는다. 행동의 주체·대상·소유자를 뒤바꾸지 말고, 신체 부위나 보통명사를 \
+        인물 이름으로 만들지 않는다. 1인칭 원고에서 나/내가는 "화자"라고 쓴다. \
+        설명·머리말 없이 아래 줄들만 출력한다.
 
         제목: 장면 내용을 한눈에 알 수 있는 제목 (최대 20자, 번호·작품명 금지)
         요약: 일어난 일 1~2문장 (최대 150자, 문장을 끝까지 완성할 것)
@@ -1336,8 +1470,11 @@ public final class BackgroundIndexer: ObservableObject {
         장소: 장면의 장소 (모르면 이 줄 생략)
         """
 
-        static func sceneUser(_ text: String) -> String {
+        static func sceneUser(
+            _ text: String, context: StoryAnalysisContext? = nil
+        ) -> String {
             """
+            \(context.map { "작품 기준:\n\($0.promptBlock)\n" } ?? "")
             다음 장면을 분석하라.
 
             \(text)
@@ -1362,8 +1499,12 @@ public final class BackgroundIndexer: ObservableObject {
         - 설명·머리말 없이 위 형식의 줄만 출력한다.
         """
 
-        static func insightUser(_ text: String, names: [String]) -> String {
+        static func insightUser(
+            _ text: String, names: [String],
+            context: StoryAnalysisContext? = nil
+        ) -> String {
             """
+            \(context.map { "작품 기준:\n\($0.promptBlock)\n" } ?? "")
             인물 목록: \(names.isEmpty ? "(등록된 인물 없음 — 앎·관계는 출력하지 않는다)" : names.joined(separator: ", "))
 
             다음 장면에서 서사 정보를 뽑아라.
@@ -1399,8 +1540,11 @@ public final class BackgroundIndexer: ObservableObject {
         - 설명·머리말 없이 구간 줄만 출력한다.
         """
 
-        static func segmentUser(_ text: String) -> String {
+        static func segmentUser(
+            _ text: String, context: StoryAnalysisContext? = nil
+        ) -> String {
             """
+            \(context.map { "작품 기준:\n\($0.promptBlock)\n" } ?? "")
             다음 장면에서 시간 이동 구간을 찾아라.
 
             \(text)
@@ -1503,13 +1647,20 @@ public final class BackgroundIndexer: ObservableObject {
         근거는 장면 원문에서 그대로 복사한 30자 이내 구절이다.
 
         규칙: 주어진 인물 목록에 있는 이름만 참여와 상태에 쓴다. 장면에 없는 \
-        일을 지어내지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
+        일을 지어내지 않는다. 누가 누구의 물건에 무엇을 했는지 주체·대상·소유자를 \
+        원문과 한 번 대조한다. 1인칭 나/내가는 이름 없는 경우 요약에서 "화자"로 \
+        쓰되 참여·상태 인물에는 넣지 않는다. 직접 확인되지 않은 동기나 감정을 \
+        사건으로 단정하지 않는다. 설명·머리말 없이 사건 줄만 출력한다.
         """
 
         /// 등록 인물 목록을 함께 준다 — 모델이 지어낸 인물은 파서가 버리지만
         /// (EventParser.resolve), 목록을 미리 주면 애초에 덜 지어낸다.
-        static func eventUser(_ text: String, names: [String]) -> String {
+        static func eventUser(
+            _ text: String, names: [String],
+            context: StoryAnalysisContext? = nil
+        ) -> String {
             """
+            \(context.map { "작품 기준:\n\($0.promptBlock)\n" } ?? "")
             인물 목록: \(names.joined(separator: ", "))
 
             다음 장면에서 사건을 뽑아라.

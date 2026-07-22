@@ -11,16 +11,24 @@ struct ContextInspectorView: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var store: EntryStore
     let theme: MintTheme
+    /// 사이드바 셸이 섹션 제목을 이미 보여줄 때 중복 헤더를 피한다.
+    var embedded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
-                Image(systemName: "eye")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.novelC)
-                Text("AI 컨텍스트")
-                    .font(MintFonts.uiFont(13, .semibold))
-                    .foregroundStyle(theme.inkC)
+                if !embedded {
+                    Image(systemName: "eye")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.novelC)
+                    Text("AI 컨텍스트")
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                } else {
+                    Text("최근 예측")
+                        .font(MintFonts.uiFont(10.5, .medium))
+                        .foregroundStyle(theme.ink2C)
+                }
                 Spacer()
                 if let report = completion.lastContextReport {
                     Text("항목 \(report.items.count)")

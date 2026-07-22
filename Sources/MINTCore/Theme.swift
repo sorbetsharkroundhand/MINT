@@ -197,6 +197,11 @@ public struct MintTheme: @unchecked Sendable { // NSColor 불변 보관만 하�
     public var novelBgC: Color {
         Color(nsColor: novelBg)
     }
+
+    /// 삭제·로드 실패처럼 복구 행동이 필요한 상태만 쓰는 시스템 의미색.
+    public var dangerC: Color {
+        Color(nsColor: .systemRed)
+    }
 }
 
 extension NSColor {
@@ -498,5 +503,61 @@ public enum MintFonts {
         case .black: 11
         default: 5
         }
+    }
+}
+
+// MARK: - 공통 리퀴드 글래스 크롬
+
+/// 앱 셸에서 반복되는 크기 규칙. 본문 조판 수치와 분리해 IDE 크롬의 밀도를
+/// 한곳에서 유지한다 — 패널마다 임의의 radius·높이를 만들면 유리 계층이 흐려진다.
+public enum MintChrome {
+    public static let toolbarHeight: CGFloat = 52
+    public static let statusHeight: CGFloat = 34
+    public static let activityRailWidth: CGFloat = 46
+    /// 숨겨진 타이틀바에서 신호등 세 개가 차지하는 가로 안전영역.
+    public static let windowControlsSafeWidth: CGFloat = 74
+    public static let inspectorMinHeight: CGFloat = 120
+    public static let inspectorDefaultHeight: CGFloat = 190
+    public static let inspectorMaxHeight: CGFloat = 320
+    public static let controlRadius: CGFloat = 8
+    public static let panelRadius: CGFloat = 11
+}
+
+private struct MintGlassSurface: ViewModifier {
+    let theme: MintTheme
+    let cornerRadius: CGFloat
+    let elevated: Bool
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background {
+                shape.fill(.ultraThinMaterial)
+                shape.fill(theme.pillC)
+            }
+            .overlay {
+                shape.strokeBorder(theme.pillBorderC, lineWidth: 1)
+            }
+            .shadow(
+                color: theme.inkC.opacity(elevated ? 0.10 : 0.04),
+                radius: elevated ? 14 : 5,
+                y: elevated ? 7 : 2
+            )
+    }
+}
+
+public extension View {
+    /// 반투명 재질 + 테마 틴트 + 헤어라인을 한 번에 적용한다. 유리 표현은
+    /// 장식이 아니라 창/도구/팝오버의 깊이를 구분할 때만 사용한다.
+    func mintGlassSurface(
+        theme: MintTheme,
+        cornerRadius: CGFloat = MintChrome.controlRadius,
+        elevated: Bool = false
+    ) -> some View {
+        modifier(
+            MintGlassSurface(
+                theme: theme, cornerRadius: cornerRadius, elevated: elevated
+            )
+        )
     }
 }

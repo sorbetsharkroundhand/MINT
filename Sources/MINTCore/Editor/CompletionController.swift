@@ -145,6 +145,9 @@ public final class CompletionController: ObservableObject {
     /// 지식 스냅샷 공급자 (M6, PLAN §11) — 인덱서가 발행한 인메모리 값만 pull.
     /// 활성 문서와의 일치 확인은 배선부(ContentView)의 몫이다.
     public var knowledgeProvider: (() -> KnowledgeSnapshot?)?
+    /// 현재 커서의 헤딩 경로. 백그라운드가 준비한 아웃라인만 조회하므로 입력
+    /// 경로에서 원문 전체를 다시 파싱하지 않는다.
+    public var breadcrumbProvider: ((Int) -> [String])?
 
     /// 종류별 컨텍스트 창 상한 — 소설은 넓게 (PLAN §10 Smart/Story 예산).
     /// 에디터(BlockTextView)가 prefix 추출 한도로 읽는다.
@@ -173,6 +176,9 @@ public final class CompletionController: ObservableObject {
     /// (docs/m6-scene-split.md §5: 씬이 수십 개면 쓰고 있는 장부터 이해해야
     /// 한다). Int 하나 저장 — 키 입력 경로 비용 없음.
     public private(set) var lastCaretLocation: Int?
+    /// 툴바 breadcrumb — 같은 장·절 안에서는 publish하지 않아 키 입력 렌더를
+    /// 늘리지 않는다. 헤딩 경계를 건널 때만 관찰자에게 알린다.
+    @Published public private(set) var breadcrumbPath: [String] = []
     /// 현재 고스트가 만들어진 모드 (fast/smart/story[-dialogue]) — 수락률
     /// 로그의 축 (M7, PLAN §13). 제안과 함께 세팅·소멸한다.
     private var currentSuggestionMode: String?
@@ -322,6 +328,7 @@ public final class CompletionController: ObservableObject {
         caretAtParagraphEnd: Bool
     ) {
         lastCaretLocation = caretLocation
+        refreshBreadcrumb(at: caretLocation)
         // `→` 한 단어 수락이 만든 편집 — 남은 고스트를 유지하고 새 요청도 걸지 않는다.
         if retainSuggestionOnNextEdit {
             retainSuggestionOnNextEdit = false
@@ -373,6 +380,7 @@ public final class CompletionController: ObservableObject {
     /// 재예약하므로(위치 일치 → no-op) 알림 순서와 무관하게 안전하다.
     public func noteSelectionChange(caretLocation: Int) {
         lastCaretLocation = caretLocation
+        refreshBreadcrumb(at: caretLocation)
         if suggestion != nil {
             if suggestionAnchor != caretLocation { invalidate() }
         } else if pendingTask != nil {
@@ -383,6 +391,13 @@ public final class CompletionController: ObservableObject {
         if let conversationCaret, conversationCaret != caretLocation {
             cancelConversationCapture()
         }
+    }
+
+    /// 문서 전환·지식 웜 로드 뒤 현재 위치 표시를 다시 맞춘다.
+    public func refreshBreadcrumb(at caretLocation: Int? = nil) {
+        let caret = caretLocation ?? lastCaretLocation
+        let next = caret.flatMap { breadcrumbProvider?($0) } ?? []
+        if next != breadcrumbPath { breadcrumbPath = next }
     }
 
     // MARK: - 수락 / 거부

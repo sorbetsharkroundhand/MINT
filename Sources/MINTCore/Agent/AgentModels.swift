@@ -101,11 +101,12 @@ public struct AgentContext: Sendable {
         caretUTF16 = source.caretUTF16
         documentEndUTF16 = (source.activeEntry.body as NSString).length
         outline = DocumentOutline.parse(source.activeEntry.body)
-        // 원문·스냅샷 내용이 바뀌면 세션 도구 캐시가 자동으로 식는다.
+        // 원문·스냅샷 내용이 바뀌면 세션 도구 캐시가 자동으로 식는다. 개수만
+        // 키에 넣던 이전 구현은 사건 수가 같은 재분석에서 **값이 바뀌어도** 오래된
+        // 타임라인을 돌려줬다. Agent가 실제로 읽는 전 필드의 안정 지문을 쓴다.
         generationKey = DocumentOutline.stableHash(
-            "\(source.activeEntry.id.uuidString)|\(source.activeEntry.body)|"
-                + "\(source.knowledge?.events.count ?? 0)|"
-                + "\(source.knowledge?.knowledgeDeltas.count ?? 0)"
+            Self.entryFingerprint(source.activeEntry)
+                + "|" + Self.knowledgeFingerprint(source.knowledge)
         )
     }
 
@@ -114,6 +115,60 @@ public struct AgentContext: Sendable {
     /// 않는다. 범위를 넘는 모델 인자는 원고 끝으로 clamp한다.
     public func boundedOffset(_ requested: Int?) -> Int {
         min(max(0, requested ?? documentEndUTF16), documentEndUTF16)
+    }
+
+    private static func entryFingerprint(_ entry: JournalEntry) -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(entry) else {
+            return "\(entry.id.uuidString)|\(entry.body)"
+        }
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private static func knowledgeFingerprint(_ knowledge: KnowledgeSnapshot?) -> String {
+        guard let knowledge else { return "knowledge:nil" }
+        var parts: [String] = [
+            knowledge.workSummary ?? "",
+            knowledge.narrationProfile.displayText
+        ]
+        parts.append(contentsOf: knowledge.summariesByHash.keys.sorted().map {
+            "summary|\($0)|\(knowledge.summariesByHash[$0] ?? "")"
+        })
+        parts.append(contentsOf: knowledge.events.map { event in
+            let deltas = event.deltas.map {
+                "\($0.characterID)|\($0.field.rawValue)|\($0.value)"
+            }.joined(separator: ",")
+            return "event|\(event.sceneHash)|\(event.summary)|\(event.importance)|"
+                + "\(event.quote ?? "")|\(deltas)"
+        })
+        parts.append(contentsOf: knowledge.utterances.map {
+            "utterance|\($0.speakerID)|\($0.utf16Start)|\($0.text)|"
+                + "\($0.listenerID?.uuidString ?? "")|\($0.politeness?.rawValue ?? "")"
+        })
+        parts.append(contentsOf: knowledge.dialogues.map {
+            "dialogue|\($0.stableKey)|\($0.speakerID?.uuidString ?? "")|"
+                + "\($0.speakerLabel)|\($0.utf16Start)|\($0.text)|\($0.attribution.rawValue)"
+        })
+        parts.append(contentsOf: knowledge.relationDeltas.map {
+            "relation|\($0.fromID)|\($0.toID)|\($0.value)|\($0.sceneHash)"
+        })
+        for hash in knowledge.segmentsByScene.keys.sorted() {
+            parts.append(contentsOf: (knowledge.segmentsByScene[hash] ?? []).map {
+                "segment|\(hash)|\($0.persistentID)|\($0.localStart)|\($0.localEnd)|"
+                    + "\($0.layer.rawValue)|\($0.chrono.rawValue)|\($0.pov ?? "")"
+            })
+        }
+        parts.append(contentsOf: knowledge.plotThreads.map { thread in
+            "thread|\(thread.id)|\(thread.title)|\(thread.summary)|\(thread.status.rawValue)|"
+                + thread.memberKeys.joined(separator: ",")
+        })
+        parts.append(contentsOf: knowledge.keyScenes.map {
+            "keyscene|\($0.id)|\($0.title)|\($0.summary)|\($0.status.rawValue)|"
+                + "\($0.sourceRange?.lowerBound ?? -1)|\($0.sourceRange?.upperBound ?? -1)"
+        })
+        return parts.joined(separator: "\n")
     }
 }
 

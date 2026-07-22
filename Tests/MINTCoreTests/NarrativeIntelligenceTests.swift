@@ -346,8 +346,8 @@ final class NarrativeIntelligenceTests: XCTestCase {
         decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(KnowledgeSidecar.self, from: data)
         XCTAssertEqual(decoded, sidecar)
-        // 구버전은 로드 시 폐기·재구축 대상이다 (v7: 설정 충돌·복선 제거).
-        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 7)
+        // 구버전은 로드 시 폐기·재구축 대상이다 (v8: 동백꽃 품질 회귀 수정).
+        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 8)
     }
 
     // MARK: - 컨텍스트 조립 (요구사항 §16·§17)

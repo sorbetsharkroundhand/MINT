@@ -88,7 +88,7 @@ flowchart TD
         CA["ContextAssembler (신규)<br/>모드 선택 · 랭킹 · 토큰 예산 · state_at(커서)"]
         CE["CompletionEngine (actor)<br/>단일 모델 상주 · KV 캐시 · 취소 가능 생성"]
         AR["AgentRuntime<br/>읽기 전용 loop · step/반복 상한 · 폴백 파서"]
-        TR["ToolRegistry<br/>12개 조회 도구 · strict validate · 결과 캐시"]
+        TR["ToolRegistry<br/>13개 조회 도구 · strict validate · 결과 캐시"]
     end
 
     BE -->|"편집 이벤트"| CC
@@ -341,8 +341,10 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 관계: 민준→존댓말을 받음, 서연→반말 (어색한 선후배)
 ```
 
-- 대화 귀속: 발화 블록의 화자를 인접 서술("~가 말했다")·교대 규칙으로 추정
-  (결정적 우선, 모호하면 LLM 판정). 귀속 결과가 대사 예문과 존대 매트릭스를 먹인다.
+- 대화 귀속: 큰따옴표 내용을 줄바꿈·화자 미상까지 전수 수집하고, 인접 서술
+  ("~가 말했다")·응답·연속 발화 표지로 화자를 추정한다. 이름 미상 1인칭은
+  `role=화자` 카드로 자동 등록하며, 사용자가 대사별 화자를 수정할 수 있다.
+  등록 인물 귀속분만 대사 예문과 존대 매트릭스를 먹인다.
 - 감정 상태·관계는 전부 StateDelta — "인물 연대기" UI(Advanced)가 공짜로 나온다.
 
 ## 8. 타임라인 시스템
@@ -616,8 +618,8 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 - MVP = **읽기 전용 Agent**(조회·조언 12 tool, side-effect 없음). 편집(propose_patch·
   diff/accept)은 P1. Agent와 고스트 자동완성은 **공존**(ADR-4).
 - [x] M-A0 — `WritingTool`/`ToolRegistry`/값복사 `AgentContext`, strict schema 검증,
-      요청 세대별 결과 캐시. 조회 도구 12개: 활성 문서·아웃라인·씬 읽기·문자열
-      검색·인물·상태·사건·대사·관계·타임라인·일관성·커서 컨텍스트.
+      요청 세대별 결과 캐시. 조회 도구 13개: 활성 문서·아웃라인·씬 읽기·문자열
+      검색·인물·상태·사건·대사 전수·인물 대사·관계·타임라인·일관성·커서 컨텍스트.
 - [x] M-A1 — 네이티브 Hermes `.toolCall` + 태그/`TOOL:` lenient 폴백,
       최대 6단계·동일 호출 3회 중단·1회 형식 repair·취소 협조. 사이드바 Agent 챗과
       도구 진행 스트림. 답변별 「작업 과정」 토글에 단계·판단 요약·실행 도구·입력·
@@ -676,6 +678,33 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
       프롬프트 A 헤더·Agent 노출·`NarrativeOverride.narrationMode`.
 - [x] **P3** — `MINTBench --story-bible-bench`: POV 10/10(1인칭·3인칭 각
       5편), 인물 정규화 9/9, 10편 판정 약 2.5ms(2026-07-21, debug).
+
+### M13 — 실원고 품질 루프 「동백꽃」 (2026-07-22)
+
+실제 로컬 원고의 파생 값 전수 점검과 Agent 답변 원문 검토:
+**[docs/dongbaek-agent-quality.md](docs/dongbaek-agent-quality.md)**.
+
+- [x] `MINTBench --dongbaek-agent-bench` — 로컬 `entries.json`의 「동백꽃」을
+      읽어 Story Intelligence 전 값, 7개 골드 질문, 도구 trace, 답변, 지연을 출력.
+- [x] `KnowledgeSidecar` v8 — 이름 미상 1인칭 전역 문맥, 동일 사건 중복 제거,
+      청크 경계를 넘는 명시적 현재→회상→현재 프레임. 분리 문단 발화 귀속 0→3,
+      회상 타일 3→5, 사건 중복 1쌍→0.
+- [x] Agent 결정적 근거 팩과 고신뢰 즉답 — 화자·명시적 회상·귀속 대사는 모델
+      0회, 해석·전체 플롯은 원문 대조 턴. 내부 청크 해시 대신 공개 장 참조·오프셋·
+      근거를 Tool이 반환하고, 자동 인물 초안은 Agent 사실 근거에서 제외한다.
+- [x] 실모델 기준선 16/29(55%), 약 390.1s → 엄격 판정 29/29(100%), 모순 0,
+      약 92.1s. 닫힌 조건의 생사·소유 즉답과 검증 턴 384토큰 상한 포함.
+- [x] `MINTBench --dongbaek-dialogue-bench` — 실제 큰따옴표 30/30 수집,
+      화자 골드 30/30, 미상·누락 0. 이름 미상 1인칭 화자 역할 카드, 대사별 사용자
+      수정, `get_dialogues`, Agent의 모델 0회 전수 답변을 회귀 게이트로 고정.
+- [x] Agent 기본 근거를 스토리 바이블 전체 + 화자 표시 대사 전수 인덱스 +
+      24,000자 이하 작품 원문 전체로 확대(긴 작품은 시작·중앙·결말 24k 창).
+      응답형 Agent 전용이라 고스트 자동완성의 시점 차단·지연 예산은 유지.
+- [x] 확대 후 실모델 재검증 29/29(100%), 모순 0, 7문항 생성 합계 약 45.3s.
+      화자·감자·생사·시간·대사·전체 플롯은 닫힌 원문 조건에서 모델 0회,
+      관계 해석 한 문항만 모델을 사용해 변동성과 지연을 줄임.
+- [ ] **P0** 주체 근거 없는 장면·작품 요약 저장 억제. Agent 답변 게이트는
+      통과했지만 현재 7개 장면 요약 중 2개가 치명 오류라 파생 캐시는 미완료다.
 
 ## 15. 향후 연구 아이디어
 
@@ -811,7 +840,8 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 | `Sources/MINTCore/Editor/CompletionController.swift` | 게이트 · 디바운스 · 수락/거부 · 취소 |
 | `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 단일 모델 상주 · 취소 가능 생성 (actor) |
 | `Sources/MINTCore/Agent/AgentRuntime.swift` | 읽기 전용 Agent loop · step/반복 상한 · 도구 실행 |
-| `Sources/MINTCore/Agent/WritingTools.swift` | 조회 도구 12개 · schema/strict validate · 전체 작품 탐색 + 명시적 `before` |
+| `Sources/MINTCore/Agent/AgentEvidencePack.swift` | 질문별 결정적 근거 팩 · 고신뢰 즉답 · 원문 대조 지시 |
+| `Sources/MINTCore/Agent/WritingTools.swift` | 조회 도구 13개 · 대사 전수 조회 · schema/strict validate · 전체 작품 탐색 + 명시적 `before` |
 | `Sources/MINTCore/Agent/AgentController.swift` | Agent 세션 UI 상태 · 단일 모델 선점 배선 |
 | `Sources/MINTCore/Agent/AgentView.swift` | 사이드바 챗 · 도구 진행 스트림 |
 | `Sources/MINTCore/Storage/EntryStore.swift` | 원문 저장 (entries.json) — 유일한 진실 |
@@ -985,9 +1015,24 @@ Qwen3.6 Agent Loop가 Story Intelligence를 **Tool**로 조회·조립해 사용
 
 ### C.10 열람 UI (§1-5, M5·M6)
 
-- **사이드바 섹션** (M6-8) — 사이드바 상단 탭으로 문서·바이블·서사·컨텍스트
-  전환 (VSCode 활동 바꼴). 툴바 "소설" 배지는 바이블 섹션을 연다. *의도*: 열람이
-  잦은 패널을 팝오버로 두면 열 때마다 닫힌다 — 상시 패널로 승격.
+- **IDE 활동 레일 + 리퀴드 글래스 셸** — 창은 `활동 레일 | 탐색 패널 | 집필
+  캔버스`의 세 평면이다. 레일에서 문서·바이블·서사·컨텍스트·Agent를 전환하고,
+  선택 도구만 민트 광선으로 표시한다. 툴바는 실제 활성 문서 제목을 보여 주며
+  툴바·레일·상태 바만 같은 반투명 재질을 공유한다. 본문은 유리 카드로 감싸지
+  않는다. *의도*: IDE의 탐색 문법과 macOS 유리 깊이는 일관되게 쓰되, 장식적
+  카드 반복으로 집필 캔버스의 우선순위를 떨어뜨리지 않는다. 툴바 "소설" 배지는
+  바이블 섹션을 연다. 숨겨진 타이틀바의 신호등은 사이드바 전체 폭의 전용 상단
+  행에 두고, 제목은 세 버튼의 안전영역 뒤에서 시작한다. 임베드 패널은 셸의 섹션
+  제목을 반복하지 않으며 좁은 폭에서는 필터를 두 줄로 접는다. 사이드바는
+  `전체 패널 → 활동 레일만 → 숨김` 3단계로 순환하고, 레일 아이콘을 누르면 해당
+  패널을 전체로 연다. 서사 사건 상세는 그래프 아래의 높이 조절 가능한 인스펙터로
+  고정해 선택 전후의 그래프 스크롤·가로폭을 보존한다. 편집기 툴바 breadcrumb는
+  이미 계산된 `DocumentOutline`에서 현재 커서의 장·절·씬 경로만 조회하고 경로가
+  달라질 때만 publish한다 — 매 키 입력 원문 재파싱은 금지한다.
+- **Agent 화자 표식** — 답변 생성 카드와 완료된 답변 왼쪽에 테마 기반 도트 구체
+  캐릭터를 둔다. 생성 중에는 표정과 1px 호흡만 바꾸고 `Reduce Motion`에서는
+  정지한다. *의도*: 사용자 질문과 Agent 답변을 즉시 구별하되 집필 화면을 흔드는
+  마스코트 애니메이션은 만들지 않는다.
 - **스토리 바이블 섹션** — 장르·인물 카드 편집 + 후보 검토 + **자동 이해 열람**
   (상태·최근 사건·말투, 예측과 같은 질의). *의도*: AI가 이해한 모든 것을
   사용자가 보고 고칠 수 있어야 한다 (§1-5). 파생 지식 직접 수정은 안 연다 —

@@ -154,6 +154,13 @@ public struct DocumentOutline: Equatable, Sendable {
         scenes.lastIndex(where: { $0.utf16Range.lowerBound <= utf16Offset })
     }
 
+    /// 툴바 breadcrumb용 현재 헤딩 경로. 비어 있는 중간 레벨은 UI에 노출하지
+    /// 않는다. 이미 계산된 씬 배열만 보므로 커서 이동마다 원문을 재파싱하지 않는다.
+    public func headingPath(at utf16Offset: Int) -> [String] {
+        guard let index = sceneIndex(at: utf16Offset) else { return [] }
+        return scenes[index].headingPath.filter { !$0.isEmpty }
+    }
+
     /// 커서 이전(커서가 속한 씬 포함) 씬들 — 커서 위치 **이후**의 지식을
     /// 프롬프트에 주입하지 않기 위한 시점 차단 질의 (CLAUDE.md §2-4).
     public func scenes(upTo utf16Offset: Int) -> ArraySlice<Scene> {
@@ -353,7 +360,7 @@ public struct DocumentOutline: Equatable, Sendable {
 
     /// 프로세스 간 안정 해시 — 씬 해시와 같은 규격 (SHA-256 앞 16자).
     /// 장·작품 노드의 결합 해시(BackgroundIndexer)도 이 규격을 쓴다.
-    static func stableHash(_ text: String) -> String {
+    public static func stableHash(_ text: String) -> String {
         SHA256.hash(data: Data(text.utf8))
             .prefix(8)
             .map { String(format: "%02x", $0) }

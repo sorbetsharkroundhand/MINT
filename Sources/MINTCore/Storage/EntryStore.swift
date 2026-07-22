@@ -16,12 +16,21 @@ public enum EntryKind: String, Codable, Sendable {
     }
 }
 
+/// 인물 카드가 작품에서 맡는 구조적 역할. 이름과 별개로 두어 이름 미상 화자를
+/// `화자` 카드로 보여 주면서도 실제 이름이라고 오해하지 않게 한다 (PLAN §7).
+public enum CharacterRole: String, Codable, Sendable, Equatable {
+    case narrator = "화자"
+}
+
 /// 스토리 바이블 v0 — 사용자가 직접 쓰는 인물 카드 (PLAN §6.2·§7).
 ///
 /// 사용자 저작 데이터이므로 파생 캐시(지식 사이드카)가 아니라 원문 스토어에
 /// 산다 — 원문이 유일한 진실(CLAUDE.md §2-1). M6 자동 추출이 도입돼도 이
 /// 카드는 잠금 취급이라 자동이 덮지 않는다 (CLAUDE.md §1-5).
 public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
+    /// 자동 화자 카드를 사용자가 삭제했을 때 다시 만들지 않는 거부 표식.
+    public static let narratorRejectionMarker = "__MINT_AUTO_NARRATOR__"
+
     public var id: UUID
     /// 정식 이름 — 최근 창 언급 감지(카드 선택)의 키 (PLAN §11).
     public var name: String
@@ -38,6 +47,8 @@ public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
     /// HIGH 신뢰 감지로 자동 등록된 카드 (요구사항 §16) — UI가 표식을 달아
     /// 사용자가 알아보고 지울 수 있게 한다. 사용자가 카드를 편집하면 해제된다.
     public var autoRegistered: Bool?
+    /// 이름과 분리된 구조적 역할. 레거시 카드에는 키가 없어 nil로 읽힌다.
+    public var role: CharacterRole?
 
     public init(
         id: UUID = UUID(),
@@ -45,7 +56,8 @@ public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
         aliases: String = "",
         note: String = "",
         locked: Bool? = nil,
-        autoRegistered: Bool? = nil
+        autoRegistered: Bool? = nil,
+        role: CharacterRole? = nil
     ) {
         self.id = id
         self.name = name
@@ -53,6 +65,7 @@ public struct CharacterCard: Identifiable, Codable, Equatable, Sendable {
         self.note = note
         self.locked = locked
         self.autoRegistered = autoRegistered
+        self.role = role
     }
 }
 
@@ -964,10 +977,19 @@ public final class EntryStore: ObservableObject {
     public func removeCharacter(_ cardID: UUID, from id: UUID) {
         guard let index = entries.firstIndex(where: { $0.id == id }),
               var cards = entries[index].characters,
-              cards.contains(where: { $0.id == cardID })
+              let removed = cards.first(where: { $0.id == cardID })
         else { return }
         cards.removeAll { $0.id == cardID }
         entries[index].characters = cards.isEmpty ? nil : cards
+        // 자동 화자는 일반 이름 후보가 아니어서 별도 거부 표식이 필요하다.
+        // 삭제 한 번이면 재등록하지 않아야 기억의 소유권이 사용자에게 남는다.
+        if removed.role == .narrator {
+            var rejected = entries[index].rejectedCharacterNames ?? []
+            if !rejected.contains(CharacterCard.narratorRejectionMarker) {
+                rejected.append(CharacterCard.narratorRejectionMarker)
+                entries[index].rejectedCharacterNames = rejected
+            }
+        }
         saveNow()
     }
 

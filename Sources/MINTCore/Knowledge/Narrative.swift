@@ -329,6 +329,8 @@ public struct NarrativeOverride: Codable, Equatable, Sendable, Identifiable {
         case segmentFocal
         /// 구간 시간 관계 (키 = 구간 ID, 값 = ChronoRelation rawValue).
         case segmentChrono
+        /// 수집 대사 화자 (키 = DialogueLine.stableKey, 값 = 인물 UUID 또는 unknown).
+        case dialogueSpeaker
         /// 구간 시작 경계 (키 = 구간 ID, 값 = 새 시작 문장 인용) — 씬 원문에서
         /// 그 인용을 찾아 경계를 다시 잡는다 (요구사항 §15 "회상 시작 위치").
         case segmentStart

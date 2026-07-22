@@ -17,16 +17,19 @@ struct CharacterBibleView: View {
     var indexer: BackgroundIndexer?
     /// 사이드바 섹션에 임베드됐는가 — 고정 폭·높이 상한을 풀고 공간을 채운다.
     var embedded = false
+    @State private var dialoguesExpanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Image(systemName: "book.closed.fill")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.novelC)
-                Text("스토리 바이블")
-                    .font(MintFonts.uiFont(13, .semibold))
-                    .foregroundStyle(theme.inkC)
+                if !embedded {
+                    Image(systemName: "book.closed.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.novelC)
+                    Text("스토리 바이블")
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                }
                 Spacer()
                 // 수동 이해 트리거 (M6-8) — 자동(유휴)만이 아니라 사용자가
                 // 원할 때도 이해를 만든다. 자동완성이 꺼져 있어도 동작한다.
@@ -45,6 +48,8 @@ struct CharacterBibleView: View {
                 .font(MintFonts.uiFont(12))
 
             narrationSection
+
+            dialogueCollectionSection
 
             Text("제목·장르·인물 카드가 예측에 함께 실려요. 최근 본문에 이름이 등장하는 인물이 우선돼요 (최대 3명).")
                 .font(MintFonts.uiFont(10.5))
@@ -279,6 +284,125 @@ struct CharacterBibleView: View {
         )
     }
 
+    /// 큰따옴표 대사 전수 목록. 자동 귀속이 틀리거나 미상인 항목은 작가가 즉시
+    /// 화자를 고칠 수 있고, 수정은 안정 키 오버라이드로 원문 재분석보다 우선한다.
+    @ViewBuilder
+    private var dialogueCollectionSection: some View {
+        if let snapshot, !snapshot.dialogues.isEmpty {
+            let unresolved = snapshot.dialogues.count { $0.attribution == .unresolved }
+            VStack(alignment: .leading, spacing: 5) {
+                Button {
+                    dialoguesExpanded.toggle()
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: dialoguesExpanded ? "chevron.down" : "chevron.right")
+                            .font(.system(size: 8, weight: .semibold))
+                        Text("수집된 대사 · \(snapshot.dialogues.count)")
+                            .font(MintFonts.uiFont(10.5, .semibold))
+                        if unresolved > 0 {
+                            Text("미상 \(unresolved)")
+                                .font(MintFonts.uiFont(9.5, .medium))
+                                .foregroundStyle(theme.novelC)
+                        }
+                    }
+                    .foregroundStyle(theme.ink2C)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if dialoguesExpanded {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 5) {
+                            ForEach(Array(snapshot.dialogues.enumerated()), id: \.element.id) {
+                                index, dialogue in
+                                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                    Text("\(index + 1)")
+                                        .font(MintFonts.monoUI(9))
+                                        .foregroundStyle(theme.ink3C)
+                                        .frame(width: 20, alignment: .trailing)
+                                    Menu {
+                                        Button("자동 판정으로 되돌리기") {
+                                            resetDialogueSpeaker(dialogue)
+                                        }
+                                        Divider()
+                                        ForEach(cards) { card in
+                                            Button(dialogueSpeakerLabel(card)) {
+                                                setDialogueSpeaker(card, for: dialogue)
+                                            }
+                                        }
+                                        Divider()
+                                        Button("미상") {
+                                            setDialogueUnknown(dialogue)
+                                        }
+                                    } label: {
+                                        Text(dialogue.speakerLabel)
+                                            .font(MintFonts.uiFont(10, .semibold))
+                                            .foregroundStyle(
+                                                dialogue.attribution == .unresolved
+                                                    ? theme.novelC : theme.blueC
+                                            )
+                                            .frame(width: 76, alignment: .leading)
+                                    }
+                                    .menuStyle(.borderlessButton)
+                                    .help("대사 화자 수정 · 현재 \(dialogue.attribution.rawValue)")
+                                    Button {
+                                        let query = SourceAnchor.resilientQuery(
+                                            for: dialogue.text,
+                                            in: store.activeEntry?.body ?? ""
+                                        ) ?? dialogue.text
+                                        store.requestSearchJump(store.activeID, query: query)
+                                    } label: {
+                                        Text("“\(dialogue.text)”")
+                                            .font(MintFonts.uiFont(10.5))
+                                            .foregroundStyle(theme.ink2C)
+                                            .lineLimit(2)
+                                            .multilineTextAlignment(.leading)
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("원문으로 이동")
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 210)
+                }
+            }
+        }
+    }
+
+    private func setDialogueSpeaker(_ card: CharacterCard, for dialogue: DialogueLine) {
+        guard let id = store.activeEntry?.id else { return }
+        store.setNarrativeOverride(
+            NarrativeOverride(
+                kind: .dialogueSpeaker, key: dialogue.stableKey,
+                value: card.id.uuidString
+            ),
+            in: id
+        )
+    }
+
+    private func dialogueSpeakerLabel(_ card: CharacterCard) -> String {
+        card.role == .narrator ? "\(card.name) · 화자" : card.name
+    }
+
+    private func setDialogueUnknown(_ dialogue: DialogueLine) {
+        guard let id = store.activeEntry?.id else { return }
+        store.setNarrativeOverride(
+            NarrativeOverride(
+                kind: .dialogueSpeaker, key: dialogue.stableKey, value: "unknown"
+            ),
+            in: id
+        )
+    }
+
+    private func resetDialogueSpeaker(_ dialogue: DialogueLine) {
+        guard let id = store.activeEntry?.id else { return }
+        store.removeNarrativeOverride(
+            kind: .dialogueSpeaker, key: dialogue.stableKey, in: id
+        )
+    }
+
     /// 카드 필드 편집 → 스토어 upsert (디바운스 저장). get은 항상 스토어의
     /// 최신 값 — 팝오버가 열린 채 다른 경로로 바뀌어도 어긋나지 않는다.
     /// **소개를 직접 고치면 잠근다** — 자동 프로파일링이 덮지 못한다 (PLAN §6.2).
@@ -432,6 +556,12 @@ private struct CharacterCardRow: View {
                         .font(.system(size: 10))
                         .foregroundStyle(theme.novelC)
                         .help("자동 등록된 인물 — 이름·별칭을 고치거나 삭제할 수 있어요")
+                }
+                if let role = card.role {
+                    Text(role.rawValue)
+                        .font(MintFonts.uiFont(9.5, .semibold))
+                        .foregroundStyle(theme.novelC)
+                        .help("이 카드는 실제 이름이 아니라 작품의 \(role.rawValue) 역할입니다")
                 }
                 // 잠금 토글 — 잠기면 자동 프로파일링이 소개를 채우지 않는다.
                 Button {

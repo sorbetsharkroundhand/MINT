@@ -1,6 +1,21 @@
 import AppKit
 import SwiftUI
 
+/// 사이드바 노출 단계. 기존 Bool 키는 구버전 설정 호환용으로 함께 유지한다.
+enum SidebarPresentation: String {
+    case full
+    case rail
+    case hidden
+
+    var next: SidebarPresentation {
+        switch self {
+        case .full: .rail
+        case .rail: .hidden
+        case .hidden: .full
+        }
+    }
+}
+
 /// MINT 에디터 v3 메인 화면 — 디자인 "MINT Editor v3.dc.html" 완전 이식.
 ///
 /// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(다중 저널),
@@ -76,6 +91,12 @@ public struct ContentView: View {
                     else { return nil }
                     return snapshot
                 }
+                completion.breadcrumbProvider = { [weak indexer, weak store] caret in
+                    guard let snapshot = indexer?.snapshot,
+                          snapshot.entryID == store?.activeID
+                    else { return [] }
+                    return snapshot.outline.headingPath(at: caret)
+                }
                 // 시작 직후에도 유휴 타이머를 감는다 — 앱을 켜두기만 해도
                 // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
                 indexer.noteChange(entryID: store.activeID)
@@ -104,6 +125,10 @@ public struct ContentView: View {
                 }
             }
         }
+        .onChange(of: store.activeID) { _, _ in
+            // 이전 문서의 장·절 경로가 새 문서 제목 아래 잠깐 남지 않게 즉시 비운다.
+            completion.refreshBreadcrumb()
+        }
     }
 
     private var preferredScheme: ColorScheme? {
@@ -125,35 +150,57 @@ private struct MainSurface: View {
     @Environment(\.colorScheme) private var colorScheme
     /// 사용자 색상 팔레트 — 관찰해서 설정에서 색을 바꾸는 즉시 화면에 반영한다.
     @ObservedObject private var palette = PaletteSettings.shared
-    /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
-    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
+    /// 구버전의 보임/숨김 값. 새 3단계 키가 비어 있을 때만 폴백으로 읽는다.
+    @AppStorage("mint.sidebarVisible") private var legacySidebarVisible = true
+    @AppStorage("mint.sidebarMode") private var sidebarModeRaw = ""
     /// 사이드바 폭 — 사용자가 divider를 끌어 조절하며 UserDefaults에 보존된다.
     /// HSplitView를 버리고 폭을 직접 소유하는 이유: 근접 감지·확대 히트영역을
     /// 가진 커스텀 divider(아래 SidebarResizeDivider)를 붙이기 위함.
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
 
     /// 사이드바 폭 한계 — 너무 좁으면 섹션 UI가 깨지고, 너무 넓으면 본문 가독 폭을 침범.
-    private let sidebarMin: CGFloat = 200
+    private let sidebarMin: CGFloat = 230
     private let sidebarMax: CGFloat = 360
 
     private var clampedSidebarWidth: CGFloat {
         min(max(CGFloat(sidebarWidth), sidebarMin), sidebarMax)
     }
 
+    private var sidebarMode: SidebarPresentation {
+        SidebarPresentation(rawValue: sidebarModeRaw)
+            ?? (legacySidebarVisible ? .full : .hidden)
+    }
+
     var body: some View {
         let theme = palette.theme(for: colorScheme)
         ZStack {
             GlassBackground()
-            theme.glassWinC
+            LinearGradient(
+                colors: [theme.glassWinC, theme.sidebarTintC, theme.glassWinC],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            // 유일한 장식적 제스처: 활성 의미색이 창 모서리에서 아주 약하게
+            // 번진다. 본문 뒤까지 오지 않아 집필 캔버스의 대비는 흔들리지 않는다.
+            RadialGradient(
+                colors: [theme.novelBgC.opacity(0.48), .clear],
+                center: .topLeading,
+                startRadius: 0,
+                endRadius: 430
+            )
             // 콘텐츠는 타이틀바(신호등 줄) 안전영역 아래부터 — 사이드바 헤더가
             // 신호등 한 줄 밑에서 우측 날짜 툴바와 나란히 놓인다.
             HStack(spacing: 0) {
-                if sidebarVisible {
+                if sidebarMode != .hidden {
                     SidebarView(
                         store: store, completion: completion, theme: theme,
-                        indexer: indexer, agent: agent
+                        indexer: indexer, agent: agent,
+                        railOnly: sidebarMode == .rail
                     )
-                    .frame(width: clampedSidebarWidth)
+                    .frame(
+                        width: sidebarMode == .rail
+                            ? MintChrome.activityRailWidth : clampedSidebarWidth
+                    )
                 }
                 EditorPane(
                     store: store, completion: completion,
@@ -167,7 +214,7 @@ private struct MainSurface: View {
             // 경계선 x = 사이드바 폭. 커스텀 NSView가 hitTest로 idle에선 얇은
             // 영역만 claim하므로 넓은 존이 다른 UI interaction을 삼키지 않는다.
             .overlay(alignment: .leading) {
-                if sidebarVisible {
+                if sidebarMode == .full {
                     SidebarResizeDivider(
                         width: Binding(
                             get: { CGFloat(sidebarWidth) },
@@ -446,7 +493,8 @@ struct EditorToolbar: View {
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     var indexer: BackgroundIndexer?
-    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
+    @AppStorage("mint.sidebarVisible") private var legacySidebarVisible = true
+    @AppStorage("mint.sidebarMode") private var sidebarModeRaw = ""
     @State private var sidebarButtonHovered = false
     @State private var settingsButtonHovered = false
     @State private var longParagraphOpen = false
@@ -456,14 +504,20 @@ struct EditorToolbar: View {
     /// 사이드바 섹션 (M6-8) — 배지 클릭이 팝오버 대신 사이드바 패널을 연다.
     @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
+    private var sidebarMode: SidebarPresentation {
+        SidebarPresentation(rawValue: sidebarModeRaw)
+            ?? (legacySidebarVisible ? .full : .hidden)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             sidebarToggle
+            documentIdentity
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // M6-8: 팝오버 → 사이드바 패널 승격. 배지는 바이블 섹션을 연다.
             if store.activeEntry?.resolvedKind == .novel {
                 Button {
-                    sidebarVisible = true
+                    setSidebarMode(.full)
                     sidebarSection = SidebarSection.bible.rawValue
                 } label: {
                     HStack(spacing: 4) {
@@ -529,20 +583,21 @@ struct EditorToolbar: View {
         }
         // 사이드바를 접으면 툴바가 창 맨 왼쪽까지 차서 신호등(닫기·최소화·최대화)과
         // 겹친다 — 접힘 상태에선 신호등을 비켜 갈 만큼 왼쪽 여백을 준다.
-        .padding(.leading, sidebarVisible ? 22 : 84)
+        .padding(.leading, sidebarMode == .full ? 22 : 84)
         .padding(.trailing, 22)
-        .frame(height: 52)
+        .frame(height: MintChrome.toolbarHeight)
+        .background(.ultraThinMaterial)
         .background(theme.toolbarC)
     }
 
     /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
     private var sidebarToggle: some View {
         Button {
-            sidebarVisible.toggle()
+            setSidebarMode(sidebarMode.next)
         } label: {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(sidebarVisible ? theme.ink2C : theme.ink3C)
+                .foregroundStyle(sidebarMode == .hidden ? theme.ink3C : theme.ink2C)
                 .frame(width: 28, height: 28)
                 .background(
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
@@ -552,7 +607,50 @@ struct EditorToolbar: View {
         }
         .buttonStyle(.plain)
         .onHover { sidebarButtonHovered = $0 }
-        .help(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기")
+        .help(sidebarToggleHelp)
+        .accessibilityLabel("사이드바: \(sidebarModeLabel)")
+    }
+
+    private var documentIdentity: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(store.activeEntry?.title ?? "제목 없음")
+                .font(MintFonts.uiFont(12, .semibold))
+                .foregroundStyle(theme.inkC)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if !completion.breadcrumbPath.isEmpty {
+                Text(completion.breadcrumbPath.joined(separator: " › "))
+                    .font(MintFonts.uiFont(9.5, .medium))
+                    .foregroundStyle(theme.ink3C)
+                    .lineLimit(1)
+                    .truncationMode(.head)
+                    .accessibilityLabel(
+                        "현재 위치: \(completion.breadcrumbPath.joined(separator: ", "))"
+                    )
+            }
+        }
+        .frame(maxWidth: 250, alignment: .leading)
+    }
+
+    private var sidebarToggleHelp: String {
+        switch sidebarMode {
+        case .full: "활동 레일만 남기기"
+        case .rail: "사이드바 숨기기"
+        case .hidden: "사이드바 전체 보이기"
+        }
+    }
+
+    private var sidebarModeLabel: String {
+        switch sidebarMode {
+        case .full: "전체 패널"
+        case .rail: "활동 레일만"
+        case .hidden: "숨김"
+        }
+    }
+
+    private func setSidebarMode(_ mode: SidebarPresentation) {
+        sidebarModeRaw = mode.rawValue
+        legacySidebarVisible = mode != .hidden
     }
 
     /// 설정 — ⌘,와 같은 Settings 창을 연다. 모델·제안·다크 모드·저자 이름·
@@ -626,13 +724,12 @@ struct ModelChip: View {
             .padding(.vertical, 5)
             .padding(.horizontal, 11)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(chipHovered ? theme.hoverC : theme.chipC)
+                RoundedRectangle(
+                    cornerRadius: MintChrome.controlRadius, style: .continuous
+                )
+                .fill(chipHovered ? theme.hoverC : .clear)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(theme.chipBorderC)
-            )
+            .mintGlassSurface(theme: theme)
         }
         .buttonStyle(.plain)
         .onHover { chipHovered = $0 }
@@ -1055,19 +1152,9 @@ struct ShortcutHintPill: View {
         .fixedSize() // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
         .padding(.vertical, 9)
         .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(theme.pillC)
-                .background(
-                    .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous)
-                )
+        .mintGlassSurface(
+            theme: theme, cornerRadius: MintChrome.panelRadius, elevated: true
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .strokeBorder(theme.pillBorderC)
-        )
-        .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
         .opacity(active ? 1 : 0.6)
         .animation(.easeOut(duration: 0.2), value: active)
         .allowsHitTesting(false)
@@ -1128,7 +1215,7 @@ struct EditorStatusBar: View {
             if case .failed = completion.engineState {
                 separator
                 Text("자동완성 로드 실패")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.dangerC)
                     .lineLimit(1)
                 Button("다시 시도") { completion.retryEngineLoad() }
                     .buttonStyle(.link)
@@ -1149,7 +1236,8 @@ struct EditorStatusBar: View {
         .font(MintFonts.monoUI(11))
         .foregroundStyle(theme.ink3C)
         .padding(.horizontal, 22)
-        .frame(height: 34)
+        .frame(height: MintChrome.statusHeight)
+        .background(.ultraThinMaterial)
         .background(theme.statusbarC)
         // 통계 재계산 — 키가 바뀌고(편집·문서 전환) 0.25s 조용해진 뒤에만.
         // 그 사이 새 키 입력이 오면 이 task가 취소되고 새로 걸린다(디바운스).

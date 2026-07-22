@@ -5,6 +5,8 @@ import SwiftUI
 struct AgentView: View {
     @ObservedObject var agent: AgentController
     let theme: MintTheme
+    /// 사이드바 셸 안에서는 제품명이 이미 보이므로 상태 설명만 남긴다.
+    var embedded = false
 
     @State private var draft = ""
     @State private var expandedTraceIDs: Set<UUID> = []
@@ -14,9 +16,11 @@ struct AgentView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Writing Agent")
-                        .font(MintFonts.uiFont(12, .semibold))
-                        .foregroundStyle(theme.inkC)
+                    if !embedded {
+                        Text("Writing Agent")
+                            .font(MintFonts.uiFont(12, .semibold))
+                            .foregroundStyle(theme.inkC)
+                    }
                     Text("읽기 전용 · 원고를 직접 바꾸지 않아요")
                         .font(MintFonts.uiFont(9.5))
                         .foregroundStyle(theme.ink3C)
@@ -118,8 +122,12 @@ struct AgentView: View {
     }
 
     private func messageRow(_ message: AgentController.TranscriptMessage) -> some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: 7) {
             if message.role == .user { Spacer(minLength: 24) }
+            if message.role == .assistant {
+                AgentDotOrb(theme: theme, active: false)
+                    .padding(.top, 1)
+            }
             VStack(alignment: .leading, spacing: 0) {
                 Text(message.text)
                     .font(MintFonts.uiFont(11))
@@ -234,44 +242,48 @@ struct AgentView: View {
     }
 
     private var progressCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            ForEach(agent.activities) { activity in
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: activity.isFinished ? "checkmark.circle.fill" : "circle.dotted")
+        HStack(alignment: .top, spacing: 8) {
+            AgentDotOrb(theme: theme, active: true)
+            VStack(alignment: .leading, spacing: 7) {
+                ForEach(agent.activities) { activity in
+                    HStack(alignment: .top, spacing: 6) {
+                        Image(
+                            systemName: activity.isFinished
+                                ? "checkmark.circle.fill" : "circle.dotted"
+                        )
                         .font(.system(size: 9.5))
                         .foregroundStyle(activity.isFinished ? theme.ink3C : theme.novelC)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(activity.toolName)
-                            .font(MintFonts.uiFont(9, .medium))
-                            .foregroundStyle(theme.ink2C)
-                        Text(activity.text)
-                            .font(MintFonts.uiFont(9.5))
-                            .foregroundStyle(theme.ink3C)
-                            .fixedSize(horizontal: false, vertical: true)
-                        if !activity.argumentsText.isEmpty {
-                            Text(activity.argumentsText)
-                                .font(MintFonts.uiFont(8.5))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(activity.toolName)
+                                .font(MintFonts.uiFont(9, .medium))
+                                .foregroundStyle(theme.ink2C)
+                            Text(activity.text)
+                                .font(MintFonts.uiFont(9.5))
                                 .foregroundStyle(theme.ink3C)
-                                .textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
+                            if !activity.argumentsText.isEmpty {
+                                Text(activity.argumentsText)
+                                    .font(MintFonts.uiFont(8.5))
+                                    .foregroundStyle(theme.ink3C)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
                         }
                     }
                 }
-            }
-            if !agent.streamingText.isEmpty {
-                Text(agent.streamingText)
-                    .font(MintFonts.uiFont(11))
-                    .foregroundStyle(theme.ink2C)
-                    .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else if agent.activities.isEmpty || agent.activities.last?.isFinished == true {
-                HStack(spacing: 6) {
-                    ProgressView().controlSize(.mini)
+                if !agent.streamingText.isEmpty {
+                    Text(agent.streamingText)
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(theme.ink2C)
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if agent.activities.isEmpty || agent.activities.last?.isFinished == true {
                     Text("작품을 살펴보는 중…")
-                        .font(MintFonts.uiFont(10))
+                        .font(MintFonts.uiFont(10, .medium))
                         .foregroundStyle(theme.ink3C)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -361,6 +373,109 @@ struct AgentView: View {
             } else if let last = agent.messages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
+        }
+    }
+}
+
+/// 매끈한 글래스 셸 안에서 Agent만의 존재감을 만드는 작은 도트 구체.
+/// 생성 중에도 넓은 이동·회전은 쓰지 않고 표정과 1px 호흡만 바꿔 집필 집중을
+/// 지킨다. 색은 현재 MintTheme를 그대로 받아 라이트·다크·사용자 팔레트에 맞는다.
+private struct AgentDotOrb: View {
+    let theme: MintTheme
+    let active: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 0.34,
+                paused: !active || reduceMotion
+            )
+        ) { timeline in
+            let phase = active && !reduceMotion
+                ? Int(timeline.date.timeIntervalSinceReferenceDate * 3) % 4
+                : 0
+            ZStack {
+                Circle()
+                    .fill(theme.novelBgC.opacity(0.72))
+                    .overlay {
+                        Circle().strokeBorder(theme.pillBorderC, lineWidth: 1)
+                    }
+                Canvas { context, size in
+                    drawDots(in: &context, size: size)
+                    drawFace(in: &context, size: size, phase: phase)
+                }
+                .padding(2)
+            }
+            .frame(width: 29, height: 29)
+            .offset(y: active && !reduceMotion && phase == 1 ? -1 : 0)
+            .shadow(color: theme.novelC.opacity(0.18), radius: 5, y: 2)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(active ? "MINT Agent가 답변하는 중" : "MINT Agent")
+    }
+
+    /// 7×7 격자에서 원 안의 점만 남긴다. 좌상단은 밝고 우하단은 차분하게 해
+    /// 작은 크기에서도 공의 부피가 읽히며, 픽셀 스프라이트 같은 인상을 만든다.
+    private func drawDots(in context: inout GraphicsContext, size: CGSize) {
+        let cell = size.width / 7
+        let center = 3.0
+        for row in 0 ..< 7 {
+            for column in 0 ..< 7 {
+                let dx = Double(column) - center
+                let dy = Double(row) - center
+                guard dx * dx + dy * dy <= 10.2 else { continue }
+                let diameter = cell * 0.76
+                let rect = CGRect(
+                    x: (CGFloat(column) + 0.5) * cell - diameter / 2,
+                    y: (CGFloat(row) + 0.5) * cell - diameter / 2,
+                    width: diameter,
+                    height: diameter
+                )
+                let highlight = max(0, 1 - CGFloat(row + column) / 16)
+                context.fill(
+                    Path(ellipseIn: rect),
+                    with: .color(theme.novelC.opacity(0.64 + 0.30 * highlight))
+                )
+            }
+        }
+    }
+
+    private func drawFace(
+        in context: inout GraphicsContext, size: CGSize, phase: Int
+    ) {
+        let unit = size.width / 7
+        let eyeY = size.height * 0.43
+        for eyeX in [size.width * 0.36, size.width * 0.64] {
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: eyeX - unit * 0.30, y: eyeY - unit * 0.30,
+                        width: unit * 0.60, height: unit * 0.60
+                    )
+                ),
+                with: .color(theme.inkC.opacity(0.88))
+            )
+        }
+
+        // 말하는 동안 한 점/세 점을 오가고, 멈추면 작은 미소로 남는다.
+        let mouthPoints: [(CGFloat, CGFloat)] = if active && phase.isMultiple(of: 2) {
+            [(0.50, 0.66)]
+        } else {
+            [(0.42, 0.64), (0.50, 0.68), (0.58, 0.64)]
+        }
+        for point in mouthPoints {
+            context.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: size.width * point.0 - unit * 0.24,
+                        y: size.height * point.1 - unit * 0.24,
+                        width: unit * 0.48, height: unit * 0.48
+                    )
+                ),
+                with: .color(theme.inkC.opacity(0.82))
+            )
         }
     }
 }

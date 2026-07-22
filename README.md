@@ -80,7 +80,7 @@ Sources/
     Inference/   CompletionEngine(MLX 단일 상주 모델·예측 우선 선점)·
                  ContextAssembler(지식 → 프롬프트 조립)·PromptCache(KV 재사용)·
                  ModelDownloadManager
-    Agent/       읽기 전용 tool-calling loop·12개 Story Intelligence 조회 도구·
+    Agent/       읽기 전용 tool-calling loop·13개 Story Intelligence 조회 도구·
                  strict validate/폴백 파서·사이드바 챗/진행 스트림
     Knowledge/   백그라운드 이해 파이프라인 (아래 "서사" 절) — 씬 분할·요약
                  피라미드·사건 로그·인물 감지·대화 귀속·구간 분석·사건 그래프·
@@ -126,6 +126,11 @@ Tests/
   클릭으로 본문 위치로 이동합니다. *의도*: **사용자가 보는 것과 예측이 아는
   것이 같은 질의(같은 소스)여야 한다** — 별도의 "보여주기용" 데이터를 만들면
   둘이 어긋나는 순간 신뢰가 깨진다.
+- **화자 역할·대사 전수 목록** — 이름이 밝혀지지 않은 1인칭 서술자는 `화자`
+  역할 카드로 자동 등록됩니다(실제 이름이 `화자`라는 뜻은 아님). 큰따옴표 안의
+  대사는 줄바꿈과 화자 미상을 포함해 전부 수집하고, 화자·귀속 근거를 목록에서
+  확인합니다. 잘못된 화자는 메뉴로 고치거나 자동 판정으로 되돌릴 수 있으며
+  사용자 지정이 재분석보다 우선합니다.
 - **잠금(locked)** — 소개를 직접 고치면 자동 잠금되어 백그라운드 프로파일링이
   덮어쓰지 못합니다. *의도*: 사용자 수정 > 자동 추출의 기계적 보장.
 - **수동 이해 트리거 「지금 읽기」** — 기본 클릭은 바뀐 씬만 증분 분석, 메뉴에서
@@ -230,29 +235,30 @@ git graph의 시각 언어를 소설의 서사 구조에 옮겼습니다. 핵심
 
 ## Writing Agent
 
-사이드바의 ✨ 탭에서 엽니다. 질문을 보내면 Agent가 원고 전체를 프롬프트에 넣는
-대신 작은 조회 도구를 **최대 6단계**로 조합합니다. 어떤 정보를 확인했는지는 진행
-줄로 보이며, 같은 `KnowledgeSnapshot`을 쓰므로 바이블·서사·자동완성과 이해가
-어긋나지 않습니다. *의도*: 온디바이스에서 거대 컨텍스트는 지연으로 갚아야 하는
-빚이다 — 원고를 통째로 넣는 대신 **필요한 사실만 질의**하면 같은 모델로 더 정확한
-답이 나온다.
+사이드바의 ✨ 탭에서 엽니다. 질문을 보내면 Agent는 스토리 바이블 전체, 화자가
+표시된 대사 전수 인덱스, 짧은 작품은 최대 24,000자의 원문 전체를 먼저 받습니다.
+긴 작품은 시작·중앙·결말의 넓은 원문 창을 받고, 부족한 위치는 읽기 전용 조회
+도구를 **최대 6단계**로 조합합니다. 어떤 정보를 확인했는지는 진행 줄로 보이며,
+같은 `KnowledgeSnapshot`을 쓰므로 바이블·서사·자동완성과 이해가 어긋나지 않습니다.
+이 큰 컨텍스트는 응답형 Agent에만 적용되고 첫 고스트 지연 예산에는 들어가지 않습니다.
 
 도구를 사용한 답변에는 **「작업 과정」 토글**이 붙습니다. 펼치면 단계별 판단 요약,
 실제로 호출한 도구, 입력 인자와 결과 요약을 대화 안에서 확인할 수 있습니다. 이는
 숨은 사고 문자열을 그대로 보여주는 기능이 아니라, 검증 가능한 실행 기록을 사람이
 읽기 좋게 요약한 것입니다. 새 질문을 보내도 이전 답변의 기록은 그대로 남습니다.
 
-**조회 도구 12개** (읽기 전용, `Agent/WritingTools.swift`):
+**조회 도구 13개** (읽기 전용, `Agent/WritingTools.swift`):
 
 | 도구 | 하는 일 | 주요 인자 |
 |---|---|---|
 | `get_active_document` | 활성 문서의 제목·종류·장르·등록 인물·전체 분량·커서 위치를 확인합니다. | 없음 |
 | `get_outline` | 작품 전체의 장·절 범위와 작가가 등록한 핵심 장면을 가져옵니다. 내부 분석 청크는 노출하지 않습니다. | 없음 |
-| `read_scene` | 장·절 또는 핵심 장면 원문을 최대 3,000자씩 페이지 조회합니다. | `scene_ref`: `chapter_ref`·핵심 장면 UUID·번호·제목, `offset`, `limit` |
+| `read_scene` | 장·절 또는 핵심 장면 원문을 최대 8,000자씩 페이지 조회합니다. | `scene_ref`: `chapter_ref`·핵심 장면 UUID·번호·제목, `offset`, `limit` |
 | `search_text` | 정확한 문자열을 찾아 문서·위치·짧은 앞뒤 문맥을 반환합니다. 필요하면 다른 로컬 문서까지 검색합니다. | `query`, `all_documents`, `limit` |
 | `find_character` | 이름·별칭·UUID로 등록 인물 카드를 찾아 안정 식별자, 별칭, 메모와 자동 등록 여부를 확인합니다. | `character_ref` |
 | `get_character_state` | 특정 시점의 인물 위치·감정·관계·목표·생사 상태를 확인합니다. | `character_ref`, `before` |
 | `get_character_events` | 인물이 참여한 사건을 담화 순서로 가져옵니다. 사건 요약·중요도·씬·근거 인용을 함께 반환합니다. | `character_ref`, `before` |
+| `get_dialogues` | 큰따옴표 안의 모든 대사를 미상까지 누락 없이 원문 순서·화자·귀속 근거와 함께 반환합니다. | `before`, `limit` |
 | `get_character_dialogues` | 인물의 최근 대사, 존대 기본값, 참여 대화의 주제·어조를 확인해 말투 판단에 사용합니다. | `character_ref`, `before` |
 | `get_relation` | 두 인물 사이의 **방향 있는** 현재 관계, 관계 변화 이력과 존대 사용을 확인합니다. | `from_character`, `to_character`, `before` |
 | `get_timeline` | 사건을 원고에 나온 순서 또는 작품 안의 시간순으로 정렬하고 시간 관계 충돌도 확인합니다. | `order`: `discourse`/`chronological`, `before` |
@@ -329,6 +335,9 @@ swift run -c release MINTBench --help         # 전체 옵션
 # Peppermint 실모델 Agent 스모크: 네이티브 tool call 3종 + 전체 loop.
 swift run -c release MINTBench --model mlx-community/Qwen3.6-35B-A3B-4bit --agent-smoke
 
+# 로컬 entries.json의 「동백꽃」: Story Intelligence 전 값 + Agent 골드 7문항.
+swift run -c release MINTBench --model mlx-community/Qwen3.6-35B-A3B-4bit --dongbaek-agent-bench
+
 # 리플레이 벤치: 실제 원고를 문장 경계에서 잘라 제안 vs 실제 이어진 원문 비교.
 # 컷마다 콜드/웜 2회 실행해 KV 프리필 재사용 효과(TTFC)까지 확인합니다.
 swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre 판타지
@@ -339,6 +348,7 @@ swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre �
 - **컨텍스트 주입 전수 분석**: [CONTEXT_EXPLAIN.md](CONTEXT_EXPLAIN.md) — 예측·이해
   두 경로가 로컬 LLM에 무엇을 어떤 순서로 넣는지
 - Agent 재설계 조사·설계: [docs/agent-redesign.md](docs/agent-redesign.md)
+- 「동백꽃」 실원고 Agent·바이블 품질 기록: [docs/dongbaek-agent-quality.md](docs/dongbaek-agent-quality.md)
 
 ## 프로젝트 진행 상태
 
@@ -352,5 +362,5 @@ swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre �
 | M7 "공저자 1차" | 일관성 경고 · 수락률 로깅 · 인물 연대기 · 타임라인 점프 | ✅ 완료 |
 | M8 Narrative Intelligence/Graph | 구간·정본 사건·관점·인과·시간 부분 순서 · 대화 기록 · 컨텍스트 인스펙터 | ✅ 완료 |
 | M9 "Branch = PlotThread" | 플롯 스레드 추론 · 통합 서사 화면 (플롯 레인 그래프 · 흐름/시간순) | ✅ 코드 완료 |
-| M10 Writing Agent MVP | 읽기 전용 tool-calling loop · 조회 도구 12개 · 진행 스트림 · 시점 차단 | ✅ 코드 완료 · Peppermint 스모크 통과 |
+| M10 Writing Agent MVP | 읽기 전용 tool-calling loop · 조회 도구 13개 · 진행 스트림 · 시점 차단 | ✅ 코드 완료 · Peppermint 스모크 통과 |
 | 후속 | 플롯 군집 품질의 실코퍼스 검증 · 대작 스케일 실기기 측정 · 일반 문서 라이트 모드 | 📋 계획 (PLAN §14·§16) |

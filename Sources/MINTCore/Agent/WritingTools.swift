@@ -139,11 +139,13 @@ public struct ToolRegistry: Sendable {
     }
 
     public func label(for name: String) -> String {
-        toolsByName[name]?.description ?? name
+        let canonical = Self.aliases[name] ?? name
+        return toolsByName[canonical]?.description ?? name
     }
 
     public func execute(_ call: AgentToolCall, context: AgentContext) async -> AgentToolResult {
-        guard let tool = toolsByName[call.name] else {
+        let canonicalName = Self.aliases[call.name] ?? call.name
+        guard let tool = toolsByName[canonicalName] else {
             return .error("알 수 없는 도구예요: \(call.name)")
         }
         if tool.sideEffect {
@@ -158,6 +160,11 @@ public struct ToolRegistry: Sendable {
             return .error("\(call.name) 실행 실패: \(error.localizedDescription)")
         }
     }
+
+    /// 소형/양자화 모델이 스키마의 `find_character`를 관용적인
+    /// `get_character`로 한 번 잘못 부르는 실측 실패를 안전하게 복구한다.
+    /// 인자 스키마 검증은 정식 도구에 그대로 적용하며 별도 도구로 노출하지 않는다.
+    private static let aliases = ["get_character": "find_character"]
 
     private func validate(
         _ arguments: [String: JSONValue], for tool: AnyWritingTool
@@ -191,7 +198,7 @@ public struct ToolRegistry: Sendable {
     }
 }
 
-// MARK: - MVP 조회 도구 12종
+// MARK: - 읽기 전용 조회 도구 13종
 
 public enum DefaultWritingTools {
     public static let readOnlyMVP: ToolRegistry = .init(tools: [
@@ -202,6 +209,7 @@ public enum DefaultWritingTools {
         AnyWritingTool(findCharacter),
         AnyWritingTool(characterState),
         AnyWritingTool(characterEvents),
+        AnyWritingTool(dialogues),
         AnyWritingTool(characterDialogues),
         AnyWritingTool(relation),
         AnyWritingTool(timeline),
@@ -219,19 +227,48 @@ public enum DefaultWritingTools {
         description: "현재 문서의 제목·종류·장르·분량·서술 시점·핵심 장면 수를 확인합니다."
     ) { _, context in
         let entry = context.activeEntry
+        let cards = entry.characters ?? []
         let narration = context.knowledge?.narrationProfile
+            ?? NarrationAnalyzer.analyze(
+                body: entry.body, outline: context.outline, characters: cards
+            )
+        let narratorCard = cards.first { $0.role == .narrator }
+        let dialogueLines = context.knowledge?.dialogues
+            ?? DialogueAttribution.dialogues(in: entry.body, cards: cards)
+        let narratorStatus: JSONValue = if let name = narration.narratorName {
+            .string("확인됨: \(name)")
+        } else if narration.mode == .firstPerson, let narratorCard {
+            .string("이름 미상 — 스토리 바이블 ‘\(narratorCard.name)’ 역할 카드로 등록")
+        } else if narration.mode == .firstPerson {
+            .string("이름 미상 — 등록 인물을 화자로 추정하지 말 것")
+        } else {
+            .null
+        }
         let value: JSONValue = .object([
             "id": .string(entry.id.uuidString),
             "title": .string(entry.title),
             "kind": .string(entry.resolvedKind.label),
             "genre": entry.genre.map(JSONValue.string) ?? .null,
-            "characters": .array((entry.characters ?? []).map { .string($0.name) }),
+            "characters": .array(cards.map { .string($0.name) }),
+            "character_cards": .array(cards.map { card in
+                .object([
+                    "id": .string(card.id.uuidString),
+                    "name": .string(card.name),
+                    "role": card.role.map { .string($0.rawValue) } ?? .null
+                ])
+            }),
             "document_utf16_length": .int(context.documentEndUTF16),
             "caret_utf16": .int(context.caretUTF16),
             "key_scene_count": .int(context.visibleKeyScenes.count),
             "chapter_count": .int(context.chapters.count),
-            "narration_mode": narration.map { .string($0.mode.rawValue) } ?? .null,
-            "narrator": narration?.narratorName.map(JSONValue.string) ?? .null
+            "narration_mode": .string(narration.mode.rawValue),
+            "narrator": narration.narratorName.map(JSONValue.string) ?? .null,
+            "narrator_card_id": narratorCard.map { .string($0.id.uuidString) } ?? .null,
+            "narrator_status": narratorStatus,
+            "dialogue_count": .int(dialogueLines.count),
+            "unresolved_dialogue_count": .int(dialogueLines.count {
+                $0.attribution == .unresolved
+            })
         ])
         return AgentToolResult(
             content: AgentJSON.encode(value),
@@ -286,7 +323,7 @@ public enum DefaultWritingTools {
                 required: true
             ),
             AgentToolParameter("offset", type: .integer, description: "장면 범위 안 시작 위치(기본 0)"),
-            AgentToolParameter("limit", type: .integer, description: "읽을 UTF-16 길이(기본 1200, 최대 3000)")
+            AgentToolParameter("limit", type: .integer, description: "읽을 UTF-16 길이(기본 1200, 최대 8000)")
         ]
     ) { arguments, context in
         guard let reference = arguments["scene_ref"]?.agentString else {
@@ -311,7 +348,7 @@ public enum DefaultWritingTools {
             )
         }
         let offset = max(0, arguments["offset"]?.agentInt ?? 0)
-        let limit = min(3000, max(1, arguments["limit"]?.agentInt ?? 1200))
+        let limit = min(8000, max(1, arguments["limit"]?.agentInt ?? 1200))
         let lower = min(target.range.upperBound, target.range.lowerBound + offset)
         let upper = min(target.range.upperBound, lower + limit)
         guard upper > lower else { return .error("이 범위에서 더 읽을 원문이 없어요.") }
@@ -382,11 +419,20 @@ public enum DefaultWritingTools {
         }
         let matches = context.characterMatches(reference)
         let values = matches.map { card -> JSONValue in
-            .object([
+            let automaticDraft = card.autoRegistered == true && card.locked != true
+            return .object([
                 "id": .string(card.id.uuidString),
                 "name": .string(card.name),
+                "role": card.role.map { .string($0.rawValue) } ?? .null,
                 "aliases": .array(context.aliases(of: card).map(JSONValue.string)),
-                "note": .string(card.note),
+                // 자동 초안은 사용자에게 보이고 고칠 수 있어야 하지만 Agent의
+                // 사실 근거로 재주입하면 초기 과적합이 답변을 오염시킨다.
+                "note": automaticDraft ? .null : .string(card.note),
+                "note_status": .string(
+                    automaticDraft
+                        ? "자동 초안 — 원문보다 낮은 우선순위"
+                        : "사용자 확인"
+                ),
                 "auto_registered": .bool(card.autoRegistered == true)
             ])
         }
@@ -444,11 +490,15 @@ public enum DefaultWritingTools {
         let before = context.boundedOffset(arguments["before"]?.agentInt)
         let events = knowledge.events(before: before).filter { $0.participants.contains(character.id) }
         let values = events.map { event -> JSONValue in
-            .object([
+            let source = context.sourceLocation(forHash: event.sceneHash)
+            return .object([
                 "summary": .string(event.summary),
                 "importance": .int(event.importance),
-                "scene_ref": .string(event.sceneHash),
+                "event_key": .string(event.stableKey),
+                "chapter_ref": source.map { .string($0.reference) } ?? .null,
+                "chapter_offset": source.map { .int($0.offset) } ?? .null,
                 "heading": .string(context.heading(forHash: event.sceneHash)),
+                "evidence": .string(event.evidenceKind.rawValue),
                 "quote": event.quote.map(JSONValue.string) ?? .null
             ])
         }
@@ -510,6 +560,50 @@ public enum DefaultWritingTools {
         return AgentToolResult(
             content: AgentJSON.encode(value),
             summary: "\(character.name)의 최근 대사 \(utterances.count)개를 확인했어요."
+        )
+    }
+
+    private static let dialogues = ClosureWritingTool(
+        name: "get_dialogues",
+        description: "큰따옴표 안의 모든 대사를 원문 순서와 화자 귀속 근거까지 확인합니다. 화자 미상도 누락하지 않습니다.",
+        parameters: [
+            beforeParameter,
+            AgentToolParameter(
+                "limit", type: .integer,
+                description: "반환할 최대 대사 수. 생략하면 200, 상한도 200입니다."
+            )
+        ]
+    ) { arguments, context in
+        let before = context.boundedOffset(arguments["before"]?.agentInt)
+        let limit = min(200, max(1, arguments["limit"]?.agentInt ?? 200))
+        let cards = context.activeEntry.characters ?? []
+        let all = context.knowledge?.dialogues
+            ?? DialogueAttribution.dialogues(
+                in: context.activeEntry.body, cards: cards
+            )
+        let selected = Array(all.lazy.filter { $0.utf16Start < before }.prefix(limit))
+        let values: [JSONValue] = selected.map { dialogue in
+            .object([
+                "dialogue_key": .string(dialogue.stableKey),
+                "speaker_id": dialogue.speakerID.map {
+                    .string($0.uuidString)
+                } ?? .null,
+                "speaker": .string(dialogue.speakerLabel),
+                "attribution": .string(dialogue.attribution.rawValue),
+                "text": .string(dialogue.text),
+                "position": .int(dialogue.utf16Start),
+                "politeness": dialogue.politeness.map {
+                    .string($0.rawValue)
+                } ?? .null
+            ])
+        }
+        return AgentToolResult(
+            content: AgentJSON.encode(.object([
+                "total_before": .int(all.count { $0.utf16Start < before }),
+                "returned": .int(selected.count),
+                "dialogues": .array(values)
+            ])),
+            summary: "전체 대사 중 \(selected.count)개와 화자를 확인했어요."
         )
     }
 
@@ -583,20 +677,36 @@ public enum DefaultWritingTools {
                 guard let canonical = knowledge.canonicalEvent(for: key),
                       canonical.perspectives.contains(where: { visibleKeys.contains($0.eventKey) })
                 else { return nil }
+                let source = context.sourceLocation(forHash: canonical.sceneHash)
                 return .object([
                     "event_key": .string(canonical.canonicalKey),
                     "summary": .string(canonical.summary),
-                    "scene_ref": .string(canonical.sceneHash),
-                    "heading": .string(context.heading(forHash: canonical.sceneHash))
+                    "importance": .int(canonical.importance),
+                    "participants": .array(canonical.participants.compactMap {
+                        context.characterName(for: $0).map(JSONValue.string)
+                    }),
+                    "chapter_ref": source.map { .string($0.reference) } ?? .null,
+                    "chapter_offset": source.map { .int($0.offset) } ?? .null,
+                    "heading": .string(context.heading(forHash: canonical.sceneHash)),
+                    "evidence": .string(canonical.quote == nil ? "추론" : "직접"),
+                    "quote": canonical.quote.map(JSONValue.string) ?? .null
                 ])
             }
         } else {
             values = visibleEvents.map { event in
-                .object([
+                let source = context.sourceLocation(forHash: event.sceneHash)
+                return .object([
                     "event_key": .string(event.stableKey),
                     "summary": .string(event.summary),
-                    "scene_ref": .string(event.sceneHash),
-                    "heading": .string(context.heading(forHash: event.sceneHash))
+                    "importance": .int(event.importance),
+                    "participants": .array(event.participants.compactMap {
+                        context.characterName(for: $0).map(JSONValue.string)
+                    }),
+                    "chapter_ref": source.map { .string($0.reference) } ?? .null,
+                    "chapter_offset": source.map { .int($0.offset) } ?? .null,
+                    "heading": .string(context.heading(forHash: event.sceneHash)),
+                    "evidence": .string(event.evidenceKind.rawValue),
+                    "quote": event.quote.map(JSONValue.string) ?? .null
                 ])
             }
         }
@@ -699,6 +809,12 @@ private extension AgentContext {
         var range: Range<Int>
     }
 
+    struct AgentSourceLocation {
+        var reference: String
+        /// `read_scene`의 offset과 같은 장 시작 기준 UTF-16 위치.
+        var offset: Int
+    }
+
     /// 내부 분석 청크를 그대로 노출하지 않고, 같은 헤딩 경로의 연속 범위를
     /// Agent가 읽을 수 있는 장·절 단위로 접는다. KeyScene이 0개여도 원문 전체에
     /// 도달할 수 있는 결정적 폴백이다.
@@ -731,6 +847,26 @@ private extension AgentContext {
         }
         let matches = chapters.filter { $0.title.localizedCaseInsensitiveContains(trimmed) }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// 내부 분석 청크 해시는 Agent가 읽을 수 있는 `scene_ref`가 아니다. 사건이
+    /// 속한 청크를 공개 장·절 참조 + 장 안 offset으로 바꿔, 타임라인 결과를
+    /// 그대로 `read_scene`에 연결한다 (PLAN §14 M11 노출 경계 유지).
+    func sourceLocation(forHash hash: String) -> AgentSourceLocation? {
+        guard let scene = outline.scenes.first(where: { $0.contentHash == hash }),
+              let chapter = chapters.first(where: {
+                  $0.range.lowerBound <= scene.utf16Range.lowerBound
+                      && scene.utf16Range.lowerBound < $0.range.upperBound
+              })
+        else { return nil }
+        return AgentSourceLocation(
+            reference: chapter.reference,
+            offset: scene.utf16Range.lowerBound - chapter.range.lowerBound
+        )
+    }
+
+    func characterName(for id: UUID) -> String? {
+        (activeEntry.characters ?? []).first(where: { $0.id == id })?.name
     }
 
     func text(in range: Range<Int>) -> String {

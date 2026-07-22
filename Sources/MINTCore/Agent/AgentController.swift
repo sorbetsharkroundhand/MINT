@@ -79,6 +79,8 @@ public final class AgentController: ObservableObject {
             )
         }
         var parameters = parametersProvider?() ?? CompletionSettings.shared.parameters
+        // 320은 「동백꽃」 실측에서 도구 호출과 시간 구조 답변을 중간에 잘랐다.
+        // 결정적 근거 팩으로 왕복 수를 줄이고, 한 턴의 형식 완결성은 512로 지킨다.
         parameters.maxTokens = 512
         parameters.temperature = min(0.4, max(0.1, parameters.temperature))
         parameters.stopAtUtteranceEnd = false

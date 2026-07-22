@@ -10,7 +10,8 @@ import UniformTypeIdentifiers
 public struct MintCommands: Commands {
     let store: EntryStore
     @AppStorage("mint.appearance") private var appearance = ""
-    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
+    @AppStorage("mint.sidebarVisible") private var legacySidebarVisible = true
+    @AppStorage("mint.sidebarMode") private var sidebarModeRaw = ""
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     public init(store: EntryStore) {
@@ -31,7 +32,7 @@ public struct MintCommands: Commands {
         // 파일 저장 영역 옆에 이름 바꾸기 · 내보내기 · 인쇄.
         CommandGroup(after: .saveItem) {
             Button("저널 이름 바꾸기") {
-                sidebarVisible = true
+                setSidebarMode(.full)
                 store.requestRename()
             }
 
@@ -99,15 +100,15 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("g", modifiers: [.command, .shift])
 
             Button("저널 검색") {
-                sidebarVisible = true
+                setSidebarMode(.full)
                 store.requestSearchFocus()
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
             Divider()
 
-            Button(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기") {
-                sidebarVisible.toggle()
+            Button(sidebarCommandTitle) {
+                setSidebarMode(sidebarMode.next)
             }
             .keyboardShortcut("s", modifiers: [.command, .control])
 
@@ -138,6 +139,24 @@ public struct MintCommands: Commands {
 
     private func send(_ selector: Selector) {
         NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
+    private var sidebarMode: SidebarPresentation {
+        SidebarPresentation(rawValue: sidebarModeRaw)
+            ?? (legacySidebarVisible ? .full : .hidden)
+    }
+
+    private var sidebarCommandTitle: String {
+        switch sidebarMode {
+        case .full: "활동 레일만 남기기"
+        case .rail: "사이드바 숨기기"
+        case .hidden: "사이드바 전체 보이기"
+        }
+    }
+
+    private func setSidebarMode(_ mode: SidebarPresentation) {
+        sidebarModeRaw = mode.rawValue
+        legacySidebarVisible = mode != .hidden
     }
 
     /// 현재 저널을 순수 마크다운(.md)으로 저장한다 — 본문 자체가 마크다운이라 그대로 쓴다.

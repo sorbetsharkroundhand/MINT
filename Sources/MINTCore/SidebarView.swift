@@ -53,10 +53,10 @@ private struct SidebarSectionHint: View {
 
 /// 좌측 사이드바 (에디터 v3 — 디자인 이식, 파일시스템 v1 · 섹션화 M6-8).
 ///
-/// 상단: 신호등 옆을 채우는 52px 헤더(우측 날짜 툴바와 같은 높이) —
-/// 새 폴더(폴더＋) + 새 소설(책) + 새 저널(＋).
-/// 그 아래 섹션 탭(문서·바이블·타임라인) — 팝오버였던 바이블·타임라인을
-/// 상시 패널로 승격한다 (열람이 잦아졌다 — 팝오버는 열 때마다 닫힌다).
+/// 상단: 사이드바 전체 폭을 쓰는 52px 헤더 — 신호등 안전영역 뒤에 현재 섹션,
+/// 문서 섹션일 때만 새 폴더·소설·저널 액션.
+/// 그 아래 세로 활동 레일로 문서·바이블·서사·컨텍스트·Agent를 전환한다.
+/// 팝오버였던 바이블·서사는 상시 패널로 승격한다.
 /// 목록(문서 섹션): 폴더 트리(펼침/접힘) + 저널 행.
 struct SidebarView: View {
     @ObservedObject var store: EntryStore
@@ -67,9 +67,13 @@ struct SidebarView: View {
     var indexer: BackgroundIndexer?
     /// nil이면 Agent 탭을 숨긴다(프리뷰·테스트의 기존 초기화 호환).
     var agent: AgentController?
+    /// 활동 레일만 남긴 집중 상태. 아이콘을 누르면 해당 패널을 전체로 연다.
+    var railOnly = false
 
     /// 현재 섹션 — 툴바의 소설 배지도 이 키를 써서 바이블 섹션을 연다.
     @AppStorage("mint.sidebarSection") private var sectionRaw = SidebarSection.files.rawValue
+    @AppStorage("mint.sidebarVisible") private var legacySidebarVisible = true
+    @AppStorage("mint.sidebarMode") private var sidebarModeRaw = ""
     private var section: SidebarSection {
         SidebarSection(rawValue: sectionRaw) ?? .files
     }
@@ -95,19 +99,34 @@ struct SidebarView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-            theme.sepC.frame(height: 1)
-            sectionStrip
-            theme.sepC.frame(height: 1)
-            switch section {
-            case .files: filesSection
-            case .bible: bibleSection
-            case .narrative: narrativeSection
-            case .context: contextSection
-            case .agent: agentSection
+        Group {
+            if railOnly {
+                VStack(spacing: 0) {
+                    Color.clear.frame(height: MintChrome.toolbarHeight)
+                    theme.sepC.frame(height: 1)
+                    activityRail
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 0) {
+                    // 신호등은 레일과 패널 어느 한쪽의 소유가 아니다. 상단 전체를
+                    // 쓰는 전용 행에 두어 패널 제목과 겹치지 않게 한다.
+                    header
+                    theme.sepC.frame(height: 1)
+                    HStack(spacing: 0) {
+                        activityRail
+                            .frame(width: MintChrome.activityRailWidth)
+                        theme.sepC.frame(width: 1)
+                        sectionContent
+                            .frame(
+                                maxWidth: .infinity, maxHeight: .infinity,
+                                alignment: .topLeading
+                            )
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
             }
         }
+        .background(.ultraThinMaterial)
         .background(theme.sidebarTintC)
         .overlay(alignment: .trailing) { theme.sepC.frame(width: 1) }
         .onChange(of: renameFieldFocused) { _, focused in
@@ -153,9 +172,22 @@ struct SidebarView: View {
         }
     }
 
-    /// 섹션 탭 — VSCode 활동 바의 수평 축소판. 아이콘 셋: 문서·바이블·타임라인.
-    private var sectionStrip: some View {
-        HStack(spacing: 4) {
+    /// 활동 레일을 뺀 실제 가용 폭을 각 패널에 명시적으로 제안한다. 콘텐츠의
+    /// 이상적 크기가 사이드바 폭을 다시 밀어내는 순환을 끊는 레이아웃 경계다.
+    @ViewBuilder private var sectionContent: some View {
+        switch section {
+        case .files: filesSection
+        case .bible: bibleSection
+        case .narrative: narrativeSection
+        case .context: contextSection
+        case .agent: agentSection
+        }
+    }
+
+    /// IDE 활동 레일. 문서 탐색과 작품 이해 도구를 같은 세로 축에 두되,
+    /// 선택된 도구만 민트 광선으로 잇는다 — 패널마다 다른 탭 문법을 만들지 않는다.
+    private var activityRail: some View {
+        VStack(spacing: 7) {
             sectionTab(.files, icon: "doc.text", help: "문서")
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
             sectionTab(
@@ -168,8 +200,9 @@ struct SidebarView: View {
             }
             Spacer()
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
+        .background(theme.toolbarC)
     }
 
     private func sectionTab(
@@ -177,15 +210,29 @@ struct SidebarView: View {
     ) -> some View {
         Button {
             sectionRaw = target.rawValue
+            if railOnly {
+                sidebarModeRaw = SidebarPresentation.full.rawValue
+                legacySidebarVisible = true
+            }
         } label: {
             Image(systemName: icon)
-                .font(.system(size: 11.5, weight: .medium))
+                .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(section == target ? theme.novelC : theme.ink3C)
-                .frame(width: 30, height: 24)
+                .frame(width: 34, height: 32)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(section == target ? theme.novelBgC : .clear)
+                    RoundedRectangle(
+                        cornerRadius: MintChrome.controlRadius, style: .continuous
+                    )
+                    .fill(section == target ? theme.novelBgC : .clear)
                 )
+                .overlay(alignment: .leading) {
+                    if section == target {
+                        Capsule()
+                            .fill(theme.novelC)
+                            .frame(width: 2, height: 17)
+                            .offset(x: -6)
+                    }
+                }
                 .overlay(alignment: .topTrailing) {
                     // 일관성 경고(M7) 점 — 비침습 배지 (CLAUDE.md §3). 관찰
                     // 서브뷰라 패스가 끝나는 즉시 나타난다.
@@ -197,6 +244,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// 바이블 섹션 — 팝오버와 같은 뷰를 임베드 모드로 (M6-8 패널 승격).
@@ -238,13 +286,15 @@ struct SidebarView: View {
 
     /// AI 컨텍스트 섹션 (v4) — 최근 예측이 실제로 참고한 정보의 열람.
     private var contextSection: some View {
-        ContextInspectorView(completion: completion, store: store, theme: theme)
+        ContextInspectorView(
+            completion: completion, store: store, theme: theme, embedded: true
+        )
     }
 
     /// Agent는 별도 진입점이지만 자동완성과 같은 KnowledgeSnapshot·모델을 쓴다.
     @ViewBuilder private var agentSection: some View {
         if let agent {
-            AgentView(agent: agent, theme: theme)
+            AgentView(agent: agent, theme: theme, embedded: true)
         } else {
             SidebarSectionHint(theme: theme, text: "Writing Agent가 준비되지 않았어요.")
         }
@@ -355,33 +405,50 @@ struct SidebarView: View {
     // MARK: - 헤더
 
     private var header: some View {
-        // 로고 없이 액션만 — 앱 이름은 메뉴바가 이미 말한다. 왼쪽 빈 자리를
-        // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
+        // 레일이 "어디"를 고르고 헤더가 "무엇"인지 말한다. 문서 생성 액션은
+        // 문서 패널에서만 보여 도구의 문맥을 흐리지 않는다.
         HStack(spacing: 2) {
+            Text(sectionTitle)
+                .font(MintFonts.uiFont(12, .semibold))
+                .foregroundStyle(theme.ink2C)
+                .lineLimit(1)
             Spacer(minLength: 0)
-            HeaderIconButton(theme: theme, help: "새 폴더") {
-                store.newFolder()
-            } label: {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 13.5, weight: .medium))
-            }
-            HeaderIconButton(theme: theme, help: "새 소설") {
-                store.newEntry(kind: .novel)
-            } label: {
-                Image(systemName: "book.closed")
-                    .font(.system(size: 13, weight: .medium))
-            }
-            HeaderIconButton(theme: theme, help: "새 저널") {
-                store.newEntry()
-            } label: {
-                Text("＋").font(.system(size: 19))
+            if section == .files {
+                HeaderIconButton(theme: theme, help: "새 폴더") {
+                    store.newFolder()
+                } label: {
+                    Image(systemName: "folder.badge.plus")
+                        .font(.system(size: 13.5, weight: .medium))
+                }
+                HeaderIconButton(theme: theme, help: "새 소설") {
+                    store.newEntry(kind: .novel)
+                } label: {
+                    Image(systemName: "book.closed")
+                        .font(.system(size: 13, weight: .medium))
+                }
+                HeaderIconButton(theme: theme, help: "새 저널") {
+                    store.newEntry()
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                }
             }
         }
-        // 신호등 줄(타이틀바 안전영역) 바로 아래 — 우측 툴바(52px)와 같은
-        // 높이라 날짜 줄과 헤더 줄이 한 줄로 이어진다.
-        .padding(.leading, 18)
+        // 세 신호등의 오른쪽에서 제목이 시작된다. 버튼의 표준 순서·간격은
+        // 그대로 두고 전용 안전영역을 배정해 macOS 근육 기억을 지킨다.
+        .padding(.leading, MintChrome.windowControlsSafeWidth)
         .padding(.trailing, 12)
-        .frame(height: 52)
+        .frame(height: MintChrome.toolbarHeight)
+    }
+
+    private var sectionTitle: String {
+        switch section {
+        case .files: "문서"
+        case .bible: "스토리 바이블"
+        case .narrative: "서사"
+        case .context: "AI 컨텍스트"
+        case .agent: "Writing Agent"
+        }
     }
 
     // MARK: - 전역 검색
@@ -411,13 +478,7 @@ struct SidebarView: View {
         }
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.chipC)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(theme.chipBorderC)
-        )
+        .mintGlassSurface(theme: theme)
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
     }
@@ -880,12 +941,12 @@ private struct DeleteButton: View {
         Button(action: action) {
             Text("✕")
                 .font(.system(size: 12))
-                .foregroundStyle(hovered ? Color(nsColor: NSColor(hex: 0xFF453A)) : theme.ink3C)
+                .foregroundStyle(hovered ? theme.dangerC : theme.ink3C)
                 .frame(width: 20, height: 20)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(hovered
-                            ? Color(nsColor: NSColor(hex: 0xFF453A, alpha: 0.14)) : .clear)
+                            ? theme.dangerC.opacity(0.14) : .clear)
                 )
                 .contentShape(Rectangle())
         }

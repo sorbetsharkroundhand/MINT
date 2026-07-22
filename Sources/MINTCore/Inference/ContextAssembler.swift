@@ -602,7 +602,8 @@ public enum ContextAssembler {
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .prefix(maxCardNoteCharacters)
             )
-            var line = note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)"
+            let cardKind = card.role == .narrator ? "화자 역할" : "등장인물"
+            var line = note.isEmpty ? "\(cardKind) \(name)" : "\(cardKind) \(name): \(note)"
             let cardKey = "card|\(card.id.uuidString)"
             var cardItems: [ContextReport.Item] = [
                 ContextReport.Item(
@@ -697,8 +698,12 @@ public enum ContextAssembler {
         }
         guard valid.count > maxCards else { return valid }
 
-        // Pin된 카드는 관련성(최근 창 언급)과 무관하게 항상 실린다 (§31).
-        var picked = valid.filter { controls.pinned("card|\($0.id.uuidString)") }
+        // 화자 역할과 Pin 카드는 최근 창의 표면 이름 언급과 무관하게 항상 실린다.
+        // 이름 미상 화자는 본문에 `화자`라고 쓰이지 않으므로 일반 랭킹만 쓰면
+        // 자동 등록해 놓고도 예측 프롬프트에서 매번 탈락한다 (PLAN §11).
+        var picked = valid.filter {
+            $0.role == .narrator || controls.pinned("card|\($0.id.uuidString)")
+        }
         for card in valid where !picked.contains(where: { $0.id == card.id }) {
             if window.contains(card.name)
                 || aliasList(card).contains(where: { window.contains($0) }) {

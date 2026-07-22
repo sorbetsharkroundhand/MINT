@@ -29,7 +29,10 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// branch 단위가 인물이 아니라 플롯이 됐다 (PLAN §6.6).
     /// v7: 설정 충돌·복선 기능을 제거했다 — `insights`에서 사실·복선 필드,
     /// 사이드카의 `factConflicts`가 빠졌다. v6 파일은 폐기·재구축.
-    public static let currentSchemaVersion = 7
+    /// v8: 작품 전역 서술자 역할을 청크 분석에 전달하고, 명시적 장기 회상을
+    /// 청크 경계 너머로 결정적 타일링하며, 중복 사건을 추출 경계에서 제거한다.
+    /// 저장 모양은 같아도 요약·사건·구간의 의미가 달라 v7 캐시는 폐기·재구축한다.
+    public static let currentSchemaVersion = 8
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -77,6 +80,16 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         /// ≤300자 (PLAN §6.1).
         public var summary: String
         public var updatedAt: Date
+
+        public init(
+            headingPath: [String], childrenHash: String, summary: String,
+            updatedAt: Date = .now
+        ) {
+            self.headingPath = headingPath
+            self.childrenHash = childrenHash
+            self.summary = summary
+            self.updatedAt = updatedAt
+        }
     }
 
     /// 작품 요약 — 앵커는 장(또는 씬 전체) 해시들의 결합 해시. ≤500자.
@@ -84,6 +97,14 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         public var childrenHash: String
         public var summary: String
         public var updatedAt: Date
+
+        public init(
+            childrenHash: String, summary: String, updatedAt: Date = .now
+        ) {
+            self.childrenHash = childrenHash
+            self.summary = summary
+            self.updatedAt = updatedAt
+        }
     }
 
     public var schemaVersion: Int
@@ -220,6 +241,8 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// 인물 id → `events` 인덱스 목록 — PLAN §6.3의 역색인.
     /// §11 엔티티 앵커 검색의 기반이자 `lastAppearance` 질의의 실체다.
     public let eventIndexByCharacter: [UUID: [Int]]
+    /// 큰따옴표 안의 모든 대사. 화자 미상도 버리지 않고 위치·근거와 함께 남긴다.
+    public let dialogues: [DialogueLine]
     /// 귀속된 발화들 (담화 순서, PLAN §6.4·§7 대화 귀속) — 결정적 추출이라
     /// 사이드카에 저장하지 않고 패스마다 재계산해 스냅샷에만 싣는다.
     public let utterances: [Utterance]
@@ -300,6 +323,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         chapterSummariesByPath: [String: String] = [:],
         workSummary: String? = nil,
         events: [String: [StoryEvent]] = [:],
+        dialogues: [DialogueLine] = [],
         utterances: [Utterance] = [],
         sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
         insights: [String: SceneInsights] = [:],
@@ -321,7 +345,31 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.summariesByHash = summariesByHash
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
-        self.utterances = utterances
+        if dialogues.isEmpty {
+            self.dialogues = []
+            self.utterances = utterances
+        } else {
+            let names = Dictionary(uniqueKeysWithValues: characters.map { ($0.id, $0.name) })
+            let resolvedDialogues = dialogues.map { dialogue -> DialogueLine in
+                guard let value = overrides.value(
+                    .dialogueSpeaker, key: dialogue.stableKey
+                ) else { return dialogue }
+                var dialogue = dialogue
+                if value == "unknown" {
+                    dialogue.speakerID = nil
+                    dialogue.speakerLabel = "미상"
+                } else if let id = UUID(uuidString: value), let name = names[id] {
+                    dialogue.speakerID = id
+                    dialogue.speakerLabel = name
+                } else {
+                    return dialogue
+                }
+                dialogue.attribution = .user
+                return dialogue
+            }
+            self.dialogues = resolvedDialogues
+            self.utterances = DialogueAttribution.utterances(from: resolvedDialogues)
+        }
         self.overrides = overrides
         self.staleOverrides = staleOverrides
         self.characters = characters
@@ -351,6 +399,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         // 갱신해도 오버라이드는 entries.json에 있어 항상 다시 이긴다 (§1-5).
         var ends: [String: Int] = [:]
         var ordered: [StoryEvent] = []
+        var seenSceneEvents: Set<String> = []
         for scene in outline.scenes {
             ends[scene.contentHash] = scene.utf16Range.upperBound
             // 같은 씬 안에서는 중요도 높은 사건이 먼저 — 예산 삭감이 뒤에서
@@ -369,7 +418,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
                     return event
                 }
                 .sorted { $0.importance > $1.importance }
-            ordered.append(contentsOf: sceneEvents)
+            ordered.append(contentsOf: sceneEvents.filter { event in
+                seenSceneEvents.insert("\(event.sceneHash)|\(event.stableKey)").inserted
+            })
         }
         self.events = ordered
         keySceneCandidates = KeySceneCandidateDetector.detect(
@@ -602,6 +653,17 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
                 branchChrono[index] = branch.chrono
             }
         }
+        // 씬 중간에서 시작한 장기 회상은 첫 씬 전체를 과거로 만들 수 없지만,
+        // 다음 청크부터 대부분을 덮는 구간은 씬 단위 사건의 확실한 과거 제약이다.
+        // 청크 경계가 회상 흐름을 현재로 리셋하던 「동백꽃」 회귀를 막는다.
+        for (index, scene) in outline.scenes.enumerated() {
+            let dominant = (segmentsApplied[scene.contentHash] ?? []).first { segment in
+                segment.chrono == .before
+                    && segment.localStart <= 32
+                    && segment.localEnd - segment.localStart >= scene.utf16Range.count / 2
+            }
+            if dominant != nil { branchChrono[index] = .before }
+        }
         let sceneIndexByHash = Dictionary(
             uniqueKeysWithValues: outline.scenes.enumerated().map { ($0.element.contentHash, $0.offset) }
         )
@@ -609,10 +671,12 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             guard let sceneIndex = sceneIndexByHash[canonical.sceneHash],
                   branchChrono[sceneIndex] == .before
             else { continue }
-            // 이 회상 사건 → 브랜치 다음의 첫 현재 사건.
+            // 이 회상 사건 → 담화에서 가장 이른 현재 사건. 회상은 삽입 지점 앞의
+            // 현재도 시간상 앞서므로 '다음 현재'만 잇으면 개시 장면이 시간순 맨
+            // 앞에 남는 오류가 생긴다.
             if let anchor = canonicals.first(where: { other in
                 guard let otherIndex = sceneIndexByHash[other.sceneHash] else { return false }
-                return otherIndex > sceneIndex && branchChrono[otherIndex] == nil
+                return branchChrono[otherIndex] == nil
             }) {
                 let edge = ChronoEdge(
                     aKey: canonical.canonicalKey, bKey: anchor.canonicalKey, relation: .before
@@ -878,6 +942,14 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             case .after: future.append(contentsOf: branch.sceneRange)
             case .simultaneous, .approximate, .unknown: break
             }
+        }
+        for (index, scene) in outline.scenes.enumerated() where !past.contains(index) {
+            let dominant = (segmentsByScene[scene.contentHash] ?? []).first { segment in
+                segment.chrono == .before
+                    && segment.localStart <= 32
+                    && segment.localEnd - segment.localStart >= scene.utf16Range.count / 2
+            }
+            if dominant != nil { past.append(index) }
         }
         let moved = Set(past + future)
         let middle = outline.scenes.indices.filter { !moved.contains($0) }

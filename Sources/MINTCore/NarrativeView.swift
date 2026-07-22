@@ -55,6 +55,11 @@ struct NarrativeView: View {
     @State private var reviewExpanded = false
     /// 펼쳐진 사소 사건 묶음.
     @State private var expandedMinors: Set<String> = []
+    /// 사건 선택 시 그래프 아래에 고정되는 인스펙터 높이. 사용자의 마지막
+    /// 작업 밀도를 보존하되 그래프와 상세 어느 쪽도 사라지지 않는 범위로 제한.
+    @AppStorage("mint.narrativeInspectorHeight") private var inspectorHeight =
+        Double(MintChrome.inspectorDefaultHeight)
+    @State private var inspectorDragStart: Double?
 
     /// 제목 수정 중인 씬 해시 (인라인 편집).
     @State private var editingSceneHash: String?
@@ -84,7 +89,7 @@ struct NarrativeView: View {
                 .frame(maxHeight: embedded ? .infinity : 380)
                 if let key = selectedEventKey,
                    let event = snapshot.canonicalEvents.first(where: { $0.canonicalKey == key }) {
-                    Divider()
+                    inspectorDivider
                     NarrativeEventDetail(
                         event: event, snapshot: snapshot, theme: theme,
                         characterNames: characterNames,
@@ -116,6 +121,9 @@ struct NarrativeView: View {
                         },
                         onClose: { selectedEventKey = nil }
                     )
+                    .frame(height: CGFloat(inspectorHeight))
+                    .background(.ultraThinMaterial)
+                    .background(theme.toolbarC)
                 }
             } else {
                 placeholder
@@ -175,6 +183,36 @@ struct NarrativeView: View {
         }
     }
 
+    /// 그래프 스크롤 위치를 유지한 채 상세 공간만 조절한다. 위로 끌면 상세가
+    /// 커지는 IDE 인스펙터 문법이며, 원고나 지식 상태에는 아무 영향이 없다.
+    private var inspectorDivider: some View {
+        ZStack {
+            theme.sepC.frame(height: 1)
+            Capsule()
+                .fill(theme.ink3C.opacity(0.55))
+                .frame(width: 30, height: 3)
+        }
+        .frame(height: 9)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    if inspectorDragStart == nil { inspectorDragStart = inspectorHeight }
+                    let start = inspectorDragStart ?? inspectorHeight
+                    inspectorHeight = min(
+                        Double(MintChrome.inspectorMaxHeight),
+                        max(
+                            Double(MintChrome.inspectorMinHeight),
+                            start - Double(value.translation.height)
+                        )
+                    )
+                }
+                .onEnded { _ in inspectorDragStart = nil }
+        )
+        .help("드래그해 사건 상세 높이 조절")
+        .accessibilityLabel("사건 상세 높이 조절")
+    }
+
     /// 델타·메뉴용 인물 id → 이름.
     private var characterNames: [UUID: String] {
         Dictionary(
@@ -194,19 +232,20 @@ struct NarrativeView: View {
 
     // MARK: - 헤더
 
-    /// 헤더 두 줄 — 1행: 제목·수치 + 액션(지금 읽기), 2행: 보기 컨트롤
-    /// (인물 필터·Projection). 좁은 사이드바에서 컨트롤 넷이 한 줄에 몰려
-    /// 압축·잘림이 생기던 것을 의미 단위로 나눈다 — 액션과 보기 방식은 다른
-    /// 종류의 컨트롤이다. 헤더 폭은 그래프 좌표 계산과 무관하다 (독립 레이아웃).
+    /// 헤더 두 줄 — 1행: 수치 + 액션(지금 읽기), 2행: 보기 컨트롤.
+    /// 임베드 모드의 섹션 제목은 바깥 셸이 이미 말하므로 반복하지 않는다.
+    /// 보기 컨트롤은 폭이 부족하면 필터/Projection 두 줄로 결정적으로 접힌다.
     private var header: some View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(.system(size: 11))
-                    .foregroundStyle(theme.novelC)
-                Text("서사")
-                    .font(MintFonts.uiFont(13, .semibold))
-                    .foregroundStyle(theme.inkC)
+                if !embedded {
+                    Image(systemName: "arrow.triangle.branch")
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.novelC)
+                    Text("서사")
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                }
                 if let snapshot = liveSnapshot {
                     Text("사건 \(snapshot.canonicalEvents.count) · 플롯 \(snapshot.plotThreads.count)")
                         .font(MintFonts.monoUI(10))
@@ -217,20 +256,36 @@ struct NarrativeView: View {
                 ManualIndexButton(indexer: indexer, theme: theme)
             }
             if liveSnapshot != nil {
-                HStack(spacing: 10) {
-                    narrationModeMenu
-                    characterFilterMenu
-                    Picker("", selection: $projection) {
-                        ForEach(Projection.allCases, id: \.self) { Text($0.rawValue) }
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 10) {
+                        narrationModeMenu
+                        characterFilterMenu
+                        projectionPicker
+                            .frame(width: 110)
+                        Spacer(minLength: 0)
                     }
-                    .pickerStyle(.segmented)
-                    .controlSize(.mini)
-                    .frame(width: 110)
-                    .help("흐름 = 본문에 등장하는 순서 · 시간순 = 작중 실제 발생 순서 (확실한 시간 간선만 반영)")
-                    Spacer()
+                    VStack(alignment: .leading, spacing: 7) {
+                        HStack(spacing: 10) {
+                            narrationModeMenu
+                            characterFilterMenu
+                            Spacer(minLength: 0)
+                        }
+                        projectionPicker
+                            .frame(maxWidth: .infinity)
+                    }
                 }
             }
         }
+    }
+
+    private var projectionPicker: some View {
+        Picker("", selection: $projection) {
+            ForEach(Projection.allCases, id: \.self) { Text($0.rawValue) }
+        }
+        .labelsHidden()
+        .pickerStyle(.segmented)
+        .controlSize(.mini)
+        .help("흐름 = 본문에 등장하는 순서 · 시간순 = 작중 실제 발생 순서 (확실한 시간 간선만 반영)")
     }
 
     /// 서사 화면에서도 전역 시점을 보고 고친다. 같은 전역 오버라이드를 써서
@@ -1862,11 +1917,16 @@ private struct NarrativeEventDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
-                    Text(event.summary)
-                        .font(MintFonts.uiFont(11.5, .semibold))
-                        .foregroundStyle(theme.inkC)
-                        .fixedSize(horizontal: false, vertical: true)
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("사건 상세")
+                            .font(MintFonts.uiFont(9, .semibold))
+                            .foregroundStyle(theme.ink3C)
+                        Text(event.summary)
+                            .font(MintFonts.uiFont(11.5, .semibold))
+                            .foregroundStyle(theme.inkC)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                     Menu {
                         ForEach(1 ... 5, id: \.self) { level in
                             Button {
@@ -1948,8 +2008,8 @@ private struct NarrativeEventDetail: View {
                     .buttonStyle(.plain)
                 }
             }
+            .padding(.vertical, 8)
         }
-        .frame(maxHeight: 200)
     }
 
     /// 플롯 줄 — 속한 스레드 + 역할, 멤버십 편집 메뉴.

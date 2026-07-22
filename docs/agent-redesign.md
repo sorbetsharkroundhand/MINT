@@ -17,7 +17,7 @@
 ③ 이 문서를 저장소 설계 자산으로 유지(PLAN §14 M10 포인터).
 
 **구현 상태(2026-07-20)**: M-A0 + M-A1 읽기 전용 MVP 완료. 네이티브 tool call,
-lenient/strict 폴백, 6-step loop, 12개 조회 도구, 시점 차단, 사이드바 진행 스트림,
+lenient/strict 폴백, 6-step loop, 13개 조회 도구, 시점 차단, 사이드바 진행 스트림,
 단일 모델 선점까지 구현했다. Peppermint(Qwen3.6-35B-A3B 4bit) 실모델 스모크에서
 단일 도구 선택과 네이티브 호출이 각각 3/3, 2-step 전체 loop가 14.0s로 통과했다.
 10개 이상 라벨 코퍼스의 모델별 형식 성공률·1/3/6-step 지연 비교는 후속이다.
@@ -667,4 +667,4 @@ Manuscript(entries.json body)
 - 실제 코드 인용의 파일·행이 착수 시점과 일치하는지 재확인(이 문서는 조사 시점 스냅샷).
 - ✅ `MINTBench --agent-smoke`로 Peppermint 도구 선택 3/3·네이티브 호출 3/3,
   2-step loop 14.0s 측정(2026-07-20). 10개 이상 라벨 코퍼스 확장은 계속 필요.
-- MVP 게이트: 12개 조회 tool로 §Example Traces 1–8·11–12를 E2E 재현.
+- MVP 게이트: 13개 조회 tool로 §Example Traces 1–8·11–12와 대사 전수 조회를 E2E 재현.

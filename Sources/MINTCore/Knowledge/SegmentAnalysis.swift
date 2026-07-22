@@ -27,6 +27,8 @@ public enum TemporalShiftDetector {
         "생각이 났", "되짚었", "돌이켜",
         // 시점 이동 부사구
         "그날", "그때", "그 시절", "어린 시절", "학창 시절", "예전에", "오래전",
+        "하루 전", "이틀 전", "사흘 전", "나흘 전", "닷새 전", "엿새 전",
+        "이레 전", "여드레 전", "아흐레 전", "며칠 전", "전날", "담날", "이튿날",
         "옛날", "년 전", "달 전", "주 전", "어렸을 때", "젊었을 때", "신혼",
         // 대과거 (과거 속 과거의 문법 신호 — 이것만으로는 부족하지만 후보는 된다)
         "았었", "었었",
@@ -40,6 +42,66 @@ public enum TemporalShiftDetector {
     /// 씬 원문에 시간 이동 후보가 있는가.
     public static func hasCandidate(in sceneText: String) -> Bool {
         markers.contains { sceneText.contains($0) }
+    }
+
+    /// 명시적 경과일 진입과 명시적 현재 복귀가 한 문서에 함께 있을 때는 LLM보다
+    /// 결정적으로 큰 회상 프레임을 잡는다. 내부 분석 청크가 1,500자씩 잘려도
+    /// 프레임을 청크별 구간으로 타일링해 중간 청크마다 현재로 리셋되지 않는다.
+    /// 두 앵커가 모두 있어야만 동작하므로 애매한 과거형은 건드리지 않는다.
+    public static func explicitFlashbackSegments(
+        in body: String, outline: DocumentOutline,
+        narration: NarrationProfile? = nil
+    ) -> [String: [NarrativeSegment]] {
+        let source = body as NSString
+        let entryPattern = #"(?:하루|이틀|사흘|나흘|닷새|엿새|이레|여드레|아흐레|며칠|[0-9]+일)\s*전"#
+        guard let expression = try? NSRegularExpression(pattern: entryPattern),
+              let entry = expression.firstMatch(
+                  in: body, range: NSRange(location: 0, length: source.length)
+              )?.range,
+              entry.location != NSNotFound
+        else { return [:] }
+
+        let returnMarkers = [
+            "그랬던 걸 이렇게", "그랬던 것을 이렇게",
+            "회상에서 깨어", "생각에서 깨어", "다시 현실로"
+        ]
+        let searchStart = NSMaxRange(entry)
+        let searchRange = NSRange(
+            location: searchStart, length: max(0, source.length - searchStart)
+        )
+        let returns = returnMarkers.compactMap { marker -> NSRange? in
+            let range = source.range(of: marker, options: [], range: searchRange)
+            return range.location == NSNotFound ? nil : range
+        }
+        guard let returnRange = returns.min(by: { $0.location < $1.location }),
+              returnRange.location > entry.location
+        else { return [:] }
+
+        let frame = entry.location ..< returnRange.location
+        var result: [String: [NarrativeSegment]] = [:]
+        for scene in outline.scenes {
+            let lower = max(frame.lowerBound, scene.utf16Range.lowerBound)
+            let upper = min(frame.upperBound, scene.utf16Range.upperBound)
+            guard upper > lower else { continue }
+            let localStart = lower - scene.utf16Range.lowerBound
+            let localEnd = upper - scene.utf16Range.lowerBound
+            let fragment = source.substring(
+                with: NSRange(location: lower, length: upper - lower)
+            )
+            let endsHere = upper == frame.upperBound
+            let segment = NarrativeSegment(
+                sceneHash: scene.contentHash,
+                localStart: localStart, localEnd: localEnd,
+                startQuote: String(fragment.prefix(40)),
+                endQuote: endsHere ? String(fragment.suffix(40)) : nil,
+                layer: .flashback, depth: 1,
+                returnState: endsHere ? .found : .sceneEnd,
+                pov: narration?.agentPOV, narrator: narration?.agentPOV,
+                source: .memory, reliability: .confirmed, confidence: 1
+            )
+            result[scene.contentHash, default: []].append(segment)
+        }
+        return result
     }
 }
 
@@ -311,7 +373,8 @@ public enum EventGraphParser {
             case "동일":
                 guard identityPairs.count < maxIdentities, numbers.count >= 2,
                       numbers[0] != numbers[1],
-                      key(numbers[0]) != nil, key(numbers[1]) != nil
+                      let firstKey = key(numbers[0]), let secondKey = key(numbers[1]),
+                      firstKey != secondKey
                 else { continue }
                 identityPairs.append((numbers[0], numbers[1]))
             case "시간":
@@ -347,8 +410,10 @@ public enum EventGraphParser {
         let identities = groups.compactMap { group -> EventIdentity? in
             let ordered = group.sorted()
             let memberKeys = ordered.compactMap { key($0) }
-            guard memberKeys.count >= 2, let canonical = memberKeys.first else { return nil }
-            return EventIdentity(canonicalKey: canonical, memberKeys: memberKeys)
+            var seenKeys: Set<String> = []
+            let uniqueKeys = memberKeys.filter { seenKeys.insert($0).inserted }
+            guard uniqueKeys.count >= 2, let canonical = uniqueKeys.first else { return nil }
+            return EventIdentity(canonicalKey: canonical, memberKeys: uniqueKeys)
         }
         .sorted { $0.canonicalKey < $1.canonicalKey }
 

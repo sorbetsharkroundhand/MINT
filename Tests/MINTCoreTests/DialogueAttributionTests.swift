@@ -121,6 +121,58 @@ final class DialogueAttributionTests: XCTestCase {
         XCTAssertTrue(result.allSatisfy { $0.speakerID == seoyeon.id })
     }
 
+    func test큰따옴표_안의_모든대사를_미상과줄바꿈까지보존() {
+        let body = """
+        “알겠습니다.” 서연이 말했다.
+        "화자를 모르는 대사"
+        「두 줄로
+        이어지는 대사」
+        """
+        let dialogues = DialogueAttribution.dialogues(in: body, cards: [seoyeon])
+        XCTAssertEqual(dialogues.count, 3)
+        XCTAssertEqual(dialogues.map(\.text), [
+            "알겠습니다.", "화자를 모르는 대사", "두 줄로\n이어지는 대사"
+        ])
+        XCTAssertEqual(dialogues[0].speakerLabel, "서연")
+        XCTAssertEqual(dialogues[1].speakerLabel, "미상")
+        XCTAssertEqual(dialogues[2].speakerLabel, "미상")
+    }
+
+    func test이름미상_화자카드가_있는_이인대화의_연속발화를귀속() {
+        let 점순 = CharacterCard(name: "점순")
+        let 화자 = CharacterCard(name: "화자", autoRegistered: true, role: .narrator)
+        let body = """
+        점순이가 다가와서,
+        "얘! 너 혼자만 일하니?"
+        "그럼 혼자 하지 떼루 하디?"
+        내가 소리를 하니까,
+        "너 일하기 좋니?"
+        또는,
+        "한여름이나 되거든 하지 벌써 울타리를 하니?"
+        """
+        let dialogues = DialogueAttribution.dialogues(in: body, cards: [점순, 화자])
+        XCTAssertEqual(dialogues.map(\.speakerLabel), ["점순", "화자", "점순", "점순"])
+        XCTAssertTrue(dialogues.allSatisfy { $0.attribution == .deterministic })
+    }
+
+    func test사용자_대사화자수정이_자동귀속보다우선() {
+        let body = "\"먼저 갈게.\" 서연이 말했다."
+        let automatic = DialogueAttribution.dialogues(in: body, cards: cards)
+        let override = NarrativeOverride(
+            kind: .dialogueSpeaker, key: automatic[0].stableKey,
+            value: minjun.id.uuidString
+        )
+        let snapshot = KnowledgeSnapshot(
+            entryID: UUID(), outline: .parse(body), summariesByHash: [:],
+            dialogues: automatic, characters: cards,
+            overrides: NarrativeOverrides([override]), body: body
+        )
+        XCTAssertEqual(snapshot.dialogues[0].speakerID, minjun.id)
+        XCTAssertEqual(snapshot.dialogues[0].speakerLabel, "민준")
+        XCTAssertEqual(snapshot.dialogues[0].attribution, .user)
+        XCTAssertEqual(snapshot.utterances.first?.speakerID, minjun.id)
+    }
+
     // MARK: - 스냅샷 질의: 매트릭스·프로필·다음 화자
 
     private func makeSnapshot(cursorBody: String? = nil) -> KnowledgeSnapshot {

@@ -35,6 +35,10 @@ struct BenchOptions {
     var agentSmoke = false
     /// 모델 없이 M12 서술 시점·한국어 이름 정규화 골드 세트를 채점한다.
     var storyBibleBench = false
+    /// 실제 로컬 「동백꽃」 문서·지식 캐시로 Agent 답변과 Story Intelligence를 채점한다.
+    var dongbaekAgentBench = false
+    /// 모델 없이 실제 「동백꽃」의 큰따옴표 대사 수집·화자 귀속을 전수 채점한다.
+    var dongbaekDialogueBench = false
 
     enum ParseResult {
         case options(BenchOptions)
@@ -120,6 +124,10 @@ struct BenchOptions {
                 options.agentSmoke = true
             case "--story-bible-bench":
                 options.storyBibleBench = true
+            case "--dongbaek-agent-bench":
+                options.dongbaekAgentBench = true
+            case "--dongbaek-dialogue-bench":
+                options.dongbaekDialogueBench = true
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -137,6 +145,11 @@ struct BenchOptions {
       --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
       --agent-smoke       실제 모델로 Agent 네이티브 tool call 3종과 전체 loop 검증
       --story-bible-bench M12 POV(1/3인칭 각 5편)·이름 정규화 결정적 채점
+      --dongbaek-agent-bench
+                           ~/Documents/MINT의 「동백꽃」 원문·실제 지식 캐시로
+                           Agent 사실 정확도와 Story Intelligence 상태를 채점
+      --dongbaek-dialogue-bench
+                           같은 원고의 큰따옴표 대사를 전수 수집하고 화자를 골드와 대조
       --help               이 도움말
 
     리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
@@ -251,6 +264,12 @@ if options.storyBibleBench {
     exit(correct == 10 && nameCorrect == nameGold.count ? 0 : 1)
 }
 
+// 실제 원고의 모든 큰따옴표를 모델 없이 전수 검사한다. 대사 누락·화자 오귀속은
+// 유창성 점수로 가려질 수 없어 Agent 실모델 평가보다 앞선 별도 게이트로 둔다.
+if options.dongbaekDialogueBench {
+    exit(await runDongbaekDialogueEvaluation() ? 0 : 1)
+}
+
 // 인물 감지 정밀도 점검 — 모델 로드 없이 감지기만 (결정적이라 GPU 불필요, PLAN §7).
 if options.detectOnly {
     guard let replayPath = options.replayPath,
@@ -289,7 +308,7 @@ if options.detectOnly {
     exit(0)
 }
 
-if options.agentSmoke {
+if options.agentSmoke || options.dongbaekAgentBench {
     print("== MINT Writing Agent 실모델 검증 ==")
     print("모델       : \(options.modelID)")
     print("응답 토큰 상한: \(max(256, options.maxTokens)) · 온도: \(options.temperature)")
@@ -324,6 +343,13 @@ print(String(format: "✅ 모델 로드 완료: %.1fs (다운로드 캐시 포�
 // Agent 실모델 스모크 — 자동완성 벤치와 섞지 않고 tool 형식 준수를 별도 판정한다.
 if options.agentSmoke {
     let ok = await runAgentSmoke(engine: engine, options: options)
+    exit(ok ? 0 : 1)
+}
+
+// 사용자가 실제로 작성해 둔 「동백꽃」의 원문·파생 캐시·Agent 답변을 한 번에
+// 대조한다. 일반 스모크와 분리해 제품 데이터가 없는 CI에서는 실행하지 않는다.
+if options.dongbaekAgentBench {
+    let ok = await runDongbaekAgentEvaluation(engine: engine, options: options)
     exit(ok ? 0 : 1)
 }
 

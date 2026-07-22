@@ -47,10 +47,11 @@ final class AgentRuntimeTests: XCTestCase {
         XCTAssertEqual(line.calls, [AgentToolCall(name: "get_outline")])
     }
 
-    func testRegistry는_12개_읽기전용_도구와_엄격한_인자를_제공() async {
+    func testRegistry는_13개_읽기전용_도구와_엄격한_인자를_제공() async {
         let registry = DefaultWritingTools.readOnlyMVP
-        XCTAssertEqual(registry.names.count, 12)
+        XCTAssertEqual(registry.names.count, 13)
         XCTAssertTrue(registry.names.contains("get_character_state"))
+        XCTAssertTrue(registry.names.contains("get_dialogues"))
         XCTAssertTrue(registry.names.contains("check_consistency"))
 
         let context = AgentContext(source: source())
@@ -169,12 +170,70 @@ final class AgentRuntimeTests: XCTestCase {
             $0.role == .tool && $0.content.contains("비밀")
         })
     }
+
+    func testRuntime은_두번깨진도구마크업을_최종답변으로노출하지않음() async throws {
+        let broken = AgentModelTurn(text: "<tool_call><arguments={깨진 호출}</tool_call>")
+        let generator = FakeGenerator(turns: [
+            broken, broken, AgentModelTurn(text: "확인한 근거로 답합니다.")
+        ])
+        let runtime = AgentRuntime(generator: generator, maxSteps: 3)
+        let result = try await runtime.run(
+            request: "구조를 알려 줘.", history: [], source: source(),
+            parameters: CompletionParameters(maxTokens: 128), onEvent: { _ in }
+        )
+        XCTAssertEqual(result.text, "확인한 근거로 답합니다.")
+        XCTAssertFalse(result.text.contains("tool_call"))
+        let callCount = await generator.callCount
+        XCTAssertEqual(callCount, 3)
+    }
+
+    func testRuntime은_이름미상화자질문을_모델없이결정적으로답함() async throws {
+        let body = "나는 닭을 보았다. 내가 점순을 만났다. 난 울타리를 고쳤다."
+        let entry = JournalEntry(
+            title: "동백꽃", body: body, kind: .novel,
+            characters: [CharacterCard(name: "점순")]
+        )
+        let source = AgentSourceSnapshot(
+            activeEntry: entry, entries: [entry], folders: [], knowledge: nil,
+            caretUTF16: (body as NSString).length
+        )
+        let generator = FakeGenerator(turns: [])
+        let result = try await AgentRuntime(generator: generator).run(
+            request: "이 작품의 서술 시점과 화자가 누구인지 알려 줘.",
+            history: [], source: source,
+            parameters: CompletionParameters(maxTokens: 128), onEvent: { _ in }
+        )
+        XCTAssertTrue(result.text.contains("1인칭"))
+        XCTAssertTrue(result.text.contains("이름 미상"))
+        XCTAssertTrue(result.text.contains("점순"))
+        let callCount = await generator.callCount
+        XCTAssertEqual(callCount, 0)
+    }
+
+    func testRuntime은_전체플롯초안을_원문대조턴으로검증함() async throws {
+        let generator = FakeGenerator(turns: [
+            AgentModelTurn(text: "주체가 뒤집힌 초안"),
+            AgentModelTurn(text: "원문과 대조해 주체를 바로잡은 5단계")
+        ])
+        let runtime = AgentRuntime(generator: generator, maxSteps: 3)
+        let result = try await runtime.run(
+            request: "사건을 실제 시간 순서대로 전체 플롯 5단계로 알려 줘.",
+            history: [], source: source(),
+            parameters: CompletionParameters(maxTokens: 512), onEvent: { _ in }
+        )
+        XCTAssertEqual(result.text, "원문과 대조해 주체를 바로잡은 5단계")
+        let callCount = await generator.callCount
+        let maxTokens = await generator.receivedMaxTokens
+        XCTAssertEqual(callCount, 2)
+        XCTAssertEqual(maxTokens, [512, 384])
+    }
 }
 
 private actor FakeGenerator: AgentTurnGenerating {
     private var turns: [AgentModelTurn]
     private(set) var callCount = 0
     private(set) var lastMessages: [AgentChatMessage] = []
+    private(set) var receivedMaxTokens: [Int] = []
 
     init(turns: [AgentModelTurn]) {
         self.turns = turns
@@ -182,11 +241,12 @@ private actor FakeGenerator: AgentTurnGenerating {
 
     func generateAgentTurn(
         messages: [AgentChatMessage], tools _: [ToolSpec],
-        parameters _: CompletionParameters,
+        parameters: CompletionParameters,
         onChunk: @Sendable @escaping (String) -> Void
     ) async throws -> AgentModelTurn {
         callCount += 1
         lastMessages = messages
+        receivedMaxTokens.append(parameters.maxTokens)
         guard !turns.isEmpty else { return AgentModelTurn(text: "끝") }
         let turn = turns.removeFirst()
         if !turn.text.isEmpty { onChunk(turn.text) }
