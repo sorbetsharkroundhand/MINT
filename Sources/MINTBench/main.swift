@@ -1,5 +1,5 @@
 import Foundation
-import MINTCore
+@_spi(Benchmark) import MINTCore
 
 // MINT M2 — 추론 리스크 선검증 CLI (PLAN §6 M2, docs/m2-inference.md)
 //
@@ -31,6 +31,8 @@ struct BenchOptions {
     var detectOnly = false
     /// --detect-only 정밀도 채점용 정답 인물 (쉼표 구분).
     var truePeople = ""
+    /// 취소 직후 후속 생성을 반복해 숨은 MLX 작업과 Metal 겹침을 검증한다 (PLAN §12).
+    var cancellationStressRuns: Int?
 
     enum ParseResult {
         case options(BenchOptions)
@@ -112,6 +114,11 @@ struct BenchOptions {
             case "--true-people":
                 guard let value = iterator.next() else { return .failure("--true-people 값 누락") }
                 options.truePeople = value
+            case "--cancellation-stress":
+                guard let value = iterator.next(), let parsed = Int(value), parsed > 0 else {
+                    return .failure("--cancellation-stress 는 양의 정수여야 함")
+                }
+                options.cancellationStressRuns = parsed
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
@@ -140,6 +147,11 @@ struct BenchOptions {
           --genre <text>       작품 장르 — 위와 동일
           --knowledge          리플레이 전에 원고를 요약(씬→장→작품)해 B 블록으로
                                주입 — 인덱서(M6)와 같은 프롬프트·규격 (PLAN §11)
+
+        안정성 스트레스 (PLAN §12 — 조기 종료한 MLX 내부 Task의 종료 동기화):
+          --cancellation-stress <n>
+                               생성 취소 → 후속 생성을 n회 반복. 기본 리플레이
+                               픽스처가 필요하며 한 번이라도 실패하면 exit 1
 
         모델 대안(가벼운 순): \(ModelPresets.qwen2_5_1_5B)
                               \(ModelPresets.qwen2_5_3B)
@@ -250,6 +262,11 @@ do {
     exit(1)
 }
 print(String(format: "✅ 모델 로드 완료: %.1fs (다운로드 캐시 포함)", Date().timeIntervalSince(loadStart)))
+
+if let runs = options.cancellationStressRuns {
+    let ok = await runCancellationStress(runs: runs, engine: engine, options: options)
+    exit(ok ? 0 : 1)
+}
 
 // 리플레이 모드 — 단발 측정 대신 원고 기반 품질 루프 (PLAN §13).
 if let replayPath = options.replayPath {
@@ -519,4 +536,117 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         print("⚠️ 웜 재사용 0 — KV 캐시(PLAN §12)가 작동하지 않고 있다. kvCache 설정·trim 경로 확인.")
     }
     return true
+}
+
+/// 조기 종료한 내부 token loop가 완전히 끝난 뒤에만 다음 생성을 시작하는지 실제
+/// Metal에서 반복 검증한다. 모델은 한 번만 워밍해 다운로드·콜드 로드를 제외한다.
+func runCancellationStress(
+    runs: Int, engine: CompletionEngine, options: BenchOptions
+) async -> Bool {
+    let fixture = "Fixtures/replay-novel-ko-v1.txt"
+    guard let raw = try? String(contentsOfFile: fixture, encoding: .utf8), !raw.isEmpty else {
+        print("❌ 취소 스트레스 픽스처를 읽지 못했습니다: \(fixture)")
+        return false
+    }
+    let stressPrompt = String(raw.prefix(1_200))
+    var parameters = CompletionParameters()
+    parameters.modelID = options.modelID
+    parameters.promptStyle = .continuation
+    parameters.maxTokens = options.maxTokens
+    parameters.temperature = options.temperature
+
+    // 내부 task가 생긴 직후 첫 청크에서 소비를 끝내는 별도 경로로, 문장 경계
+    // 조기 종료와 같은 stream early-break → cancelAndWait 짝을 먼저 검증한다.
+    do {
+        var earlyStopParameters = parameters
+        earlyStopParameters.maxTokens = max(128, parameters.maxTokens)
+        let earlyStop = try await engine.completeForCancellationStress(
+            prefix: stressPrompt,
+            parameters: earlyStopParameters,
+            stopAfterFirstChunk: true,
+            onGenerationStarted: {})
+        guard !earlyStop.text.isEmpty else {
+            print("❌ 첫 청크 조기 종료 결과가 비었습니다.")
+            return false
+        }
+        _ = try await engine.complete(
+            prefix: stressPrompt + " 그리고", parameters: parameters)
+        print("✅ 첫 청크 조기 종료 → 후속 생성 성공")
+    } catch {
+        print("❌ 첫 청크 조기 종료 경로 실패: \(error.localizedDescription)")
+        return false
+    }
+
+    do {
+        _ = try await engine.complete(prefix: stressPrompt, parameters: parameters)
+    } catch {
+        print("❌ 취소 스트레스 워밍 실패: \(error.localizedDescription)")
+        return false
+    }
+
+    print("\n== 취소 → 후속 생성 스트레스 (\(runs)회) ==")
+    for run in 1...runs {
+        // 매번 콜드 프리필로 만들되 고정 sleep을 쓰지 않는다. 내부 token loop
+        // 생성 신호를 받은 직후 취소해 문제의 in-flight 창을 직접 선점한다.
+        await engine.resetPromptCache()
+        let startProbe = GenerationStartProbe()
+        var stressParameters = parameters
+        stressParameters.maxTokens = max(128, parameters.maxTokens)
+        let generation = Task {
+            try await engine.completeForCancellationStress(
+                prefix: stressPrompt,
+                parameters: stressParameters,
+                onGenerationStarted: {
+                    Task { await startProbe.markStarted() }
+                })
+        }
+        var didStart = false
+        for _ in 0..<3_000 {
+            if await startProbe.started {
+                didStart = true
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        guard didStart else {
+            generation.cancel()
+            _ = try? await generation.value
+            print("[\(run)/\(runs)] ❌ 내부 생성 시작 신호가 30초 안에 오지 않았습니다.")
+            return false
+        }
+        generation.cancel()
+        do {
+            _ = try await generation.value
+            print("[\(run)/\(runs)] ❌ 취소 전에 생성 작업이 자연 종료했습니다.")
+            return false
+        } catch is CancellationError {
+            // 기대 경로 — 내부 생성 Task 종료까지 기다린 뒤 부모 취소가 전파된다.
+        } catch {
+            print("[\(run)/\(runs)] ❌ 취소 경로 오류: \(error.localizedDescription)")
+            return false
+        }
+
+        do {
+            let followup = try await engine.complete(
+                prefix: stressPrompt + " 그리고", parameters: parameters)
+            guard !followup.text.isEmpty else {
+                print("[\(run)/\(runs)] ❌ 후속 생성이 비었습니다.")
+                return false
+            }
+            print("[\(run)/\(runs)] in-flight 취소 확인 → 후속 생성 성공")
+        } catch {
+            print("[\(run)/\(runs)] ❌ 후속 생성 실패: \(error.localizedDescription)")
+            return false
+        }
+    }
+    print("✅ 취소 스트레스 \(runs)/\(runs) 성공")
+    return true
+}
+
+private actor GenerationStartProbe {
+    private(set) var started = false
+
+    func markStarted() {
+        started = true
+    }
 }

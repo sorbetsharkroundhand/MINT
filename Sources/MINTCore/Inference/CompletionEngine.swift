@@ -6,13 +6,138 @@ import MLXLLM
 import MLXLMCommon
 import Tokenizers
 
+/// MLX 내부 생성 태스크의 수명주기 짝 — 스트림 소비를 먼저 끝낸 경로도 실제
+/// token loop 종료까지 기다려 다음 Metal 작업과 겹치지 않게 한다 (PLAN §12).
+struct GenerationTaskSynchronizer: Sendable {
+    let task: Task<Void, Never>
+
+    func cancelAndWait() async {
+        task.cancel()
+        await task.value
+    }
+}
+
+/// 모델 컨테이너 사용권과 교체권을 조정한다. 교체가 시작되면 새 사용권 발급을
+/// 막고 기존 사용권이 모두 돌아온 뒤 한 호출만 교체를 수행한다 (PLAN §12).
+actor ModelLifetimeCoordinator {
+    enum Admission: Equatable, Sendable {
+        case current
+        case switchOwner
+    }
+
+    private var currentModelID: String?
+    private var activeOperations = 0
+    private var switching = false
+    private struct Waiter {
+        let id: UUID
+        let continuation: CheckedContinuation<Void, Never>
+    }
+    private var switchWaiters: [Waiter] = []
+    private var drainWaiters: [Waiter] = []
+
+    func acquire(modelID: String, reservingOperation: Bool) async throws -> Admission {
+        try Task.checkCancellation()
+        while switching {
+            try await wait(in: .switchQueue)
+        }
+        if currentModelID == modelID {
+            try Task.checkCancellation()
+            if reservingOperation { activeOperations += 1 }
+            return .current
+        }
+
+        switching = true
+        do {
+            while activeOperations > 0 {
+                try await wait(in: .drainQueue)
+            }
+            try Task.checkCancellation()
+            return .switchOwner
+        } catch {
+            abandonSwitch()
+            throw error
+        }
+    }
+
+    func finishSwitch(
+        to modelID: String, succeeded: Bool, reservingOperation: Bool
+    ) {
+        precondition(switching)
+        currentModelID = succeeded ? modelID : nil
+        if succeeded, reservingOperation { activeOperations += 1 }
+        switching = false
+        let waiters = switchWaiters
+        switchWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters { waiter.continuation.resume() }
+    }
+
+    func releaseOperation() {
+        precondition(activeOperations > 0)
+        activeOperations -= 1
+        guard activeOperations == 0 else { return }
+        let waiters = drainWaiters
+        drainWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters { waiter.continuation.resume() }
+    }
+
+    func cancelSwitch() {
+        abandonSwitch()
+    }
+
+    private enum WaitQueue: Sendable {
+        case switchQueue
+        case drainQueue
+    }
+
+    private func wait(in queue: WaitQueue) async throws {
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if Task.isCancelled {
+                    continuation.resume()
+                    return
+                }
+                let waiter = Waiter(id: id, continuation: continuation)
+                switch queue {
+                case .switchQueue: switchWaiters.append(waiter)
+                case .drainQueue: drainWaiters.append(waiter)
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id: id, in: queue) }
+        }
+        try Task.checkCancellation()
+    }
+
+    private func cancelWaiter(id: UUID, in queue: WaitQueue) {
+        switch queue {
+        case .switchQueue:
+            guard let index = switchWaiters.firstIndex(where: { $0.id == id }) else { return }
+            let waiter = switchWaiters.remove(at: index)
+            waiter.continuation.resume()
+        case .drainQueue:
+            guard let index = drainWaiters.firstIndex(where: { $0.id == id }) else { return }
+            let waiter = drainWaiters.remove(at: index)
+            waiter.continuation.resume()
+        }
+    }
+
+    private func abandonSwitch() {
+        precondition(switching)
+        switching = false
+        let waiters = switchWaiters
+        switchWaiters.removeAll(keepingCapacity: true)
+        for waiter in waiters { waiter.continuation.resume() }
+    }
+}
+
 /// 온디바이스 자동완성 추론 엔진 (M2/M3·M5, PLAN §4·§10·§12).
 ///
 /// - 모델은 **1회 lazy 로드** 후 상주. 모델 id가 바뀌면 교체 로드.
 /// - 프롬프트는 조립기(`ContextAssembler`)가 만든 `AssembledPrompt`만 받는다 —
 ///   엔진은 조립에 관여하지 않는다 (PLAN §10).
 /// - `complete(prompt:parameters:)`는 **취소 가능**: 호출 태스크가 취소되면
-///   토큰 스트림 소비가 끝나고, 스트림 종료가 내부 생성 태스크까지 취소한다.
+///   토큰 스트림 소비를 끝내고 내부 생성 태스크도 명시적으로 취소·종료 대기한다.
 /// - 이어쓰기(continuation) 경로는 직전 요청과의 공통 접두 KV를 재사용해
 ///   새 토큰만 증분 프리필한다 (PLAN §12 — `PromptCacheBox`).
 /// - 토큰 상한(기본 12) + **문장 경계 조기 종료**로 단어/구 단위 제안을 보장.
@@ -52,6 +177,9 @@ public actor CompletionEngine {
     private var loadedModelID: String?
     private var loadTask: Task<ModelContainer, Error>?
     private var loadingModelID: String?
+    /// `loadedContainer` 반환과 `container.perform` 시작 사이의 actor 재진입까지
+    /// 포함해 모델 교체와 기존 생성의 수명을 직렬화한다 (PLAN §12).
+    private let modelLifetime = ModelLifetimeCoordinator()
     /// 이어쓰기 프리필 KV 재사용 (PLAN §12). 모델 교체 시 폐기.
     private let promptCache = PromptCacheBox()
 
@@ -63,7 +191,9 @@ public actor CompletionEngine {
         parameters: CompletionParameters,
         onProgress: (@Sendable (Double) -> Void)? = nil
     ) async throws {
-        _ = try await loadedContainer(modelID: parameters.modelID, onProgress: onProgress)
+        _ = try await loadedContainer(
+            modelID: parameters.modelID, onProgress: onProgress,
+            reservingOperation: false)
     }
 
     /// 프롬프트 KV 캐시를 폐기한다 — 다음 생성은 무조건 콜드 프리필이다.
@@ -86,12 +216,15 @@ public actor CompletionEngine {
         {
             return .empty
         }
-        let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: onLoadProgress)
-        try Task.checkCancellation()
-        return try await Self.runGeneration(
-            in: container, prompt: prompt, parameters: parameters,
-            promptCache: promptCache)
+        let cache = promptCache
+        return try await withLoadedContainer(
+            modelID: parameters.modelID, onProgress: onLoadProgress
+        ) { container in
+            try Task.checkCancellation()
+            return try await Self.runGeneration(
+                in: container, prompt: prompt, parameters: parameters,
+                promptCache: cache)
+        }
     }
 
     /// 구 API 호환(MINTBench 단발 측정 등) — 조립기 없이 prefix만으로 생성.
@@ -109,6 +242,30 @@ public actor CompletionEngine {
         )
     }
 
+    /// MINTBench 전용: 내부 token loop가 만들어진 정확한 시점을 알려, 콜드
+    /// 프리필 도중이 아니라 생성 진행 중 취소를 재현한다 (PLAN §12).
+    @_spi(Benchmark)
+    public func completeForCancellationStress(
+        prefix: String,
+        parameters: CompletionParameters,
+        stopAfterFirstChunk: Bool = false,
+        onGenerationStarted: @escaping @Sendable () -> Void
+    ) async throws -> Completion {
+        let prompt = ContextAssembler.assemble(
+            prefix: prefix, document: nil, style: parameters.promptStyle)
+        let cache = promptCache
+        return try await withLoadedContainer(
+            modelID: parameters.modelID, onProgress: nil
+        ) { container in
+            try Task.checkCancellation()
+            return try await Self.runGeneration(
+                in: container, prompt: prompt, parameters: parameters,
+                promptCache: cache,
+                onGenerationStarted: onGenerationStarted,
+                stopAfterFirstChunk: stopAfterFirstChunk)
+        }
+    }
+
     /// 폴더 멤버 문서들의 내용에서 짧은 폴더 이름을 생성한다 (사이드바 DnD 1.4).
     ///
     /// promptStyle 설정과 무관하게 항상 instruct 챗으로 실행 — 이어쓰기는 이름
@@ -122,43 +279,46 @@ public actor CompletionEngine {
         guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
         }
-        let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: nil)
-        try Task.checkCancellation()
-        return try await container.perform { context in
-            let chat: [Chat.Message] = [
-                .system(Prompting.folderNameSystem),
-                .user(Prompting.folderNameUser(content: content)),
-            ]
-            let userInput = UserInput(
-                chat: chat, additionalContext: ["enable_thinking": false])
-            let input = try await context.processor.prepare(input: userInput)
+        return try await withLoadedContainer(
+            modelID: parameters.modelID, onProgress: nil
+        ) { container in
             try Task.checkCancellation()
+            return try await container.perform { context in
+                let chat: [Chat.Message] = [
+                    .system(Prompting.folderNameSystem),
+                    .user(Prompting.folderNameUser(content: content)),
+                ]
+                let userInput = UserInput(
+                    chat: chat, additionalContext: ["enable_thinking": false])
+                let input = try await context.processor.prepare(input: userInput)
+                try Task.checkCancellation()
 
-            let generateParameters = GenerateParameters(
-                maxTokens: 16,
-                temperature: Float(parameters.temperature),
-                topP: Float(parameters.topP)
-            )
+                let generateParameters = GenerateParameters(
+                    maxTokens: 16,
+                    temperature: Float(parameters.temperature),
+                    topP: Float(parameters.topP)
+                )
 
-            var text = ""
-            let stream = try MLXLMCommon.generate(
-                input: input, parameters: generateParameters, context: context)
-            for await generation in stream {
-                if Task.isCancelled { break }
-                if case .chunk(let chunk) = generation {
-                    text += chunk
-                    // 이름은 한 줄 — 내용이 생긴 뒤 줄바꿈이 나오면 그만 받는다
-                    // (문장 경계 로직은 이름의 마침표 오검출 위험이 있어 안 쓴다).
-                    if text.contains("\n"),
-                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
-                        break
+                var text = ""
+                let (stream, synchronizer) = try Self.generationTask(
+                    input: input, parameters: generateParameters, context: context)
+                for await generation in stream {
+                    if Task.isCancelled { break }
+                    if case .chunk(let chunk) = generation {
+                        text += chunk
+                        // 이름은 한 줄 — 내용이 생긴 뒤 줄바꿈이 나오면 그만 받는다
+                        // (문장 경계 로직은 이름의 마침표 오검출 위험이 있어 안 쓴다).
+                        if text.contains("\n"),
+                            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        {
+                            break
+                        }
                     }
                 }
+                await synchronizer.cancelAndWait()
+                try Task.checkCancellation()
+                return Self.cleanFolderName(text)
             }
-            try Task.checkCancellation()
-            return Self.cleanFolderName(text)
         }
     }
 
@@ -183,87 +343,134 @@ public actor CompletionEngine {
         guard !user.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return ""
         }
-        let container = try await loadedContainer(
-            modelID: parameters.modelID, onProgress: nil)
-        try Task.checkCancellation()
-        return try await container.perform { context in
-            let chat: [Chat.Message] = [.system(system), .user(user)]
-            let userInput = UserInput(
-                chat: chat, additionalContext: ["enable_thinking": false])
-            let input = try await context.processor.prepare(input: userInput)
+        return try await withLoadedContainer(
+            modelID: parameters.modelID, onProgress: nil
+        ) { container in
             try Task.checkCancellation()
+            return try await container.perform { context in
+                let chat: [Chat.Message] = [.system(system), .user(user)]
+                let userInput = UserInput(
+                    chat: chat, additionalContext: ["enable_thinking": false])
+                let input = try await context.processor.prepare(input: userInput)
+                try Task.checkCancellation()
 
-            let generateParameters = GenerateParameters(
-                maxTokens: maxTokens,
-                temperature: Float(parameters.temperature),
-                topP: Float(parameters.topP)
-            )
+                let generateParameters = GenerateParameters(
+                    maxTokens: maxTokens,
+                    temperature: Float(parameters.temperature),
+                    topP: Float(parameters.topP)
+                )
 
-            var text = ""
-            let stream = try MLXLMCommon.generate(
-                input: input, parameters: generateParameters, context: context)
-            for await generation in stream {
-                if Task.isCancelled { break }
-                if case .chunk(let chunk) = generation {
-                    text += chunk
-                    // 요약은 한 문단 — 내용이 생긴 뒤 빈 줄(문단 경계)이 나오면
-                    // 그만 받는다 (설명·부연이 이어지는 걸 끊는다).
-                    if stopAtBlankLine,
-                        text.contains("\n\n"),
-                        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    {
-                        break
+                var text = ""
+                let (stream, synchronizer) = try Self.generationTask(
+                    input: input, parameters: generateParameters, context: context)
+                for await generation in stream {
+                    if Task.isCancelled { break }
+                    if case .chunk(let chunk) = generation {
+                        text += chunk
+                        // 요약은 한 문단 — 내용이 생긴 뒤 빈 줄(문단 경계)이 나오면
+                        // 그만 받는다 (설명·부연이 이어지는 걸 끊는다).
+                        if stopAtBlankLine,
+                            text.contains("\n\n"),
+                            !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        {
+                            break
+                        }
                     }
                 }
+                await synchronizer.cancelAndWait()
+                try Task.checkCancellation()
+                let cleaned = Self.stripThinking(text)
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                return Self.stripSurroundingQuotes(cleaned)
             }
-            try Task.checkCancellation()
-            let cleaned = Self.stripThinking(text)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            return Self.stripSurroundingQuotes(cleaned)
         }
     }
 
     // MARK: - 모델 로드 (1회, 교체 가능)
 
+    /// 모델 사용권을 생성 전체 수명 동안 유지한다. 교체 요청은 이 사용권이
+    /// 반환될 때까지 기다리므로 `loadedContainer` 반환 직후의 재진입 창도 없다.
+    private func withLoadedContainer<Result: Sendable>(
+        modelID: String,
+        onProgress: (@Sendable (Double) -> Void)?,
+        operation: @Sendable (ModelContainer) async throws -> Result
+    ) async throws -> Result {
+        let loaded = try await loadedContainer(
+            modelID: modelID, onProgress: onProgress,
+            reservingOperation: true)
+        do {
+            let result = try await operation(loaded)
+            await modelLifetime.releaseOperation()
+            return result
+        } catch {
+            await modelLifetime.releaseOperation()
+            throw error
+        }
+    }
+
     private func loadedContainer(
         modelID: String,
-        onProgress: (@Sendable (Double) -> Void)?
+        onProgress: (@Sendable (Double) -> Void)?,
+        reservingOperation: Bool
     ) async throws -> ModelContainer {
-        if let container, loadedModelID == modelID {
+        let admission = try await modelLifetime.acquire(
+            modelID: modelID, reservingOperation: reservingOperation)
+        do {
+            try Task.checkCancellation()
+        } catch {
+            if admission == .switchOwner {
+                await modelLifetime.cancelSwitch()
+            } else if reservingOperation {
+                await modelLifetime.releaseOperation()
+            }
+            throw error
+        }
+        if admission == .current {
+            // 조정기와 실제 컨테이너 상태는 같은 switch owner만 함께 갱신한다.
+            guard let container, loadedModelID == modelID else {
+                preconditionFailure("모델 수명주기 상태와 컨테이너가 불일치합니다")
+            }
             return container
         }
-        // 같은 모델을 이미 로드 중이면 그 결과를 공유한다(중복 로드 방지).
-        if let loadTask, loadingModelID == modelID {
-            let loaded = try await loadTask.value
-            try Task.checkCancellation()
-            return loaded
-        }
-        // 다른 모델로 교체 — 기존 로드/컨테이너와 함께 프롬프트 KV도 버린다
-        // (다른 모델의 캐시는 쓰레기가 아니라 독이다).
-        loadTask?.cancel()
+
+        // 교체권을 얻은 시점에는 기존 perform 사용권이 모두 반환됐다. 게시된
+        // 컨테이너를 먼저 내리고, 취소한 로드와 Metal 큐를 모두 기다린다.
+        let retiringContainer = container
+        let retiringLoad = loadTask
         container = nil
         loadedModelID = nil
+        loadTask = nil
+        loadingModelID = nil
         promptCache.invalidate()
+        retiringLoad?.cancel()
+        if let retiringLoad { _ = try? await retiringLoad.value }
+        if let retiringContainer { await retiringContainer.perform { _ in () } }
 
         let task = Task { try await Self.load(modelID: modelID, onProgress: onProgress) }
         loadTask = task
         loadingModelID = modelID
         do {
-            let loaded = try await task.value
-            // 로드 중 또 다른 모델로 교체됐을 수 있다 — 내 로드가 최신일 때만 채택.
-            if loadingModelID == modelID {
-                container = loaded
-                loadedModelID = modelID
-                loadTask = nil
-                loadingModelID = nil
+            let loaded = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: {
+                task.cancel()
             }
             try Task.checkCancellation()
+            container = loaded
+            loadedModelID = modelID
+            loadTask = nil
+            loadingModelID = nil
+            await modelLifetime.finishSwitch(
+                to: modelID, succeeded: true,
+                reservingOperation: reservingOperation)
             return loaded
         } catch {
-            if loadingModelID == modelID {
-                loadTask = nil
-                loadingModelID = nil
-            }
+            // `task.value`가 돌아왔으므로 취소된 로드도 실제 종료된 상태다.
+            loadTask = nil
+            loadingModelID = nil
+            await modelLifetime.finishSwitch(
+                to: modelID, succeeded: false,
+                reservingOperation: false)
             throw error
         }
     }
@@ -294,7 +501,9 @@ public actor CompletionEngine {
         in container: ModelContainer,
         prompt: AssembledPrompt,
         parameters: CompletionParameters,
-        promptCache: PromptCacheBox
+        promptCache: PromptCacheBox,
+        onGenerationStarted: (@Sendable () -> Void)? = nil,
+        stopAfterFirstChunk: Bool = false
     ) async throws -> Completion {
         let start = Date()
         return try await container.perform { context in
@@ -358,10 +567,12 @@ public actor CompletionEngine {
                 var timeToFirstChunk: TimeInterval?
                 var info: GenerateCompletionInfo?
                 var stoppedAtBoundary = false
+                var stoppedAfterFirstChunk = false
 
-                let stream = try MLXLMCommon.generate(
+                let (stream, synchronizer) = try Self.generationTask(
                     input: input, cache: kvCache, parameters: generateParameters,
                     context: context)
+                onGenerationStarted?()
                 for await generation in stream {
                     if Task.isCancelled { break }
                     switch generation {
@@ -370,6 +581,7 @@ public actor CompletionEngine {
                             timeToFirstChunk = Date().timeIntervalSince(start)
                         }
                         text += chunk
+                        if stopAfterFirstChunk { stoppedAfterFirstChunk = true }
                         // 정지 사다리 (PLAN §10): 기본 = 문장 경계, 대화 모드 =
                         // 발화 끝(닫는 따옴표) — 대사 중간의 마침표에서 끊지 않는다.
                         let cut =
@@ -384,12 +596,20 @@ public actor CompletionEngine {
                     case .toolCall:
                         break
                     }
-                    // 루프 이탈 → 스트림 종료 → 내부 생성 태스크 취소.
-                    if stoppedAtBoundary { break }
+                    // 루프 이탈 뒤 아래에서 내부 생성 Task를 취소·종료 대기한다.
+                    if stoppedAtBoundary || stoppedAfterFirstChunk { break }
                 }
+                // 스트림 소비를 먼저 끝낸 경우에도 내부 token loop와 Metal
+                // command buffer가 끝난 뒤에만 캐시·컨테이너를 넘긴다 (PLAN §12).
+                await synchronizer.cancelAndWait()
                 // 조기 종료·협조 취소여도 캐시엔 "프롬프트 + α"가 앞에서부터 순서대로
                 // 들어가 있다 — 기록해 두면 다음 요청이 LCP까지 재사용한다.
-                if cacheInUse { promptCache.commit(tokens: promptTokens) }
+                if cacheInUse {
+                    promptCache.commit(tokens: promptTokens)
+                    // 동기화 뒤 이미 안전하게 commit했다. 뒤이은 취소 검사가 throw해도
+                    // catch에서 같은 캐시를 다시 abandon하지 않는다.
+                    cacheInUse = false
+                }
                 try Task.checkCancellation()
 
                 return Completion(
@@ -419,6 +639,25 @@ public actor CompletionEngine {
                 throw error
             }
         }
+    }
+
+    /// 고수준 `generate()`가 숨기는 내부 Task까지 소유해 조기 종료 경로가
+    /// 명시적으로 cancel 후 await할 수 있게 한다 (PLAN §12).
+    private static func generationTask(
+        input: LMInput,
+        cache: [KVCache]? = nil,
+        parameters: GenerateParameters,
+        context: ModelContext
+    ) throws -> (AsyncStream<Generation>, GenerationTaskSynchronizer) {
+        let iterator = try TokenIterator(
+            input: input, model: context.model, cache: cache,
+            parameters: parameters)
+        let (stream, task) = MLXLMCommon.generateTask(
+            promptTokenCount: input.text.tokens.size,
+            modelConfiguration: context.configuration,
+            tokenizer: context.tokenizer,
+            iterator: iterator)
+        return (stream, GenerationTaskSynchronizer(task: task))
     }
 
     // MARK: - 프롬프트 (폴더 명명 전용 — 자동완성 프롬프트는 ContextAssembler 소유)
