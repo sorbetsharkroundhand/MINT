@@ -44,6 +44,7 @@ public struct ContextReport: Sendable, Equatable {
             case chapterSummary = "장 요약"
             case sceneSummary = "앞선 장면"
             case currentScene = "지금 장면"
+            case cohort = "장면 인물"
             case narrative = "서사 위치"
             case flowEvent = "흐름 사건"
             case dialogue = "대화 모드"
@@ -105,6 +106,9 @@ public enum ContextAssembler {
     static let maxCardNoteCharacters = 140
     /// B(요약 지식) 문자 상한 — 초과 시 커서에서 먼 것부터 버린다 (PLAN §10 삭감).
     static let maxKnowledgeCharacters = 600
+    /// 그라운딩(동석 인물) 이름 수 상한 — 군중 장면이 블록을 잠식하지 않게
+    /// 한다 (토큰당 품질, CLAUDE.md §5-1).
+    static let maxCohortNames = 4
 
     /// C(최근 원문 창)에 A·B를 얹어 최종 프롬프트를 만든다.
     ///
@@ -177,12 +181,12 @@ public enum ContextAssembler {
         {
             header = header.isEmpty ? block : header + "\n" + block
         }
-        // 지금 장면·서사 위치 (v4·v5) — 커서가 속한 씬의 제목·유형·흐름·층.
-        // 커서가 씬을 넘을 때만 변하므로 대화 블록과 같은 "맨 뒤" 자리다
-        // (KV 프리픽스 보호).
+        // 지금 장면·서사 위치·그라운딩 (v4·v5) — 커서가 속한 씬의 제목·유형·
+        // 시점·장소·동석 인물·흐름·층. 커서가 씬을 넘을 때만 변하므로 대화
+        // 블록과 같은 "맨 뒤" 자리다 (KV 프리픽스 보호).
         if document?.kind == .novel, let knowledge {
             let block = currentSceneText(
-                knowledge, cursor: cursor, position: position,
+                knowledge, document: document, cursor: cursor, position: position,
                 controls: controls, report: &items)
             if !block.isEmpty {
                 header = header.isEmpty ? block : header + "\n" + block
@@ -215,11 +219,12 @@ public enum ContextAssembler {
         }
     }
 
-    /// 커서가 속한 씬의 메타 + 서사 위치 — "지금 장면: 아내의 외출 (회상)" +
-    /// "지금 흐름: 남편의 과거 (회상 · 깊이 1)". 흐름·층은 Narrative Graph의
-    /// position 질의에서 온다 (요구사항 §30 "지금 어떤 이야기 흐름에 있는가").
+    /// 커서가 속한 씬의 메타 + 서사 위치 + 그라운딩 — "지금 장면: 아내의 외출 (회상)" +
+    /// "지금 흐름: 남편의 과거 (회상 · 깊이 1)" + "이 장면의 사람들: …". 흐름·층은
+    /// Narrative Graph의 position 질의에서, 사람들은 씬 발화·사건 질의에서 온다
+    /// (요구사항 §30 "지금 어떤 이야기 흐름에 있는가" + 그라운딩 계층).
     static func currentSceneText(
-        _ knowledge: KnowledgeSnapshot, cursor: Int,
+        _ knowledge: KnowledgeSnapshot, document: DocumentContext?, cursor: Int,
         position: KnowledgeSnapshot.NarrativePosition? = nil,
         controls: Controls = Controls(nil),
         report: inout [ContextReport.Item]
@@ -236,6 +241,10 @@ public enum ContextAssembler {
             if let location = meta.location, !location.isEmpty {
                 pieces.append("· 장소: \(location)")
             }
+            // 시점 명시 — 1인칭/제한 삼인칭은 서술 어투와 앎 범위를 결정하는
+            // 소설의 핵심 신호다. 구간 시점(회상 속 시점)이 씬 시점보다 이긴다.
+            let pov = position?.pov ?? meta.pov
+            if let pov, !pov.isEmpty { pieces.append("· 시점: \(pov)") }
             if !pieces.isEmpty {
                 let line = "지금 장면: " + pieces.joined(separator: " ")
                 lines.append(line)
@@ -244,6 +253,23 @@ public enum ContextAssembler {
                         kind: .currentScene, text: line,
                         jumpUTF16: scene.utf16Range.lowerBound,
                         stableKey: "current", pinned: controls.pinned("current")))
+            }
+        }
+        // 그라운딩 — 지금 공간에 함께 있는 등장인물. 다음 문장 예측의 탄약은
+        // 작품 요약이 아니라 "지금 이 방에 누가 있는가"다 (ConStory-Bench:
+        // 오류 최다 분포가 factual — 로컬 사실 그라운딩이 실탄).
+        // 대화 모드에서는 화자·청자를 이미 지목하므로 중복 없이 서술용으로만.
+        if controls.allows("cohort") {
+            let names = knowledge.sceneCohabitants(at: cursor).compactMap { id in
+                document?.characters.first(where: { $0.id == id })?.name
+            }
+            if !names.isEmpty {
+                let line = "이 장면의 사람들: \(names.prefix(maxCohortNames).joined(separator: ", "))"
+                lines.append(line)
+                report.append(
+                    ContextReport.Item(
+                        kind: .cohort, text: line, stableKey: "cohort",
+                        pinned: controls.pinned("cohort")))
             }
         }
         // 서사 위치 (v5) — 회상·구술·꿈 등 시간 이동 층 안일 때만 한 줄 더.
@@ -319,21 +345,6 @@ public enum ContextAssembler {
         var lines: [String] = []
         var reported: [ContextReport.Item] = []
 
-        if let work = knowledge.workSummary, work.count + 12 <= budget,
-            controls.allows("work"),
-            // 과거 층 집필 중에는 작품 요약(미래 포함 가능)도 뺀다 — 회상 안에서
-            // 결말이 새는 것을 막는다 (Pin이 있으면 사용자 결정을 따른다).
-            !writingInPast || controls.pinned("work")
-        {
-            let line = "지난 줄거리: \(work)"
-            lines.append(line)
-            reported.append(
-                ContextReport.Item(
-                    kind: .workSummary, text: line,
-                    stableKey: "work", pinned: controls.pinned("work")))
-            budget -= work.count + 12
-        }
-
         // 흐름 사건 (v5, 요구사항 §30) — 회상 집필 중이면 그 인물 흐름의 이전
         // 사건을 우선 주입한다: "이 회상의 주인이 겪어온 일"이 가장 진한 신호다.
         if writingInPast, let flowID = position?.flowID {
@@ -355,15 +366,31 @@ public enum ContextAssembler {
             }
         }
 
-        // Pin된 씬 요약 먼저 (§31 — 관련성이 낮아져도 유지), 그 뒤 가까운 것부터
-        // 담고(예산 소진 시 먼 것이 자연히 빠진다) 문서 순서로 뒤집는다.
+        // 선별 순서 (살라이언스, PLAN §11 개편) — Pin된 씬이 항상 먼저(§31 —
+        // 관련성이 낮아져도 유지·예산을 이긴다), 나머지는 인덱스 공유 점수순:
+        // 인과 선행·같은 장소·동석 인물이 담화 거리보다 이긴다. 같은 점수면
+        // 담화상 가까운 쪽 — 결정적 타이브레이크라 출력이 요동치지 않는다.
+        // 실제 줄 순서는 아래에서 문서 순서로 복원한다 (KV 프리픽스 보호).
+        let indexByHash = Dictionary(
+            uniqueKeysWithValues: scenes.enumerated().map { ($0.element.contentHash, $0.offset) })
+        let scores = knowledge.sceneSalienceScores(at: windowStart, candidates: outside)
+        let pinnedScenes = outside
+            .filter { controls.pinned("scene|\($0.contentHash)") }
+            .sorted { indexByHash[$0.contentHash] ?? 0 < indexByHash[$1.contentHash] ?? 0 }
+        let rankedScenes = outside
+            .filter { !controls.pinned("scene|\($0.contentHash)") }
+            .sorted { lhs, rhs in
+                let ls = scores[lhs.contentHash] ?? 0
+                let rs = scores[rhs.contentHash] ?? 0
+                if ls != rs { return ls > rs }
+                return indexByHash[lhs.contentHash] ?? 0 > indexByHash[rhs.contentHash] ?? 0
+            }
+
+        // 담고 나서(예산 소진 시 밀린 것이 자연히 빠진다) 문서 순서로 뒤집는다.
         var picked: [(line: String, item: ContextReport.Item)] = []
         var coveredChapters: Set<String> = []
         var coveredScenes: Set<String> = []
-        let pinnedFirst =
-            outside.filter { controls.pinned("scene|\($0.contentHash)") }.reversed()
-            + outside.filter { !controls.pinned("scene|\($0.contentHash)") }.reversed()
-        for scene in pinnedFirst {
+        for scene in pinnedScenes + rankedScenes {
             let sceneKey = "scene|\(scene.contentHash)"
             guard controls.allows(sceneKey), coveredScenes.insert(scene.contentHash).inserted
             else { continue }
@@ -408,6 +435,24 @@ public enum ContextAssembler {
         }
         lines.append(contentsOf: ordered.map(\.line))
         reported.append(contentsOf: ordered.map(\.item))
+
+        // 지난 줄거리 (작품 요약) — 맨 앞에서 **맨 뒤·남는 예산**으로 강등했다.
+        // 다음 문장 예측의 실탄은 장면 해상도 지식이고, 작품 요약은 일관성
+        // 보험이다 (ConStory-Bench 2026: 오류 최다 분포가 factual·temporal —
+        // state·장면 지식이 요약보다 먼저다). 회상 집필 중엔 여전히 아예
+        // 빠진다 — 미래가 새는 것을 막는다 (Pin이 있으면 사용자 결정).
+        if let work = knowledge.workSummary, controls.allows("work"),
+            !writingInPast || controls.pinned("work")
+        {
+            let line = "지난 줄거리: \(work)"
+            if line.count + 1 <= budget {
+                lines.append(line)
+                reported.append(
+                    ContextReport.Item(
+                        kind: .workSummary, text: line,
+                        stableKey: "work", pinned: controls.pinned("work")))
+            }
+        }
         report.append(contentsOf: reported)
         return lines.joined(separator: "\n")
     }
@@ -486,14 +531,14 @@ public enum ContextAssembler {
 
     /// 인물 한 명의 "최근" 줄 상한 — 사건 요약(≤80자)을 그대로 쓴다.
     static let maxRecentEventCharacters = 80
-    /// 인물 한 명의 "상태@커서" 조각 상한 — 필드 5개 × 값 40자를 다 붙이면
+    /// 인물 한 명의 상태 산문 절 상한 — 필드 5개 × 값 40자를 다 붙이면
     /// 카드 하나가 헤더 예산(700자)을 잠식한다 (토큰당 품질, CLAUDE.md §5-1).
     static let maxStateCharacters = 100
 
-    /// A 고정 헤더 + B 인물 카드. 소설 전용 — 저널은 빈 문자열(Fast = C만).
+    /// A 고정 헤더 + 인물 카드(산문형). 소설 전용 — 저널은 빈 문자열(Fast = C만).
     ///
     /// `knowledge`/`windowStart`(M6-5): 카드마다 **커서 이전 마지막 등장 사건**을
-    /// 한 줄 붙인다 (PLAN §8 `lastAppearance`). 사건을 B 블록에 따로 나열하지
+    /// 한 문장 붙인다 (PLAN §8 `lastAppearance`). 사건을 B 블록에 따로 나열하지
     /// 않는 이유: 같은 씬을 씬 요약이 이미 말하고 있어 지식이 겹치고 예산만
     /// 태운다. 사건이 요약 대비 더 가진 것은 **참여자 링크**뿐이므로, 그 값은
     /// "인물 → 그 인물의 사건"이라는 질의에서만 나온다 (PLAN §11 엔티티 앵커
@@ -560,35 +605,40 @@ public enum ContextAssembler {
                     .replacingOccurrences(of: "\n", with: " ")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .prefix(maxCardNoteCharacters))
-            var line = note.isEmpty ? "등장인물 \(name)" : "등장인물 \(name): \(note)"
+            // 산문형 카드 — "등장인물 N: 소개 · 필드=값" 레코드 대신 이름으로
+            // 시작하는 짧은 문장들. 소설 코퍼스에 맞춰진 모델(Qwen3 계열 포함)은
+            // 서술형을 레코드보다 어투 누수 없이 흡수한다 (NovelAI lorebook
+            // 실측·CHIRON EMNLP 2024). 줄 단위 예산 규율은 그대로 유지한다.
+            var pieces: [String] = [
+                note.isEmpty ? name : "\(name) — \(KoreanProse.terminated(note))"
+            ]
             let cardKey = "card|\(card.id.uuidString)"
             var cardItems: [ContextReport.Item] = [
                 ContextReport.Item(
-                    kind: .card, text: line,
+                    kind: .card, text: pieces[0],
                     stableKey: cardKey, pinned: controls.pinned(cardKey))
             ]
             // 상태@커서 (PLAN §7 카드 스키마, §8 `state_at`) — 창 시작 시점까지의
-            // 델타를 접은 결과. 일관성 > 유창성(CLAUDE.md §3)의 실탄이다:
-            // "생사=사망"이 든 카드가 죽은 인물의 등장을 프롬프트 수준에서 막는다.
+            // 델타를 접은 결과를 **산문 절**로 편다. 일관성 > 유창성(CLAUDE.md §3)
+            // 의 실탄: "이미 죽어 있다" 한 문장이 죽은 인물의 등장을 프롬프트
+            // 수준에서 막는다.
             if let knowledge {
                 let state = knowledge.stateAt(of: card.id, before: windowStart)
                 if !state.isEmpty, controls.allows("state|\(card.id.uuidString)") {
-                    // CaseIterable 순서로 고정 렌더링 — 같은 상태가 패스마다 다른
-                    // 순서로 찍히면 KV 프리픽스가 식는다 (PLAN §12).
-                    let rendered = StateDelta.Field.allCases
-                        .compactMap { field in state[field].map { "\(field.rawValue)=\($0)" } }
-                        .joined(separator: " · ")
-                    let piece = "상태@커서: \(rendered.prefix(maxStateCharacters))"
-                    line += " · " + piece
-                    cardItems.append(
-                        ContextReport.Item(
-                            kind: .state, text: "\(card.name) \(piece)",
-                            stableKey: "state|\(card.id.uuidString)"))
+                    let clauses = stateProse(name: card.name, state: state)
+                    if !clauses.isEmpty {
+                        let rendered = clauses.joined(separator: " ").prefix(maxStateCharacters)
+                        pieces.append(String(rendered))
+                        cardItems.append(
+                            ContextReport.Item(
+                                kind: .state, text: "\(card.name) \(rendered)",
+                                stableKey: "state|\(card.id.uuidString)"))
+                    }
                 }
                 // 앎@커서 (v4, 요구사항 §11·§16) — 그 시점까지 이 인물이 가진
-                // 앎의 최근 조각. "아직 모르는 비밀을 대사로 말하는" 제안을
-                // 프롬프트 수준에서 막는 재료다. **회상 집필 중에는 시간 기준**
-                // (요구사항 §14·§30) — 그때의 인물은 미래의 앎이 없다.
+                // 앎의 최근 조각을 태도 문장으로. "아직 모르는 비밀을 대사로
+                // 말하는" 제안을 프롬프트 수준에서 막는 재료다. **회상 집필 중에는
+                // 시간 기준** (요구사항 §14·§30) — 그때의 인물은 미래의 앎이 없다.
                 let known =
                     writingInPast
                     ? position?.sceneIndex.map {
@@ -596,14 +646,14 @@ public enum ContextAssembler {
                     } ?? knowledge.knowledgeChrono(of: card.id, atSceneContaining: windowStart)
                     : knowledge.knowledge(of: card.id, before: windowStart)
                 if !known.isEmpty, controls.allows("knowledge|\(card.id.uuidString)") {
-                    let rendered = known.suffix(maxKnowledgeFactsPerCard)
-                        .map { "\($0.fact)(\($0.stance.rawValue))" }
-                        .joined(separator: "; ")
-                    let piece = "앎: \(rendered)"
-                    line += " · " + piece
+                    let facts = known.suffix(maxKnowledgeFactsPerCard)
+                        .map { knowledgeProse(name: card.name, delta: $0) }
+                    pieces.append(contentsOf: facts)
+                    // 태도 문장은 이미 이름으로 시작하므로 리포트 접두 없이 그대로.
                     cardItems.append(
                         ContextReport.Item(
-                            kind: .knowledge, text: "\(card.name) \(piece)",
+                            kind: .knowledge,
+                            text: facts.joined(separator: " "),
                             jumpQuery: known.last?.quote,
                             stableKey: "knowledge|\(card.id.uuidString)"))
                 }
@@ -614,15 +664,16 @@ public enum ContextAssembler {
             if let recent = knowledge?.lastAppearance(of: card.id, before: windowStart),
                 controls.allows("recent|\(card.id.uuidString)")
             {
-                let piece = "최근: \(recent.summary.prefix(maxRecentEventCharacters))"
-                line += " · " + piece
+                let summary = String(recent.summary.prefix(maxRecentEventCharacters))
+                let piece = "최근에 \(KoreanProse.terminated(summary))"
+                pieces.append(piece)
                 cardItems.append(
                     ContextReport.Item(
-                        kind: .recentEvent, text: "\(card.name) \(piece)",
+                        kind: .recentEvent, text: "\(card.name): \(piece)",
                         jumpQuery: recent.quote,
                         stableKey: "recent|\(card.id.uuidString)"))
             }
-            lines.append((line, cardItems))
+            lines.append((pieces.joined(separator: " "), cardItems))
         }
         // 줄 단위 예산 — 통짜 prefix는 마지막 줄을 중간에서 잘라 리포트와
         // 프롬프트가 어긋난다. 예산을 넘는 줄부터 통째로 버린다.
@@ -635,6 +686,61 @@ public enum ContextAssembler {
             report.append(contentsOf: items)
         }
         return kept.joined(separator: "\n")
+    }
+
+    // MARK: - 산문 렌더링 (PLAN §11 형식 개편 — 레코드 덤프 폐지)
+
+    /// 상태 델타 → 산문 절들 — `필드=값` 대신 짧은 자연 문장. 값은 자유 서술
+    /// (≤40자)이라 완벽한 굴절은 불가능하다: 템플릿이 가장 무해한 문형을 고르고,
+    /// 정보가 없는 기본값(생존)은 침묵한다 (품질 > 적극성, CLAUDE.md §1-2).
+    /// CaseIterable 순서로 고정 렌더링 — 같은 상태가 패스마다 다른 순서로 찍히면
+    /// KV 프리픽스가 식는다 (PLAN §12).
+    static func stateProse(
+        name: String, state: [StateDelta.Field: String]
+    ) -> [String] {
+        StateDelta.Field.allCases.compactMap { field -> String? in
+            guard let value = state[field]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                !value.isEmpty
+            else { return nil }
+            switch field {
+            case .vitality:
+                if isDeathValue(value) {
+                    return "\(KoreanProse.topic(name)) 이미 죽어 있다."
+                }
+                // 생존·건강 같은 기본값은 말할 가치가 없다 — 토큰당 품질.
+                guard !value.contains("생존"), !value.contains("건강"),
+                    !value.contains("무사")
+                else { return nil }
+                return "몸은 \(KoreanProse.copula(value))."
+            case .location:
+                return "지금 \(value)에 있다."
+            case .emotion:
+                return "마음은 \(KoreanProse.copula(value))."
+            case .relation:
+                return "관계는 \(KoreanProse.copula(value))."
+            case .goal:
+                return "목표는 \(KoreanProse.terminated(value))"
+            }
+        }
+    }
+
+    /// 사망을 뜻하는 값 판정 — 닫힌 키워드 집합 (소형 모델의 서술 변주를 흡수).
+    private static func isDeathValue(_ value: String) -> Bool {
+        ["사망", "죽음", "죽었", "숨졌", "없어졌", "부고"].contains { value.contains($0) }
+    }
+
+    /// 앎 델타 → 태도 문장 — `사실(태도)` 튜플 대신 "누구는 …다 — 사실." 꼴.
+    /// 오해(misbelieves)는 "잘못 믿고 있다"로 렌더링해 모델이 그 사실을 진실로
+    /// 흡수하는 것을 막는다 (일관성 > 유창성, CLAUDE.md §3).
+    static func knowledgeProse(name: String, delta: KnowledgeDelta) -> String {
+        let attitude: String
+        switch delta.stance {
+        case .knows: attitude = "알고 있다"
+        case .suspects: attitude = "의심한다"
+        case .misbelieves: attitude = "잘못 믿고 있다"
+        case .hides: attitude = "숨기고 있다"
+        }
+        return "\(KoreanProse.topic(name)) \(attitude) — \(KoreanProse.terminated(delta.fact))"
     }
 
     /// 카드 선택 — 최근 창에 이름·별칭이 언급된 카드 우선, 남는 자리는 목록

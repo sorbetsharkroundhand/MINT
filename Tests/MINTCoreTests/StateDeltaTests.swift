@@ -186,9 +186,9 @@ final class StateDeltaTests: XCTestCase {
         XCTAssertEqual(snapshot.stateAt(of: UUID(), before: .max), [:])
     }
 
-    // MARK: - 카드 조립: 상태@커서 줄
+    // MARK: - 카드 조립: 상태 산문 절
 
-    func test카드에_상태_줄이_붙는다() {
+    func test카드에_상태가_산문으로_붙는다() {
         let (snapshot, outline) = makeSnapshot()
         let document = DocumentContext(
             title: "시험작", kind: .novel, characters: [seoyeon, minjun])
@@ -196,18 +196,34 @@ final class StateDeltaTests: XCTestCase {
             document: document, window: "",
             knowledge: snapshot, windowStart: outline.scenes[1].utf16Range.upperBound)
         // CaseIterable 순서 고정 렌더링 — KV 프리픽스 안정 (PLAN §12).
-        XCTAssertTrue(header.contains("상태@커서: 위치=병원 · 감정=기대"), header)
+        // 레코드(`필드=값`)가 아니라 자연 문장으로 펴진다 (PLAN §11 형식 개편).
+        XCTAssertTrue(header.contains("지금 병원에 있다"), header)
+        XCTAssertTrue(header.contains("마음은 기대다"), header)
+        XCTAssertFalse(header.contains("="), "레코드 구분자는 산문형에서 사라진다")
+        XCTAssertFalse(header.contains("@커서"), header)
         // 3장(커서 이후)의 죽음은 카드에 없어야 한다.
         XCTAssertFalse(header.contains("사망"), header)
     }
 
-    func test상태가_없으면_상태_줄도_없다() {
+    func test상태가_없으면_상태_절도_없다() {
         let (snapshot, outline) = makeSnapshot()
         let document = DocumentContext(
             title: "시험작", kind: .novel, characters: [minjun])
         let header = ContextAssembler.headerText(
             document: document, window: "",
             knowledge: snapshot, windowStart: outline.scenes[0].utf16Range.upperBound)
-        XCTAssertFalse(header.contains("상태@커서"), header)
+        XCTAssertFalse(header.contains("몸은"), header)
+        XCTAssertFalse(header.contains("마음은"), header)
+    }
+
+    func test사망_델타는_등장불가_문장이_된다() {
+        // 일관성 실탄 — "생사=사망" 레코드보다 문장이 모델을 더 세게 묶는다.
+        let (snapshot, outline) = makeSnapshot()
+        let document = DocumentContext(
+            title: "시험작", kind: .novel, characters: [minjun])
+        let header = ContextAssembler.headerText(
+            document: document, window: "",
+            knowledge: snapshot, windowStart: outline.scenes[2].utf16Range.upperBound)
+        XCTAssertTrue(header.contains("민준은 이미 죽어 있다"), header)
     }
 }

@@ -365,8 +365,8 @@ final class NarrativeIntelligenceTests: XCTestCase {
         guard case .continuation(let text) = prompt else {
             return XCTFail("continuation이어야 한다")
         }
-        // 앎이 카드 줄에 실렸고, 리포트에도 같은 내용이 있다.
-        XCTAssertTrue(text.contains("앎: 약이 바뀌었다(의심)"))
+        // 앎이 태도 문장으로 카드 줄에 실렸고, 리포트에도 같은 내용이 있다.
+        XCTAssertTrue(text.contains("서연은 의심한다 — 약이 바뀌었다."))
         XCTAssertTrue(report.items.contains { $0.kind == .knowledge })
         // 지금 장면(제목)이 실렸다.
         XCTAssertTrue(text.contains("지금 장면: 카페의 재회"))

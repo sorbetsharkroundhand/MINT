@@ -675,6 +675,29 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         return nil
     }
 
+    /// 커서가 속한 씬에 함께 있는 등록 인물 — PLAN §11 장면 앵커(그라운딩).
+    ///
+    /// 다음 문장 예측에는 "지난 줄거리"보다 "지금 이 공간에 누가 있는가"가
+    /// 정보량이 크다 (ConStory-Bench 2026의 실패 분포 — factual 최다 — 와
+    /// 같은 방향). 발화는 커서 이전 것만(위치가 있는 유일 신호), 씬 사건은
+    /// 씬 해시 단위로 합친다 — 사건은 씬 내 세부 위치가 없어 그렇게밖에 안 된다.
+    /// 순서는 첫 등장 순(발화 → 사건)으로 고정 — KV 프리픽스 보호 (PLAN §12).
+    public func sceneCohabitants(at utf16Offset: Int) -> [UUID] {
+        guard let index = outline.sceneIndex(at: utf16Offset) else { return [] }
+        let hash = outline.scenes[index].contentHash
+        var order: [UUID] = []
+        var seen: Set<UUID> = []
+        func add(_ ids: [UUID]) {
+            for id in ids where seen.insert(id).inserted { order.append(id) }
+        }
+        for conversation in conversations
+        where conversation.sceneHash == hash && conversation.utf16Start < utf16Offset {
+            add(conversation.participants)
+        }
+        for event in events where event.sceneHash == hash { add(event.participants) }
+        return order
+    }
+
     /// 그 위치 시점의 인물 상태 — PLAN §8 `state_at`, §6.2의 fold.
     ///
     /// 커서 이전에 끝난 씬의 델타를 **담화 순서로 접는다**: 같은 필드는 나중
@@ -1003,6 +1026,77 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         guard let flow = flows.first(where: { $0.id == flowID }) else { return [] }
         let keys = Set(flow.eventKeys)
         return canonicalEvents.filter { keys.contains($0.canonicalKey) }
+    }
+
+    // MARK: - 씬 살라이언스 (B블록 선별, PLAN §11)
+
+    /// B블록 후보 씬들의 살라이언스 점수 — 인덱스 공유(Indexter pairwise event
+    /// salience: 시간·공간·주인공·인과 중 그래프가 답할 수 있는 셋)와 담화 거리
+    /// 감쇠의 합. 순수 거리순("커서에서 가까운 것부터")을 대체한다 — 같은 장소
+    /// 재방문·동석 인물·인과 선행 사건은 멀어도 다음 장면 예측에 더 진한 신호다.
+    ///
+    /// 결정적 파생이라 예측 경로에서 매번 계산해도 O(사건+간선+후보)로 저렴하다
+    /// (조립은 조립만, CLAUDE.md §2-2 — LLM 호출 없음).
+    public func sceneSalienceScores(
+        at utf16Offset: Int, candidates: [DocumentOutline.Scene]
+    ) -> [String: Double] {
+        let offset = max(utf16Offset, 0)
+        guard let currentIndex = outline.sceneIndex(at: offset) else { return [:] }
+        let currentHash = outline.scenes[currentIndex].contentHash
+        let currentMeta = sceneMetaByHash[currentHash]
+        let currentLocation = Self.normalizedLocation(currentMeta?.location)
+        let currentCast = Set(sceneCohabitants(at: offset))
+
+        // 정본 사건 키 → 씬 해시 — 인과 간선 끝점을 씬 단위로 환산한다.
+        var hashByKey: [String: String] = [:]
+        for event in canonicalEvents { hashByKey[event.canonicalKey] = event.sceneHash }
+        let currentKeys = Set(
+            canonicalEvents.filter { $0.sceneHash == currentHash }.map(\.canonicalKey))
+        // 지금 씬의 사건으로 **들어오는** 인과 간선의 원인 씬 — "지금 일이 왜
+        // 일어났나"의 근거가 놓인 과거 장면이다 (Indexter causality).
+        var ancestorHashes: Set<String> = []
+        for link in causalLinks where currentKeys.contains(link.toKey) {
+            if let hash = hashByKey[link.fromKey], hash != currentHash {
+                ancestorHashes.insert(hash)
+            }
+        }
+
+        let indexByHash = Dictionary(
+            uniqueKeysWithValues: outline.scenes.enumerated().map {
+                ($0.element.contentHash, $0.offset)
+            })
+        var castByHash: [String: Set<UUID>] = [:]
+        for event in events {
+            castByHash[event.sceneHash, default: []].formUnion(event.participants)
+        }
+
+        var scores: [String: Double] = [:]
+        for scene in candidates {
+            let hash = scene.contentHash
+            var score = 5.0
+            if ancestorHashes.contains(hash) { score += 30 }
+            if let currentLocation,
+                let location = Self.normalizedLocation(sceneMetaByHash[hash]?.location),
+                location == currentLocation
+            {
+                score += 20
+            }
+            let shared = (castByHash[hash] ?? []).intersection(currentCast).count
+            score += Double(min(shared, 2)) * 10
+            if let index = indexByHash[hash] {
+                score -= 0.25 * Double(max(0, currentIndex - index))
+            }
+            scores[hash] = score
+        }
+        return scores
+    }
+
+    /// 장소 문자열 정규화 — 공백 제거, 빈 값은 nil. 살라이언스의 공간 비교용.
+    private static func normalizedLocation(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !trimmed.isEmpty
+        else { return nil }
+        return trimmed
     }
 
     /// 다음 화자 추정 (PLAN §10 대화 모드 ①) — 직전 발화의 청자가 1순위,
