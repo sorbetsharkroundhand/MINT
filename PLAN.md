@@ -274,7 +274,10 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
   `storyEvent(forMember:)`·`EventPerspective.segmentID`·`segment(withID:)`.
 - **Pin/Exclude** (§11 조립과 같은 파이프라인): 컨텍스트 항목의 안정 키에
   오버라이드(`contextPin`/`contextExclude`)를 걸면 조립이 강제 포함/제외한다.
-  UI 전용 프리뷰 금지 — 인스펙터가 보는 것 = 조립이 하는 것.
+  핀은 카드 상한(maxCards)보다 많아도 **전부** 실린다 — 사용자 지정이 휴리스틱
+  예산을 이긴다 (§1-5). stableKey는 항목마다 고유해야 한다 — 흐름 사건이
+  `"flow"` 하나를 같이 쓰면 서로의 오버라이드가 덮였다(2026-08-22 수정,
+  `flow|<정본키>`). UI 전용 프리뷰 금지 — 인스펙터가 보는 것 = 조립이 하는 것.
 - **재앵커 사다리** (`SourceAnchor`): exact → 접두 12자 → 어절 지문 과반 매칭.
   전부 실패하면 nil — 엉뚱한 위치로 조용히 잇는 것보다 stale이 낫다.
 

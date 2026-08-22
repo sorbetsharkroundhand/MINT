@@ -291,7 +291,7 @@ public final class BackgroundIndexer: ObservableObject {
                 let auto = candidates.filter {
                     $0.confidence == .high && $0.aliasOfKnown == nil
                 }
-                for candidate in auto { self.autoRegister(candidate) }
+                for candidate in auto { self.autoRegister(candidate, in: entryID) }
                 self.characterCandidates = candidates.filter { candidate in
                     !auto.contains(where: { $0.name == candidate.name })
                 }
@@ -331,8 +331,14 @@ public final class BackgroundIndexer: ObservableObject {
     /// HIGH 신뢰 후보의 자동 등록 (요구사항 §16) — 사용자 확인 없이 카드를
     /// 만들되 `autoRegistered` 표식을 남긴다. 사용자가 카드를 편집하면 표식이
     /// 사라지고, 삭제는 언제나 한 번의 클릭이다 (기억은 사용자의 것, §1-5).
-    private func autoRegister(_ candidate: CharacterDetector.Candidate) {
-        guard let store, let entry = store.activeEntry else { return }
+    /// 등록 대상은 **감지된 문서**다 — activeEntry가 아니라. 감지와 MainActor 홉
+    /// 사이에 문서를 전환하면 다른 원고에 카드가 새어드는 레이스가 생긴다.
+    private func autoRegister(
+        _ candidate: CharacterDetector.Candidate, in entryID: UUID
+    ) {
+        guard let store,
+            let entry = store.entries.first(where: { $0.id == entryID })
+        else { return }
         // 이미 같은 이름의 카드가 있으면 만들지 않는다 (known 필터의 안전망).
         guard (entry.characters ?? []).allSatisfy({ $0.name != candidate.name }) else { return }
         let card = CharacterCard(
@@ -732,7 +738,8 @@ public final class BackgroundIndexer: ObservableObject {
             }
         }
 
-        var freshChapters: [KnowledgeSidecar.ChapterSummary] = []
+        // 이번 패스에서 확보한 롤업 — 경로별 기록 후 아래에서 문서 순서로 조립한다.
+        var madeByPath: [[String]: KnowledgeSidecar.ChapterSummary] = [:]
         for chapter in chapters {
             guard !Task.isCancelled, gateAllows(deep: true) else { return }
             let childSummaries = chapter.scenes.compactMap {
@@ -746,25 +753,31 @@ public final class BackgroundIndexer: ObservableObject {
             if let existing = sidecar.chapterSummaries.first(where: {
                 $0.headingPath == chapter.path && $0.childrenHash == childrenHash
             }) {
-                freshChapters.append(existing)  // 메모 적중 — 재요약 금지
+                madeByPath[chapter.path] = existing  // 메모 적중 — 재요약 금지
                 continue
             }
             let summary = await rollup(
                 childSummaries, level: .chapter, engine: engine, parameters: parameters)
             guard let summary else { continue }
-            freshChapters.append(
+            madeByPath[chapter.path] =
                 .init(
                     headingPath: chapter.path, childrenHash: childrenHash,
-                    summary: summary, updatedAt: .now))
+                    summary: summary, updatedAt: .now)
         }
-        sidecar.chapterSummaries = freshChapters
+        // 문서 순서 조립 — 갱신된 장은 새 값, 아니면 기존 롤업을 물려받는다.
+        // 완전 교체하면 더티 윈도우(씬 재요약 중·롤업 실패)에 유효한 장 요약이
+        // 통째로 사라졌다 다음 패스에 되살아난다 — 요약 피라미드의 증분 규율(§6.1) 위반.
+        sidecar.chapterSummaries = chapters.compactMap { chapter in
+            madeByPath[chapter.path]
+                ?? sidecar.chapterSummaries.first { $0.headingPath == chapter.path }
+        }
 
         // 작품 요약 — 장 요약(없으면 씬 요약)에서. 씬 3개 미만이면 만들지 않는다
         // (C 창이 이미 전부를 본다 — 토큰당 품질, CLAUDE.md §5-1).
         guard outline.scenes.count >= 3, !Task.isCancelled else { return }
         let sources =
-            freshChapters.count >= 2
-            ? freshChapters.map(\.summary)
+            sidecar.chapterSummaries.count >= 2
+            ? sidecar.chapterSummaries.map(\.summary)
             : outline.scenes.compactMap { sidecar.sceneSummaries[$0.contentHash]?.summary }
         guard sources.count >= 2 else { return }
         let childrenHash = combinedHash(outline.scenes.map(\.contentHash))

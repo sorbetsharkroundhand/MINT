@@ -140,6 +140,12 @@ public enum ContextAssembler {
             excludes = Set(overrides.map(of: .contextExclude).keys)
         }
 
+        /// 테스트·내부 조립용 — 오버라이드 집합을 직접 지정한다.
+        init(pins: Set<String> = [], excludes: Set<String> = []) {
+            self.pins = pins
+            self.excludes = excludes
+        }
+
         func allows(_ key: String) -> Bool { !excludes.contains(key) }
         func pinned(_ key: String) -> Bool { pins.contains(key) }
     }
@@ -330,16 +336,21 @@ public enum ContextAssembler {
 
         // 흐름 사건 (v5, 요구사항 §30) — 회상 집필 중이면 그 인물 흐름의 이전
         // 사건을 우선 주입한다: "이 회상의 주인이 겪어온 일"이 가장 진한 신호다.
-        if writingInPast, let flowID = position?.flowID, controls.allows("flow") {
+        if writingInPast, let flowID = position?.flowID {
             let flowEvents = knowledge.flowEvents(of: flowID)
             for event in flowEvents.suffix(2) {
+                // stableKey에 정본 사건 키를 넣는다 — 두 사건이 "flow" 하나를
+                // 같이 쓰면 Pin/Exclude 오버라이드가 서로를 덮어 인스펙터(거울)와
+                // 조립이 어긋난다.
+                let key = "flow|\(event.canonicalKey)"
+                guard controls.allows(key) else { continue }
                 let line = "이 흐름의 사건: \(event.summary)"
                 guard line.count <= budget else { break }
                 lines.append(line)
                 reported.append(
                     ContextReport.Item(
                         kind: .flowEvent, text: line, jumpQuery: event.quote,
-                        stableKey: "flow", pinned: controls.pinned("flow")))
+                        stableKey: key, pinned: controls.pinned(key)))
                 budget -= line.count
             }
         }
@@ -638,13 +649,18 @@ public enum ContextAssembler {
         }
         guard valid.count > maxCards else { return valid }
 
-        // Pin된 카드는 관련성(최근 창 언급)과 무관하게 항상 실린다 (§31).
+        // Pin된 카드는 상한과 무관하게 **전부** 실린다 — 사용자 지정(§31)이 휴리스틱
+        // 예산을 이긴다 (CLAUDE.md §1-5). prefix로 자르면 초과분이 말없이 탈락해
+        // "고정했는데 빠졌다"는 신뢰 붕괴가 된다. 토큰 안전망은 엔진의 3072 클램프가 담당.
         var picked = valid.filter { controls.pinned("card|\($0.id.uuidString)") }
-        for card in valid where !picked.contains(where: { $0.id == card.id }) {
-            if window.contains(card.name)
-                || aliasList(card).contains(where: { window.contains($0) })
-            {
-                picked.append(card)
+        if picked.count < maxCards {
+            for card in valid where !picked.contains(where: { $0.id == card.id }) {
+                if window.contains(card.name)
+                    || aliasList(card).contains(where: { window.contains($0) })
+                {
+                    picked.append(card)
+                    if picked.count >= maxCards { break }
+                }
             }
         }
         if picked.count < maxCards {
@@ -653,7 +669,7 @@ public enum ContextAssembler {
                 if picked.count >= maxCards { break }
             }
         }
-        let chosen = Set(picked.prefix(maxCards).map(\.id))
+        let chosen = Set(picked.map(\.id))
         return valid.filter { chosen.contains($0.id) }
     }
 
