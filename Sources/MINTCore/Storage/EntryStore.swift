@@ -267,12 +267,26 @@ public final class EntryStore: ObservableObject {
         var expandedFolderIDs: [UUID]? = nil
     }
 
-    public init(autosaveDelay: Duration = .milliseconds(800)) {
-        self.autosaveDelay = autosaveDelay
-        let dir = Self.storageDirectory()
-        self.fileURL = dir.appendingPathComponent("entries.json", isDirectory: false)
+    public convenience init(autosaveDelay: Duration = .milliseconds(800)) {
+        self.init(directory: Self.storageDirectory(), autosaveDelay: autosaveDelay)
+    }
 
-        let loaded = Self.loadSnapshot(from: fileURL) ?? Self.migratedOrEmptySnapshot(in: dir)
+    /// 저장 위치를 지정하는 내부 초기자 — 테스트가 임시 디렉터리로 격리하기 위함.
+    init(directory: URL, autosaveDelay: Duration) {
+        self.autosaveDelay = autosaveDelay
+        self.fileURL = directory.appendingPathComponent("entries.json", isDirectory: false)
+
+        let loaded: Snapshot
+        switch Self.loadSnapshot(from: fileURL) {
+        case .loaded(let snapshot):
+            loaded = snapshot
+        case .missing:
+            loaded = Self.migratedOrEmptySnapshot(in: directory)
+        case .corrupted:
+            // 원본은 .corrupt-* 사본으로 보존됐다 — 빈 저널로 시작해도 복구 가능.
+            // M1 이관(journal.md)은 정상 첫 실행 전용이라 여기선 하지 않는다.
+            loaded = Snapshot(entries: [], activeID: nil)
+        }
         var entries = loaded.entries
         if entries.isEmpty { entries = [JournalEntry()] }
         // 마이그레이션: 예전 파생 버그로 제목에 인라인 마크업(<font …>)이 얼어붙은
@@ -317,11 +331,37 @@ public final class EntryStore: ObservableObject {
         return dir
     }
 
-    private static func loadSnapshot(from url: URL) -> Snapshot? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
+    /// 스냅샷 로드 결과 — "파일 없음"(정상 첫 실행)과 "손상"(보존 대상)을 구분한다.
+    /// 둘을 하나로 뭉개면 디스크 장애·스키마 붕괴 시 빈 원고로 시작한 뒤 첫 autosave가
+    /// 유일한 원본을 통째로 덮어쓴다 — 원문 전멸(AGENTS.md §1 "원문이 안전") 위반이다.
+    private enum SnapshotLoad {
+        case loaded(Snapshot)
+        case missing
+        case corrupted
+    }
+
+    private static func loadSnapshot(from url: URL) -> SnapshotLoad {
+        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        guard let data = try? Data(contentsOf: url) else {
+            preserveCorruptedFile(at: url)
+            return .corrupted
+        }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(Snapshot.self, from: data)
+        guard let snapshot = try? decoder.decode(Snapshot.self, from: data) else {
+            preserveCorruptedFile(at: url)
+            return .corrupted
+        }
+        return .loaded(snapshot)
+    }
+
+    /// 손상된 원고 파일을 타임스탬프 사본으로 보존한다 — 스토어는 빈 상태로 다시
+    /// 시작하지만 원본은 항상 디스크에 남아 수동 복구가 가능하게 (조용한 전멸 금지).
+    static func preserveCorruptedFile(at url: URL) {
+        let stamp = Self.corruptStampFormatter.string(from: .now)
+        let backup = url.deletingPathExtension()
+            .appendingPathExtension("corrupt-\(stamp).json")
+        try? FileManager.default.copyItem(at: url, to: backup)
     }
 
     /// M1 단일 문서(journal.md) 이관 — 없으면 빈 저널 하나로 시작.
@@ -938,11 +978,49 @@ public final class EntryStore: ObservableObject {
     }
 
     private static func write(_ snapshot: Snapshot, to url: URL) {
+        rotateDailyBackup(of: url)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(snapshot) else { return }
         try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - 원고 백업 (PLAN §16 "백업 로테이션도 없음 — 원고는 소중하다" 해소)
+
+    /// 백업 보존 세대.
+    private static let backupKeepGenerations = 7
+
+    /// 하루 1회, 그날 첫 저장 직전에 어제까지의 상태를 `backups/`에 스냅샷하고
+    /// 최근 세대만 남긴다. 사본 이름은 **파일의 수정일**(그 내용이 무엇의 상태인지)을
+    /// 쓰므로 며칠 켜지 않았다가 돌아와도 같은 상태의 중복 사본이 생기지 않는다.
+    /// 결정적 로직 — 같은 디스크 상태면 같은 동작. 실패는 조용히 건너뛴다(최선 노력).
+    static func rotateDailyBackup(of url: URL) {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: url.path),
+            let attrs = try? fm.attributesOfItem(atPath: url.path),
+            let modified = attrs[.modificationDate] as? Date,
+            !Self.koCalendar.isDateInToday(modified)
+        else { return }
+        let dir = url.deletingLastPathComponent()
+            .appendingPathComponent("backups", isDirectory: true)
+        guard (try? fm.createDirectory(at: dir, withIntermediateDirectories: true)) != nil
+        else { return }
+        let stem = url.deletingPathExtension().lastPathComponent
+        let target = dir.appendingPathComponent(
+            "\(stem)-\(Self.backupDayFormatter.string(from: modified)).json")
+        if !fm.fileExists(atPath: target.path) {
+            try? fm.copyItem(at: url, to: target)
+        }
+        // 로테이션 — 파일명이 날짜라 사전순 정렬이 곧 시간순이다.
+        let prefix = stem + "-"
+        let generations =
+            ((try? fm.contentsOfDirectory(atPath: dir.path)) ?? [])
+            .filter { $0.hasPrefix(prefix) && $0.hasSuffix(".json") }
+            .sorted()
+        for stale in generations.dropLast(Self.backupKeepGenerations) {
+            try? fm.removeItem(at: dir.appendingPathComponent(stale))
+        }
     }
 
     // MARK: - 날짜 포맷터
@@ -963,4 +1041,7 @@ public final class EntryStore: ObservableObject {
     private static let fullDateFormatter = koFormatter("M월 d일 EEEE")
     private static let weekdayFormatter = koFormatter("EEEEE")
     private static let shortDateFormatter = koFormatter("M.d")
+    /// 백업 파일명·손상 사본 스탬프 — 정렬 가능성이 곧 시간순이 되게 고정 폭 형식.
+    private static let backupDayFormatter = koFormatter("yyyy-MM-dd")
+    private static let corruptStampFormatter = koFormatter("yyyy-MM-dd-HHmmss")
 }
