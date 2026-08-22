@@ -66,6 +66,12 @@ public actor CompletionEngine {
         _ = try await loadedContainer(modelID: parameters.modelID, onProgress: onProgress)
     }
 
+    /// 프롬프트 KV 캐시를 폐기한다 — 다음 생성은 무조건 콜드 프리필이다.
+    /// 모델 교체 외의 무효화 지점(메모리 압박·벤치의 콜드 기준선 복원)용 (PLAN §12).
+    public func resetPromptCache() {
+        promptCache.invalidate()
+    }
+
     /// 조립된 프롬프트로 다음 단어/구를 생성한다 (PLAN §10).
     ///
     /// 호출 태스크 취소에 즉시 협조한다 — 새 키 입력 시 컨트롤러가 태스크를

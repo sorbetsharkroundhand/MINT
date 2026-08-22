@@ -460,6 +460,9 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
             knowledge: knowledge, prefixStartUTF16: prefixStartUTF16,
             style: style)
         do {
+            // 콜드 기준선을 진짜 콜드로 — 같은 원고라 컷 사이 공통 접두가 길어
+            // 캐시가 살아 있으면 두 번째 컷부터 "콜드"가 사실상 웜이 된다.
+            await engine.resetPromptCache()
             let cold = try await engine.complete(prompt: prompt, parameters: parameters)
             let warm = try await engine.complete(prompt: prompt, parameters: parameters)
             // 수락 프록시: 제안과 정답의 문자 단위 공통 접두 길이.
