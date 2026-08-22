@@ -471,6 +471,8 @@ public actor CompletionEngine {
             text = stripThinking(text)
             text = text.trimmingCharacters(in: .whitespacesAndNewlines)
             text = stripSurroundingQuotes(text)
+        } else {
+            text = stripContinuationThinking(text)
         }
         // 고스트는 한 줄만 그린다 — 첫 줄바꿈 이전까지만.
         if let newline = text.firstIndex(of: "\n") {
@@ -481,6 +483,24 @@ public actor CompletionEngine {
             text.removeLast()
         }
         return text
+    }
+
+    /// 이어쓰기 출력의 사고(thinking) 태그 제거 — 사고 학습 모델(Qwen3.5 계열)은
+    /// 챗 템플릿 없는 이어쓰기에서도 `<think>…</think>` 블록이나 홀로 닫는
+    /// `</think>`를 내보낸다 (벤치 2026-08-22: Ternary-Bonsai 제안이 "</think>"
+    /// 그 자체였음). 태그로 시작할 때만 벗겨 뒤의 본문을 남긴다 — 일반 출력과
+    /// 본문 중간의 태그는 건드리지 않는다. 닫히지 않은 사고 블록은 빈 제안.
+    static func stripContinuationThinking(_ text: String) -> String {
+        let stripped = text.drop(while: { $0.isWhitespace || $0.isNewline })
+        guard stripped.hasPrefix("<think>") || stripped.hasPrefix("</think>") else {
+            return text
+        }
+        var rest = String(stripped)
+        if let range = rest.range(of: "</think>") {
+            return String(rest[range.upperBound...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return ""
     }
 
     /// 폴더 이름 후처리 — 모델 출력에서 깨끗한 한 줄 이름만 남긴다.
