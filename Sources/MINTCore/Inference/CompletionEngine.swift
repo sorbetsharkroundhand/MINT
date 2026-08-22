@@ -397,8 +397,19 @@ public actor CompletionEngine {
                     reusedPromptTokens: reusedPromptTokens
                 )
             } catch {
-                // 생성이 던졌다 — 캐시 상태를 신뢰할 수 없으니 버린다.
-                if cacheInUse { promptCache.abandon() }
+                // 협조 취소는 문장 경계 조기 종료와 같은 그림이다 — 스트림을 중간에
+                // 닫았을 뿐, 프리필·생성이 토큰 순서대로 진행하는 이상 캐시 앞부분은
+                // 기록된 프롬프트 접두와 일치하고 다음 요청의 trim이 초과분(offset−lcp,
+                // 생성 토큰 포함)을 정리한다. 버리면 빠른 타이핑의 잦은 선점마다 웜
+                // 이득이 증발하므로 commit으로 짝을 맞춘다 (PLAN §16 부채 해소).
+                // 반면 실제 실패(GPU 오류 등)는 캐시 상태를 신뢰할 수 없으니 버린다.
+                if cacheInUse {
+                    if error is CancellationError {
+                        promptCache.commit(tokens: promptTokens)
+                    } else {
+                        promptCache.abandon()
+                    }
+                }
                 throw error
             }
         }
