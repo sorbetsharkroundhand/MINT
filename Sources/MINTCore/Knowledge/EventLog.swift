@@ -128,6 +128,7 @@ public enum EventParser {
         sceneText: String? = nil
     ) -> [StoryEvent] {
         var events: [StoryEvent] = []
+        var seenKeys: Set<String> = []
         for rawLine in output.split(separator: "\n") {
             guard events.count < maxEventsPerScene else { break }
             let line = stripListMarker(rawLine.trimmingCharacters(in: .whitespaces))
@@ -164,11 +165,14 @@ public enum EventParser {
             // 상태가 바뀐 인물은 그 사건의 참여자다 — 델타만 있고 참여 표기가
             // 빠진 사건도 역색인(§6.3)에 걸려야 `state_at`이 그 인물을 찾는다.
             let holders = deltas.map(\.characterID).filter { !participants.contains($0) }
-            events.append(
-                StoryEvent(
-                    sceneHash: sceneHash, participants: participants + holders,
-                    summary: summary, importance: importance, deltas: deltas,
-                    quote: quote))
+            let event = StoryEvent(
+                sceneHash: sceneHash, participants: participants + holders,
+                summary: summary, importance: importance, deltas: deltas,
+                quote: quote)
+            // 양자화 모델이 같은 사건 줄을 반복해도 정본 후보는 하나다
+            // (PLAN §6.3·§6.6). 첫 출력만 남겨 순서와 근거를 안정화한다.
+            guard seenKeys.insert(event.stableKey).inserted else { continue }
+            events.append(event)
         }
         return events
     }
