@@ -289,6 +289,8 @@ public final class CompletionController: ObservableObject {
             preloadEngine()
         } else {
             invalidate()
+            // 이름 생성도 접는다 — 스위치가 꺼진 뒤엔 이 이름이 도착해도 어긋난다.
+            cancelAllFolderNaming()
         }
     }
 
@@ -309,6 +311,9 @@ public final class CompletionController: ObservableObject {
         guard settings.modelID == modelID else { return }
         engineState = .failed(error.localizedDescription)
         failedModelID = modelID
+        // 콜드 로드 실패 = 이름 생성이 영영 끝나지 못함 — 스피너를 풀어준다
+        // (이슈 #47의 "스피너 무한 회전" 본경로).
+        cancelAllFolderNaming()
     }
 
     // MARK: - 에디터 이벤트
@@ -440,6 +445,12 @@ public final class CompletionController: ObservableObject {
     /// AI 이름 생성이 진행 중인 폴더들 — 사이드바 행의 로딩 점 표시용.
     @Published public private(set) var namingFolderIDs: Set<UUID> = []
 
+    /// 폴더별 이름 생성 태스크 (이슈 #47). 미추적이면 콜드 모델 로드 수 분 동안
+    /// 스피너가 도는 걸 끊을 방법이 없었다. 취소는 소유자(아래 cancel 계열)만
+    /// 딕셔너리를 정리하고, 태스크는 깨어나 `Task.isCancelled`로 스스로 물러난다 —
+    /// 늦게 풀린 옛 태스크가 새 요청의 표시·딕셔너리를 침범하지 않게.
+    private var folderNamingTasks: [UUID: Task<Void, Never>] = [:]
+
     /// 자동 생성 폴더("새 폴더")의 이름을 멤버 문서 내용에서 지어 붙인다.
     ///
     /// 엔진을 쓸 수 없으면(자동완성 꺼짐·로드 실패) 조용히 기본 이름을 유지한다 —
@@ -458,10 +469,15 @@ public final class CompletionController: ObservableObject {
         namingFolderIDs.insert(folderID)
         let parameters = settings.parameters
         // 이름이 도착할 때까지 self를 붙잡는다(수명 유한) — 진행 표시 해제가 목적.
-        Task { [engine, weak store] in
+        let task = Task { [engine, weak store] in
             let name =
                 (try? await engine.generateFolderName(
                     content: content, parameters: parameters)) ?? ""
+            // 취소됐다면 정리는 이미 취소 경로가 끝냈고 이름도 적용하지 않는다
+            // (stale 결과 무시, 이슈 #47). 여기서 건드리지 않는 이유 — 이 태스크가
+            // 풀리기 전에 같은 폴더에 새 요청이 들어왔을 수 있다.
+            guard !Task.isCancelled else { return }
+            self.folderNamingTasks[folderID] = nil
             self.namingFolderIDs.remove(folderID)
             guard !name.isEmpty, let store else { return }
             // 사용자가 그 사이 직접 이름을 바꿨다면 스토어 쪽 가드가 조용히 무시한다.
@@ -469,6 +485,24 @@ public final class CompletionController: ObservableObject {
                 store.renameFolderIfPlaceholder(folderID, to: name)
             }
         }
+        folderNamingTasks[folderID] = task
+    }
+
+    /// 사이드바 행이 사라졌다(삭제·접힘·필터) — 그 폴더의 이름 생성을 접는다.
+    /// 보이지 않는 스피너를 위해 수 분 생성을 돌려두는 일이 없게 (이슈 #47).
+    public func cancelFolderName(for folderID: UUID) {
+        folderNamingTasks.removeValue(forKey: folderID)?.cancel()
+        namingFolderIDs.remove(folderID)
+    }
+
+    /// 이름 생성 전부 중단 — 자동완성 종료·모델 로드 실패처럼 이 이름이 더는
+    /// 도착할 수 없는 터미널 상태에서 부른다. 고스트 invalidate()와는 달리
+    /// 편집마다 부르지 않는다 — 명명은 타이핑과 간섭 없이 완료되기로 되어 있다.
+    private func cancelAllFolderNaming() {
+        for (_, task) in folderNamingTasks { task.cancel() }
+        folderNamingTasks.removeAll()
+        guard !namingFolderIDs.isEmpty else { return }
+        namingFolderIDs.removeAll()
     }
 
     // MARK: - 내부
