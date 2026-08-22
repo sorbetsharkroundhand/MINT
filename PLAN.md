@@ -644,6 +644,11 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
   `entries.json.corrupt-*`로 보존 후 시작(`preserveCorruptedFile`) — 빈 스토어의
   autosave가 손상 원본을 조용히 덮던 전멸 경로를 막았다
   (EntryStoreSafetyTests 7건). 단일 파일 스케일 한계 자체는 여전히 열려 있다.
+- ~~자동저장이 메인 스레드를 막는다~~ **해소(2026-08-22)**: 디바운스 autosave의
+  JSON 인코딩+쓰기를 `EntryStore.SnapshotWriter`(전용 직렬 액터)로 옮겼다 —
+  스냅샷 캡처·취소 판정만 메인에 남기고 쓰기는 hop. 예전의 MainActor 직렬화가
+  보장하던 쓰기 순서는 액터 FIFO가 승계하고, flush·즉시 저장은 완료 대기로
+  "반환 시점 = 디스크 반영" 계약을 유지한다(⌘Q 마지막 문장 보존 — AGENTS §6).
 - `BlockTextView` 3141행 모놀리스 — 지식·추출 로직 반입 금지(CLAUDE.md §4),
   장기적으로 고스트 렌더·서식 분리 후보.
 - ~~상태 바가 렌더마다 문서 전체를 3번 센다~~ **해소(2026-07-17)**: 키 입력마다

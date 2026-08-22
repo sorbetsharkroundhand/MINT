@@ -177,6 +177,7 @@ extension JournalFolder: SortOrderable {}
 ///
 /// - 저장 위치: `~/Documents/MINT/entries.json`
 /// - 본문 타이핑은 디바운스 autosave, 생성/삭제/이름변경 같은 구조 변경은 즉시 저장.
+///   인코딩+쓰기는 전용 직렬 라이터 액터에서 — 대형 원고도 메인 스레드를 막지 않는다.
 /// - 첫 실행 시 M1의 단일 문서(`journal.md`)가 있으면 첫 저널로 이관한다
 ///   (원본 파일은 안전을 위해 남겨둔다).
 /// - 목록은 항상 1편 이상 유지한다 — 마지막 저널을 지우면 빈 저널을 새로 만든다.
@@ -250,6 +251,11 @@ public final class EntryStore: ObservableObject {
     private let autosaveDelay: Duration
     private let fileURL: URL
     private var saveTask: Task<Void, Never>?
+    /// 마지막으로 예약된 저장의 세대 — 이전 세대 쓰기의 완료가 `isSaving`을
+    /// 되살리지 못하게 (새 저장이 예약된 상태에서 "저장됨"으로 깜빡임 방지).
+    private var saveGeneration = 0
+    /// 원고 저장의 유일한 통로 (아래 `SnapshotWriter`).
+    private let writer = SnapshotWriter()
 
     /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
     /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
@@ -259,7 +265,8 @@ public final class EntryStore: ObservableObject {
     /// 지식 로직은 여기 두지 않는다 (CLAUDE.md §4) — 신호만 내보낸다.
     public var documentDidChange: ((UUID) -> Void)?
 
-    private struct Snapshot: Codable {
+    /// 스냅샷 — 저장 파일 한 벌. 값 타입뿐이라 라이터 액터로 건너갈 수 있다 (Sendable).
+    private struct Snapshot: Codable, Sendable {
         var entries: [JournalEntry]
         var activeID: UUID?
         // 파일시스템 v1 이전 파일엔 없는 키 — 옵셔널로 하위 호환.
@@ -950,21 +957,64 @@ public final class EntryStore: ObservableObject {
     /// 저장 대기/진행 중 표시 — 상태 바의 "저장 중…/저장됨" 표시용 (L6).
     @Published public private(set) var isSaving = false
 
+    /// 원고 저장 전용 직렬 라이터 (이슈 #44).
+    ///
+    /// 수백 KB~MB 스냅샷의 JSON 인코딩+쓰기는 수십~수백 ms 걸리고, 메인에서
+    /// 돌면 타이핑 재개와 겹쳐 프리즈가 된다(고스트 지연 예산 PLAN §10 직격).
+    /// 그래서 **스냅샷 캡처·취소 판정만 메인에 남기고 인코딩+쓰기는 여기서
+    /// 돌린다**. 예전엔 MainActor 직렬화가 "캡처 순서 = 디스크 반영 순서"를
+    /// 보장했는데, 액터의 FIFO 직렬화가 그 역할을 승계한다 — 세 스냅샷은 전부
+    /// 전체 상태라 순서만 지켜지면 마지막 쓰기가 곧 최신 상태다.
+    private actor SnapshotWriter {
+        func write(_ snapshot: Snapshot, to url: URL) {
+            EntryStore.write(snapshot, to: url)
+        }
+    }
+
+    /// 디바운스 autosave — 입력이 멈춘 뒤에만 쓴다.
+    /// 메인에서 하는 일: 이전 예약 취소 → 스냅샷 캡처 → 지연 대기. 실제 쓰기는
+    /// 라이터 액터로 hop하므로 대형 원고에서도 메인이 막히지 않는다.
     private func scheduleSave() {
         saveTask?.cancel()
         isSaving = true
+        saveGeneration += 1
+        let generation = saveGeneration
         let snapshot = currentSnapshot
         saveTask = Task { [weak self, autosaveDelay, fileURL] in
             try? await Task.sleep(for: autosaveDelay)
             guard !Task.isCancelled else { return }
-            Self.write(snapshot, to: fileURL)
-            self?.isSaving = false
+            await self?.persist(snapshot, to: fileURL, generation: generation)
         }
     }
 
+    /// 라이터 액터로 쓰기를 넘기고, 끝나면 메인으로 돌아와 최신성 검사 후 표시 정리.
+    /// 새 저장이 먼저 예약된(stale) 완료는 `isSaving`을 건드리지 않는다.
+    private func persist(_ snapshot: Snapshot, to url: URL, generation: Int) async {
+        await writer.write(snapshot, to: url)
+        if generation == saveGeneration { isSaving = false }
+    }
+
+    /// 라이터 액터에 쓰기를 맡기고 **완료까지 기다린다** — 구조 변경 즉시 저장과
+    /// flush처럼 "반환 시점 = 디스크 반영 시점" 계약이 필요한 경로용 (AGENTS §6:
+    /// ⌘Q 직전 flush로 마지막 문장 보존). 라이터는 메인을 필요로 하지 않으므로
+    /// 메인에서 기다려도 교착하지 않는다. 밀린 autosave 쓰기도 FIFO로 이 안에서
+    /// 먼저 마쳐지므로, 반환 시 파일은 항상 이 스냅샷이다.
+    private func writeAndWait(_ snapshot: Snapshot) {
+        let semaphore = DispatchSemaphore(value: 0)
+        let writer = self.writer
+        let url = self.fileURL
+        Task.detached(priority: .userInitiated) {
+            await writer.write(snapshot, to: url)
+            semaphore.signal()
+        }
+        semaphore.wait()
+    }
+
+    /// 구조 변경(생성·삭제·이름변경 등) 즉시 저장 — 호출이 끝나면 디스크에 반영돼 있다.
     private func saveNow() {
         saveTask?.cancel()
-        Self.write(currentSnapshot, to: fileURL)
+        saveGeneration += 1
+        writeAndWait(currentSnapshot)
         isSaving = false
     }
 
@@ -973,11 +1023,14 @@ public final class EntryStore: ObservableObject {
     public func flush() {
         saveTask?.cancel()
         saveTask = nil
-        Self.write(currentSnapshot, to: fileURL)
+        saveGeneration += 1
+        writeAndWait(currentSnapshot)
         isSaving = false
     }
 
-    private static func write(_ snapshot: Snapshot, to url: URL) {
+    /// JSON 인코딩 + 원자적 쓰기 — 라이터 액터(백그라운드)에서만 호출된다.
+    /// MainActor 격리로 두면 액터가 다시 메인으로 hop해 이 개선의 목적이 사라진다.
+    private nonisolated static func write(_ snapshot: Snapshot, to url: URL) {
         rotateDailyBackup(of: url)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
@@ -989,18 +1042,23 @@ public final class EntryStore: ObservableObject {
     // MARK: - 원고 백업 (PLAN §16 "백업 로테이션도 없음 — 원고는 소중하다" 해소)
 
     /// 백업 보존 세대.
-    private static let backupKeepGenerations = 7
+    private nonisolated static let backupKeepGenerations = 7
 
     /// 하루 1회, 그날 첫 저장 직전에 어제까지의 상태를 `backups/`에 스냅샷하고
     /// 최근 세대만 남긴다. 사본 이름은 **파일의 수정일**(그 내용이 무엇의 상태인지)을
     /// 쓰므로 며칠 켜지 않았다가 돌아와도 같은 상태의 중복 사본이 생기지 않는다.
     /// 결정적 로직 — 같은 디스크 상태면 같은 동작. 실패는 조용히 건너뛴다(최선 노력).
-    static func rotateDailyBackup(of url: URL) {
+    /// 라이터 액터(백그라운드)에서 불리므로 nonisolated — 포맷터도 격리 밖에서
+    /// 만든다(하루 한 번이라 비용 무시).
+    nonisolated static func rotateDailyBackup(of url: URL) {
+        let dayFormatter = DateFormatter()
+        dayFormatter.locale = Locale(identifier: "ko_KR")
+        dayFormatter.dateFormat = "yyyy-MM-dd"
         let fm = FileManager.default
         guard fm.fileExists(atPath: url.path),
             let attrs = try? fm.attributesOfItem(atPath: url.path),
             let modified = attrs[.modificationDate] as? Date,
-            !Self.koCalendar.isDateInToday(modified)
+            !Calendar(identifier: .gregorian).isDateInToday(modified)
         else { return }
         let dir = url.deletingLastPathComponent()
             .appendingPathComponent("backups", isDirectory: true)
@@ -1008,7 +1066,7 @@ public final class EntryStore: ObservableObject {
         else { return }
         let stem = url.deletingPathExtension().lastPathComponent
         let target = dir.appendingPathComponent(
-            "\(stem)-\(Self.backupDayFormatter.string(from: modified)).json")
+            "\(stem)-\(dayFormatter.string(from: modified)).json")
         if !fm.fileExists(atPath: target.path) {
             try? fm.copyItem(at: url, to: target)
         }
@@ -1042,6 +1100,6 @@ public final class EntryStore: ObservableObject {
     private static let weekdayFormatter = koFormatter("EEEEE")
     private static let shortDateFormatter = koFormatter("M.d")
     /// 백업 파일명·손상 사본 스탬프 — 정렬 가능성이 곧 시간순이 되게 고정 폭 형식.
-    private static let backupDayFormatter = koFormatter("yyyy-MM-dd")
+    /// 백업 쪽은 라이터 액터가 nonisolated로 만들어 쓴다(위 rotateDailyBackup).
     private static let corruptStampFormatter = koFormatter("yyyy-MM-dd-HHmmss")
 }
