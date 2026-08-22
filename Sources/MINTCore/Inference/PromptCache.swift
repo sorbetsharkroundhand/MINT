@@ -14,6 +14,33 @@ import MLXLMCommon
 /// 접근을 NSLock으로 직렬화한다. 엔진 actor의 재진입(예: 폴더 명명과 예측이
 /// 겹침)으로 생성이 겹치는 드문 경우엔 busy 가드가 재사용을 포기한다 —
 /// 겹친 쪽은 캐시 없이 생성한다. 틀린 캐시보다 느린 프리필이 낫다.
+/// LCP 재사용 판정의 순수 로직 — KV 캐시·모델 없이 결정적으로 검증 가능한 부분
+/// (PLAN §12). 박스(`PromptCacheBox`)는 실제 trim·캐시 수명만 담당하고,
+/// "얼마나 재사용하고 얼마나 잘라내는가"의 계산은 여기서 한다.
+enum PromptCacheMath {
+
+    /// 캐시 상태에서 새 프롬프트로 재사용 가능한 접두 토큰 수.
+    ///
+    /// - `offset`: 캐시에 실제로 들어있는 토큰 수 (생성·중단된 프리필 포함 — 진실).
+    /// - `recorded`: 마지막 `commit`이 기록한 프롬프트 토큰.
+    ///   `min(offset, recorded.count)`까지는 기록과 일치가 항상 성립한다 —
+    ///   프리필이 토큰 순서대로 진행하기 때문. 생성 토큰은 기록 밖이라 재사용에 안 센다.
+    /// - 요청이 통째로 접두와 같으면 최소 1토큰을 남긴다 — 빈 입력으론 생성을
+    ///   시작할 수 없다 (뒤로 지우기 직후).
+    static func reusablePrefix(offset: Int, recorded: [Int], requested: [Int]) -> Int {
+        let known = min(offset, recorded.count)
+        var lcp = 0
+        while lcp < known, lcp < requested.count, recorded[lcp] == requested[lcp] {
+            lcp += 1
+        }
+        if lcp == requested.count { lcp -= 1 }
+        return max(lcp, 0)
+    }
+
+    /// 재사용분을 뺀 trim 양 — 생성 토큰이든 중단된 프리필이든 이 값으로 몰아 정리된다.
+    static func trimAmount(offset: Int, reused: Int) -> Int { offset - reused }
+}
+
 final class PromptCacheBox: @unchecked Sendable {
 
     struct Reuse {
@@ -63,16 +90,10 @@ final class PromptCacheBox: @unchecked Sendable {
     /// LCP 0이면 nil → 호출부(begin)가 새 캐시로 간다.
     private func reusableSuffix(cache: [KVCache], tokens: [Int]) -> Reuse? {
         let offset = cache.first?.offset ?? 0
-        let known = min(offset, promptTokens.count)
-        var lcp = 0
-        while lcp < known, lcp < tokens.count, promptTokens[lcp] == tokens[lcp] {
-            lcp += 1
-        }
-        // 새 프롬프트가 통째로 캐시 접두와 같아도 최소 1토큰은 프리필한다 —
-        // 빈 입력으론 생성을 시작할 수 없다 (뒤로 지우기 직후가 이 경우).
-        if lcp == tokens.count { lcp -= 1 }
+        let lcp = PromptCacheMath.reusablePrefix(
+            offset: offset, recorded: promptTokens, requested: tokens)
         guard lcp > 0, canTrimPromptCache(cache) else { return nil }
-        let trim = offset - lcp
+        let trim = PromptCacheMath.trimAmount(offset: offset, reused: lcp)
         guard trimPromptCache(cache, numTokens: trim) == trim else { return nil }
         return Reuse(cache: cache, suffix: Array(tokens[lcp...]), reusedTokens: lcp)
     }
