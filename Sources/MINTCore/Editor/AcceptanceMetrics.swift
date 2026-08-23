@@ -35,8 +35,10 @@ public enum AcceptanceMetrics {
         var line = #"{"ts":"\#(timestamp)","event":"\#(event.rawValue)","mode":"\#(mode)""#
         if let latencyMs { line += #","latencyMs":\#(latencyMs)"# }
         line += "}\n"
+        // 비동기 블록엔 값 스냅샷을 넘긴다 — var 캡처는 동시성 검사의 경고 대상.
+        let payload = line
         queue.async {
-            guard let data = line.data(using: .utf8) else { return }
+            guard let data = payload.data(using: .utf8) else { return }
             let url = fileURL
             if !FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.createDirectory(

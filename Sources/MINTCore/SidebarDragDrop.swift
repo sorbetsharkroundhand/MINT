@@ -128,7 +128,7 @@ private func applyVerified(
 
 /// 저널 행 위 드롭: 상/하단 = 형제 사이 삽입, 가운데 = 두 저널을 새 폴더로 병합.
 @MainActor
-struct EntryRowDropDelegate: @preconcurrency DropDelegate {
+struct EntryRowDropDelegate: DropDelegate {
     let entry: JournalEntry
     let store: EntryStore
     let model: SidebarDragModel
@@ -199,7 +199,7 @@ struct EntryRowDropDelegate: @preconcurrency DropDelegate {
 /// 폴더 행 위 드롭: 저널은 행 전체가 "안으로", 폴더는 상/하단 = 형제 재정렬,
 /// 가운데 = 하위로 이동 (순환은 금지).
 @MainActor
-struct FolderRowDropDelegate: @preconcurrency DropDelegate {
+struct FolderRowDropDelegate: DropDelegate {
     let folder: JournalFolder
     let expanded: Bool
     let store: EntryStore
@@ -320,7 +320,7 @@ struct FolderRowDropDelegate: @preconcurrency DropDelegate {
 
 /// 목록 아래 빈 영역 드롭 — 루트 맨 끝으로 이동.
 @MainActor
-struct RootAreaDropDelegate: @preconcurrency DropDelegate {
+struct RootAreaDropDelegate: DropDelegate {
     let store: EntryStore
     let model: SidebarDragModel
 
