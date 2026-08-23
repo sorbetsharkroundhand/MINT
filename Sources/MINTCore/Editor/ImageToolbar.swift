@@ -7,6 +7,10 @@ enum ImageObjectAction {
     case align(String)
     /// 표시 너비(%) — 컬럼 폭 대비.
     case width(Int)
+    /// 대체 텍스트(alt)와 마우스오버 제목 저장 (이슈 #14).
+    case metadata(alt: String, title: String?)
+    /// alt·title 편집 카드를 연다 — 저장은 `metadata`로 돌아온다.
+    case editMetadata
     /// 이미지 뒤에 빈 줄을 넣고 커서를 옮긴다.
     case lineBreak
     /// 이미지 문단 삭제.
@@ -41,6 +45,9 @@ struct ImageObjectToolbarView: View {
                 .frame(minWidth: 30)
                 .help("크기 조절: 모서리 핸들 드래그")
             divider
+            iconButton("text.below.photo", active: false, help: "대체 텍스트·제목 편집") {
+                onAction(.editMetadata)
+            }
             iconButton("return", active: false, help: "줄바꿈 (아래 새 줄)") {
                 onAction(.lineBreak)
             }
@@ -76,6 +83,75 @@ struct ImageObjectToolbarView: View {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
         }
+    }
+}
+
+/// alt·title 편집 카드 — 툴바 아래에 뜨는 작은 시트. Enter는 적용, Esc는 닫기.
+/// 저장은 `ImageObjectAction.metadata`로 에디터에 돌아간다 (이슈 #14).
+struct ImageAltEditorView: View {
+    let theme: MintTheme
+    let initialAlt: String
+    let initialTitle: String?
+    let onApply: (_ alt: String, _ title: String?) -> Void
+    let onCancel: () -> Void
+    @State private var alt: String = ""
+    @State private var title: String = ""
+    @FocusState private var focusedField: Int?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("대체 텍스트 (VoiceOver·EPUB)")
+                .font(MintFonts.uiFont(10, .semibold))
+                .foregroundStyle(theme.ink2C)
+            TextField("이 이미지를 말로 설명하면", text: $alt)
+                .textFieldStyle(.roundedBorder)
+                .font(MintFonts.uiFont(11))
+                .focused($focusedField, equals: 0)
+                .onSubmit { submit() }
+            Text("마우스오버 제목 (선택)")
+                .font(MintFonts.uiFont(10, .semibold))
+                .foregroundStyle(theme.ink2C)
+            TextField("비워 두면 title을 넣지 않는다", text: $title)
+                .textFieldStyle(.roundedBorder)
+                .font(MintFonts.uiFont(11))
+                .focused($focusedField, equals: 1)
+                .onSubmit { submit() }
+            HStack {
+                Spacer()
+                Button("취소") { onCancel() }
+                    .controlSize(.small)
+                Button("적용") { submit() }
+                    .controlSize(.small)
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(10)
+        .frame(width: 240)
+        .background(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(theme.pillC)
+                .background(
+                    .ultraThinMaterial,
+                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(theme.pillBorderC)
+        )
+        .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
+        .onExitCommand { onCancel() }
+        .onAppear {
+            alt = initialAlt
+            title = initialTitle ?? ""
+            focusedField = 0
+        }
+    }
+
+    private func submit() {
+        let trimmedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        onApply(
+            alt.trimmingCharacters(in: .whitespacesAndNewlines),
+            trimmedTitle.isEmpty ? nil : trimmedTitle)
     }
 }
 

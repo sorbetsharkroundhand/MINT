@@ -439,20 +439,55 @@ struct ImageAttrs: Equatable {
     var title: String?
     /// `{…}` 앞부분(이미지 구문) 원문 — 있으면 markdown 재합성 대신 스플라이스.
     var optionsPrefix: String?
+    /// 인식 못 한 확장 속성 토큰 원문(`custom=x` 등, 원래 순서 유지) —
+    /// 정렬·리사이즈를 해도 사라지지 않게 (이슈 #14).
+    var extraOptions: [String] = []
 
     /// 소스 마크다운으로 직렬화. optionsPrefix가 있으면 원문 구문을 그대로 쓰고
     /// `{…}`만 다시 붙인다 — alt·title·destination 표기가 절대 변하지 않는다.
-    /// 없으면(새 조립) 구성요소로 합성한다 — 기본값이면 접미를 생략한다.
+    /// 없으면(새 조립) 구성요소를 CommonMark 규칙으로 **이스케이프해** 합성한다 —
+    /// 기본값이면 접미를 생략한다.
     var markdown: String {
         var opts: [String] = []
         if width != 100 { opts.append("width=\(width)") }
         if align != "center" { opts.append("align=\(align)") }
+        opts.append(contentsOf: extraOptions)
         let suffix = opts.isEmpty ? "" : "{\(opts.joined(separator: " "))}"
         if let prefix = optionsPrefix {
             return suffix.isEmpty ? prefix : "\(prefix) \(suffix)"
         }
-        let titlePart = title.map { " \"\($0)\"" } ?? ""
-        return "![\(alt)](\(src))\(titlePart)\(suffix)"
+        let titlePart = title.map { " \"" + Self.escapeTitle($0) + "\"" } ?? ""
+        // title은 닫는 괄호 **안**이다 — 밖에 두면 파서가 이미지로 인정하지 않는다.
+        return "![\(Self.escapeAlt(alt))](\(Self.serializeDestination(src))\(titlePart))\(suffix)"
+    }
+
+    // MARK: 신규 합성용 이스케이프 (#14) — 파서의 unescape와 짝을 이룬다.
+
+    /// alt 텍스트 — 이미지 구문을 닫는 `]`와 백슬래시만 막으면 충분하다
+    /// (파서 scanAlt가 중첩 괄호 카운트·escape만 존중).
+    static func escapeAlt(_ text: String) -> String {
+        escapeCharacters(text, in: "\\[]")
+    }
+
+    /// title — 여는 따옴표 종류에 따라 닫힘이 갈리므로 세 따옴표를 모두 막는다.
+    static func escapeTitle(_ text: String) -> String {
+        escapeCharacters(text, in: "\\\"'()")
+    }
+
+    /// destination — 공백·괄호가 있으면 angle destination(`<…>`)으로 감싸고,
+    /// 내부의 `<` `>`는 이스케이프한다. 일반 destination은 공백에서 끊긴다.
+    static func serializeDestination(_ path: String) -> String {
+        guard path.contains(where: { " \t()".contains($0) }) else { return path }
+        return "<\(escapeCharacters(path, in: "\\<>"))>"
+    }
+
+    private static func escapeCharacters(_ text: String, in set: String) -> String {
+        var out = ""
+        for c in text {
+            if set.contains(c) { out.append("\\") }
+            out.append(c)
+        }
+        return out
     }
 }
 
@@ -1868,11 +1903,12 @@ final class BlockTextView: NSTextView {
         repositionImageBox()
     }
 
-    /// 객체 선택 해제 — 툴바·박스를 감추고 다시 그린다.
+    /// 객체 선택 해제 — 툴바·박스·편집 카드를 감추고 다시 그린다.
     func clearImageSelection() {
         guard selectedImageLocation != nil else { return }
         selectedImageLocation = nil
         hideImageToolbar()
+        hideImageAltEditor()
         imageBox?.removeFromSuperview()
         imageBox = nil
         imageDropIndicatorY = nil
@@ -1984,13 +2020,21 @@ final class BlockTextView: NSTextView {
         switch action {
         case .align(let a): rewriteImage(para, setAlign: a)
         case .width(let w): rewriteImage(para, setWidth: w)
+        case .editMetadata: presentImageAltEditor(for: para)
+        case .metadata(let alt, let title):
+            rewriteImage(para, setAlt: alt, setTitle: .some(title))
+            hideImageAltEditor()  // 적용 후 카드를 닫는다 — 툴바 갱신은 rewrite가 한다
         case .lineBreak: imageLineBreak(after: para)
         case .delete: deleteImageParagraph(para)
         }
     }
 
-    /// 이미지 소스 줄의 `{width align}` 속성을 새 값으로 바꿔 다시 쓴다 (undo 포함).
-    private func rewriteImage(_ para: NSRange, setAlign: String? = nil, setWidth: Int? = nil) {
+    /// 이미지 소스 줄의 `{width align}`·alt/title 속성을 새 값으로 바꿔 다시 쓴다
+    /// (undo 포함). `setTitle`: nil=무변화, .some(nil)=해제, .some(문자열)=지정.
+    private func rewriteImage(
+        _ para: NSRange, setAlign: String? = nil, setWidth: Int? = nil,
+        setAlt: String? = nil, setTitle: String?? = nil
+    ) {
         guard let storage = textStorage else { return }
         let content = paragraphContent(para)
         guard var attrs = Self.imageAttrs(
@@ -1998,6 +2042,13 @@ final class BlockTextView: NSTextView {
         else { return }
         if let a = setAlign { attrs.align = a }
         if let w = setWidth { attrs.width = w }
+        if let alt = setAlt { attrs.alt = alt }
+        if let newTitle = setTitle {
+            attrs.title = newTitle
+            // optionsPrefix 스플라이스 경로는 원문을 그대로 쓰므로, title이
+            // 바뀌면 prefix를 내려 새로 합성해야 반영된다.
+            attrs.optionsPrefix = nil
+        }
         let newLine = attrs.markdown
         let contentRange = NSRange(
             location: para.location, length: (content as NSString).length)
@@ -2079,6 +2130,37 @@ final class BlockTextView: NSTextView {
 
     func hideImageToolbar() {
         imageToolbarHost?.removeFromSuperview()
+    }
+
+    /// alt·title 편집 카드를 툴바 아래에 띄운다 — 현재 alt/title로 미리 채운다 (이슈 #14).
+    private func presentImageAltEditor(for para: NSRange) {
+        guard let attrs = Self.imageAttrs(
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
+            let toolbarFrame = imageToolbarHost?.frame
+        else { return }
+        let view = ImageAltEditorView(
+            theme: palette, initialAlt: attrs.alt, initialTitle: attrs.title,
+            onApply: { [weak self] alt, title in
+                self?.performImage(.metadata(alt: alt, title: title))
+            },
+            onCancel: { [weak self] in self?.hideImageAltEditor() })
+        let host = NSHostingView(rootView: view)
+        // 툴바 바로 아래 — 화면 위쪽에 붙으면 이미지 아래로 내린다.
+        var origin = NSPoint(
+            x: toolbarFrame.minX + 4, y: toolbarFrame.maxY + 6)
+        if origin.y + host.fittingSize.height > bounds.height {
+            origin = NSPoint(x: toolbarFrame.minX + 4, y: toolbarFrame.minY - host.fittingSize.height - 6)
+        }
+        origin.x = max(8, min(origin.x, bounds.width - host.fittingSize.width - 8))
+        host.frame = NSRect(origin: origin, size: host.fittingSize)
+        imageAltEditorHost?.removeFromSuperview()
+        imageAltEditorHost = host
+        addSubview(host)
+    }
+
+    func hideImageAltEditor() {
+        imageAltEditorHost?.removeFromSuperview()
+        imageAltEditorHost = nil
     }
 
     /// 문단이 차지하는 **전체 컬럼 폭** rect (뷰 좌표) — 레이아웃 매니저의
@@ -2538,7 +2620,9 @@ final class BlockTextView: NSTextView {
                 case "width": if let w = Int(kv[1]) { attrs.width = min(100, max(10, w)) }
                 case "align" where ["left", "center", "right"].contains(String(kv[1])):
                     attrs.align = String(kv[1])
-                default: break
+                default:
+                    // 미지 확장 속성 — 원문 토큰을 순서대로 보관해 재작성 시 되살린다 (이슈 #14).
+                    attrs.extraOptions.append(String(token))
                 }
             }
             // 재합성 대신 스플라이스 — alt·title을 보존한 채 속성만 바꾼다.
@@ -2633,6 +2717,8 @@ final class BlockTextView: NSTextView {
     private var toolbarShowTask: Task<Void, Never>?
     /// 이미지 객체 선택 시 뜨는 정렬·크기·줄바꿈 툴바 (요구 3).
     private var imageToolbarHost: NSHostingView<ImageObjectToolbarView>?
+    /// alt·title 편집 카드 호스트 — 툴바와 함께 수명을 관리한다 (이슈 #14).
+    private var imageAltEditorHost: NSHostingView<ImageAltEditorView>?
 
     /// 선택이 생기면 잠깐 안정된 뒤 툴바를 띄우고, 사라지면 감춘다.
     func updateSelectionToolbar() {

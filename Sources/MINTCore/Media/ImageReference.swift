@@ -69,17 +69,25 @@ public enum ImageReferenceParser {
         let inner = line[line.index(after: open)..<line.index(before: line.endIndex)]
         let body = line[..<open].trimmingCharacters(in: .whitespaces)
         guard !body.isEmpty else { return (line[...], nil) }
-        // 옵션 토큰 검증 — width=N · align=X 외의 내용이면 확장이 아니다.
+        // 옵션 토큰 검증 — `key=value` 모양만 확장으로 인정한다. width·align은
+        // 알려진 키, 나머지는 미지 확장 속성으로 소비자(ImageAttrs)에 그대로
+        // 전달된다 (이슈 #14 — `{custom=x}`를 몰라서 버리지 않게). 값에 공백을
+        // 허용하지 않는다 — 토큰 경계와 충돌하기 때문.
         let tokens = inner.split(separator: " ").filter { !$0.isEmpty }
         guard !tokens.isEmpty else { return (line[...], nil) }
         for token in tokens {
-            let parts = token.split(separator: "=", maxSplits: 1)
-            let key = String(parts[0])
-            let value = parts.count == 2 ? String(parts[1]) : ""
+            guard let eq = token.firstIndex(of: "="), eq != token.startIndex,
+                !token[token.index(after: eq)...].isEmpty
+            else { return (line[...], nil) }
+            let key = String(token[..<eq])
+            let value = String(token[token.index(after: eq)...])
+            // 키는 글자·숫자·_- 만 — 문장부호 오탐({…} 꾸미기)을 걸러낸다.
+            guard key.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" || $0 == "-" })
+            else { return (line[...], nil) }
             switch key {
             case "width" where Int(value) != nil: continue
             case "align" where ["left", "center", "right"].contains(value): continue
-            default: return (line[...], nil)
+            default: continue
             }
         }
         return (Substring(body), String(inner))
