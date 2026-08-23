@@ -154,4 +154,60 @@ final class BackgroundIndexerTests: XCTestCase {
             loadMs: 0, deriveMs: 0)
         XCTAssertEqual(metrics.bytesPerScene, 0)
     }
+
+    // MARK: - 열·전력 게이트 (백그라운드 3요건, PLAN §9)
+
+    func test정상_상태에서는_모든_패스를_허용한다() {
+        for state in [ProcessInfo.ThermalState.nominal, .fair] {
+            XCTAssertTrue(BackgroundIndexer.gateAllows(
+                deep: true, thermalState: state, lowPowerModeEnabled: false))
+            XCTAssertTrue(BackgroundIndexer.gateAllows(
+                deep: false, thermalState: state, lowPowerModeEnabled: false))
+        }
+    }
+
+    func test발열_serious_이상은_빠른패스도_보류한다() {
+        // 시민의식은 전부 아니오만 있다 — 발기 중엔 요약도 예측도 양보.
+        for state in [ProcessInfo.ThermalState.serious, .critical] {
+            XCTAssertFalse(BackgroundIndexer.gateAllows(
+                deep: true, thermalState: state, lowPowerModeEnabled: false))
+            XCTAssertFalse(BackgroundIndexer.gateAllows(
+                deep: false, thermalState: state, lowPowerModeEnabled: false))
+        }
+    }
+
+    func test저전력은_깊은패스만_보류한다() {
+        // 빠른 패스는 타이핑 직후의 이해라 저전력에도 돈다 — 깊은 패스(전체
+        // 재분석·전파)만 배터리를 아끼려 미룬다.
+        XCTAssertTrue(BackgroundIndexer.gateAllows(
+            deep: false, thermalState: .nominal, lowPowerModeEnabled: true))
+        XCTAssertFalse(BackgroundIndexer.gateAllows(
+            deep: true, thermalState: .nominal, lowPowerModeEnabled: true))
+    }
+
+    // MARK: - 커서 거리순 순회 (docs/m6-scene-split.md §5)
+
+    private let scenes = DocumentOutline.parse(
+        "# A\n가.\n# B\n나.\n# C\n다.\n").scenes
+
+    private func assertDistance(
+        _ expected: Int, scene index: Int, caret: Int,
+        file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertEqual(
+            BackgroundIndexer.distance(from: scenes[index], to: caret), expected,
+            file: file, line: line)
+    }
+
+    func test커서가_씬안이면_거리는_영이다() {
+        assertDistance(0, scene: 1, caret: 8)   // "# B" 시작
+        assertDistance(0, scene: 1, caret: 10)  // B 본문 안
+    }
+
+    func test커서에서_먼_방향으로_거리가_자란다() {
+        assertDistance(0, scene: 0, caret: 7)   // A 끝 경계(=B 시작) — 사실상 인접
+        assertDistance(7, scene: 0, caret: 14)  // A ← C 시작 지점
+        assertDistance(7, scene: 2, caret: 7)   // C ← B 시작 지점 (뒤쪽)
+        assertDistance(14, scene: 2, caret: 0)  // 문서 맨 앞에서 C까지
+    }
 }

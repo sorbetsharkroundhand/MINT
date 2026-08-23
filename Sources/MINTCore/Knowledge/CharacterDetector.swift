@@ -145,8 +145,9 @@ public enum CharacterDetector {
 
     /// 표기 변형 병합 — 접미 관계(김재형 ⊃ 재형)와 호격 조사 형태(재형이)를
     /// 하나의 후보로 묶는다. 연쇄(김재형–재형–재형이)도 추이적으로 한 무리다.
-    /// 확실한 구조 관계만 묶는다 — 우연히 닮은 이름(수진/진)은 길이 조건
-    /// (성 1자 차이)으로 걸러진다.
+    /// 우연히 닮은 이름(수진/진)은 여기서가 아니라 **업스트림 길이 하한**
+    /// (minStemLength = 2)이 걸러낸다 — 1자 파편은 후보 자체가 될 수 없어
+    /// 이 함수에 들어오는 비교는 전부 2자 이상 어간끼리다.
     static func mergeAliasForms(_ candidates: [Candidate]) -> [Candidate] {
         guard candidates.count >= 2 else { return candidates }
         // 유니언-파인드 — 변형 관계의 연결 성분으로 묶는다.

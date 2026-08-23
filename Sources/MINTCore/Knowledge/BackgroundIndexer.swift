@@ -1176,7 +1176,8 @@ public final class BackgroundIndexer: ObservableObject {
     // MARK: - 보조
 
     /// 커서와 씬의 UTF-16 거리 — 커서가 씬 안이면 0.
-    nonisolated private static func distance(
+    /// internal인 이유: "가까운 씬부터 이해한다" 성질을 단위 테스트로 고정.
+    nonisolated static func distance(
         from scene: DocumentOutline.Scene, to caret: Int
     ) -> Int {
         if scene.utf16Range.contains(caret) { return 0 }
@@ -1186,15 +1187,25 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 열·전력 시민의식 (PLAN §9) — `.serious` 이상이면 전부, 저전력이면 깊은
-    /// 패스만 보류한다.
-    nonisolated private static func gateAllows(deep: Bool) -> Bool {
-        let process = ProcessInfo.processInfo
-        switch process.thermalState {
+    /// 패스만 보류한다. 판정은 상태를 주입받는 순수 함수 — 실제 발열·저전력을
+    /// 만들 수 없는 테스트도 백그라운드 3요건(게이트)의 경계를 검증할 수 있다.
+    nonisolated static func gateAllows(
+        deep: Bool, thermalState: ProcessInfo.ThermalState,
+        lowPowerModeEnabled: Bool
+    ) -> Bool {
+        switch thermalState {
         case .serious, .critical: return false
         default: break
         }
-        if deep, process.isLowPowerModeEnabled { return false }
+        if deep, lowPowerModeEnabled { return false }
         return true
+    }
+
+    nonisolated private static func gateAllows(deep: Bool) -> Bool {
+        let process = ProcessInfo.processInfo
+        return gateAllows(
+            deep: deep, thermalState: process.thermalState,
+            lowPowerModeEnabled: process.isLowPowerModeEnabled)
     }
 
     nonisolated private static func makeSnapshot(
