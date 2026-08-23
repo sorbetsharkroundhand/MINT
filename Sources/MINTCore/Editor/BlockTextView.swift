@@ -434,14 +434,25 @@ struct ImageAttrs: Equatable {
     var width: Int = 100
     /// 가로 정렬 — "left" / "center"(기본) / "right".
     var align: String = "center"
+    /// 원문 alt·title — 속성 재작성 시 손실 없이 되돌리려고 보관 (이슈 #12).
+    var alt: String = ""
+    var title: String?
+    /// `{…}` 앞부분(이미지 구문) 원문 — 있으면 markdown 재합성 대신 스플라이스.
+    var optionsPrefix: String?
 
-    /// 소스 마크다운으로 직렬화 — 기본값(100%·center)이면 접미 `{...}`를 생략한다.
+    /// 소스 마크다운으로 직렬화. optionsPrefix가 있으면 원문 구문을 그대로 쓰고
+    /// `{…}`만 다시 붙인다 — alt·title·destination 표기가 절대 변하지 않는다.
+    /// 없으면(새 조립) 구성요소로 합성한다 — 기본값이면 접미를 생략한다.
     var markdown: String {
         var opts: [String] = []
         if width != 100 { opts.append("width=\(width)") }
         if align != "center" { opts.append("align=\(align)") }
         let suffix = opts.isEmpty ? "" : "{\(opts.joined(separator: " "))}"
-        return "![](\(src))\(suffix)"
+        if let prefix = optionsPrefix {
+            return suffix.isEmpty ? prefix : "\(prefix) \(suffix)"
+        }
+        let titlePart = title.map { " \"\($0)\"" } ?? ""
+        return "![\(alt)](\(src))\(titlePart)\(suffix)"
     }
 }
 
@@ -2501,33 +2512,42 @@ final class BlockTextView: NSTextView {
     }
 
     /// `![](src){width=NN align=X}` 한 줄에서 소스·너비·정렬을 파싱한다. 형식이 아니면 nil.
+    /// 이미지 문단 한 줄 해석 — 공용 파서(ImageReferenceParser, 이슈 #12)의
+    /// 결과만 쓴다. 옛 한 줄 정규식은 title·angle·괄호·reference를 놓쳤다.
+    /// 원격·차단 소스는 렌더 대상에서 제외한다 (완전 로컬 원칙).
     static func imageAttrs(from line: String) -> ImageAttrs? {
-        let ns = line as NSString
-        guard let match = imageLinePattern.firstMatch(
-            in: line, range: NSRange(location: 0, length: ns.length))
-        else { return nil }
-        let src = ns.substring(with: match.range(at: 1))
-        guard !src.isEmpty else { return nil }
-        var attrs = ImageAttrs(src: src)
-        let optRange = match.range(at: 2)
-        if optRange.location != NSNotFound {
-            for token in ns.substring(with: optRange)
-                .components(separatedBy: .whitespaces) where !token.isEmpty {
-                let kv = token.components(separatedBy: "=")
+        guard let ref = ImageReferenceParser.parse(line) else { return nil }
+        switch ref.destinationKind {
+        case .managedRelative, .externalFile:
+            break
+        case .remote, .blocked:
+            return nil
+        }
+        var attrs = ImageAttrs(src: ref.destinationRaw)
+        attrs.alt = ref.alt
+        attrs.title = ref.title
+        // {width align} 확장 적용 — splitOptions가 검증토큰만 남겨 두었다.
+        if let trimmed = line.trimmingCharacters(in: .whitespaces) as String?,
+           let open = trimmed.lastIndex(of: "{"),
+           trimmed.hasSuffix("}") {
+            let inner = trimmed[trimmed.index(after: open)..<trimmed.index(before: trimmed.endIndex)]
+            for token in inner.split(separator: " ") where !token.isEmpty {
+                let kv = token.split(separator: "=", maxSplits: 1)
                 guard kv.count == 2 else { continue }
-                switch kv[0] {
+                switch String(kv[0]) {
                 case "width": if let w = Int(kv[1]) { attrs.width = min(100, max(10, w)) }
-                case "align" where ["left", "center", "right"].contains(kv[1]):
-                    attrs.align = kv[1]
+                case "align" where ["left", "center", "right"].contains(String(kv[1])):
+                    attrs.align = String(kv[1])
                 default: break
                 }
             }
+            // 재합성 대신 스플라이스 — alt·title을 보존한 채 속성만 바꾼다.
+            attrs.optionsPrefix = String(trimmed[..<open])
+        } else {
+            attrs.optionsPrefix = nil
         }
         return attrs
     }
-
-    private static let imageLinePattern = try! NSRegularExpression(
-        pattern: #"^!\[[^\]]*\]\(([^)\s]+)\)(?:\{([^}]*)\})?$"#)
 
     /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 수식 높이를 구한다.
     private func displayHeight(of image: NSImage) -> CGFloat {

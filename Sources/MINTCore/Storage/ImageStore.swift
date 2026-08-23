@@ -70,7 +70,12 @@ public enum MintImageStore {
     }
 
     /// 상대경로의 이미지를 로드한다 (경로별 캐시). 없거나 못 읽으면 nil.
+    /// 원격·차단 소스는 로컬 파일로 오해하지 않고 nil — 완전 로컬 원칙 (이슈 #12).
     public static func image(for relativePath: String) -> NSImage? {
+        switch ImageReferenceParser.classify(relativePath) {
+        case .managedRelative, .externalFile: break
+        case .remote, .blocked: return nil
+        }
         if let hit = cache[relativePath] { return hit }
         let fileURL = url(for: relativePath)
         guard let image = NSImage(contentsOf: fileURL), image.size.width > 0 else {
