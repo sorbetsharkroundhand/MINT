@@ -7,17 +7,22 @@ public struct DocumentContext: Sendable, Equatable {
     public var kind: EntryKind
     public var genre: String?
     public var characters: [CharacterCard]
+    /// 이 스냅샷이 뜯어낸 문서 — 리포트·오버라이드가 어느 작품 소속인지 판정하는
+    /// 기준 (이슈 #8). nil이면 구형 호출자(프리뷰 등).
+    public var entryID: UUID?
 
     public init(
         title: String,
         kind: EntryKind,
         genre: String? = nil,
-        characters: [CharacterCard] = []
+        characters: [CharacterCard] = [],
+        entryID: UUID? = nil
     ) {
         self.title = title
         self.kind = kind
         self.genre = genre
         self.characters = characters
+        self.entryID = entryID
     }
 }
 
@@ -80,10 +85,20 @@ public struct ContextReport: Sendable, Equatable {
     public var items: [Item]
     /// 조립 시각 — 인스펙터의 "언제 것인지" 표시.
     public var assembledAt: Date
+    /// 이 리포트가 조립된 문서 — 다른 작품의 화면에서 보여주거나, 그 작품의
+    /// 오버라이드에 기록하는 일을 원천 차단한다 (이슈 #8). nil이면 구형 리포트.
+    public var entryID: UUID?
+    /// 조립 시점의 예측 세대 — 문서 전환·편집으로 무효화됐는지 판정용 (이슈 #8).
+    public var generation: Int
 
-    public init(items: [Item], assembledAt: Date = .now) {
+    public init(
+        items: [Item], assembledAt: Date = .now,
+        entryID: UUID? = nil, generation: Int = 0
+    ) {
         self.items = items
         self.assembledAt = assembledAt
+        self.entryID = entryID
+        self.generation = generation
     }
 
     public static let empty = ContextReport(items: [])

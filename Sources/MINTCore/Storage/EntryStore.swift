@@ -918,7 +918,9 @@ public final class EntryStore: ObservableObject {
             title: JournalEntry.placeholderTitles.contains(entry.title) ? "" : entry.title,
             kind: entry.resolvedKind,
             genre: entry.genre,
-            characters: entry.characters ?? []
+            characters: entry.characters ?? [],
+            // 리포트·오버라이드 소속 판정용 (이슈 #8).
+            entryID: entry.id
         )
     }
 

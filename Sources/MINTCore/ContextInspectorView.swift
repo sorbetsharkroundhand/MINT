@@ -22,14 +22,20 @@ struct ContextInspectorView: View {
                     .font(MintFonts.uiFont(13, .semibold))
                     .foregroundStyle(theme.inkC)
                 Spacer()
-                if let report = completion.lastContextReport {
+                // 소속 문서가 활성 문서와 다른 리포트는 숨긴다 — A 작품 리포트를
+                // B 화면에서 보여주면 pin/exclude/jump가 B 오버라이드를 오염시킨다
+                // (이슈 #8).
+                if let report = completion.lastContextReport,
+                    report.entryID == nil || report.entryID == store.activeID {
                     Text("항목 \(report.items.count)")
                         .font(MintFonts.monoUI(10))
                         .foregroundStyle(theme.ink3C)
                 }
             }
             Divider()
-            if let report = completion.lastContextReport, !report.items.isEmpty {
+            if let report = completion.lastContextReport,
+                !report.items.isEmpty,
+                report.entryID == nil || report.entryID == store.activeID {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("최근 예측이 참고한 정보예요. 최근 원문(C 창)은 항상 함께 실려요.")
@@ -37,7 +43,7 @@ struct ContextInspectorView: View {
                             .foregroundStyle(theme.ink3C)
                             .fixedSize(horizontal: false, vertical: true)
                         ForEach(Array(report.items.enumerated()), id: \.offset) { _, item in
-                            itemRow(item)
+                            itemRow(item, targetID: report.entryID ?? store.activeID)
                         }
                         excludedList
                     }
@@ -58,7 +64,7 @@ struct ContextInspectorView: View {
         .padding(14)
     }
 
-    @ViewBuilder private func itemRow(_ item: ContextReport.Item) -> some View {
+    @ViewBuilder private func itemRow(_ item: ContextReport.Item, targetID: UUID) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Text(item.kind.rawValue)
@@ -76,9 +82,11 @@ struct ContextInspectorView: View {
                 Spacer()
                 // Pin/Exclude (요구사항 §31) — 오버라이드(entries.json)로 저장돼
                 // 실제 조립 파이프라인이 그대로 읽는다. UI 전용 프리뷰가 아니다.
+                // 기록 대상은 화면의 activeID가 아니라 리포트 소속 문서다 — 전환
+                // 직전 클릭이 B 오버라이드를 오염시키지 않게 (이슈 #8).
                 if !item.stableKey.isEmpty {
                     Button {
-                        togglePin(item)
+                        togglePin(item, in: targetID)
                     } label: {
                         Image(systemName: item.pinned ? "pin.slash" : "pin")
                             .font(.system(size: 9))
@@ -87,7 +95,7 @@ struct ContextInspectorView: View {
                     .buttonStyle(.plain)
                     .help(item.pinned ? "고정 해제" : "고정 — 항상 컨텍스트에 유지")
                     Button {
-                        exclude(item)
+                        exclude(item, in: targetID)
                     } label: {
                         Image(systemName: "eye.slash")
                             .font(.system(size: 9))
@@ -98,7 +106,7 @@ struct ContextInspectorView: View {
                 }
                 if hasJump(item) {
                     Button {
-                        jump(item)
+                        jump(item, in: targetID)
                     } label: {
                         Label("원문", systemImage: "arrow.right.circle")
                             .font(MintFonts.uiFont(9.5))
@@ -123,21 +131,21 @@ struct ContextInspectorView: View {
 
     // MARK: - Pin / Exclude (요구사항 §31)
 
-    private func togglePin(_ item: ContextReport.Item) {
+    private func togglePin(_ item: ContextReport.Item, in entryID: UUID) {
         if item.pinned {
             store.removeNarrativeOverride(
-                kind: .contextPin, key: item.stableKey, in: store.activeID)
+                kind: .contextPin, key: item.stableKey, in: entryID)
         } else {
             store.setNarrativeOverride(
                 NarrativeOverride(kind: .contextPin, key: item.stableKey, value: "고정"),
-                in: store.activeID)
+                in: entryID)
         }
     }
 
-    private func exclude(_ item: ContextReport.Item) {
+    private func exclude(_ item: ContextReport.Item, in entryID: UUID) {
         store.setNarrativeOverride(
             NarrativeOverride(kind: .contextExclude, key: item.stableKey, value: "제외"),
-            in: store.activeID)
+            in: entryID)
     }
 
     /// 제외 중인 항목 목록 — 복원 통로 (조용히 사라진 채 잊히지 않게).
@@ -177,17 +185,18 @@ struct ContextInspectorView: View {
 
     /// 원문 보기 — 인용이 있으면 인용 검색, 위치만 있으면 그 자리 스니펫 검색
     /// (타임라인과 같은 requestSearchJump 통로 — 좌표 불일치를 구조적으로 회피).
-    private func jump(_ item: ContextReport.Item) {
+    /// 이동 대상도 리포트 소속 문서로 고정한다 (이슈 #8).
+    private func jump(_ item: ContextReport.Item, in entryID: UUID) {
         if let quote = item.jumpQuery {
-            let query = store.activeEntry.flatMap {
+            let query = store.entries.first(where: { $0.id == entryID }).flatMap {
                 SourceAnchor.resilientQuery(for: quote, in: $0.body)
             } ?? quote
-            store.requestSearchJump(store.activeID, query: query)
+            store.requestSearchJump(entryID, query: query)
         } else if let offset = item.jumpUTF16,
-            let body = store.activeEntry?.body,
+            let body = store.entries.first(where: { $0.id == entryID })?.body,
             let snippet = NarrativeView.jumpSnippet(in: body, atUTF16: offset)
         {
-            store.requestSearchJump(store.activeID, query: snippet)
+            store.requestSearchJump(entryID, query: snippet)
         }
     }
 }

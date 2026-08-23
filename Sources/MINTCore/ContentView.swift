@@ -74,8 +74,12 @@ public struct ContentView: View {
                 // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
                 if let indexer {
                     indexer.attach(store: store)
-                    store.documentDidChange = { [weak indexer] id in
+                    store.documentDidChange = { [weak indexer, weak completion] id in
                         indexer?.noteChange(entryID: id)
+                        // 문서 전환을 예측 쪽에도 알린다 — 이전 작품의 고스트·
+                        // 리포트가 B 화면에 남거나 B 오버라이드에 기록되지 않게
+                        // (이슈 #8, Gate 2).
+                        completion?.noteDocumentSwitch(to: id)
                     }
                     // 사용자 수정(오버라이드) 변경 → LLM 없이 스냅샷만 재조립
                     // (v4) — 타임라인·바이블·예측이 즉시 수정본을 본다.
