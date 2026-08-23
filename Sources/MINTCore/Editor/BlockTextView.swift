@@ -1744,6 +1744,220 @@ final class BlockTextView: NSTextView {
         super.deleteBackward(sender)
     }
 
+    // MARK: 이미지 원자 모델 (이슈 #16)
+
+    /// 캐럿 제안이 이미지 문단 **내부**로 들어오면 문단 앞·뒤 경계로 튕겨 낸다 —
+    /// 렌더된 이미지는 원자 객체라 숨은 소스를 문자 단위로 돌아다닐 수 없다.
+    /// 화살표 한 번이면 이미지 앞/뒤로 건너뛴다. 범위 선택(Shift 확장)은 그대로 둔다.
+    static func atomicCaretRange(
+        _ proposedLocation: Int, result: NSRange, in ns: NSString,
+        isImage: (NSRange) -> Bool
+    ) -> NSRange {
+        guard result.length == 0 else { return result }
+        let loc = min(max(result.location, 0), ns.length)
+        let para = ns.paragraphRange(for: NSRange(location: loc, length: 0))
+        // 문단 시작·끝 경계는 "이미지 앞/뒤" 자리라 유효하다.
+        guard isImage(para), para.location < loc, loc < para.upperBound else { return result }
+        return proposedLocation <= para.location
+            ? NSRange(location: para.location, length: 0)
+            : NSRange(location: para.upperBound, length: 0)
+    }
+
+    override func selectionRange(
+        forProposedRange proposedRange: NSRange, granularity: NSSelectionGranularity
+    ) -> NSRange {
+        let base = super.selectionRange(
+            forProposedRange: proposedRange, granularity: granularity)
+        let ns = string as NSString
+        return Self.atomicCaretRange(proposedRange.location, result: base, in: ns) { para in
+            self.blockInfo(in: para).block == .image
+        }
+    }
+
+    /// VoiceOver가 이미지 문단 대신 읽을 문장 — alt 기반 label에 너비·정렬
+    /// value를 덧붙인다. alt가 비었으면 파일명으로 대체한다.
+    static func spokenDescription(
+        attrs: ImageAttrs, failure: ImageLoadFailure?
+    ) -> String {
+        var parts: [String] = ["이미지"]
+        if failure != nil { parts.append("표시 불가") }
+        parts.append(attrs.alt.isEmpty ? (attrs.src as NSString).lastPathComponent : attrs.alt)
+        parts.append("너비 \(attrs.width)%")
+        let alignName =
+            ["left": "왼쪽", "center": "가운데", "right": "오른쪽"][attrs.align]
+            ?? attrs.align
+        parts.append("\(alignName) 정렬")
+        return parts.joined(separator: ", ")
+    }
+
+    /// 접근성 읽기에서 이미지 소스(`![…](…){…}`)를 말 문장으로 바꾼다 — VO 사용자는
+    /// 마크다운 구문 대신 이미지의 의미를 듣는다.
+    override func accessibilityString(for range: NSRange) -> String {
+        let ns = string as NSString
+        guard ns.length > 0 else {
+            return super.accessibilityString(for: range) ?? ""
+        }
+        let upper = min(range.location + range.length, ns.length)
+        guard range.location < upper else { return "" }
+
+        var out = ""
+        var cursor = range.location
+        while cursor < upper {
+            let para = ns.paragraphRange(for: NSRange(location: cursor, length: 0))
+            if blockInfo(in: para).block == .image,
+                let attrs = Self.imageAttrs(
+                    from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
+                !isTransforming
+            {
+                out += Self.spokenDescription(
+                    attrs: attrs, failure: ImageFailure.classify(attrs.src))
+            } else {
+                out += ns.substring(
+                    with: NSRange(
+                        location: cursor,
+                        length: min(para.upperBound, upper) - cursor))
+            }
+            cursor = para.upperBound
+        }
+        return out
+    }
+
+    /// 객체 모드에서 소비할 수 있는 키 동작 (이슈 #16).
+    enum ImageObjectKeyAction: Equatable {
+        case exitBefore  // 이미지 앞 경계로 나온다
+        case exitAfter  // 이미지 뒤 경계로 나온다
+        case align(String)
+        case adjustWidth(Int)
+        case move(Int)
+        case revealToolbar
+    }
+
+    /// 객체 선택 중 키 → 동작 해석. 순수 함수 — 키보드 이벤트 합성 없이
+    /// 회귀 테스트가 가능하다.
+    static func objectKeyAction(
+        _ raw: String, command: Bool, option: Bool
+    ) -> ImageObjectKeyAction? {
+        // 특수키는 charactersIgnoringModifiers의 사유 코드로 온다 (F700~F703).
+        switch (raw, command, option) {
+        case ("\u{F702}", false, false), ("\u{F700}", false, false):
+            return .exitBefore
+        case ("\u{F703}", false, false), ("\u{F704}", false, false):
+            return .exitAfter
+        case ("\u{F702}", true, _):
+            return .align("left")
+        case ("\u{F700}", true, _):
+            return .align("center")
+        case ("\u{F703}", true, _):
+            return .align("right")
+        case ("+", false, _), ("=", false, _):
+            return .adjustWidth(10)
+        case ("-", false, _), ("_", false, _):
+            return .adjustWidth(-10)
+        case ("\u{F700}", false, true):
+            return .move(-1)
+        case ("\u{F704}", false, true):
+            return .move(1)
+        case ("\r", false, false), (" ", false, false):
+            return .revealToolbar
+        default:
+            return nil
+        }
+    }
+
+    /// 객체 선택 중 키 조작 — Full Keyboard Access로 정렬·크기·이동·삭제·툴바를
+    /// 다루는 경로 (이슈 #16). 이 모드에선 텍스트 입력이 차단돼 있으므로
+    /// 화살표·부호키를 객체 조작에 쓸 수 있다. 소비한 키만 true.
+    @discardableResult
+    private func handleObjectKey(_ event: NSEvent) -> Bool {
+        guard let loc = selectedImageLocation else { return false }
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
+        guard let action = Self.objectKeyAction(
+            event.charactersIgnoringModifiers ?? "",
+            command: event.modifierFlags.contains(.command),
+            option: event.modifierFlags.contains(.option))
+        else { return false }
+
+        switch action {
+        case .exitBefore:
+            clearImageSelection()
+            setSelectedRange(NSRange(location: para.location, length: 0))
+        case .exitAfter:
+            clearImageSelection()
+            setSelectedRange(NSRange(location: para.upperBound, length: 0))
+        case .align(let a):
+            rewriteImage(para, setAlign: a)
+        case .adjustWidth(let delta):
+            rewriteImage(para, setWidth: min(100, max(10, widthOfSelectedImage() + delta)))
+        case .move(let offset):
+            moveImageParagraph(para, offset: offset)
+            // 새 자리에서 선택 UI를 다시 얹는다 — ⌥↑↓ 연속 입력이 이어지도록.
+            if let newLoc = selectedImageLocation {
+                showImageBox(for: newLoc)
+                presentImageToolbar(for: NSRange(location: newLoc, length: 0))
+            }
+        case .revealToolbar:
+            showImageBox(for: para.location)
+            presentImageToolbar(for: para)
+        }
+        return true
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if selectedImageLocation != nil, handleObjectKey(event) { return }
+        super.keyDown(with: event)
+    }
+
+    private func widthOfSelectedImage() -> Int {
+        guard let loc = selectedImageLocation else { return 100 }
+        let ns = string as NSString
+        let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
+        return Self.imageAttrs(
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces))?.width ?? 100
+    }
+
+    /// 이미지 문단을 이웃 문단과 맞바꿔 위(offset -1)·아래(+1)로 옮긴다 —
+    /// undo 가능 (shouldChangeText). 성공해도 실패해도 원문 손상은 없다.
+    /// internal — 키보드 이동 경로의 회귀 테스트용 (이슈 #16). 선택 UI 갱신은
+    /// 호출부(키 핸들러)가 이어서 한다.
+    func moveImageParagraph(_ para: NSRange, offset: Int) {
+        guard let storage = textStorage else { return }
+        let ns = string as NSString
+        let neighbor: NSRange
+        if offset < 0 {
+            guard para.location > 0 else { return }
+            neighbor = ns.paragraphRange(for: NSRange(location: para.location - 1, length: 0))
+        } else {
+            guard para.upperBound < ns.length else { return }
+            neighbor = ns.paragraphRange(for: NSRange(location: para.upperBound, length: 0))
+        }
+        let lower = min(para.location, neighbor.location)
+        let upper = max(para.upperBound, neighbor.upperBound)
+        let span = NSRange(location: lower, length: upper - lower)
+        let imageText = ns.substring(with: para)
+        let otherText = ns.substring(with: neighbor)
+        // 문단은 자기 개행을 데리고 다닌다. 위 이동은 그대로 붙여도 줄 구조가
+        // 유지되지만, 아래 이동에서 이웃이 **마지막 문단**(개행 없음)이면
+        // 개행을 재배치해야 두 줄이 한 줄로 붙지 않는다.
+        let newText: String
+        if offset < 0 {
+            newText = imageText + otherText
+        } else if !otherText.hasSuffix("\n"), imageText.hasSuffix("\n") {
+            newText = otherText + "\n" + String(imageText.dropLast())
+        } else {
+            newText = otherText + imageText
+        }
+        guard shouldChangeText(in: span, replacementString: newText) else { return }
+        isTransforming = true
+        storage.replaceCharacters(in: span, with: newText)
+        isTransforming = false
+
+        // 새 자리의 이미지를 다시 객체 선택 — 키보드 이동이 연속되도록.
+        selectedImageLocation = offset < 0 ? lower : lower + otherText.count
+        refreshRenderedBlocks()
+    }
+
+
     // MARK: 체크박스 클릭
 
     override func mouseDown(with event: NSEvent) {

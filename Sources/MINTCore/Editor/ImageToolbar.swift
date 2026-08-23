@@ -59,6 +59,7 @@ struct ImageObjectToolbarView: View {
                 .foregroundStyle(theme.ink2C)
                 .frame(minWidth: 30)
                 .help("크기 조절: 모서리 핸들 드래그")
+                .accessibilityLabel(Text("표시 너비 \(width)%"))
             divider
             iconButton("text.below.photo", active: false, help: "대체 텍스트·제목 편집") {
                 onAction(.editMetadata)
@@ -123,6 +124,7 @@ struct ImageAltEditorView: View {
                 .font(MintFonts.uiFont(11))
                 .focused($focusedField, equals: 0)
                 .onSubmit { submit() }
+                .accessibilityLabel(Text("대체 텍스트"))
             Text("마우스오버 제목 (선택)")
                 .font(MintFonts.uiFont(10, .semibold))
                 .foregroundStyle(theme.ink2C)
@@ -131,6 +133,7 @@ struct ImageAltEditorView: View {
                 .font(MintFonts.uiFont(11))
                 .focused($focusedField, equals: 1)
                 .onSubmit { submit() }
+                .accessibilityLabel(Text("마우스오버 제목"))
             HStack {
                 Spacer()
                 Button("취소") { onCancel() }
@@ -171,6 +174,10 @@ struct ImageAltEditorView: View {
 }
 
 /// 이미지 툴바 공용 버튼 — hover/활성 배경.
+///
+/// 접근성: 아이콘만으로는 VoiceOver가 읽을 수 없어 help 문장을 label로 노출하고,
+/// 정렬 버튼은 활성 상태를 isSelected 트레잇으로 알린다. 히트 타깃은 보기 크기와
+/// 별도로 넉넉히 확보한다 (이슈 #16).
 private struct ImageToolbarButton<Label: View>: View {
     let theme: MintTheme
     let active: Bool
@@ -183,8 +190,8 @@ private struct ImageToolbarButton<Label: View>: View {
         Button(action: action) {
             label()
                 .foregroundStyle(active ? theme.blueC : theme.inkC)
-                .frame(height: 24)
-                .padding(.horizontal, 4)
+                .frame(width: 28, height: 24)  // 히트 타깃 — 아이콘보다 넓게
+                .padding(.horizontal, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(active ? theme.activeBgC : (hovered ? theme.hoverC : .clear))
@@ -194,5 +201,7 @@ private struct ImageToolbarButton<Label: View>: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
+        .accessibilityLabel(Text(help))
+        .accessibilityAddTraits(active ? [.isSelected] : [])
     }
 }
