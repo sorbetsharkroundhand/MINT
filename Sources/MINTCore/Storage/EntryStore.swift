@@ -230,7 +230,7 @@ public final class EntryStore: ObservableObject {
         guard let index = entries.firstIndex(where: { $0.id == id }),
             entries[index].resolvedKind != kind
         else { return }
-        entries[index].kind = kind
+        commitEntryChange(id, name: "종류 변경") { $0.kind = kind }
         scheduleSave()
         // 전환도 인덱서에겐 신호 — 소설이 됐으면 유휴 타이머를 감는다.
         documentDidChange?(id)
@@ -302,6 +302,134 @@ public final class EntryStore: ObservableObject {
     /// nonisolated(unsafe) 탈출구를 없앴다 (이슈 #45). 메인 스레드에서만 읽고 쓴다.
     public static weak var current: EntryStore?
 
+    // MARK: - 구조 변경 Undo + 휴지통 (이슈 #9)
+
+    /// 구조 변경(삭제·이동·재정렬·종류 전환·바이블 메타)이 등록될 창의
+    /// undo manager. ContentView가 창과 함께 배선한다 — 텍스트 편집 undo와
+    /// 같은 ⌘Z 흐름을 타게 하기 위해서다.
+    public weak var structureUndoManager: UndoManager?
+
+    /// 앱 휴지통 — ⌘Z 유예가 지난 실수의 내구 복제본. 삭제는 즉시 여기로
+    /// 가고, 영구 삭제(비우기)만 확인 Alert를 묻는다.
+    public private(set) var trash: TrashStore
+
+    /// 사용자 피드백 한 줄 — 상태 바에 잠깐 떴다 사라진다 ("⌘Z로 되돌릴 수
+    /// 있어요" 안내). nil이면 표시 중 아님.
+    @Published public private(set) var notice: String?
+
+    private var noticeClearTask: Task<Void, Never>?
+
+    /// 구조 변경 하나를 원자적으로 적용하고 이름 있는 undo/redo를 등록한다.
+    ///
+    /// 스냅샷은 값 타입(JournalEntry·JournalFolder)이라 before/after 배열만으로
+    /// 완전 복원이 성립한다 — 원인별 복원 코드를 만들지 않는다 (#9).
+    private func commitStructure(
+        _ name: String,
+        before: @escaping () -> Void,
+        after: @escaping () -> Void
+    ) {
+        guard let um = structureUndoManager else {
+            after()
+            return
+        }
+        after()
+        registerRevert(
+            StructureChange(name: name, forward: after, backward: before), in: um)
+    }
+
+    private struct StructureChange {
+        let name: String
+        let forward: () -> Void
+        let backward: () -> Void
+    }
+
+    /// undo 시 역동작을 실행하고 그 결과(=redo)를 다시 등록한다 — 표준 코코아
+    /// 상호 등록 패턴. 연속 ⌘Z/⇧⌘Z가 끊기지 않는다.
+    private func registerRevert(_ change: StructureChange, in um: UndoManager) {
+        um.setActionName(change.name)
+        um.registerUndo(withTarget: self) { store in
+            store.structureUndoManager = um  // 창 재배선 전에도 이어지게
+            FileHandle.standardError.write(Data("DBG revert[\(change.name)]\n".utf8))
+            change.backward()
+            store.registerRevert(
+                StructureChange(
+                    name: change.name,
+                    forward: change.backward,
+                    backward: change.forward),
+                in: um)
+        }
+    }
+
+    /// 저널 목록에서 해당 id 항목을 스냅샷으로 되돌린다. 없으면 원래 위치 근처에
+    /// 다시 심는다 — sortOrder가 순서의 단일 진실이라 값 복원이 곧 위치 복원이다.
+    private func restoreEntries(_ snapshots: [JournalEntry]) {
+        for snapshot in snapshots {
+            if let index = entries.firstIndex(where: { $0.id == snapshot.id }) {
+                entries[index] = snapshot
+            } else {
+                // 순서의 단일 진실은 sortOrder라 **배열 위치는 무의미**하다.
+                // (새 항목은 sortOrder를 음수로 내려가며 넣기도 한다 — insert
+                // 위치 계산은 함정.) 없으면 끝에 붙인다.
+                entries.append(snapshot)
+            }
+        }
+    }
+
+    private func restoreFolders(_ snapshots: [JournalFolder]) {
+        for snapshot in snapshots {
+            if let index = folders.firstIndex(where: { $0.id == snapshot.id }) {
+                folders[index] = snapshot
+            } else {
+                folders.append(snapshot)
+            }
+        }
+    }
+
+    /// 구조 변경 후 안내 문구. 기존 타이머를 취소하고 4초 뒤에 지운다.
+    func showNotice(_ text: String) {
+        notice = text
+        noticeClearTask?.cancel()
+        noticeClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            self?.notice = nil
+        }
+    }
+
+    /// 단일 저널의 필드 변경을 스냅샷 undo로 감싼다 — 바이블 메타(인물·핵심
+    /// 장면·무시한 후보·대화 기록)와 종류 전환이 공유한다 (#9).
+    private func commitEntryChange(
+        _ id: UUID, name: String, mutate: (inout JournalEntry) -> Void
+    ) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let before = entries[index]
+        var after = before
+        mutate(&after)
+        guard after != before else { return }
+        // TEMP-DBG
+        FileHandle.standardError.write(Data("DBG commit[\(name)] beforeChars=\(before.characters?.count ?? -1) afterChars=\(after.characters?.count ?? -1)\n".utf8))
+        entries[index] = after
+        commitStructure(name, before: { [weak self] in
+            guard let self else { return }
+            self.restoreEntries([before])
+            self.saveNow()
+        }, after: { [weak self] in
+            guard let self else { return }
+            self.restoreEntries([after])
+            self.saveNow()
+        })
+    }
+
+    /// 휴지통 항목을 문서 구조로 되살린다 — 폴더 묶음이면 폴더와 저널 전체.
+    public func restoreFromTrash(itemID: UUID) {
+        guard let item = trash.take(id: itemID) else { return }
+        restoreFolders(item.folders)
+        restoreEntries(item.entries)
+        fixActiveAfterStructureChange(prefer: nil)
+        saveNow()
+        showNotice("휴지통에서 ‘\(item.title)’을(를) 복원했어요")
+    }
+
     /// 본문 편집·문서 전환 알림 (M6) — BackgroundIndexer가 배선한다.
     /// 지식 로직은 여기 두지 않는다 (CLAUDE.md §4) — 신호만 내보낸다.
     public var documentDidChange: ((UUID) -> Void)?
@@ -323,6 +451,7 @@ public final class EntryStore: ObservableObject {
     init(directory: URL, autosaveDelay: Duration) {
         self.autosaveDelay = autosaveDelay
         self.fileURL = directory.appendingPathComponent("entries.json", isDirectory: false)
+        self.trash = TrashStore(directory: directory)
 
         let loaded: Snapshot
         var recovery: RecoveryContext?
@@ -696,11 +825,34 @@ public final class EntryStore: ObservableObject {
         return entry.id
     }
 
+    /// 저널 삭제 — 확인 Alert 없이 휴지통으로 보내고 ⌘Z를 안내한다 (이슈 #9).
+    /// 영구 삭제는 휴지통 화면의 몫이다.
     public func delete(_ id: UUID) {
-        entries.removeAll(where: { $0.id == id })
-        if entries.isEmpty { entries = [JournalEntry()] }
-        if !entries.contains(where: { $0.id == activeID }) { activeID = entries[0].id }
-        saveNow()
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let snapshot = entries[index]
+        commitStructure("저널 삭제", before: { [weak self] in
+            guard let self else { return }
+            self.restoreEntries([snapshot])
+            self.fixActiveAfterStructureChange(prefer: nil)
+            self.saveNow()
+        }, after: { [weak self] in
+            guard let self else { return }
+            self.entries.removeAll { $0.id == id }
+            if self.entries.isEmpty { self.entries = [JournalEntry()] }
+            self.fixActiveAfterStructureChange(prefer: nil)
+            self.saveNow()
+        })
+        trash.add(folders: [], entries: [snapshot])
+        showNotice("‘\(snapshot.title)’을(를) 휴지통으로 옮겼어요 — ⌘Z로 되돌릴 수 있어요")
+    }
+
+    /// 구조 변경 후 활성 문서가 목록에 남아 있게 유지한다.
+    private func fixActiveAfterStructureChange(prefer: UUID?) {
+        if let prefer, entries.contains(where: { $0.id == prefer }) {
+            activeID = prefer
+        } else if !entries.contains(where: { $0.id == activeID }) {
+            activeID = entries[0].id
+        }
     }
 
     /// 저널의 작성일을 바꾼다 — 어제 일을 오늘 적었을 때 날짜를 맞추도록 (L9).
@@ -722,29 +874,44 @@ public final class EntryStore: ObservableObject {
 
     /// 저널을 대상 폴더로 옮기고 beforeID 앞에 놓는다 (nil = 맨 끝).
     /// 같은 폴더 안이면 순수 재정렬. 이동 후 형제 그룹 전체를 0…n으로 재번호한다 —
-    /// 목록이 작아 분수 순서 관리보다 단순한 쪽을 택한다.
+    /// 목록이 작아 분수 순서 관리보다 단순한 쪽을 택한다. ⌘Z로 되돌릴 수 있다 (#9).
     public func moveEntry(_ id: UUID, toFolder folderID: UUID?, before beforeID: UUID?) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        // 드래그한 항목을 뺀 형제 목록에 삽입 위치를 잡는다 — 같은 목록 안 이동도
-        // 인덱스가 어긋나지 않는다.
-        var siblings = childEntries(of: folderID).filter { $0.id != id }
-        let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
-            ?? siblings.count
-        var moved = entries[index]
-        let orderUnchanged = moved.folderID == folderID
-            && childEntries(of: folderID).firstIndex(where: { $0.id == id }) == insertAt
-        guard !orderUnchanged else { return }
-        moved.folderID = folderID
-        siblings.insert(moved, at: insertAt)
-        renumberEntries(siblings)
-        entries[index].folderID = folderID
-        // 옮긴 저널이 접힌 폴더에 숨지 않게 대상 폴더를 펼친다.
-        if let folderID { expandedFolderIDs.insert(folderID) }
-        saveNow()
+        // 변화가 없으면 스택을 오염시키지 않고 끝낸다.
+        let movedNow = entries[index]
+        if movedNow.folderID == folderID,
+            childEntries(of: folderID).firstIndex(where: { $0.id == id })
+                == beforeID.flatMap { b in childEntries(of: folderID).firstIndex { $0.id == b } }
+        {
+            return
+        }
+        let movedBefore = movedNow
+        let siblingsBefore = childEntries(of: movedBefore.folderID)
+            + childEntries(of: folderID).filter { $0.id != id }
+        commitStructure("저널 이동", before: { [weak self] in
+            guard let self else { return }
+            self.restoreEntries(siblingsBefore + [movedBefore])
+            self.saveNow()
+        }, after: { [weak self] in
+            guard let self else { return }
+            var siblings = self.childEntries(of: folderID).filter { $0.id != id }
+            let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
+                ?? siblings.count
+            var moved = self.entries.first(where: { $0.id == id }) ?? movedBefore
+            moved.folderID = folderID
+            siblings.insert(moved, at: insertAt)
+            self.renumberEntries(siblings)
+            if let i = self.entries.firstIndex(where: { $0.id == id }) {
+                self.entries[i].folderID = folderID
+            }
+            // 옮긴 저널이 접힌 폴더에 숨지 않게 대상 폴더를 펼친다.
+            if let folderID { self.expandedFolderIDs.insert(folderID) }
+            self.saveNow()
+        })
     }
 
     /// 폴더를 다른 부모로 옮기고 beforeID 앞에 놓는다 (nil = 맨 끝).
-    /// 자기 자신·자기 자손으로의 이동은 거부한다 (순환 방지).
+    /// 자기 자신·자기 자손으로의 이동은 거부한다 (순환 방지). ⌘Z 지원 (#9).
     @discardableResult
     public func moveFolder(_ id: UUID, toParent parentID: UUID?, before beforeID: UUID?) -> Bool {
         guard canMoveFolder(id, toParent: parentID),
@@ -757,12 +924,26 @@ public final class EntryStore: ObservableObject {
         let orderUnchanged = moved.parentID == parentID
             && childFolders(of: parentID).firstIndex(where: { $0.id == id }) == insertAt
         guard !orderUnchanged else { return true }
-        moved.parentID = parentID
-        siblings.insert(moved, at: insertAt)
-        renumberFolders(siblings)
-        folders[index].parentID = parentID
-        if let parentID { expandedFolderIDs.insert(parentID) }
-        saveNow()
+        let movedBefore = moved
+        let siblingsBefore = childFolders(of: movedBefore.parentID)
+            + childFolders(of: parentID).filter { $0.id != id }
+        commitStructure("폴더 이동", before: { [weak self] in
+            guard let self else { return }
+            self.restoreFolders(siblingsBefore + [movedBefore])
+            self.saveNow()
+        }, after: { [weak self] in
+            guard let self else { return }
+            var sibs = self.childFolders(of: parentID).filter { $0.id != id }
+            var m = self.folders.first(where: { $0.id == id }) ?? movedBefore
+            m.parentID = parentID
+            sibs.insert(m, at: insertAt)
+            self.renumberFolders(sibs)
+            if let i = self.folders.firstIndex(where: { $0.id == id }) {
+                self.folders[i].parentID = parentID
+            }
+            if let parentID { self.expandedFolderIDs.insert(parentID) }
+            self.saveNow()
+        })
         return true
     }
 
@@ -889,14 +1070,32 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 폴더와 그 안의 하위 폴더·저널을 전부 삭제한다.
+    /// 폴더 삭제 — 하위 폴더·저널 전체가 **휴지통으로** 가고 ⌘Z로 복원된다 (#9).
     public func deleteFolder(_ id: UUID) {
         let doomed = descendantFolderIDs(of: id)
-        folders.removeAll { doomed.contains($0.id) }
-        entries.removeAll { entry in entry.folderID.map(doomed.contains) ?? false }
-        expandedFolderIDs.subtract(doomed)
-        if entries.isEmpty { entries = [JournalEntry()] }
-        if !entries.contains(where: { $0.id == activeID }) { activeID = entries[0].id }
-        saveNow()
+        let removedFolders = folders.filter { doomed.contains($0.id) }
+        let removedEntries = entries.filter { $0.folderID.map(doomed.contains) ?? false }
+        guard !removedFolders.isEmpty || !removedEntries.isEmpty else { return }
+        commitStructure("폴더 삭제", before: { [weak self] in
+            guard let self else { return }
+            self.restoreFolders(removedFolders)
+            self.restoreEntries(removedEntries)
+            self.expandedFolderIDs.formUnion(removedFolders.map(\.id))
+            self.fixActiveAfterStructureChange(prefer: nil)
+            self.saveNow()
+        }, after: { [weak self] in
+            guard let self else { return }
+            self.folders.removeAll { doomed.contains($0.id) }
+            self.entries.removeAll { $0.folderID.map(doomed.contains) ?? false }
+            self.expandedFolderIDs.subtract(doomed)
+            if self.entries.isEmpty { self.entries = [JournalEntry()] }
+            self.fixActiveAfterStructureChange(prefer: nil)
+            self.saveNow()
+        })
+        trash.add(folders: removedFolders, entries: removedEntries)
+        let name = removedFolders.first(where: { $0.id == id })?.name ?? "폴더"
+        showNotice(
+            "‘\(name)’을(를) 휴지통으로 옮겼어요 — 저널 \(removedEntries.count)개가 함께 들어갔어요")
     }
 
     public func toggleExpanded(_ folderID: UUID) {
@@ -946,16 +1145,15 @@ public final class EntryStore: ObservableObject {
 
     /// 인물 카드 추가/수정 — 팝오버 텍스트 필드가 매 키 입력마다 부르므로 디바운스 저장.
     public func upsertCharacter(_ card: CharacterCard, in id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        var cards = entries[index].characters ?? []
-        if let i = cards.firstIndex(where: { $0.id == card.id }) {
-            guard cards[i] != card else { return }
-            cards[i] = card
-        } else {
-            cards.append(card)
+        commitEntryChange(id, name: "인물 카드 편집") { entry in
+            var cards = entry.characters ?? []
+            if let i = cards.firstIndex(where: { $0.id == card.id }) {
+                cards[i] = card
+            } else {
+                cards.append(card)
+            }
+            entry.characters = cards
         }
-        entries[index].characters = cards
-        scheduleSave()
     }
 
     /// 인물 감지 후보 "무시" — 거부 목록에 넣어 같은 후보를 다시 묻지 않는다
@@ -978,12 +1176,12 @@ public final class EntryStore: ObservableObject {
     /// AI 분석 결과 수정 저장 — 같은 (kind, key)는 최신 값으로 대체된다.
     /// 사용자 결정 = 구조 변경이라 즉시 저장 (rejectCharacterName과 같은 규칙).
     public func setNarrativeOverride(_ override: NarrativeOverride, in id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        var overrides = entries[index].narrativeOverrides ?? []
-        overrides.removeAll { $0.kind == override.kind && $0.key == override.key }
-        overrides.append(override)
-        entries[index].narrativeOverrides = overrides
-        saveNow()
+        commitEntryChange(id, name: "분석 결과 수정") { entry in
+            var overrides = entry.narrativeOverrides ?? []
+            overrides.removeAll { $0.kind == override.kind && $0.key == override.key }
+            overrides.append(override)
+            entry.narrativeOverrides = overrides
+        }
         narrativeOverridesDidChange?(id)
     }
 
@@ -991,13 +1189,11 @@ public final class EntryStore: ObservableObject {
     public func removeNarrativeOverride(
         kind: NarrativeOverride.Kind, key: String, in id: UUID
     ) {
-        guard let index = entries.firstIndex(where: { $0.id == id }),
-            var overrides = entries[index].narrativeOverrides,
-            overrides.contains(where: { $0.kind == kind && $0.key == key })
-        else { return }
-        overrides.removeAll { $0.kind == kind && $0.key == key }
-        entries[index].narrativeOverrides = overrides.isEmpty ? nil : overrides
-        saveNow()
+        commitEntryChange(id, name: "분석 결과 되돌리기") { entry in
+            var overrides = entry.narrativeOverrides ?? []
+            overrides.removeAll { $0.kind == kind && $0.key == key }
+            entry.narrativeOverrides = overrides.isEmpty ? nil : overrides
+        }
         narrativeOverridesDidChange?(id)
     }
 
@@ -1006,37 +1202,34 @@ public final class EntryStore: ObservableObject {
     /// 대화 기록 승인 — 사용자 결정 = 즉시 저장. 스냅샷 재조립 신호까지 쏜다
     /// (기록이 대화 인덱스에 바로 보이도록).
     public func recordConversation(_ record: RecordedConversation, in id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
-        var records = entries[index].recordedConversations ?? []
-        // 같은 범위의 중복 기록 방지 — 같은 블록을 두 번 기록하지 않는다.
-        guard !records.contains(where: { $0.contentHash == record.contentHash }) else { return }
-        records.append(record)
-        entries[index].recordedConversations = records
-        saveNow()
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+            !(entries[index].recordedConversations ?? []).contains(where: { $0.contentHash == record.contentHash })
+        else { return }
+        commitEntryChange(id, name: "대화 기록") { entry in
+            var records = entry.recordedConversations ?? []
+            records.append(record)
+            entry.recordedConversations = records
+        }
         narrativeOverridesDidChange?(id)
     }
 
     /// 기록 삭제 — 사용자만 지울 수 있다 (재분석은 절대 지우지 않는다).
     public func removeRecordedConversation(id recordID: UUID, in id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }),
-            var records = entries[index].recordedConversations,
-            records.contains(where: { $0.id == recordID })
-        else { return }
-        records.removeAll { $0.id == recordID }
-        entries[index].recordedConversations = records.isEmpty ? nil : records
-        saveNow()
+        commitEntryChange(id, name: "대화 기록 삭제") { entry in
+            var records = entry.recordedConversations ?? []
+            records.removeAll { $0.id == recordID }
+            entry.recordedConversations = records.isEmpty ? nil : records
+        }
         narrativeOverridesDidChange?(id)
     }
 
-    /// 인물 카드 삭제 — 구조 변경은 즉시 저장 (스토어의 기존 규칙).
+    /// 인물 카드 삭제 — ⌘Z로 복원된다 (#9). 구조 변경은 즉시 저장 (기존 규칙).
     public func removeCharacter(_ cardID: UUID, from id: UUID) {
-        guard let index = entries.firstIndex(where: { $0.id == id }),
-            var cards = entries[index].characters,
-            cards.contains(where: { $0.id == cardID })
-        else { return }
-        cards.removeAll { $0.id == cardID }
-        entries[index].characters = cards.isEmpty ? nil : cards
-        saveNow()
+        commitEntryChange(id, name: "인물 삭제") { entry in
+            var cards = entry.characters ?? []
+            cards.removeAll { $0.id == cardID }
+            entry.characters = cards.isEmpty ? nil : cards
+        }
     }
 
     /// 활성 본문 변경 카운터 — 상태 바의 디바운스 통계가 `.task(id:)` 키로
