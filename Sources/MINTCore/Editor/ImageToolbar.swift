@@ -11,6 +11,10 @@ enum ImageObjectAction {
     case metadata(alt: String, title: String?)
     /// alt·title 편집 카드를 연다 — 저장은 `metadata`로 돌아온다.
     case editMetadata
+    /// 깨진 이미지 복구 — 파일을 다시 골라 원래 참조 위치에 심는다 (이슈 #15).
+    case locateFile
+    /// 깨진 이미지의 원래 위치를 Finder에서 보여준다 (이슈 #15).
+    case revealInFinder
     /// 이미지 뒤에 빈 줄을 넣고 커서를 옮긴다.
     case lineBreak
     /// 이미지 문단 삭제.
@@ -24,10 +28,21 @@ struct ImageObjectToolbarView: View {
     /// 현재 이미지 너비(%) — 표시용(크기 조절은 모서리 핸들 드래그).
     let width: Int
     let align: String
+    /// 로드 실패 플레이스홀더인가 — 복구 액션(찾기·Finder)을 노출한다 (이슈 #15).
+    var isPlaceholder: Bool = false
     let onAction: (ImageObjectAction) -> Void
 
     var body: some View {
         HStack(spacing: 2) {
+            if isPlaceholder {
+                iconButton("magnifyingglass", active: false, help: "파일 찾아 복구") {
+                    onAction(.locateFile)
+                }
+                iconButton("folder", active: false, help: "Finder에서 보기") {
+                    onAction(.revealInFinder)
+                }
+                divider
+            }
             iconButton("arrow.left.to.line", active: align == "left", help: "왼쪽 정렬") {
                 onAction(.align("left"))
             }
