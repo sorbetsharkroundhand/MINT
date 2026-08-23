@@ -148,7 +148,17 @@ public struct MintCommands: Commands {
         panel.nameFieldStringValue = "\(sanitizedFileName(entry.title)).md"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        try? entry.body.write(to: url, atomically: true, encoding: .utf8)
+        do {
+            try entry.body.write(to: url, atomically: true, encoding: .utf8)
+            // 성공 위치를 명시한다 — 어디에 저장됐는지 사용자가 바로 확인 (이슈 #10).
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            let alert = NSAlert()
+            alert.messageText = "Markdown 내보내기 실패"
+            alert.informativeText = "대상: \(url.path)\n\(error.localizedDescription)"
+            alert.alertStyle = .warning
+            alert.runModal()
+        }
     }
 
     /// 현재 저널을 EPUB 3 전자책으로 저장한다 (요구 7 — 소설 내보내기).
