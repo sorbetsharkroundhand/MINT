@@ -26,6 +26,7 @@ public enum EpubExporter {
     // MARK: - 진입점
 
     /// 저장 패널을 띄워 내보낸다 — 파일 메뉴와 사이드바 문맥 메뉴가 공유한다.
+    /// 누락 이미지가 있으면 **미리** 알리고 명시적 계속을 요구한다 (이슈 #15).
     @MainActor
     public static func exportWithPanel(_ entry: JournalEntry) {
         let panel = NSSavePanel()
@@ -35,6 +36,9 @@ public enum EpubExporter {
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             // 설정의 저자 이름은 값 스냅샷으로만 넘긴다 (CLAUDE.md §4 격리 경계).
+            guard ImageAssetScanner.confirmContinueDespiteMissing(in: entry.body) else {
+                return
+            }
             try export(entry, to: url, author: CompletionSettings.shared.authorName)
         } catch {
             let alert = NSAlert()
@@ -68,7 +72,11 @@ public enum EpubExporter {
             atomically: true, encoding: .utf8)
 
         var images: [String] = []
-        let chapters = makeChapters(from: entry, copyingImagesInto: oebps, collected: &images)
+        // 누락 asset은 exportWithPanel에서 미리 검증됐지만, API 직접 호출 경로에서도
+        // 조용히 사라지지 않게 목록을 유지한다 (이슈 #15).
+        var missingAssets: [String] = []
+        let chapters = makeChapters(
+            from: entry, copyingImagesInto: oebps, collected: &images, missing: &missingAssets)
         for (index, chapter) in chapters.enumerated() {
             try chapterXHTML(chapter).write(
                 to: oebps.appendingPathComponent(chapterFile(index)),
@@ -101,7 +109,8 @@ public enum EpubExporter {
     /// 격리)를 거치므로 같은 격리를 따른다 (이슈 #45). private가 아닌 이유는
     /// alt/title 반영을 단위 테스트로 고정하기 위해서다 (packageOPF와 같은 선례).
     @MainActor static func makeChapters(
-        from entry: JournalEntry, copyingImagesInto oebps: URL, collected images: inout [String]
+        from entry: JournalEntry, copyingImagesInto oebps: URL,
+        collected images: inout [String], missing: inout [String]
     ) -> [Chapter] {
         var chapters: [Chapter] = []
         var title = plainTitle(entry.title)
@@ -183,15 +192,22 @@ public enum EpubExporter {
             } else if let attrs = BlockTextView.imageAttrs(
                 from: line.trimmingCharacters(in: .whitespaces)) {
                 closeList()
-                if let relative = copyImage(attrs.src, into: oebps) {
+                if let relative = copyImage(attrs.src, into: oebps, missing: &missing) {
                     if !images.contains(relative) { images.append(relative) }
-                    // alt는 리더·VoiceOver의 유일한 이미지 설명이다 — 빈 값 대신
-                    // 원문 alt를 넣고, 있으면 title 속성도 살린다 (이슈 #14).
-                    let titlePart = attrs.title.map { " title=\"\(attrEscape($0))\"" } ?? ""
-                    html +=
-                        "<p class=\"image\"><img src=\"\(relative)\""
-                        + " alt=\"\(attrEscape(attrs.alt))\"\(titlePart)/></p>\n"
+                    html += imageTag(src: relative, attrs: attrs)
                 }
+                // 누락 로컬 파일은 missing에 기록됐고 exportWithPanel이 계속
+                // 여부를 물었다. 차단 소스는 에디터에서도 렌더 대상이 아니므로
+                // 사라진 것이 아니다.
+            } else if let ref = ImageReferenceParser.parse(line.trimmingCharacters(in: .whitespaces)),
+                case .remote(let url) = ref.destinationKind {
+                // 원격 이미지는 로컬 복사 대상이 아니지만 주소 그대로 남긴다 —
+                // 콘텐츠가 경고 없이 사라지지 않게 (#12·#15).
+                closeList()
+                var attrs = ImageAttrs(src: url.absoluteString)
+                attrs.alt = ref.alt
+                attrs.title = ref.title
+                html += imageTag(src: attrs.src, attrs: attrs)
             } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 closeList()
             } else {
@@ -206,25 +222,39 @@ public enum EpubExporter {
     }
 
     /// 원본 이미지를 OEBPS/images/로 복사하고 EPUB 내 상대경로를 돌려준다.
-    @MainActor private static func copyImage(_ src: String, into oebps: URL) -> String? {
-        // 원격·차단 소스는 EPUB에 실을 로컬 asset이 아니다 — 파일로 오해해
-        // 이상한 경로를 만들지 않는다 (이슈 #12). 누락 보고는 #15 몫.
+    /// 원격·차단 소스는 nil — 호출부가 주소 통과로 처리한다 (#12). 원본이 없는
+    /// 로컬 파일은 missing에 기록하고 nil (이슈 #15).
+    @MainActor private static func copyImage(
+        _ src: String, into oebps: URL, missing: inout [String]
+    ) -> String? {
         switch ImageReferenceParser.classify(src) {
         case .managedRelative, .externalFile: break
         case .remote, .blocked: return nil
         }
         let sourceURL = MintImageStore.url(for: src)
-        guard FileManager.default.fileExists(atPath: sourceURL.path) else { return nil }
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            if !missing.contains(src) { missing.append(src) }
+            return nil
+        }
         let dir = oebps.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let name = sourceURL.lastPathComponent
         let dest = dir.appendingPathComponent(name)
         if !FileManager.default.fileExists(atPath: dest.path) {
             guard (try? FileManager.default.copyItem(at: sourceURL, to: dest)) != nil else {
+                if !missing.contains(src) { missing.append(src) }
                 return nil
             }
         }
         return "images/\(name)"
+    }
+
+    /// `<img>` 한 줄 — alt는 리더·VoiceOver의 유일한 이미지 설명이고 title도
+    /// 살린다 (이슈 #14). 속성값은 attrEscape 필수.
+    private static func imageTag(src: String, attrs: ImageAttrs) -> String {
+        let titlePart = attrs.title.map { " title=\"\(attrEscape($0))\"" } ?? ""
+        return "<p class=\"image\"><img src=\"\(attrEscape(src))\""
+            + " alt=\"\(attrEscape(attrs.alt))\"\(titlePart)/></p>\n"
     }
 
     // MARK: - 인라인 변환

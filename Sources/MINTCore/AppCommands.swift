@@ -151,6 +151,11 @@ public struct MintCommands: Commands {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
+            // 누락 asset을 미리 검증해 명시적 계속을 받는다 (이슈 #15) —
+            // 조용히 깨진 참조만 남은 결과물을 만들지 않는다.
+            guard ImageAssetScanner.confirmContinueDespiteMissing(in: entry.body) else {
+                return
+            }
             let report = try MarkdownExporter.export(entry, to: url)
             // 성공 위치를 명시한다 — 어디에 저장됐는지 사용자가 바로 확인 (이슈 #10).
             NSWorkspace.shared.activateFileViewerSelecting([url])

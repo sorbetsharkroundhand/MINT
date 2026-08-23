@@ -500,6 +500,20 @@ struct ImageRender {
     let align: String
     /// 객체 선택 상태 — true면 선택 테두리를 그린다.
     let selected: Bool
+    /// 로드 실패 플레이스홀더일 때의 원인 — nil이면 정상 렌더 (이슈 #15).
+    let failure: ImageLoadFailure?
+
+    init(
+        range: NSRange, image: NSImage, size: NSSize, align: String,
+        selected: Bool, failure: ImageLoadFailure? = nil
+    ) {
+        self.range = range
+        self.image = image
+        self.size = size
+        self.align = align
+        self.selected = selected
+        self.failure = failure
+    }
 }
 
 extension NSAttributedString.Key {
@@ -1799,10 +1813,16 @@ final class BlockTextView: NSTextView {
     }
 
     /// 파일 URL 하나를 읽어 images 폴더에 복사한 뒤 이미지 블록으로 삽입한다.
+    /// 저장 실패는 조용히 무시하지 않는다 (이슈 #15).
     private func insertImageFile(_ url: URL) {
-        guard let data = try? Data(contentsOf: url),
-            let relative = MintImageStore.save(data, ext: url.pathExtension)
-        else { return }
+        guard let data = try? Data(contentsOf: url) else {
+            alertAssetWriteFailure("파일을 읽지 못했어요: \(url.lastPathComponent)")
+            return
+        }
+        guard let relative = MintImageStore.save(data, ext: url.pathExtension) else {
+            alertAssetWriteFailure("'\(url.lastPathComponent)'을 images 폴더에 복사하지 못했어요.")
+            return
+        }
         insertImageBlock(relativePath: relative)
     }
 
@@ -1821,15 +1841,22 @@ final class BlockTextView: NSTextView {
             }
         }
         // 2) 비트맵 데이터(스크린샷·복사한 이미지) — PNG로 정규화해 저장한다.
-        if let data = pasteboard.data(forType: .png),
-            let relative = MintImageStore.save(data, ext: "png") {
+        // 저장 실패도 조용히 넘기지 않는다 (이슈 #15).
+        if let data = pasteboard.data(forType: .png) {
+            guard let relative = MintImageStore.save(data, ext: "png") else {
+                alertAssetWriteFailure("붙여넣은 이미지를 images 폴더에 저장하지 못했어요.")
+                return true
+            }
             insertImageBlock(relativePath: relative)
             return true
         }
         if let tiff = pasteboard.data(forType: .tiff),
             let rep = NSBitmapImageRep(data: tiff),
-            let png = rep.representation(using: .png, properties: [:]),
-            let relative = MintImageStore.save(png, ext: "png") {
+            let png = rep.representation(using: .png, properties: [:]) {
+            guard let relative = MintImageStore.save(png, ext: "png") else {
+                alertAssetWriteFailure("붙여넣은 이미지를 images 폴더에 저장하지 못했어요.")
+                return true
+            }
             insertImageBlock(relativePath: relative)
             return true
         }
@@ -1930,13 +1957,16 @@ final class BlockTextView: NSTextView {
         }
         // 이미지 문단에 커서가 놓였는데 객체 선택이 아니면 자동 선택.
         // (로드·프로그램적 변경 중인 isTransforming 때는 건너뛴다.)
+        // 로드 실패 플레이스홀더도 선택 대상이다 — 찾기·Finder·제거 액션을
+        // 제공하려면 (이슈 #15).
         guard sel.length == 0, !isTransforming, window?.firstResponder === self,
             caretPara.location < ns.length,
             selectedImageLocation != caretPara.location,
             blockInfo(in: caretPara).block == .image,
-            Self.imageAttrs(
-                from: paragraphContent(caretPara).trimmingCharacters(in: .whitespaces))
-                .flatMap({ MintImageStore.image(for: $0.src) }) != nil
+            let caretAttrs = Self.imageAttrs(
+                from: paragraphContent(caretPara).trimmingCharacters(in: .whitespaces)),
+            MintImageStore.image(for: caretAttrs.src) != nil
+                || ImageFailure.classify(caretAttrs.src) != nil
         else { return }
         // 커서는 그대로 두고(어차피 숨김) 객체 선택만 채택 — setSelectedRange
         // 재귀를 피한다. refresh가 뒤이어 렌더를 유지한다.
@@ -2021,6 +2051,8 @@ final class BlockTextView: NSTextView {
         case .align(let a): rewriteImage(para, setAlign: a)
         case .width(let w): rewriteImage(para, setWidth: w)
         case .editMetadata: presentImageAltEditor(for: para)
+        case .locateFile: locateBrokenImage(para)
+        case .revealInFinder: revealBrokenImage(para)
         case .metadata(let alt, let title):
             rewriteImage(para, setAlt: alt, setTitle: .some(title))
             hideImageAltEditor()  // 적용 후 카드를 닫는다 — 툴바 갱신은 rewrite가 한다
@@ -2029,11 +2061,69 @@ final class BlockTextView: NSTextView {
         }
     }
 
+    /// 깨진 이미지(플레이스홀더) 복구 — 새 파일을 골라 원래 참조가 가리키던
+    /// 자리를 채운다 (이슈 #15). 관리 asset은 **상대경로 그대로** 심어 문서를
+    /// 건드리지 않고, 외부 절대경로는 임의 경로에 쓰는 대신 새 관리 asset으로
+    /// 옮겨 참조를 고친다.
+    private func locateBrokenImage(_ para: NSRange) {
+        guard let attrs = Self.imageAttrs(
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces))
+        else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowedContentTypes =
+            MintImageStore.imageExtensions.compactMap { UTType(filenameExtension: $0) }
+        panel.message = "'\(attrs.alt.isEmpty ? attrs.src : attrs.alt)' 이미지 파일을 찾아 복구"
+        guard panel.runModal() == .OK, let url = panel.urls.first,
+            let data = try? Data(contentsOf: url)
+        else { return }
+        switch ImageReferenceParser.classify(attrs.src) {
+        case .managedRelative:
+            do {
+                try data.write(
+                    to: MintImageStore.url(for: attrs.src), options: .atomic)
+            } catch {
+                alertAssetWriteFailure(error.localizedDescription)
+                return
+            }
+            refreshRenderedBlocks()  // 플레이스홀더 → 정상 렌더 즉시 전환
+        case .externalFile:
+            guard let relative = MintImageStore.save(data, ext: url.pathExtension) else {
+                alertAssetWriteFailure("images 폴더에 복사하지 못했어요.")
+                return
+            }
+            rewriteImage(para, setSrc: relative)
+        case .remote, .blocked:
+            break
+        }
+    }
+
+    /// 깨진 이미지가 참조하던 위치를 Finder에서 연다 — 파일이 없으면 그 부모 폴더.
+    private func revealBrokenImage(_ para: NSRange) {
+        guard let attrs = Self.imageAttrs(
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces))
+        else { return }
+        let url = MintImageStore.url(for: attrs.src)
+        let target = FileManager.default.fileExists(atPath: url.path)
+            ? url : url.deletingLastPathComponent()
+        NSWorkspace.shared.activateFileViewerSelecting([target])
+    }
+
+    /// asset 저장 실패를 조용히 넘기지 않는다 (이슈 #15).
+    private func alertAssetWriteFailure(_ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = "이미지를 저장하지 못했어요"
+        alert.informativeText = "\(detail)\n디스크 여유와 MINT 폴더 권한을 확인해 주세요."
+        alert.alertStyle = .warning
+        alert.runModal()
+    }
+
     /// 이미지 소스 줄의 `{width align}`·alt/title 속성을 새 값으로 바꿔 다시 쓴다
     /// (undo 포함). `setTitle`: nil=무변화, .some(nil)=해제, .some(문자열)=지정.
     private func rewriteImage(
         _ para: NSRange, setAlign: String? = nil, setWidth: Int? = nil,
-        setAlt: String? = nil, setTitle: String?? = nil
+        setAlt: String? = nil, setTitle: String?? = nil, setSrc: String? = nil
     ) {
         guard let storage = textStorage else { return }
         let content = paragraphContent(para)
@@ -2043,6 +2133,12 @@ final class BlockTextView: NSTextView {
         if let a = setAlign { attrs.align = a }
         if let w = setWidth { attrs.width = w }
         if let alt = setAlt { attrs.alt = alt }
+        if let newSrc = setSrc {
+            attrs.src = newSrc
+            // destination을 다시 쓰는 것이므로 원문 스플라이스를 내린다 —
+            // 합성 경로의 escape 규칙(#14)으로 새 src가 안전하게 직렬화된다.
+            attrs.optionsPrefix = nil
+        }
         if let newTitle = setTitle {
             attrs.title = newTitle
             // optionsPrefix 스플라이스 경로는 원문을 그대로 쓰므로, title이
@@ -2107,7 +2203,9 @@ final class BlockTextView: NSTextView {
         else { return }
 
         let view = ImageObjectToolbarView(
-            theme: palette, width: overrideWidth ?? attrs.width, align: attrs.align
+            theme: palette, width: overrideWidth ?? attrs.width, align: attrs.align,
+            // 로드 실패 플레이스홀더면 찾기·Finder 복구 액션을 노출한다 (이슈 #15).
+            isPlaceholder: ImageFailure.classify(attrs.src) != nil
         ) { [weak self] action in
             self?.performImage(action)
         }
@@ -2503,7 +2601,23 @@ final class BlockTextView: NSTextView {
                 // 소스가 있는데 파싱 불가면 직전 높이를 유지(아무것도 안 한다).
             case .image:
                 guard let image = rendered else {
-                    updateRenderedLineHeight(nil, block: .image, in: para)
+                    // 로드 실패 — 소스로 빠지는 대신 원인·alt·경로를 적은
+                    // 플레이스홀더를 렌더한다 (이슈 #15). 소스 노출 금지 불변식 유지.
+                    if let a = attrs, let failure = ImageFailure.classify(a.src) {
+                        let placeholder = ImageFailure.placeholder(
+                            reason: failure, alt: a.alt, path: a.src, theme: palette)
+                        let size = imageDisplaySize(placeholder, widthPercent: a.width)
+                        images.append(
+                            ImageRender(
+                                range: para, image: placeholder, size: size,
+                                align: a.align, selected: objectSelected, failure: failure))
+                        updateRenderedLineHeight(size.height, block: .image, in: para)
+                        layoutManager.addTemporaryAttribute(
+                            .foregroundColor, value: NSColor.clear, forCharacterRange: para)
+                    } else {
+                        // attrs가 없다면 이미지 문단 표식만 남은 빈 줄 — 높이만 복원.
+                        updateRenderedLineHeight(nil, block: .image, in: para)
+                    }
                     continue
                 }
                 let a = attrs ?? ImageAttrs(src: "")
