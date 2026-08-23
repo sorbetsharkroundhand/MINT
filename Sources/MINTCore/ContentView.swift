@@ -14,6 +14,8 @@ public struct ContentView: View {
     private let indexer: BackgroundIndexer?
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
+    /// 손상 복구 안내를 이번 세션에서 닫았는지 — 닫아도 저장 우회 보호는 계속된다.
+    @State private var recoveryGuideDismissed = false
 
     public init(
         store: EntryStore,
@@ -29,6 +31,24 @@ public struct ContentView: View {
         MainSurface(store: store, completion: completion, indexer: indexer)
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
+            .confirmationDialog(
+                "원고 파일 복구",
+                isPresented: recoveryDialogBinding,
+                titleVisibility: .visible
+            ) {
+                Button("안전 내보내기…") { exportSessionCopy() }
+                if let preserved = store.pendingRecovery?.preservedCopyURL {
+                    Button("보존 사본 위치 열기") {
+                        NSWorkspace.shared.activateFileViewerSelecting([preserved])
+                    }
+                }
+                Button("복구 파일로 라이브러리 승계", role: .destructive) {
+                    store.adoptRecoveredAsLibrary()
+                    recoveryGuideDismissed = false
+                }
+            } message: {
+                Text(recoveryMessage)
+            }
             .onAppear {
                 // 모델 상주 — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다 (PLAN §10).
                 completion.preloadEngine()
@@ -86,6 +106,54 @@ public struct ContentView: View {
         case "light": .light
         default: nil
         }
+    }
+
+    // MARK: - 손상 복구 안내 (이슈 #6)
+
+    /// 복구 모드에서만 뜨고, 사용자가 닫으면 이번 세션에선 다시 열지 않는다.
+    /// 닫아도 데이터는 안전 — 저장은 계속 세션 복구 파일로 우회된다.
+    private var recoveryDialogBinding: Binding<Bool> {
+        Binding(
+            get: { store.pendingRecovery != nil && !recoveryGuideDismissed },
+            set: { shown in if !shown { recoveryGuideDismissed = true } })
+    }
+
+    private var recoveryTitle: String {
+        switch store.pendingRecovery?.cause {
+        case .unreadable: "원고 파일을 읽을 수 없습니다"
+        default: "원고 파일이 손상되어 있습니다"
+        }
+    }
+
+    private var recoveryMessage: String {
+        guard let recovery = store.pendingRecovery else { return "" }
+        var lines = ["""
+            원본은 그대로 보존됐고, 이 세션의 입력은 아래 복구 파일에 기록됩니다 \
+            (손상 원본을 덮지 않기 위한 우회).
+            """
+        ]
+        lines.append("• 원본: \(recovery.originalURL.lastPathComponent)")
+        if let preserved = recovery.preservedCopyURL {
+            lines.append("• 보존 사본: \(preserved.lastPathComponent)")
+        }
+        if case .corrupted(let reason) = recovery.cause {
+            lines.append("• 오류: \(reason)")
+        } else if case .unreadable(let message) = recovery.cause {
+            lines.append("• 오류: \(message)")
+        }
+        lines.append("• 이 세션 기록: \(recovery.sessionURL.lastPathComponent)")
+        return lines.joined(separator: "\n")
+    }
+
+    /// 현재 세션 전체를 사용자가 고른 위치로 내보낸다 (SavePanel).
+    private func exportSessionCopy() {
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = store.pendingRecovery?.sessionURL.lastPathComponent
+            ?? "entries-recovered.json"
+        panel.allowedContentTypes = [.json]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        _ = store.exportSessionCopy(to: url)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }
 
@@ -1101,7 +1169,10 @@ struct EditorStatusBar: View {
                     .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
                 separator
             }
-            Text(store.isSaving ? "저장 중…" : "저장됨")
+            // 복구 모드에선 "저장됨"이 거짓말이 된다 — 우회 대상을 정직하게 표시 (이슈 #6).
+            Text(store.pendingRecovery != nil
+                ? "복구 파일 기록 중 (\(store.pendingRecovery!.sessionURL.lastPathComponent))"
+                : store.isSaving ? "저장 중…" : "저장됨")
             separator
             Text("Markdown")
         }
