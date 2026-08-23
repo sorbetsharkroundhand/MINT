@@ -598,6 +598,9 @@ struct SidebarView: View {
             Button("이름 바꾸기") { startRenameFolder(folder) }
             Button("삭제", role: .destructive) { requestDeleteFolder(folder) }
         }
+        // 행이 사라지면(삭제·접힘·필터) AI 이름 생성을 접는다 — 안 보이는
+        // 스피너를 위해 수 분 생성을 돌려두지 않는다 (이슈 #47).
+        .onDisappear { completion.cancelFolderName(for: folder.id) }
     }
 
     // MARK: - 저널 행

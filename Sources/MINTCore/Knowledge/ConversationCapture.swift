@@ -205,36 +205,85 @@ public enum ConversationDetector {
             contentHash: DocumentOutline.stableHash(content))
     }
 
-    /// 기록의 재앵커 (요구사항 §21·§28) — 원문이 수정돼 위치가 밀렸으면
-    /// 첫/끝 대사로 범위를 되찾는다. 못 찾으면 nil (stale — 조용히 엉뚱한
-    /// 위치로 잇는 것보다 낫다).
+    /// 기록의 재앵커 (PLAN §6.6) — 현재 범위의 해시가 맞으면 그대로 유지하고,
+    /// 원문이 수정돼 밀렸을 때만 기존 위치에서 가장 가까운 첫/끝 대사로 되찾는다.
+    /// 못 찾으면 nil — 조용히 엉뚱한 반복 대사에 잇는 것보다 낫다.
     public static func reanchor(
         _ record: RecordedConversation, in body: NSString
     ) -> RecordedConversation? {
-        guard !record.firstLine.isEmpty else { return nil }
-        let full = NSRange(location: 0, length: body.length)
-        let first = body.range(of: record.firstLine, options: [], range: full)
-        guard first.location != NSNotFound else { return nil }
-        var updated = record
-        // 문단 시작으로 확장 — 기록 범위는 발화 문단 단위였다.
-        let firstParagraph = body.lineRange(for: first)
-        updated.utf16Start = firstParagraph.location
-        let tailStart = first.location + first.length
-        if !record.lastLine.isEmpty, tailStart < body.length {
-            let last = body.range(
-                of: record.lastLine, options: [],
-                range: NSRange(location: tailStart, length: body.length - tailStart))
-            if last.location != NSNotFound {
-                let lastParagraph = body.lineRange(for: last)
-                var end = lastParagraph.location + lastParagraph.length
-                while end > updated.utf16Start, body.character(at: end - 1) == 0x0A { end -= 1 }
-                updated.utf16End = end
-                return updated
-            }
+        guard !record.firstLine.isEmpty, !record.lastLine.isEmpty else { return nil }
+        if record.utf16Start >= 0,
+            record.utf16End > record.utf16Start,
+            record.utf16End <= body.length
+        {
+            let current = body.substring(
+                with: NSRange(
+                    location: record.utf16Start,
+                    length: record.utf16End - record.utf16Start))
+            if DocumentOutline.stableHash(current) == record.contentHash { return record }
         }
-        // 끝을 못 찾으면 원래 길이만큼 잠정 유지.
-        updated.utf16End = min(
-            body.length, updated.utf16Start + (record.utf16End - record.utf16Start))
+
+        var firstCandidates: [NSRange] = []
+        var searchStart = 0
+        while searchStart < body.length {
+            let found = body.range(
+                of: record.firstLine, options: [],
+                range: NSRange(location: searchStart, length: body.length - searchStart))
+            guard found.location != NSNotFound else { break }
+            let paragraph = body.lineRange(for: found)
+            let line = body.substring(with: paragraph)
+            if DialogueAttribution.quotedSpans(in: Substring(line)).contains(where: {
+                String($0.text.prefix(60)) == record.firstLine
+                    && paragraph.location + $0.utf16Offset == found.location
+            }) {
+                firstCandidates.append(found)
+            }
+            searchStart = found.location + max(1, found.length)
+        }
+
+        // 시작·끝 문자열을 독립적으로 고르면 서로 다른 장면을 긴 범위로 이을 수 있다.
+        // 블록 감지 결과 안의 가능한 쌍을 함께 평가하고, 기록 당시 길이에서 두 배
+        // 넘게 벌어진 후보는 버린다 (PLAN §6.6 — 품질 > 적극성).
+        let oldLength = max(1, record.utf16End - record.utf16Start)
+        let maximumLength = max(oldLength * 2, oldLength + 32)
+        var ranges: [Range<Int>] = []
+        searchStart = 0
+        while searchStart < body.length {
+            let found = body.range(
+                of: record.lastLine, options: [],
+                range: NSRange(location: searchStart, length: body.length - searchStart))
+            guard found.location != NSNotFound else { break }
+            let paragraph = body.lineRange(for: found)
+            let caret = min(body.length, paragraph.location + paragraph.length)
+            if let block = blockEnding(at: caret, in: body),
+                block.lastLine == record.lastLine,
+                block.utf16Range.contains(found.location)
+            {
+                var end = paragraph.location + paragraph.length
+                while end > paragraph.location, body.character(at: end - 1) == 0x0A {
+                    end -= 1
+                }
+                for first in firstCandidates where first.location < found.location {
+                    let firstParagraph = body.lineRange(for: first)
+                    let start = firstParagraph.location
+                    guard block.utf16Range.contains(first.location),
+                        end > start, end - start <= maximumLength
+                    else { continue }
+                    ranges.append(start..<end)
+                }
+            }
+            searchStart = found.location + max(1, found.length)
+        }
+
+        guard let range = ranges.min(by: {
+            abs($0.lowerBound - record.utf16Start)
+                + abs($0.upperBound - record.utf16End)
+                < abs($1.lowerBound - record.utf16Start)
+                + abs($1.upperBound - record.utf16End)
+        }) else { return nil }
+        var updated = record
+        updated.utf16Start = range.lowerBound
+        updated.utf16End = range.upperBound
         return updated
     }
 

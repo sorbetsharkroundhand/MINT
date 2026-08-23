@@ -64,6 +64,37 @@ final class PlotThreadTests: XCTestCase {
         XCTAssertNil(threads[0].resolvedAtKey)
     }
 
+    func test_그래프분석입력은_동일stableKey의_첫사건만_보존한다() {
+        let first = StoryEvent(
+            sceneHash: "scene-1", participants: [],
+            summary: "문이 열린다", importance: 3)
+        let repeated = StoryEvent(
+            sceneHash: "scene-2", participants: [],
+            summary: "문이 열린다", importance: 5)
+        let next = StoryEvent(
+            sceneHash: "scene-3", participants: [],
+            summary: "서연이 들어온다", importance: 4)
+
+        let result = BackgroundIndexer.uniqueEventsForAnalysis(
+            [first, repeated, next])
+
+        XCTAssertEqual(result.map(\.sceneHash), ["scene-1", "scene-3"])
+        XCTAssertEqual(Set(result.map(\.stableKey)).count, result.count)
+    }
+
+    func test_고유사건이_임계값아래로줄면_이전그래프와플롯을_비운다() {
+        var sidecar = KnowledgeSidecar(entryID: UUID())
+        sidecar.eventGraph = EventGraphAnalysis(memoHash: "old-graph")
+        sidecar.plotThreads = PlotThreadAnalysis(threads: [], memoHash: "old-plot")
+
+        let changed = BackgroundIndexer.clearAnalysesBelowThreshold(
+            sidecar: &sidecar, uniqueEventCount: 1)
+
+        XCTAssertTrue(changed)
+        XCTAssertNil(sidecar.eventGraph)
+        XCTAssertNil(sidecar.plotThreads)
+    }
+
     // MARK: - Stable identity (요구사항 §10 — 재분석에도 유지)
 
     func test_reconcile_멤버겹침이면_이전ID_유지() {

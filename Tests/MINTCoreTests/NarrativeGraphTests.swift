@@ -547,6 +547,77 @@ final class NarrativeGraphTests: XCTestCase {
         XCTAssertNil(ConversationDetector.reanchor(record, in: "전혀 다른 본문" as NSString))
     }
 
+    func test_기록_재앵커_현재범위해시가_맞으면_원본을유지한다() {
+        let body = "\"어디 가?\"\n\"금방 다녀올게.\""
+        let ns = body as NSString
+        let record = RecordedConversation(
+            participants: [], utf16Start: 0, utf16End: ns.length,
+            firstLine: "어디 가?", lastLine: "금방 다녀올게.",
+            contentHash: DocumentOutline.stableHash(body))
+
+        XCTAssertEqual(ConversationDetector.reanchor(record, in: ns), record)
+    }
+
+    func test_기록_재앵커_반복대사는_기존위치와_가까운블록을_선택한다() {
+        let body = "\"네.\"\n\"먼저 갈게.\"\n\n긴 서술.\n\n\"네.\"\n\"나중에 갈게.\""
+        let ns = body as NSString
+        let expectedStart = ns.range(of: "\"네.\"", options: .backwards).location
+        let record = RecordedConversation(
+            participants: [], utf16Start: expectedStart + 2, utf16End: ns.length,
+            firstLine: "네.", lastLine: "나중에 갈게.", contentHash: "낡은 해시")
+
+        let anchored = ConversationDetector.reanchor(record, in: ns)
+
+        XCTAssertEqual(anchored?.utf16Start, expectedStart)
+        XCTAssertTrue(ns.substring(to: anchored!.utf16End).hasSuffix("\"나중에 갈게.\""))
+    }
+
+    func test_기록_재앵커_마지막대사를_찾지못하면_nil이다() {
+        let body = "서두\n\"어디 가?\"\n대화가 잘렸다."
+        let record = RecordedConversation(
+            participants: [], utf16Start: 0, utf16End: 10,
+            firstLine: "어디 가?", lastLine: "금방 다녀올게.", contentHash: "낡은 해시")
+
+        XCTAssertNil(ConversationDetector.reanchor(record, in: body as NSString))
+    }
+
+    func test_기록_재앵커_서로다른대화블록의_첫끝을_잇지않는다() {
+        let body = """
+            \"네.\"
+            이 블록에는 끝 대사가 없다.
+
+            장면이 완전히 바뀌었다. 인물도 장소도 다르다.
+
+            \"처음 뵙겠습니다.\"
+            \"나중에 갈게.\"
+            """
+        let ns = body as NSString
+        let nearFirst = ns.range(of: "\"네.\"").location
+        let record = RecordedConversation(
+            participants: [], utf16Start: nearFirst, utf16End: nearFirst + 20,
+            firstLine: "네.", lastLine: "나중에 갈게.", contentHash: "낡은 해시")
+
+        XCTAssertNil(ConversationDetector.reanchor(record, in: ns))
+    }
+
+    func test_기록_재앵커_첫대사가60자를넘어도_저장접두로찾는다() {
+        let first = String(repeating: "아주긴대사", count: 16)
+        let conversation = "\"\(first)\"\n\"마지막 대사.\""
+        let body = "앞에 새로 삽입된 문단.\n\n" + conversation
+        let ns = body as NSString
+        let expectedStart = ns.range(of: "\"\(first)\"").location
+        let record = RecordedConversation(
+            participants: [], utf16Start: 0,
+            utf16End: (conversation as NSString).length,
+            firstLine: String(first.prefix(60)), lastLine: "마지막 대사.",
+            contentHash: "삽입 전 해시")
+
+        let anchored = ConversationDetector.reanchor(record, in: ns)
+
+        XCTAssertEqual(anchored?.utf16Start, expectedStart)
+        XCTAssertEqual(anchored?.utf16End, ns.length)
+    }
+
     // MARK: - Case 18–23: 통합 서사 화면 — 흐름 Projection 행 모델
 
     func test_case18_case20_흐름행_정본사건과_관점참조() {

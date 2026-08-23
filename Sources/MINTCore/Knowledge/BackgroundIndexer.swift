@@ -629,10 +629,16 @@ public final class BackgroundIndexer: ObservableObject {
             for scene in outline.scenes {
                 orderedEvents.append(contentsOf: sidecar.events[scene.contentHash] ?? [])
             }
-            let memoHash = combinedHash(orderedEvents.map(\.stableKey))
-            if orderedEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
+            let analysisEvents = uniqueEventsForAnalysis(orderedEvents)
+            if clearAnalysesBelowThreshold(
+                sidecar: &sidecar, uniqueEventCount: analysisEvents.count)
+            {
+                sidecar.save()
+            }
+            let memoHash = combinedHash(analysisEvents.map(\.stableKey))
+            if analysisEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
                 if let analysis = await analyzeEventGraph(
-                    events: orderedEvents, characters: characters,
+                    events: analysisEvents, characters: characters,
                     engine: engine, parameters: parameters)
                 {
                     sidecar.eventGraph = EventGraphAnalysis(
@@ -654,10 +660,11 @@ public final class BackgroundIndexer: ObservableObject {
             for scene in outline.scenes {
                 orderedEvents.append(contentsOf: sidecar.events[scene.contentHash] ?? [])
             }
-            let memoHash = combinedHash(orderedEvents.map(\.stableKey) + ["plot"])
-            if orderedEvents.count >= 3, sidecar.plotThreads?.memoHash != memoHash {
+            let analysisEvents = uniqueEventsForAnalysis(orderedEvents)
+            let memoHash = combinedHash(analysisEvents.map(\.stableKey) + ["plot"])
+            if analysisEvents.count >= 3, sidecar.plotThreads?.memoHash != memoHash {
                 if let threads = await analyzePlotThreads(
-                    events: orderedEvents, characters: characters,
+                    events: analysisEvents, characters: characters,
                     causalLinks: sidecar.eventGraph?.causalLinks ?? [],
                     engine: engine, parameters: parameters)
                 {
@@ -928,7 +935,7 @@ public final class BackgroundIndexer: ObservableObject {
         events: [StoryEvent], characters: [CharacterCard],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> EventGraphParser.Result? {
-        let capped = Array(events.prefix(40))
+        let capped = uniqueEventsForAnalysis(events)
         guard capped.count >= 2 else {
             return EventGraphParser.Result(causalLinks: [], identities: [], chronoEdges: [])
         }
@@ -959,7 +966,7 @@ public final class BackgroundIndexer: ObservableObject {
         causalLinks: [CausalLink],
         engine: CompletionEngine, parameters: CompletionParameters
     ) async -> [PlotThread]? {
-        let capped = Array(events.prefix(40))
+        let capped = uniqueEventsForAnalysis(events)
         guard capped.count >= 3 else { return [] }
         let names = Dictionary(uniqueKeysWithValues: characters.map { ($0.id, $0.name) })
         let listing = capped.enumerated()
@@ -989,6 +996,40 @@ public final class BackgroundIndexer: ObservableObject {
             return []
         }
         return PlotThreadParser.parse(output, keys: capped.map(\.stableKey))
+    }
+
+    /// 같은 사건의 재서술은 stableKey가 겹친다. 번호 목록과 key→번호 인덱스를
+    /// 1:1로 유지하도록 첫 등장만 남긴 뒤 분석 상한을 적용한다 (PLAN §6.6).
+    nonisolated static func uniqueEventsForAnalysis(
+        _ events: [StoryEvent], limit: Int = 40
+    ) -> [StoryEvent] {
+        guard limit > 0 else { return [] }
+        var seen: Set<String> = []
+        var result: [StoryEvent] = []
+        result.reserveCapacity(min(limit, events.count))
+        for event in events where seen.insert(event.stableKey).inserted {
+            result.append(event)
+            if result.count == limit { break }
+        }
+        return result
+    }
+
+    /// 중복 정규화 뒤 분석 최소 개수를 못 채우면 과거 결과도 더는 유효하지 않다.
+    /// raw 사건 수만 보고 건너뛰면 삭제된 사건을 가리키는 그래프가 남는다 (PLAN §6.6).
+    @discardableResult
+    nonisolated static func clearAnalysesBelowThreshold(
+        sidecar: inout KnowledgeSidecar, uniqueEventCount: Int
+    ) -> Bool {
+        var changed = false
+        if uniqueEventCount < 2, sidecar.eventGraph != nil {
+            sidecar.eventGraph = nil
+            changed = true
+        }
+        if uniqueEventCount < 3, sidecar.plotThreads != nil {
+            sidecar.plotThreads = nil
+            changed = true
+        }
+        return changed
     }
 
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 주제·어조·핵심 발언을 뽑는다.

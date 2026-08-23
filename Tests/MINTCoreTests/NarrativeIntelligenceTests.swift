@@ -79,6 +79,19 @@ final class NarrativeIntelligenceTests: XCTestCase {
         XCTAssertEqual(a.stableKey, b.stableKey)  // 씬이 재해시돼도 키 유지
     }
 
+    func test_사건파서는_같은씬의_동일사건줄을_한번만_보존한다() {
+        let output = """
+            문이 열린다 | 중요도: 4
+            문이 열린다 | 중요도: 4
+            서연이 들어온다 | 중요도: 3
+            """
+
+        let events = EventParser.parse(
+            output, sceneHash: "scene-1", nameIndex: [:])
+
+        XCTAssertEqual(events.map(\.summary), ["문이 열린다", "서연이 들어온다"])
+    }
+
     // MARK: - 심화 파서 (앎·관계)
 
     func test_심화_앎_파싱과_태도검증() {
