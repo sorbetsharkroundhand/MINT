@@ -614,6 +614,8 @@ final class BlockTextView: NSTextView {
     /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
     /// 다중 행 display 그룹은 그룹 전체 범위가 하나의 항목으로 들어간다 (이슈 #20).
     nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
+    /// 무효 수식 문단(location) → 파싱 오류 원인 — 우클릭 메뉴·접근성 안내용 (이슈 #22).
+    nonisolated(unsafe) private(set) var mathRenderErrors: [Int: String] = [:]
 
     /// 직전 패스에서 감지된 다중 행 수식 그룹 범위 — 구조 편집 후 줄 높이 잔상을
     /// 되돌리는 기준 (이슈 #22 valid→invalid→valid 잔상 예방).
@@ -1877,10 +1879,22 @@ final class BlockTextView: NSTextView {
                 out += Self.spokenDescription(
                     attrs: attrs, failure: ImageFailure.classify(attrs.src))
             } else {
-                out += ns.substring(
-                    with: NSRange(
-                        location: cursor,
-                        length: min(para.upperBound, upper) - cursor))
+                // 산문 — 인라인 수식 원자(U+FFFC+attachment)를 "수식: …"로 치환해
+                // 읽고, 나머지 글자는 그대로 흘려보낸다 (이슈 #22).
+                let end = min(para.upperBound, upper)
+                var runCursor = cursor
+                while runCursor < end {
+                    if let atom = textStorage?.attribute(
+                            .attachment, at: runCursor, effectiveRange: nil)
+                        as? MathAtomAttachment
+                    {
+                        out += "수식: \(atom.latex)"
+                        runCursor += 1
+                    } else {
+                        out += ns.substring(with: NSRange(location: runCursor, length: 1))
+                        runCursor += 1
+                    }
+                }
             }
             cursor = para.upperBound
         }
@@ -1970,7 +1984,34 @@ final class BlockTextView: NSTextView {
 
     override func keyDown(with event: NSEvent) {
         if selectedImageLocation != nil, handleObjectKey(event) { return }
+        if handleMathEditingKey(event) { return }
         super.keyDown(with: event)
+    }
+
+    /// 수식 소스 모드에서의 객체 조작 키 — 이동(⌥↑↓)과 문단 삭제(⌘⌦)만 가로채고
+    /// 나머지 입력은 LaTeX 편집으로 그대로 흘려보낸다 (이슈 #22).
+    private func handleMathEditingKey(_ event: NSEvent) -> Bool {
+        guard window?.firstResponder === self, !isTransforming else { return false }
+        let ns = string as NSString
+        let sel = selectedRange()
+        let para = ns.paragraphRange(
+            for: NSRange(location: min(sel.location, ns.length), length: 0))
+        guard blockInfo(in: para).block == .math,
+              NSIntersectionRange(sel, para).length > 0 || NSLocationInRange(sel.location, para)
+        else { return false }
+        let raw = event.charactersIgnoringModifiers ?? ""
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        switch (raw, flags.contains(.option), flags.contains(.command)) {
+        case ("\u{F700}", true, false):
+            moveMathParagraph(para, offset: -1)
+        case ("\u{F704}", true, false):
+            moveMathParagraph(para, offset: 1)
+        case ("\u{F728}", _, true):
+            deleteMathParagraph(para)
+        default:
+            return false
+        }
+        return true
     }
 
     private func widthOfSelectedImage() -> Int {
@@ -1986,6 +2027,15 @@ final class BlockTextView: NSTextView {
     /// internal — 키보드 이동 경로의 회귀 테스트용 (이슈 #16). 선택 UI 갱신은
     /// 호출부(키 핸들러)가 이어서 한다.
     func moveImageParagraph(_ para: NSRange, offset: Int) {
+        moveBlockParagraph(para, offset: offset, undoName: "이미지 이동")
+    }
+
+    /// 수식(단일·그룹) 문단의 키보드 이동 — undo 이름만 다르다 (이슈 #22).
+    func moveMathParagraph(_ para: NSRange, offset: Int) {
+        moveBlockParagraph(para, offset: offset, undoName: "수식 이동")
+    }
+
+    private func moveBlockParagraph(_ para: NSRange, offset: Int, undoName: String) {
         guard let storage = textStorage else { return }
         let ns = string as NSString
         let neighbor: NSRange
@@ -2013,7 +2063,7 @@ final class BlockTextView: NSTextView {
             newText = otherText + imageText
         }
         guard shouldChangeText(in: span, replacementString: newText) else { return }
-        nameCurrentUndo("이미지 이동")
+        nameCurrentUndo(undoName)
         isTransforming = true
         storage.replaceCharacters(in: span, with: newText)
         isTransforming = false
@@ -2528,6 +2578,15 @@ final class BlockTextView: NSTextView {
     /// 이미지 문단을 개행째 지운다 (요구 3 · 백스페이스 공통).
     /// internal — 삭제 undo·asset 장부 등록의 회귀 테스트용 (이슈 #17).
     func deleteImageParagraph(_ para: NSRange) {
+        deleteBlockParagraph(para, undoName: "이미지 삭제")
+    }
+
+    /// 수식 문단 삭제 — asset 장부 등록이 없을 뿐 구조는 이미지 삭제와 같다 (#22).
+    func deleteMathParagraph(_ para: NSRange) {
+        deleteBlockParagraph(para, undoName: "수식 삭제")
+    }
+
+    private func deleteBlockParagraph(_ para: NSRange, undoName: String) {
         guard let storage = textStorage else { return }
         clearImageSelection()
         // 지워지는 asset을 장부에 적어 둔다 — undo/redo가 끝난 뒤 참조가 없으면
@@ -2539,7 +2598,7 @@ final class BlockTextView: NSTextView {
             AssetJanitor.record(attrs.src)
         }
         guard shouldChangeText(in: para, replacementString: "") else { return }
-        nameCurrentUndo("이미지 삭제")
+        nameCurrentUndo(undoName)
         isTransforming = true
         storage.replaceCharacters(in: para, with: "")
         isTransforming = false
@@ -2957,7 +3016,8 @@ final class BlockTextView: NSTextView {
             var atomAttrs = baseAttrs
             atomAttrs[.attachment] = atom
             atomAttrs[.mintMath] = true
-            // VoiceOver 라벨은 attachment 자체에서 노출한다 — 이슈 #22가 모델을 완성.
+            // VoiceOver 읽기는 accessibilityString(for:)가 attachment를 문장으로
+            // 바꿔 담당한다 (이슈 #22).
             storage.setAttributes(
                 atomAttrs, range: NSRange(location: span.location, length: 1))
             if registersUndo {
@@ -3136,6 +3196,7 @@ final class BlockTextView: NSTextView {
             .foregroundColor,
             forCharacterRange: NSRange(location: 0, length: storage.length))
         var maths: [(range: NSRange, image: NSImage)] = []
+        var collectedMathErrors: [Int: String] = [:]
         var images: [ImageRender] = []
         // 편집 모드인 수식 그룹 — 루프 뒤 라이브 미리보기 패널을 붙인다.
         var editingMath: (para: NSRange, source: String)?
@@ -3237,10 +3298,17 @@ final class BlockTextView: NSTextView {
 
             let rendered: NSImage?
             var attrs: ImageAttrs?
+            var mathError: String?
             switch block {
             case .math:
-                rendered = source.isEmpty ? nil : MathRenderer.image(
-                    latex: source, color: palette.ink, fontSize: mathFontSize)
+                if source.isEmpty {
+                    rendered = nil
+                } else {
+                    let status = MathRenderer.render(
+                        latex: source, color: palette.ink, fontSize: mathFontSize)
+                    rendered = status.image
+                    mathError = status.error
+                }
             case .image:
                 attrs = Self.imageAttrs(from: source)
                 rendered = attrs.flatMap { MintImageStore.image(for: $0.src) }
@@ -3260,10 +3328,23 @@ final class BlockTextView: NSTextView {
                         layoutManager.addTemporaryAttribute(
                             .foregroundColor, value: NSColor.clear, forCharacterRange: para)
                     }
+                } else if let error = mathError {
+                    // 유효→무효 전환 — 직전 높이·플로팅 미리보기 잔상을 끊고
+                    // 원인 표시 placeholder로 갈아끼운다 (이슈 #22).
+                    hideMathPreview()
+                    let placeholder = MathRenderer.failurePlaceholder(
+                        message: error, latex: source, color: palette.ink)
+                    updateRenderedLineHeight(
+                        displayHeight(of: placeholder), block: .math, in: para)
+                    if !editing {
+                        maths.append((para, placeholder))
+                        collectedMathErrors[para.location] = error
+                        layoutManager.addTemporaryAttribute(
+                            .foregroundColor, value: NSColor.clear, forCharacterRange: para)
+                    }
                 } else if source.isEmpty {
                     updateRenderedLineHeight(nil, block: .math, in: para)  // 빈 수식만 기본
                 }
-                // 소스가 있는데 파싱 불가면 직전 높이를 유지(아무것도 안 한다).
             case .image:
                 guard let image = rendered else {
                     // 로드 실패 — 소스로 빠지는 대신 원인·alt·경로를 적은
@@ -3302,6 +3383,7 @@ final class BlockTextView: NSTextView {
             }
         }
         mathRenders = maths
+        self.mathRenderErrors = collectedMathErrors
         imageRenders = images
         // 이전 그룹에서 벗어난 문단의 줄 높이 복원 — 열기 줄 삭제 같은 구조 편집으로
         // 산문이 된 줄이 거대한 줄 높이를 물려받아 본문이 뜨는 잔상을 막는다 (이슈 #22).
@@ -3524,6 +3606,98 @@ final class BlockTextView: NSTextView {
             paras.append((para, info.block, delim == "open", delim == "close"))
         }
         return Self.mathGroupRanges(paras).first { NSLocationInRange(loc, $0) }
+    }
+
+    // MARK: 수식 객체 복사 (이슈 #22)
+
+    /// 우클릭 메뉴가 대상으로 삼는 수식 문단 위치 — 메뉴 표시 직전에 세팅된다.
+    private var mathActionLocation: Int?
+
+    /// loc의 수식 LaTeX 원문 — 단독 완결은 문단 내용이고, 그룹이면 구분자 줄을
+    /// 걷어내고 내용 줄만 개행으로 합친다 (#22).
+    func mathSource(at loc: Int) -> String? {
+        let ns = string as NSString
+        guard ns.length > 0 else { return nil }
+        let para = ns.paragraphRange(
+            for: NSRange(location: min(loc, ns.length), length: 0))
+        guard blockInfo(in: para).block == .math else { return nil }
+        if let group = mathGroup(containing: para.location) {
+            var lines: [String] = []
+            var scanLoc = group.location
+            while scanLoc < min(group.upperBound, ns.length) {
+                let p = ns.paragraphRange(for: NSRange(location: scanLoc, length: 0))
+                scanLoc = p.upperBound
+                guard blockInfo(in: p).block == .math else { continue }
+                var line = paragraphContent(p)
+                if line == "$$" { continue }  // 열기/닫기 구분자 줄
+                if line.hasSuffix("$$") { line.removeLast(2) }  // 닫기가 붙어 있는 줄
+                lines.append(line)
+            }
+            return lines.joined(separator: "\n")
+        }
+        // 단독 완결 수식 — 저장 내용이 곧 LaTeX (직렬화 때 $$를 덧입힌다).
+        return paragraphContent(para)
+    }
+
+    private func renderedMathImage(at loc: Int, latex: String) -> NSImage? {
+        mathRenders.first { $0.range.location <= loc && $0.range.upperBound > loc }?.image
+            ?? MathRenderer.image(latex: latex, color: palette.ink, fontSize: mathFontSize)
+    }
+
+    @objc private func copyMathLatex(_ sender: AnyObject?) {
+        guard let loc = mathActionLocation, let latex = mathSource(at: loc) else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(latex, forType: .string)
+    }
+
+    @objc private func copyMathImage(_ sender: AnyObject?) {
+        guard let loc = mathActionLocation,
+            let latex = mathSource(at: loc),
+            let image = renderedMathImage(at: loc, latex: latex)
+        else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.writeObjects([image])
+    }
+
+    @objc private func copyMathPDF(_ sender: AnyObject?) {
+        guard let loc = mathActionLocation,
+            let latex = mathSource(at: loc),
+            let image = renderedMathImage(at: loc, latex: latex),
+            let pdf = MathRenderer.pdfData(from: image)
+        else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setData(pdf, forType: .pdf)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let point = convert(event.locationInWindow, from: nil)
+        if let layoutManager, let textContainer {
+            let containerPoint = NSPoint(
+                x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+            let index = layoutManager.characterIndex(
+                for: containerPoint, in: textContainer,
+                fractionOfDistanceBetweenInsertionPoints: nil)
+            let ns = string as NSString
+            if ns.length > 0 {
+                let para = ns.paragraphRange(
+                    for: NSRange(location: min(index, ns.length), length: 0))
+                if blockInfo(in: para).block == .math,
+                    let latex = mathSource(at: para.location), !latex.isEmpty
+                {
+                    mathActionLocation = para.location
+                    let menu = NSMenu(title: "수식")
+                    menu.addItem(withTitle: "LaTeX 복사", action: #selector(copyMathLatex(_:)), keyEquivalent: "")
+                    menu.addItem(withTitle: "이미지 복사", action: #selector(copyMathImage(_:)), keyEquivalent: "")
+                    menu.addItem(withTitle: "PDF로 복사", action: #selector(copyMathPDF(_:)), keyEquivalent: "")
+                    menu.addItem(.separator())
+                    if let base = super.menu(for: event) {
+                        for item in base.items { menu.addItem(item.copy() as! NSMenuItem) }
+                    }
+                    return menu
+                }
+            }
+        }
+        return super.menu(for: event)
     }
 
     /// 폭이 바뀌면 수식·이미지 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
@@ -4712,14 +4886,88 @@ enum MathRenderer {
         latex: String, color: NSColor, fontSize: CGFloat,
         labelMode: MTMathUILabelMode = .display
     ) -> NSImage? {
+        render(latex: latex, color: color, fontSize: fontSize, labelMode: labelMode).image
+    }
+
+    /// 렌더 결과와 **파싱 오류 원인**을 함께 돌려준다 — 무효 수식의 원인 표시용
+    /// (이슈 #22). 성공이면 error nil.
+    static func render(
+        latex: String, color: NSColor, fontSize: CGFloat,
+        labelMode: MTMathUILabelMode = .display
+    ) -> (image: NSImage?, error: String?) {
         let key = "\(labelMode == .display ? "D" : "T")|\(fontSize)|\(color.description)|\(latex)"
-        if let hit = cache[key] { return hit }
+        if let hit = cache[key] { return (hit, nil) }
         let renderer = MTMathImage(
             latex: latex, fontSize: fontSize, textColor: color, labelMode: labelMode)
         let (error, image) = renderer.asImage()
-        guard error == nil, let image, image.size.width > 0 else { return nil }
+        guard error == nil, let image, image.size.width > 0 else {
+            return (nil, error?.localizedDescription ?? "수식을 해석하지 못했어요")
+        }
         if cache.count > 256 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
         cache[key] = image
+        return (image, nil)
+    }
+
+    /// 파싱 실패 플레이스홀더 — 원인과 LaTeX 원문을 담아 정상 렌더와 같은
+    /// 파이프라인으로 그린다. 점선 붉은 박스라 유효 수식과 시각 구분 (이슈 #22).
+    static func failurePlaceholder(
+        message: String, latex: String, color: NSColor
+    ) -> NSImage {
+        let width = max(260, min(560, CGFloat(latex.count) * fontSize0 * 0.42))
+        let height: CGFloat = 58
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+        defer { image.unlockFocus() }
+
+        let box = NSRect(x: 1, y: 1, width: width - 2, height: height - 2)
+        let rounded = NSBezierPath(roundedRect: box, xRadius: 8, yRadius: 8)
+        NSColor.systemRed.withAlphaComponent(0.06).setFill()
+        rounded.fill()
+        let dashed: [CGFloat] = [4, 4]
+        NSColor.systemRed.withAlphaComponent(0.55).setStroke()
+        rounded.setLineDash(dashed, count: 2, phase: 0)
+        rounded.lineWidth = 1.5
+        rounded.stroke()
+
+        let text = NSMutableAttributedString()
+        text.append(NSAttributedString(string: "⚠︎  수식을 해석하지 못했어요", attributes: [
+            .font: MintFonts.ui(12, weight: .semibold),
+            .foregroundColor: color,
+        ]))
+        text.append(NSAttributedString(string: "\n\(message)", attributes: [
+            .font: MintFonts.ui(10.5),
+            .foregroundColor: NSColor.systemRed.withAlphaComponent(0.9),
+        ]))
+        let trimmedLatex = latex.replacingOccurrences(of: "\n", with: " ⏎ ")
+        text.append(NSAttributedString(string: "\n\(trimmedLatex)", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .regular),
+            .foregroundColor: color.withAlphaComponent(0.75),
+        ]))
+        let bounds = text.boundingRect(
+            with: NSSize(width: width - 24, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin])
+        text.draw(with: NSRect(
+            x: 12, y: (height - bounds.height) / 2,
+            width: width - 24, height: bounds.height),
+            options: [.usesLineFragmentOrigin])
         return image
     }
+
+    /// 렌더된 이미지를 PDF 데이터로 — "PDF로 복사"용 (이슈 #22).
+    static func pdfData(from image: NSImage) -> Data? {
+        var box = CGRect(origin: .zero, size: image.size)
+        let data = NSMutableData()
+        guard let consumer = CGDataConsumer(data: data as CFMutableData),
+            let context = CGContext(consumer: consumer, mediaBox: &box, nil)
+        else { return nil }
+        let nsContext = NSGraphicsContext(cgContext: context, flipped: false)
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = nsContext
+        image.draw(in: box)
+        NSGraphicsContext.restoreGraphicsState()
+        context.closePDF()
+        return data as Data
+    }
+
+    private static let fontSize0: CGFloat = 14
 }

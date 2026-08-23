@@ -133,7 +133,11 @@ public enum EpubExporter {
         func flushMath() {
             closeList()
             let source = mathLines.joined(separator: "\n")
-            html += "<p class=\"math\"><code>\(escape(source))</code></p>\n"
+            let result = Self.mathHTML(source, into: oebps)
+            html += result.html
+            if let asset = result.asset, !images.contains(asset) {
+                images.append(asset)  // OPF manifest 등록 (#22)
+            }
             mathLines = []
         }
         func openList(_ tag: String) {
@@ -213,7 +217,11 @@ public enum EpubExporter {
             } else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
                 closeList()
                 let source = String(line.dropFirst(2).dropLast(2))
-                html += "<p class=\"math\"><code>\(escape(source))</code></p>\n"
+                let result = Self.mathHTML(source, into: oebps)
+                html += result.html
+                if let asset = result.asset, !images.contains(asset) {
+                    images.append(asset)
+                }
             } else if line.trimmingCharacters(in: .whitespaces) == "$$"
                 || (line.hasPrefix("$$") && !line.dropFirst(2).hasPrefix("$")) {
                 // 다중 행 display의 열기 — 이후 줄들이 닫는 $$를 만날 때까지 수식.
@@ -255,6 +263,42 @@ public enum EpubExporter {
         closeList()
         chapters.append(Chapter(title: title, html: html))
         return chapters
+    }
+
+    /// 수식을 OEBPS/images/에 PNG로 심고 (html 태그, OPF 등록용 asset 파일명?)을
+    /// 돌려준다 — 리더 호환 표현. LaTeX 원문은 alt에 남겨 의미 fallback을 제공하고,
+    /// 렌더 실패 시엔 code 소스를 남긴다 (이슈 #22).
+    @MainActor static func mathHTML(
+        _ source: String, into oebps: URL
+    ) -> (html: String, asset: String?) {
+        guard !source.trimmingCharacters(in: .whitespaces).isEmpty,
+            let image = MathRenderer.image(
+                latex: source, color: .black, fontSize: 16, labelMode: .display),
+            let tiff = image.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiff),
+            let png = rep.representation(using: .png, properties: [:])
+        else {
+            // 렌더 실패 — 소스를 남겨 의미가 완전히 사라지지 않게 한다 (#15 승계).
+            return ("<p class=\"math\"><code>\(escape(source))</code></p>\n", nil)
+        }
+        let name = "math-\(stableHash(source)).png"
+        let dir = oebps.appendingPathComponent("images", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try? png.write(to: dir.appendingPathComponent(name), options: .atomic)
+        return (
+            "<p class=\"math\"><img src=\"images/\(name)\""
+                + " alt=\"LaTeX: \(attrEscape(source))\"/></p>\n",
+            "images/\(name)"
+        )
+    }
+
+    /// 실행마다 달라지는 HashValue 대신 안정 해시 — 같은 수식은 같은 파일명.
+    static func stableHash(_ source: String) -> String {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in source.utf8 {
+            h = (h ^ UInt64(byte)) &* 0x1000_0000_01b3
+        }
+        return String(h, radix: 16)
     }
 
     /// 원본 이미지를 OEBPS/images/로 복사하고 EPUB 내 상대경로를 돌려준다.
