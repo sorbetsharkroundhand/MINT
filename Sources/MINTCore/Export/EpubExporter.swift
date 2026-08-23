@@ -98,8 +98,9 @@ public enum EpubExporter {
     /// 본문을 `# ` 제목마다 챕터로 나누고, 각 챕터를 XHTML 조각으로 변환한다.
     /// 이미지(`![](images/…)`)는 OEBPS/images/로 복사해 참조를 살린다.
     /// export(@MainActor)에서만 호출된다 — 이미지 URL 해석이 MintImageStore(메인
-    /// 격리)를 거치므로 같은 격리를 따른다 (이슈 #45).
-    @MainActor private static func makeChapters(
+    /// 격리)를 거치므로 같은 격리를 따른다 (이슈 #45). private가 아닌 이유는
+    /// alt/title 반영을 단위 테스트로 고정하기 위해서다 (packageOPF와 같은 선례).
+    @MainActor static func makeChapters(
         from entry: JournalEntry, copyingImagesInto oebps: URL, collected images: inout [String]
     ) -> [Chapter] {
         var chapters: [Chapter] = []
@@ -184,7 +185,12 @@ public enum EpubExporter {
                 closeList()
                 if let relative = copyImage(attrs.src, into: oebps) {
                     if !images.contains(relative) { images.append(relative) }
-                    html += "<p class=\"image\"><img src=\"\(relative)\" alt=\"\"/></p>\n"
+                    // alt는 리더·VoiceOver의 유일한 이미지 설명이다 — 빈 값 대신
+                    // 원문 alt를 넣고, 있으면 title 속성도 살린다 (이슈 #14).
+                    let titlePart = attrs.title.map { " title=\"\(attrEscape($0))\"" } ?? ""
+                    html +=
+                        "<p class=\"image\"><img src=\"\(relative)\""
+                        + " alt=\"\(attrEscape(attrs.alt))\"\(titlePart)/></p>\n"
                 }
             } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 closeList()
@@ -229,6 +235,11 @@ public enum EpubExporter {
         text.replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
             .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// 속성값용 — escape()와 달리 따옴표도 막는다 (alt·title 속성, 이슈 #14).
+    private static func attrEscape(_ text: String) -> String {
+        escape(text).replacingOccurrences(of: "\"", with: "&quot;")
     }
 
     /// 인라인 마크다운(굵게·기울임·코드·`<font>` 색/크기)을 XHTML로 바꾼다.
