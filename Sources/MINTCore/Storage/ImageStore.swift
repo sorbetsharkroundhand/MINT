@@ -48,14 +48,17 @@ public enum MintImageStore {
     }
 
     /// 이미지 데이터를 images 폴더에 복사하고 상대경로("images/<uuid>.<ext>")를 돌려준다.
-    /// 실패하면 nil.
+    /// 실패하면 nil. 저장된 asset은 장부에 후보 등록 — 삽입이 취소돼도 유예 후
+    /// 참조 기반으로 정리된다 (이슈 #17).
     public static func save(_ data: Data, ext rawExt: String) -> String? {
         let ext = normalizedExtension(rawExt)
         let name = "\(UUID().uuidString).\(ext)"
         let url = imagesDirectory().appendingPathComponent(name, isDirectory: false)
         do {
             try data.write(to: url, options: .atomic)
-            return "images/\(name)"
+            let relative = "images/\(name)"
+            AssetJanitor.record(relative)
+            return relative
         } catch {
             return nil
         }
