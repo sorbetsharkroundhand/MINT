@@ -141,11 +141,17 @@ enum InlineMarkdown {
     // MARK: 직렬화 (속성 → 마크다운)
 
     /// 범위의 인라인 속성 런을 마커로 감싸 마크다운 한 줄로 되돌린다.
+    /// 인라인 수식 원자(attachment)는 `$latex$`로 — 굵게 등 다른 마커로
+    /// 감싸지 않는다 (원자는 서식의 대상이 아니라 객체다, 이슈 #20).
     static func serialize(_ storage: NSAttributedString, in range: NSRange) -> String {
         guard range.length > 0 else { return "" }
         var out = ""
         storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
             var text = (storage.string as NSString).substring(with: run)
+            if let atom = attrs[.attachment] as? MathAtomAttachment {
+                out += "$\(atom.latex)$"
+                return
+            }
             if attrs[.mintCode] as? Bool == true {
                 text = "`\(text)`"
             } else {

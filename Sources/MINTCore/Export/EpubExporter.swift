@@ -119,12 +119,22 @@ public enum EpubExporter {
         var started = false
         var inCode = false
         var listTag: String?
-
         func closeList() {
             if let tag = listTag {
                 html += "</\(tag)>\n"
                 listTag = nil
             }
+        }
+        // 다중 행 display 수식 그룹 — 에디터 로드와 같은 상태기계 (이슈 #20).
+        // "$$"로 열리고 "$$"로 닫히며, 그룹 안의 줄은 다른 블록으로 오독하지 않는다.
+        var inMathGroup = false
+        var mathLines: [String] = []
+
+        func flushMath() {
+            closeList()
+            let source = mathLines.joined(separator: "\n")
+            html += "<p class=\"math\"><code>\(escape(source))</code></p>\n"
+            mathLines = []
         }
         func openList(_ tag: String) {
             if listTag != tag {
@@ -136,6 +146,21 @@ public enum EpubExporter {
 
         for rawLine in entry.body.components(separatedBy: "\n") {
             var line = rawLine
+            if inMathGroup {
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed == "$$" {
+                    inMathGroup = false
+                    flushMath()
+                } else if trimmed.hasSuffix("$$"), trimmed.count >= 3 {
+                    mathLines.append((line as NSString).substring(
+                        with: NSRange(location: 0, length: (line as NSString).length - 2)))
+                    inMathGroup = false
+                    flushMath()
+                } else {
+                    mathLines.append(line)
+                }
+                continue
+            }
             if line.trimmingCharacters(in: .whitespaces) == "```" {
                 closeList()
                 inCode.toggle()
@@ -189,6 +214,15 @@ public enum EpubExporter {
                 closeList()
                 let source = String(line.dropFirst(2).dropLast(2))
                 html += "<p class=\"math\"><code>\(escape(source))</code></p>\n"
+            } else if line.trimmingCharacters(in: .whitespaces) == "$$"
+                || (line.hasPrefix("$$") && !line.dropFirst(2).hasPrefix("$")) {
+                // 다중 행 display의 열기 — 이후 줄들이 닫는 $$를 만날 때까지 수식.
+                closeList()
+                inMathGroup = true
+                let rest = String(line.dropFirst(2))
+                if !rest.trimmingCharacters(in: .whitespaces).isEmpty {
+                    mathLines.append(rest)
+                }
             } else if let attrs = BlockTextView.imageAttrs(
                 from: line.trimmingCharacters(in: .whitespaces)) {
                 closeList()
@@ -216,6 +250,8 @@ public enum EpubExporter {
                 html += "<p\(style)>\(inline(line))</p>\n"
             }
         }
+        // 파일 끝에서 닫히지 않은 그룹 — 열려 있는 만큼은 수식으로 남긴다.
+        if inMathGroup || !mathLines.isEmpty { flushMath() }
         closeList()
         chapters.append(Chapter(title: title, html: html))
         return chapters

@@ -523,6 +523,11 @@ extension NSAttributedString.Key {
     static let mintChecked = NSAttributedString.Key("mint.checked")
     /// number 블록의 마커 문자열 ("1." 등).
     static let mintMarker = NSAttributedString.Key("mint.marker")
+    /// 다중 행 display 수식 그룹에서의 구분자 역할 — "open"/"mid"/"close" (이슈 #20).
+    /// serialize는 이 값으로 `$$`를 어디에 되돌릴지 정한다. 없으면 단독 완결 수식.
+    static let mintMathDelim = NSAttributedString.Key("mint.mathDelim")
+    /// 인라인 수식 원자 문자(attachment) 표시 (Bool) — 직렬화·접근성 판별용.
+    static let mintMath = NSAttributedString.Key("mint.math")
 }
 
 // MARK: - 텍스트 뷰
@@ -555,6 +560,8 @@ final class BlockTextView: NSTextView {
         didSet {
             guard baseFontSize != oldValue else { return }
             bodyFont = MintFonts.serif(baseFontSize)
+            // 인라인 수식 원자도 본문 크기에 맞춰 다시 렌더한다 (이슈 #20).
+            if window != nil { rerenderInlineAtoms() }
         }
     }
 
@@ -605,7 +612,12 @@ final class BlockTextView: NSTextView {
 
     /// 현재 렌더 모드인 수식 문단들 (문단 range + 렌더된 LaTeX 이미지).
     /// `refreshRenderedBlocks()`이 갱신하고 레이아웃 매니저가 그린다.
+    /// 다중 행 display 그룹은 그룹 전체 범위가 하나의 항목으로 들어간다 (이슈 #20).
     nonisolated(unsafe) private(set) var mathRenders: [(range: NSRange, image: NSImage)] = []
+
+    /// 직전 패스에서 감지된 다중 행 수식 그룹 범위 — 구조 편집 후 줄 높이 잔상을
+    /// 되돌리는 기준 (이슈 #22 valid→invalid→valid 잔상 예방).
+    private var previousMathGroups: [NSRange] = []
 
     /// 현재 렌더 모드인 이미지 문단들 — 문단 range·이미지·표시 크기·정렬·선택 여부.
     /// 정렬/크기는 소스(`![](src){width=NN align=X}`)에서 파싱해 담고, 레이아웃
@@ -741,10 +753,14 @@ final class BlockTextView: NSTextView {
         isTransforming = true
         let result = NSMutableAttributedString()
         var inCode = false
+        // 다중 행 display 수식 그룹 상태 — "$$"만 있는(혹은 $$ 뒤 내용이 이어지는)
+        // 줄에 열리고 $$로 닫힌다. 그룹 안에선 다른 블록 파싱(#·-·>)을 전부 건너뛴다:
+        // 행렬·cases 내용 줄이 헤딩·목록으로 오독되면 원문 구조가 깨진다 (이슈 #20).
+        var inMathGroup = false
         let lines = markdown.components(separatedBy: "\n")
         for (index, rawLine) in lines.enumerated() {
             var line = rawLine
-            if line.trimmingCharacters(in: .whitespaces) == "```" {
+            if !inMathGroup, line.trimmingCharacters(in: .whitespaces) == "```" {
                 inCode.toggle()
                 continue
             }
@@ -753,15 +769,32 @@ final class BlockTextView: NSTextView {
             var marker: String?
             // 정렬 래퍼(<p align="…">…</p>)는 블록 판정 전에 벗긴다.
             var align: String?
-            if !inCode {
+            if !inCode, !inMathGroup {
                 let full = NSRange(location: 0, length: (line as NSString).length)
                 if let match = Self.alignWrapper.firstMatch(in: line, range: full) {
                     align = (line as NSString).substring(with: match.range(at: 1))
                     line = (line as NSString).substring(with: match.range(at: 2))
                 }
             }
+            // 이 줄이 수식 그룹에서 어떤 역할인지 — 속성으로 기록해 serialize가
+            // 구분자를 정확히 되돌려준다.
+            var mathDelim: String?
             if inCode {
                 block = .code
+            } else if inMathGroup {
+                block = .math
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                if trimmed == "$$" || trimmed.hasSuffix("$$"), trimmed.count >= 2 {
+                    // 닫는 줄. 텍스트는 **원문 그대로** 둔다 — 빈 문단은 storage에서
+                    // 존재하지 않아(마지막 줄이면 특히) 속성째 사라진다. 구분자를
+                    // 벗기는 일은 렌더·직렬화가 역할 속성으로 처리한다 (이슈 #20).
+                    mathDelim = "close"
+                    inMathGroup = false
+                } else {
+                    // 중간 내용 줄 — 완결 단독 수식과 구별해야 serialize가 $$를
+                    // 덧붙이지 않는다.
+                    mathDelim = "mid"
+                }
             } else if line.hasPrefix("### ") {
                 block = .h3; line = String(line.dropFirst(4))
             } else if line.hasPrefix("## ") {
@@ -784,6 +817,13 @@ final class BlockTextView: NSTextView {
                 block = .divider; line = ""
             } else if line.hasPrefix("$$"), line.hasSuffix("$$"), line.count >= 4 {
                 block = .math; line = String(line.dropFirst(2).dropLast(2))
+            } else if line.trimmingCharacters(in: .whitespaces) == "$$"
+                || (line.hasPrefix("$$") && !line.dropFirst(2).hasPrefix("$")) {
+                // "$$" 단독 또는 "$$내용…" — 여러 줄 display의 열기 (이슈 #20).
+                // 텍스트는 원문 그대로 — 벗기는 일은 렌더·직렬화가 한다.
+                block = .math
+                mathDelim = "open"
+                inMathGroup = true
             } else if line.range(
                 of: #"^!\[[^\]]*\]\([^)\s]+\)(?:\{[^}]*\})?$"#,
                 options: .regularExpression) != nil {
@@ -795,6 +835,7 @@ final class BlockTextView: NSTextView {
             attrs[.mintBlock] = block.rawValue
             if checked { attrs[.mintChecked] = true }
             if let marker { attrs[.mintMarker] = marker }
+            if let mathDelim { attrs[.mintMathDelim] = mathDelim }
             if let align {
                 attrs[.mintAlign] = align
                 if let ps = (attrs[.paragraphStyle] as? NSParagraphStyle)?.mutableCopy()
@@ -819,6 +860,8 @@ final class BlockTextView: NSTextView {
         }
         storage.setAttributedString(result)
         decorateInline(in: NSRange(location: 0, length: storage.length))
+        // 산문의 인라인 수식($…$)을 렌더 원자로 — 로드 시 1회 전환 (이슈 #20).
+        convertAllInlineMath()
         // 저널을 열면 맨 위·처음에 커서를 둔다 — 예전엔 문서 끝에 놓여, 뷰포트는
         // 위인데 커서는 아래라 첫 키 입력이 바닥으로 순간이동하는 혼란이 있었다.
         setSelectedRange(NSRange(location: 0, length: 0))
@@ -915,7 +958,18 @@ final class BlockTextView: NSTextView {
         case .bullet: return ("- " + content, false)
         case .number: return ((info.marker ?? "1.") + " " + content, false)
         case .todo: return ("- [" + (info.checked ? "x" : " ") + "] " + content, false)
-        case .math: return ("$$" + content + "$$", false)
+        case .math:
+            // 다중 행 display 그룹 — 그룹 문단은 **원문 그대로** 저장됐다 (열기/
+            // 중간/닫기 모두). 그대로 돌려주면 왕복이 항상 정확하다 (이슈 #20).
+            // 단독 완결 수식만 마커를 다시 감싼다.
+            if let storage = textStorage, para.location < storage.length {
+                let attrs = storage.attributes(at: para.location, effectiveRange: nil)
+                switch attrs[.mintMathDelim] as? String {
+                case "open", "mid", "close": return (content, false)
+                default: break
+                }
+            }
+            return ("$$" + content + "$$", false)
         case .divider: return ("---", false)
         case .image: return (content, false)  // content = 원문 ![](src)
         default:
@@ -1253,6 +1307,7 @@ final class BlockTextView: NSTextView {
         }
         syncTypingAttributes()
         // 테마가 바뀌면 잉크 색으로 수식을 다시 렌더한다.
+        rerenderInlineAtoms()
         refreshRenderedBlocks()
         needsDisplay = true
     }
@@ -1531,6 +1586,16 @@ final class BlockTextView: NSTextView {
         let text = paragraphContent(para)
         let nsText = text as NSString
         let caretInPara = sel.location - para.location
+
+        // "$…$" 닫기 타이핑 — 인라인 수식 원자로 즉시 전환 (이슈 #20).
+        // 코드 스팬에 걸친 쌍은 변환하지 않는다 — 코드는 문자 그대로다.
+        if let region = MathScanner.closingInline(in: text, atCaret: caretInPara) {
+            let skips = inlineCodeSkips(in: para)
+            if !skips.contains(where: { NSIntersectionRange($0, region.range).length > 0 }) {
+                convertInlineMath(in: para)
+                return
+            }
+        }
 
         for rule in InlineMarkdown.typingRules {
             let matches = rule.pattern.matches(
@@ -1963,6 +2028,8 @@ final class BlockTextView: NSTextView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        // 인라인 수식 원자 더블클릭 — 소스(`$latex$`)로 펼쳐 편집한다 (이슈 #20).
+        if event.clickCount == 2, revealInlineMathSource(at: point) { return }
         if let layoutManager, let textContainer {
             let containerPoint = NSPoint(
                 x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
@@ -2656,20 +2723,28 @@ final class BlockTextView: NSTextView {
     }
 
     /// 블록 문단(이미지·수식)을 통째로 드롭 지점의 문단 앞으로 옮긴다 (요구 B·6).
+    /// 다중 행 수식 그룹이면 그룹 전체를 옮긴다 (이슈 #20).
     func moveParagraph(at loc: Int, as block: MintBlock, toViewPoint p: NSPoint) {
         imageDropIndicatorY = nil
         guard let storage = textStorage else { return }
         let ns = string as NSString
-        let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
-        let lineText = paragraphContent(para)
+        var para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
+        // 수식 그룹 소속이면 이동 단위를 그룹 전체로 넓힌다.
+        if block == .math, let group = mathGroup(containing: para.location) {
+            para = group
+        }
+        let isMathGroup = block == .math && para.length > 0
+            && ns.paragraphRange(for: NSRange(location: para.location, length: 0)).upperBound
+                != para.upperBound
+        let lineText = ns.substring(with: para).trimmingCharacters(in: CharacterSet(["\n"]))
         let dropIdx = min(characterIndexForInsertion(at: p), ns.length)
         let dropPara = ns.paragraphRange(for: NSRange(location: dropIdx, length: 0))
-        guard dropPara.location != para.location else {
+        guard dropPara.location < para.location || dropPara.location >= para.upperBound else {
             refreshRenderedBlocks(); return
         }
         clearImageSelection()
 
-        // 지울 범위: 이미지 문단(개행 포함). 마지막 줄이라 개행이 없으면 앞 개행을 지운다.
+        // 지울 범위: 블록 문단(개행 포함). 마지막 줄이라 개행이 없으면 앞 개행을 지운다.
         var removeRange = para
         let endsNL =
             para.length > 0
@@ -2683,7 +2758,7 @@ final class BlockTextView: NSTextView {
         guard shouldChangeText(
             in: NSRange(location: 0, length: ns.length), replacementString: nil)
         else { return }
-        nameCurrentUndo("이미지 이동")
+        nameCurrentUndo("블록 이동")
         isTransforming = true
         storage.replaceCharacters(in: removeRange, with: "")
         // 삭제로 밀린 삽입 위치 보정.
@@ -2699,7 +2774,11 @@ final class BlockTextView: NSTextView {
 
         let newPara = (string as NSString).paragraphRange(
             for: NSRange(location: insertLoc, length: 0))
-        applyBlock(block, to: newPara, registerUndo: false)
+        if !isMathGroup {
+            // 단일 문단만 속성 재부여 — 그룹은 열기/닫기 구분자 속성이 문단마다
+            // 다르므로 텍스트와 함께 이동한 속성을 건드리지 않는다 (이슈 #20).
+            applyBlock(block, to: newPara, registerUndo: false)
+        }
         if block == .image {
             setSelectedRange(NSRange(location: newPara.location, length: 0))
             didChangeText()
@@ -2718,12 +2797,10 @@ final class BlockTextView: NSTextView {
     // MARK: 수식 블록 드래그 이동 (요구 6)
 
     /// 렌더된 수식이 실제 그려지는 뷰 좌표 rect — `drawMath`와 같은 축소 규칙.
-    /// 히트 판정·커서 rect의 기준.
+    /// 히트 판정·커서 rect의 기준. 다중 행 그룹은 그룹 전체 rect 기준 (이슈 #20).
     func mathDrawnRect(forParagraphAt loc: Int) -> NSRect? {
-        guard let render = mathRenders.first(where: { $0.range.location == loc }),
-            let row = paragraphRectInView(
-                (string as NSString).paragraphRange(
-                    for: NSRange(location: min(loc, (string as NSString).length), length: 0)))
+        guard let render = mathRenders.first(where: { NSLocationInRange(loc, $0.range) }),
+            let row = paragraphRectInView(render.range)
         else { return nil }
         var size = render.image.size
         guard size.width > 0, size.height > 0 else { return nil }
@@ -2804,22 +2881,246 @@ final class BlockTextView: NSTextView {
         return insertImages(from: sender.draggingPasteboard)
     }
 
+    // MARK: 인라인 수식 원자 (이슈 #20)
+
+    /// raw `$…$` 스팬이 문서에 남아 있을 가능성 — 빠른 경로 판정용.
+    /// `$` 입력·소스 펼치기·로드 시 남은 스팬에서 켜지고, 접기 검사가 실측으로 끈다.
+    private(set) var mayHaveInlineMath = true
+
+    /// 회귀 테스트용 — 붙여넣기 등 외부 편집 후의 상태를 흉내 낸다 (이슈 #20).
+    var mayHaveInlineMathForTesting: Bool {
+        get { mayHaveInlineMath }
+        set { mayHaveInlineMath = newValue }
+    }
+    /// 인라인 수식 원자의 storage 문자 — U+FFFC (attachment 글자 하나).
+    static let attachmentCharacter = "\u{FFFC}"
+
+
+    /// 수식 스캔 제외 범위(문단 상대) — 인라인 코드 스팬과 **이미 존재하는
+    /// 수식 원자**. 원자를 끼고 `$`가 재결합하면 이중 변환으로 내용이 삼켜진다.
+    private func inlineCodeSkips(in paragraph: NSRange) -> [NSRange] {
+        guard let storage = textStorage else { return [] }
+        var skips: [NSRange] = []
+        storage.enumerateAttribute(.mintCode, in: paragraph, options: []) { value, range, _ in
+            if value as? Bool == true {
+                skips.append(
+                    NSRange(
+                        location: range.location - paragraph.location, length: range.length))
+            }
+        }
+        storage.enumerateAttribute(.mintMath, in: paragraph, options: []) { value, range, _ in
+            if value as? Bool == true {
+                skips.append(
+                    NSRange(
+                        location: range.location - paragraph.location, length: range.length))
+            }
+        }
+        return skips
+    }
+
+    /// 산문 문단의 `$…$` 스팬을 렌더 원자(attachment 한 글자)로 바꾼다.
+    /// 변환한 스팬 수를 돌려준다. 코드 블록·수식/이미지/구분선 블록은 처음부터 건너뛴다.
+    @discardableResult
+    func convertInlineMath(in paragraph: NSRange, registersUndo: Bool = true) -> Int {
+        guard let storage = textStorage,
+            ![MintBlock.code, .math, .divider, .image].contains(blockInfo(in: paragraph).block)
+        else { return 0 }
+        let content = paragraphContent(paragraph)
+        // 인라인 원자는 **inlineText**만 대상이다. 산문 한가운데의 `$$…$$`는
+        // 단일-$ 복원으로 되돌릴 때 경계가 흔들려(파싱 비대칭) 원문 텍스트로
+        // 남긴다 — 블록 렌더는 문단 단위 그룹이 담당한다 (이슈 #20).
+        let regions = MathScanner.regions(
+            in: content, skipping: inlineCodeSkips(in: paragraph)
+        ).filter { $0.kind == .inlineText }
+        guard !regions.isEmpty else { return 0 }
+
+        if registersUndo { isTransforming = true }
+        defer { if registersUndo { isTransforming = false } }
+        for region in regions.reversed() {
+            let span = NSRange(
+                location: paragraph.location + region.range.location,
+                length: region.range.length)
+            // 원자 폰트 크기 — 문단에 저장된 인라인 크기 속성을 존중한다.
+            let baseAttrs =
+                storage.attributes(at: span.location, effectiveRange: nil)
+            let size = (baseAttrs[.mintFontSize] as? Double).map { CGFloat($0) }
+                ?? baseFontSize
+            let atom = MathAtomAttachment(latex: region.latex)
+            atom.render(fontSize: size, color: palette.ink)
+
+            if registersUndo {
+                guard shouldChangeText(in: span, replacementString: "") else { continue }
+            }
+            // 주의: String(unichar)은 십진수 "65532"를 만든다 — 유니코드 스칼라로.
+            storage.replaceCharacters(
+                in: span, with: Self.attachmentCharacter)
+            var atomAttrs = baseAttrs
+            atomAttrs[.attachment] = atom
+            atomAttrs[.mintMath] = true
+            // VoiceOver 라벨은 attachment 자체에서 노출한다 — 이슈 #22가 모델을 완성.
+            storage.setAttributes(
+                atomAttrs, range: NSRange(location: span.location, length: 1))
+            if registersUndo {
+                nameCurrentUndo("수식 원자 전환")
+                didChangeText()
+            }
+        }
+        return regions.count
+    }
+
+    /// 로드 직후 전 문서 1회 전환 — 로드는 undo 대상이 아니므로 storage를 곧장 고친다.
+    func convertAllInlineMath() {
+        // 남는 raw 스팬 여부는 syncInlineMathFlag가 실측으로 정리한다.
+        let ns = string as NSString
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            location = para.upperBound
+            convertInlineMath(in: para, registersUndo: false)
+        }
+        syncInlineMathFlag()
+    }
+
+    /// 커서가 떠난 문단의 raw `$…$`를 원자로 접는다. 커서 문단은 편집 중일 수 있어
+    /// 건드리지 않고 플래그만 유지한다 — 다음 커서 이동 때 접힌다.
+    private func collapseRawInlineMath(awayFrom sel: NSRange) {
+        guard mayHaveInlineMath else { return }
+        let ns = string as NSString
+        var remaining = false
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            location = para.upperBound
+            let caretInside =
+                NSIntersectionRange(sel, para).length > 0
+                || (sel.location >= para.location && sel.location <= para.upperBound)
+            if caretInside {
+                if hasConvertibleRawMath(in: para) { remaining = true }
+                continue
+            }
+            if convertInlineMath(in: para) > 0 { needsDisplay = true }
+        }
+        mayHaveInlineMath = remaining
+    }
+
+    /// 문단에 지금 접을 수 있는 raw `$…$`가 있는가.
+    private func hasConvertibleRawMath(in paragraph: NSRange) -> Bool {
+        !MathScanner.regions(
+            in: paragraphContent(paragraph), skipping: inlineCodeSkips(in: paragraph)).isEmpty
+    }
+
+    /// 실측으로 플래그 정리 — 전체 경로를 한 번 탄 뒤 호출한다 (syncMarkerFlag 짝).
+    private func syncInlineMathFlag() {
+        guard let storage = textStorage else {
+            mayHaveInlineMath = false
+            return
+        }
+        let ns = storage.string as NSString
+        var found = false
+        var location = 0
+        while location < ns.length, !found {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            location = para.upperBound
+            if hasConvertibleRawMath(in: para) { found = true }
+        }
+        mayHaveInlineMath = found
+    }
+
+    /// 테마·글자 크기 변경 — 원자 이미지를 새 잉크색·크기로 다시 렌더한다.
+    func rerenderInlineAtoms() {
+        guard let storage = textStorage else { return }
+        let full = NSRange(location: 0, length: storage.length)
+        storage.enumerateAttribute(.mintMath, in: full, options: []) { value, range, _ in
+            guard value as? Bool == true, range.length == 1 else { return }
+            let attrs = storage.attributes(at: range.location, effectiveRange: nil)
+            guard let atom = attrs[.attachment] as? MathAtomAttachment else { return }
+            let size = (attrs[.mintFontSize] as? Double).map { CGFloat($0) } ?? baseFontSize
+            atom.render(fontSize: size, color: palette.ink)
+        }
+        needsDisplay = true
+    }
+
+    /// 더블클릭한 원자를 `$latex$` 소스로 펼쳐 내용을 선택한다 — 편집 후 커서가
+    /// 문단을 떠나면 다시 원자로 접힌다(collapseRawInlineMath).
+    private func revealInlineMathSource(at point: NSPoint) -> Bool {
+        guard let layoutManager, let textContainer, let storage = textStorage else {
+            return false
+        }
+        let containerPoint = NSPoint(
+            x: point.x - textContainerOrigin.x, y: point.y - textContainerOrigin.y)
+        let index = layoutManager.characterIndex(
+            for: containerPoint, in: textContainer,
+            fractionOfDistanceBetweenInsertionPoints: nil)
+        let ns = string as NSString
+        guard index < ns.length else { return false }
+        let attrs = storage.attributes(at: index, effectiveRange: nil)
+        guard attrs[.mintMath] as? Bool == true,
+            let atom = attrs[.attachment] as? MathAtomAttachment
+        else { return false }
+        // 원자는 한 글자다 — 소스 텍스트로 갈아끼운다.
+        let source = "$\(atom.latex)$"
+        let span = NSRange(location: index, length: 1)
+        // 문단 속성은 교체 전에 채집 — 교체가 위치를 밀기 때문.
+        let paraAttrs = storage.attributes(at: span.location, effectiveRange: nil)
+        guard shouldChangeText(in: span, replacementString: source) else { return false }
+        isTransforming = true
+        storage.replaceCharacters(in: span, with: source)
+        storage.setAttributes(
+            paraAttrs, range: NSRange(location: index, length: (source as NSString).length))
+        isTransforming = false
+        nameCurrentUndo("수식 편집")
+        didChangeText()
+        setSelectedRange(
+            NSRange(location: index + 1, length: (atom.latex as NSString).length))
+        mayHaveInlineMath = true
+        return true
+    }
+
     // MARK: 수식·이미지 렌더
 
     /// 수식·이미지 문단 표시 갱신 — 커서가 밖에 있고 소스가 렌더되면 소스 글자를
     /// 투명 처리(temporary attribute — storage·undo·저장에 무해)하고, 레이아웃
     /// 매니저가 그 자리에 렌더 결과를 그린다. 커서가 들어오면 소스로 돌아온다.
+    /// 연속 `.math` 문단에서 다중 행 display 그룹의 범위를 계산한다 (이슈 #20).
+    /// 열기(`$$`) 속성 문단에서 시작해 닫기(`$$`) 속성 문단까지 — 닫힘이 없으면
+    /// 수식이 끊기는 곳(문서 끝·다른 블록)까지가 그룹이다. 단독 완결 수식은
+    /// 그룹이 아니라 결과에 없다 — 기존 단일 렌더 경로가 맡는다.
+    static func mathGroupRanges(
+        _ paragraphs: [(range: NSRange, block: MintBlock, open: Bool, close: Bool)]
+    ) -> [NSRange] {
+        var groups: [NSRange] = []
+        var index = 0
+        while index < paragraphs.count {
+            let para = paragraphs[index]
+            if para.block == .math, para.open {
+                var last = index
+                while last + 1 < paragraphs.count,
+                    paragraphs[last + 1].block == .math,
+                    !paragraphs[last].close
+                { last += 1 }
+                groups.append(NSRange(
+                    location: para.range.location,
+                    length: paragraphs[last].range.upperBound - para.range.location))
+                index = last + 1
+            } else {
+                index += 1
+            }
+        }
+        return groups
+    }
+
     func refreshRenderedBlocks(forceRender: Bool = false) {
         guard let layoutManager, let storage = textStorage else { return }
         // 빠른 경로: 렌더 중인 블록도, 이미 렌더된 것도, 이미지 선택도 없고 소스에
-        // 수식/이미지 마커("$$"·"![")조차 없으면 — 즉 대다수의 평문 저널이면 —
-        // 문단 순회·임시속성 조작·전체 재그리기를 통째로 건너뛴다(키 입력마다 O(n)
-        // 낭비 제거). 마커 검사는 NSString range 검색이라 문단 순회보다 훨씬 싸다.
+        // 수식/이미지 마커("$$"·"![")와 raw 인라인 수식("$")조차 없으면 — 즉 대다수의
+        // 평문 저널이면 — 문단 순회·임시속성 조작·전체 재그리기를 통째로 건너뛴다
+        // (키 입력마다 O(n) 낭비 제거). 마커 검사는 NSString range 검색이라 문단
+        // 순회보다 훨씬 싸다.
         // 주의: 수식/이미지 블록은 마커("$$"·"![")가 이미 **소비**돼 storage 텍스트에
         // 남아 있지 않다 — 커서 문단이 수식/이미지면 마커 검사와 무관하게 전체
         // 경로를 타야 한다 (안 그러면 편집 후 렌더로 영영 못 돌아가는 버그).
         if mathRenders.isEmpty, imageRenders.isEmpty, selectedImageLocation == nil,
-            !mayHaveMarkers {
+            !mayHaveMarkers, !mayHaveInlineMath {
             let source = storage.string as NSString
             let caretPara = source.paragraphRange(
                 for: NSRange(location: min(selectedRange().location, source.length), length: 0))
@@ -2829,23 +3130,97 @@ final class BlockTextView: NSTextView {
                 return
             }
         }
+        // 커서가 떠난 문단의 raw `$…$`를 원자로 접는다 (이슈 #20).
+        collapseRawInlineMath(awayFrom: selectedRange())
         layoutManager.removeTemporaryAttribute(
             .foregroundColor,
             forCharacterRange: NSRange(location: 0, length: storage.length))
         var maths: [(range: NSRange, image: NSImage)] = []
         var images: [ImageRender] = []
-        // 편집 모드인 수식 문단 — 루프 뒤 라이브 미리보기 패널을 붙인다.
+        // 편집 모드인 수식 그룹 — 루프 뒤 라이브 미리보기 패널을 붙인다.
         var editingMath: (para: NSRange, source: String)?
         let ns = string as NSString
         let sel = selectedRange()
         // 포커스가 사이드바 등 밖에 있으면 커서가 문단에 남아 있어도 렌더한다 —
         // 수식·이미지가 문서 마지막 문단일 때 소스가 계속 보이는 문제 방지.
         let focused = window?.firstResponder === self
+
+        // 1단계 — 문단 정보 수집. 그룹 판정은 순수 헬퍼(mathGroupRanges)가 맡는다.
+        var paras: [(range: NSRange, block: MintBlock, open: Bool, close: Bool)] = []
         var location = 0
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            location = para.upperBound
+            var delim = ""
+            if para.location < storage.length {
+                let attrs = storage.attributes(at: para.location, effectiveRange: nil)
+                delim = attrs[.mintMathDelim] as? String ?? ""
+            }
+            paras.append(
+                (para, blockInfo(in: para).block, delim == "open", delim == "close"))
+        }
+        let groups = Self.mathGroupRanges(paras)
+
+        // 2단계 — 다중 행 display 그룹 렌더. 커서가 그룹 어느 줄에든 들어오면
+        // 그룹 전체가 소스 편집 모드가 되고, 나가면 하나의 이미지로 합쳐 그린다.
+        for group in groups {
+            let members = paras.filter {
+                $0.block == .math && NSIntersectionRange($0.range, group).length > 0
+            }
+            guard let firstMember = members.first, let lastMember = members.last else {
+                continue
+            }
+            // 그룹 문단은 원문($$ 포함)이 저장돼 있다 — 렌더할 LaTeX만 추출한다.
+            let latex = members.map { member -> String in
+                var source =
+                    paragraphContent(member.range).trimmingCharacters(in: .whitespaces)
+                if member.open, source.hasPrefix("$$") {
+                    source = String(source.dropFirst(2)).trimmingCharacters(in: .whitespaces)
+                }
+                if member.close, source.hasSuffix("$$"), source.count >= 2 {
+                    source = String(source.dropLast(2)).trimmingCharacters(in: .whitespaces)
+                }
+                return source
+            }
+            .joined(separator: "\n")
+            let contentEnd = lastMember.range.location
+                + (paragraphContent(lastMember.range) as NSString).length
+            let editing =
+                !forceRender && focused
+                && ((sel.length == 0 && sel.location >= group.location
+                    && sel.location <= contentEnd)
+                    || (sel.length > 0 && NSIntersectionRange(sel, group).length > 0))
+            if editing {
+                editingMath = (firstMember.range, latex)
+                continue
+            }
+            guard let image = MathRenderer.image(
+                latex: latex, color: palette.ink, fontSize: mathFontSize)
+            else { continue }  // 파싱 불가 — 직전 높이 유지 (기존 정책)
+            maths.append((group, image))
+            layoutManager.addTemporaryAttribute(
+                .foregroundColor, value: NSColor.clear, forCharacterRange: group)
+            // 그룹 박스 총높이(렌더±마진+틈)를 문단 수로 나눠 배분한다 — 표시
+            // 전용 속성이라 저장·undo에 흔적이 없다.
+            let total = displayHeight(of: image) + Self.mathBoxMargin * 2 + 4
+            let share = max(28, total / CGFloat(max(members.count, 1)))
+            for member in members { updateGroupLineHeight(share, in: member.range) }
+        }
+
+        // 3단계 — 단독 완결 수식·이미지 (기존 경로).
+        location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             defer { location = para.upperBound }
-            let block = blockInfo(in: para).block
+            guard let info = paras.first(where: { $0.range.location == para.location }) else {
+                continue
+            }
+            let block = info.block
+            if block == .math,
+                groups.contains(where: { NSLocationInRange(para.location, $0) })
+            {
+                continue  // 그룹 소속은 2단계에서 처리됐다
+            }
             guard block == .math || block == .image else { continue }
 
             let content = paragraphContent(para)
@@ -2928,6 +3303,20 @@ final class BlockTextView: NSTextView {
         }
         mathRenders = maths
         imageRenders = images
+        // 이전 그룹에서 벗어난 문단의 줄 높이 복원 — 열기 줄 삭제 같은 구조 편집으로
+        // 산문이 된 줄이 거대한 줄 높이를 물려받아 본문이 뜨는 잔상을 막는다 (이슈 #22).
+        for old in previousMathGroups {
+            var scanLoc = old.location
+            while scanLoc < min(old.upperBound, ns.length) {
+                let para = ns.paragraphRange(for: NSRange(location: scanLoc, length: 0))
+                scanLoc = para.upperBound
+                let inCurrentGroup = groups.contains {
+                    NSIntersectionRange($0, para).length > 0
+                }
+                if !inCurrentGroup { updateGroupLineHeight(nil, in: para) }
+            }
+        }
+        previousMathGroups = groups
         // 여기까지 왔다는 건 이미 O(문서)를 지불했다는 뜻 — 스캔 한 번을 더 해
         // 마커 캐시를 실측으로 되돌린다. 마커를 지운 뒤 빠른 경로로 복귀하는 길이자,
         // 델리게이트가 보수적으로 true를 켠 오탐을 정리하는 자리다.
@@ -3097,6 +3486,44 @@ final class BlockTextView: NSTextView {
             as? NSParagraphStyle
         guard current?.minimumLineHeight != ps.minimumLineHeight else { return }
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
+    }
+
+    /// 다중 행 수식 그룹용 — 문단별 최소 줄 높이를 **직접** 지정한다 (이슈 #20).
+    /// 그룹 총 박스 높이를 문단 수로 나눈 값을 호출부가 계산해 넣는다.
+    private func updateGroupLineHeight(_ raw: CGFloat?, in paragraph: NSRange) {
+        guard let storage = textStorage, paragraph.length > 0,
+            paragraph.location < storage.length,
+            let ps = (styleAttributes(for: .math, checked: false)[.paragraphStyle]
+                as? NSParagraphStyle)?.mutableCopy() as? NSMutableParagraphStyle
+        else { return }
+        if let raw { ps.minimumLineHeight = raw }
+        let current =
+            storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
+            as? NSParagraphStyle
+        guard current?.minimumLineHeight != ps.minimumLineHeight else { return }
+        storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
+    }
+
+    /// loc가 속한 다중 행 수식 그룹의 storage 범위 — 드래그 이동·히트 판정용.
+    /// 단독 완결 수식이면 nil (그룹 이동 대상이 아니다).
+    func mathGroup(containing loc: Int) -> NSRange? {
+        let ns = string as NSString
+        guard ns.length > 0 else { return nil }
+        var paras: [(range: NSRange, block: MintBlock, open: Bool, close: Bool)] = []
+        var location = 0
+        while location < ns.length {
+            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            location = para.upperBound
+            let info = blockInfo(in: para)
+            guard info.block == .math, para.location < ns.length else {
+                paras.append((para, info.block, false, false))
+                continue
+            }
+            let attrs = textStorage?.attributes(at: para.location, effectiveRange: nil)
+            let delim = attrs?[.mintMathDelim] as? String ?? ""
+            paras.append((para, info.block, delim == "open", delim == "close"))
+        }
+        return Self.mathGroupRanges(paras).first { NSLocationInRange(loc, $0) }
     }
 
     /// 폭이 바뀌면 수식·이미지 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
@@ -3923,12 +4350,19 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
         // 직렬화 증분 캐시 판정 — 모든 편집에 대해 먼저(마커 조기 반환에 가리지 않게).
         updateSerialCacheState(editedMask: editedMask, editedRange: editedRange, delta: delta)
 
-        guard editedMask.contains(.editedCharacters), !mayHaveMarkers else { return }
+        guard editedMask.contains(.editedCharacters) else { return }
         let ns = textStorage.string as NSString
         let start = max(0, editedRange.location - 1)
         let end = min(ns.length, editedRange.upperBound + 1)
         guard end > start else { return }
         let touched = ns.substring(with: NSRange(location: start, length: end - start))
+        // 인라인 수식 후보 — `$` 하나만으로도 보수적으로 켠다 (이슈 #20).
+        // 접기 검사(collapseRawInlineMath)가 실측으로 다시 끝낸다.
+        if touched.contains("$") {
+            mayHaveInlineMath = true
+        }
+        // 마커 플래그가 이미 true면 더 볼 필요 없다 — syncMarkerFlag가 정리한다.
+        guard !mayHaveMarkers else { return }
         if touched.contains("$$") || touched.contains("![") {
             mayHaveMarkers = true
         }
@@ -4009,8 +4443,9 @@ final class MintLayoutManager: NSLayoutManager {
                 if block == .math {
                     // 렌더 모드 수식의 박스는 drawGlyphs가 **수식 크기에 맞춰**
                     // 그린다 (요구 5) — 여기선 소스 편집 중일 때만 문단 폭 배경.
+                    // 다중 행 그룹 소속 문단도 렌더 중이면 박스를 생략한다 (이슈 #20).
                     let rendered = view.mathRenders.contains {
-                        $0.range.location == para.location
+                        NSLocationInRange(para.location, $0.range)
                     }
                     if !rendered {
                         drawGroupBackground(
@@ -4070,8 +4505,15 @@ final class MintLayoutManager: NSLayoutManager {
                 NSRect(x: rect.minX, y: rect.midY, width: rect.width, height: 1).fill()
             case .math:
                 if let render = view.mathRenders.first(
-                    where: { $0.range.location == para.location }) {
-                    drawMath(render.image, in: rect, theme: theme)
+                    where: { NSLocationInRange(para.location, $0.range) })
+                {
+                    // 다중 행 그룹이면 그룹 **전체** rect에 한 번만 그린다 —
+                    // 문단별로 그리면 같은 이미지가 줄마다 찍힌다 (이슈 #20).
+                    if para.location == render.range.location {
+                        let unionRect = paragraphRect(
+                            charRange: render.range, origin: origin) ?? rect
+                        drawMath(render.image, in: unionRect, theme: theme)
+                    }
                 } else {
                     // 편집 중이거나 아직 파싱 안 되는 소스 — "수식" 태그만.
                     let tag = NSAttributedString(
@@ -4265,11 +4707,15 @@ enum MathRenderer {
     private static var cache: [String: NSImage] = [:]
 
     /// LaTeX가 파싱되지 않으면 nil — 뷰는 소스 텍스트를 그대로 보여준다.
-    static func image(latex: String, color: NSColor, fontSize: CGFloat) -> NSImage? {
-        let key = "\(fontSize)|\(color.description)|\(latex)"
+    /// `labelMode` — display 블록은 `.display`, 인라인 원자는 `.text` (이슈 #20).
+    static func image(
+        latex: String, color: NSColor, fontSize: CGFloat,
+        labelMode: MTMathUILabelMode = .display
+    ) -> NSImage? {
+        let key = "\(labelMode == .display ? "D" : "T")|\(fontSize)|\(color.description)|\(latex)"
         if let hit = cache[key] { return hit }
         let renderer = MTMathImage(
-            latex: latex, fontSize: fontSize, textColor: color, labelMode: .display)
+            latex: latex, fontSize: fontSize, textColor: color, labelMode: labelMode)
         let (error, image) = renderer.asImage()
         guard error == nil, let image, image.size.width > 0 else { return nil }
         if cache.count > 256 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
