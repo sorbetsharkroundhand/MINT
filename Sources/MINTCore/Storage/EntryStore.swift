@@ -1066,8 +1066,42 @@ public final class EntryStore: ObservableObject {
             expandedFolderIDs: expandedFolderIDs.sorted { $0.uuidString < $1.uuidString })
     }
 
-    /// 저장 대기/진행 중 표시 — 상태 바의 "저장 중…/저장됨" 표시용 (L6).
-    @Published public private(set) var isSaving = false
+    // MARK: - 저장 상태 (이슈 #10)
+
+    /// 저장 결과의 정직한 상태 — 실패를 "저장됨"으로 위장하지 않는다.
+    /// 디스크 부족·권한 오류는 실제로 자주 있고, 거짓 안심이 곧 데이터 손실이다.
+    public enum SavePhase: Equatable {
+        /// 아직 저장 요청이 없다.
+        case idle
+        case saving
+        /// 마지막 성공 시각.
+        case saved(Date)
+        case failed(message: String, date: Date)
+    }
+
+    @Published public private(set) var savePhase: SavePhase = .idle
+
+    /// 지금 진행 중인 저장이 있는가 — 상태 바 표시용 파생 값.
+    public var isSaveInFlight: Bool {
+        if case .saving = savePhase { return true }
+        return false
+    }
+
+    /// 상태 바·오류 안내가 가리킬 현재 저장 대상 파일명 — 복구 모드면 세션 파일.
+    public var saveTargetFileName: String { writeTargetURL.lastPathComponent }
+
+    /// 마지막으로 실패한 저장을 다시 시도한다 — 현재 메모리 상태 전체를 쓴다.
+    /// 실패 후에도 타이핑을 계속했더라도 그 최신 내용이 반영된다.
+    public func retrySave() { saveNow() }
+
+    /// 저장 결과를 상태로 기록한다. 성공/실패 공통.
+    private func noteOutcome(_ failure: String?) {
+        if let failure {
+            savePhase = .failed(message: failure, date: .now)
+        } else {
+            savePhase = .saved(Date.now)
+        }
+    }
 
     /// 원고 저장 전용 직렬 라이터 (이슈 #44).
     ///
@@ -1078,8 +1112,9 @@ public final class EntryStore: ObservableObject {
     /// 보장했는데, 액터의 FIFO 직렬화가 그 역할을 승계한다 — 세 스냅샷은 전부
     /// 전체 상태라 순서만 지켜지면 마지막 쓰기가 곧 최신 상태다.
     private actor SnapshotWriter {
-        func write(_ snapshot: Snapshot, to url: URL) {
-            EntryStore.write(snapshot, to: url)
+        /// 쓰고 실패 이유를 돌려준다 — nil이면 성공 (이슈 #10).
+        func write(_ snapshot: Snapshot, to url: URL) -> String? {
+            EntryStore.performWrite(snapshot, to: url)
         }
     }
 
@@ -1088,7 +1123,7 @@ public final class EntryStore: ObservableObject {
     /// 라이터 액터로 hop하므로 대형 원고에서도 메인이 막히지 않는다.
     private func scheduleSave() {
         saveTask?.cancel()
-        isSaving = true
+        savePhase = .saving
         saveGeneration += 1
         let generation = saveGeneration
         let snapshot = currentSnapshot
@@ -1102,36 +1137,45 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 라이터 액터로 쓰기를 넘기고, 끝나면 메인으로 돌아와 최신성 검사 후 표시 정리.
-    /// 새 저장이 먼저 예약된(stale) 완료는 `isSaving`을 건드리지 않는다.
+    /// 새 저장이 먼저 예약된(stale) 완료는 상태를 건드리지 않는다 — 새 저장의
+    /// 결과가 이어서 보고한다.
     private func persist(_ snapshot: Snapshot, to url: URL, generation: Int) async {
-        await writer.write(snapshot, to: url)
-        if generation == saveGeneration { isSaving = false }
+        guard generation == saveGeneration else { return }
+        noteOutcome(await writer.write(snapshot, to: url))
     }
 
     /// 라이터 액터에 쓰기를 맡기고 **완료까지 기다린다** — 구조 변경 즉시 저장과
     /// flush처럼 "반환 시점 = 디스크 반영 시점" 계약이 필요한 경로용 (AGENTS §6:
     /// ⌘Q 직전 flush로 마지막 문장 보존). 라이터는 메인을 필요로 하지 않으므로
     /// 메인에서 기다려도 교착하지 않는다. 밀린 autosave 쓰기도 FIFO로 이 안에서
-    /// 먼저 마쳐지므로, 반환 시 파일은 항상 이 스냅샷이다.
-    private func writeAndWait(_ snapshot: Snapshot) {
+    /// 먼저 마쳐지므로, 반환 시 파일은 항상 이 스냅샷이다. 실패 이유를 돌려준다.
+    @discardableResult
+    private func writeAndWait(_ snapshot: Snapshot) -> String? {
         let semaphore = DispatchSemaphore(value: 0)
         let writer = self.writer
         // 복구 모드면 세션 파일로 — flush 계약("반환 = 디스크 반영")은 대상 파일
         // 기준으로 지켜진다 (이슈 #6).
         let url = writeTargetURL
+        // 클로저→메인 결과 전달은 세마포어가 순서를 보장한다 (wait가 먼저 풀리고
+        // 읽는다). 박스로 감싸 동시성 검사를 통과한다.
+        let outcome = OutcomeBox()
         Task.detached(priority: .userInitiated) {
-            await writer.write(snapshot, to: url)
+            outcome.value = await writer.write(snapshot, to: url)
             semaphore.signal()
         }
         semaphore.wait()
+        return outcome.value
+    }
+
+    private final class OutcomeBox: @unchecked Sendable {
+        var value: String?
     }
 
     /// 구조 변경(생성·삭제·이름변경 등) 즉시 저장 — 호출이 끝나면 디스크에 반영돼 있다.
     private func saveNow() {
         saveTask?.cancel()
         saveGeneration += 1
-        writeAndWait(currentSnapshot)
-        isSaving = false
+        noteOutcome(writeAndWait(currentSnapshot))
     }
 
     /// 대기 중인 디바운스 저장을 즉시 디스크에 쓴다 — 앱 종료·백그라운드 전환 직전에
@@ -1140,8 +1184,7 @@ public final class EntryStore: ObservableObject {
         saveTask?.cancel()
         saveTask = nil
         saveGeneration += 1
-        writeAndWait(currentSnapshot)
-        isSaving = false
+        noteOutcome(writeAndWait(currentSnapshot))
     }
 
     // MARK: - 복구 액션 (이슈 #6)
@@ -1183,13 +1226,24 @@ public final class EntryStore: ObservableObject {
 
     /// JSON 인코딩 + 원자적 쓰기 — 라이터 액터(백그라운드)에서만 호출된다.
     /// MainActor 격리로 두면 액터가 다시 메인으로 hop해 이 개선의 목적이 사라진다.
-    private nonisolated static func write(_ snapshot: Snapshot, to url: URL) {
+    /// 실패를 삼키지 않고 이유를 돌려준다 (nil = 성공, 이슈 #10).
+    private nonisolated static func performWrite(
+        _ snapshot: Snapshot, to url: URL
+    ) -> String? {
         rotateDailyBackup(of: url)
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(snapshot) else { return }
-        try? data.write(to: url, options: .atomic)
+        guard let data = try? encoder.encode(snapshot) else {
+            return "원고를 JSON으로 변환하지 못했습니다"
+        }
+        do {
+            try data.write(to: url, options: .atomic)
+            return nil
+        } catch {
+            // 디스크 부족·권한 오류가 여기서 온다 — 사용자에게 이유 그대로 전달.
+            return "쓰기 실패 (\(url.lastPathComponent)): \(error.localizedDescription)"
+        }
     }
 
     // MARK: - 원고 백업 (PLAN §16 "백업 로테이션도 없음 — 원고는 소중하다" 해소)

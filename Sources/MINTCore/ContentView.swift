@@ -1169,10 +1169,21 @@ struct EditorStatusBar: View {
                     .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
                 separator
             }
-            // 복구 모드에선 "저장됨"이 거짓말이 된다 — 우회 대상을 정직하게 표시 (이슈 #6).
-            Text(store.pendingRecovery != nil
-                ? "복구 파일 기록 중 (\(store.pendingRecovery!.sessionURL.lastPathComponent))"
-                : store.isSaving ? "저장 중…" : "저장됨")
+            // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
+            if case .failed(let message, _) = store.savePhase {
+                Text("저장 실패")
+                    .foregroundStyle(.red)
+                    .help("\(message)\n대상: \(store.saveTargetFileName)")
+                Button("다시 시도") { store.retrySave() }
+                    .buttonStyle(.link)
+                    .font(MintFonts.monoUI(11))
+            } else if store.pendingRecovery != nil {
+                Text("복구 파일 기록 중 (\(store.saveTargetFileName))")
+            } else if store.isSaveInFlight {
+                Text("저장 중…")
+            } else if case .saved = store.savePhase {
+                Text("저장됨")
+            }
             separator
             Text("Markdown")
         }
