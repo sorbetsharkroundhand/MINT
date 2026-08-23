@@ -72,6 +72,58 @@ final class EntryStoreSafetyTests: XCTestCase {
         XCTAssertEqual(second.entries[0].body, "# 서연의 귀환\n\n첫 문단.")
     }
 
+    // MARK: - 전용 저장 라이터 (이슈 #44)
+
+    /// ⌘Q 직전에 친 마지막 문장 보존 (AGENTS §6). flush는 "반환 시점 = 디스크
+    /// 반영 시점" 계약이라 입력 직후 종료해도 그 문장이 다음 실행에 있어야 한다.
+    @MainActor
+    func testFlushPreservesLastSentenceTypedBeforeQuit() throws {
+        let store = makeStore()
+        store.updateActiveBody("앞 문단.\n\n방금 친 마지막 문장.")
+        store.flush()
+
+        let reloaded = makeStore()
+        XCTAssertEqual(
+            reloaded.entries[0].body,
+            "앞 문단.\n\n방금 친 마지막 문장.",
+            "flush가 돌아왔는데 내용이 디스크에 없으면 계약 위반이다")
+    }
+
+    /// 장편 원고(~30만 자)도 라이터 액터 경로에서 무손실 왕복해야 한다.
+    /// 인코딩+쓰기가 메인에서 도는 옛 구조로 돌아가면 이 크기에서 프리즈가 재발한다.
+    @MainActor
+    func testLargeManuscriptRoundTripsLosslesslyThroughWriter() throws {
+        let paragraph = "한강을 따라 오래 걸었다. 바람이 차가웠지만 기분은 좋았다. "
+        let longBody = String(repeating: paragraph, count: 10_000)
+        XCTAssertGreaterThanOrEqual(longBody.count, 300_000)
+
+        let store = makeStore()
+        store.updateActiveBody(longBody)
+        store.flush()
+
+        let reloaded = makeStore()
+        XCTAssertEqual(reloaded.entries[0].body, longBody)
+    }
+
+    /// 손으로 flush하지 않아도 디바운스 autosave가 스스로 디스크에 반영된다 —
+    /// 라이터 액터로 hop하는 새 경로가 취소·hop 실수로 쓰기를 유실하지 않게 고정.
+    @MainActor
+    func testDebouncedAutosaveLandsOnDiskWithoutManualFlush() async throws {
+        let store = makeStore()
+        store.updateActiveBody("디바운스 뒤 자동 저장되는 문장.")
+
+        let deadline = Date.now.addingTimeInterval(5)
+        while Date.now < deadline {
+            if FileManager.default.fileExists(atPath: entriesURL.path),
+               (try String(contentsOf: entriesURL, encoding: .utf8))
+                   .contains("디바운스 뒤 자동 저장되는 문장.") {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTFail("디바운스 시간이 지났는데도 자동 저장이 디스크에 반영되지 않았다")
+    }
+
     // MARK: - 일일 백업
 
     /// 어제 수정된 파일 기준 — 백업 이름이 되어야 할 날짜 문자열.
