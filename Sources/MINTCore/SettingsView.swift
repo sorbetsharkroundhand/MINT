@@ -12,6 +12,10 @@ import SwiftUI
 /// 없앴던 것이 문제였다.
 public struct SettingsView: View {
     @ObservedObject private var settings: CompletionSettings
+    /// 예측 의유 통로 (이슈 #11) — 자동완성 스위치·모델 변경은 settings를 직접
+    /// 고치지 않고 컨트롤러의 무효화(세대 상승·스트림 취소·리포트 폐기)를 함께
+    /// 발화한다. nil이면 프리뷰처럼 값만 바뀐다.
+    private let completion: CompletionController?
     /// 실사용 품질 지표 집계 (M7) — .task에서 백그라운드 로드.
     @State private var metrics = AcceptanceMetrics.Summary()
     /// 외형(다크 모드) — 상단바 스위치에서 옮겨 왔다. 키는 그대로 둬서 기존
@@ -21,8 +25,12 @@ public struct SettingsView: View {
     /// 색상 팔레트 — 고르는 즉시 앱 전체에 반영된다 (ContentView도 관찰).
     @ObservedObject private var palette = PaletteSettings.shared
 
-    public init(settings: CompletionSettings = .shared) {
+    public init(
+        settings: CompletionSettings = .shared,
+        completion: CompletionController? = nil
+    ) {
         self._settings = ObservedObject(wrappedValue: settings)
+        self.completion = completion
     }
 
     public var body: some View {
@@ -132,19 +140,19 @@ public struct SettingsView: View {
     private var predictionTab: some View {
         Form {
             Section("모델") {
-                TextField("Hugging Face 저장소 id", text: $settings.modelID)
+                TextField("Hugging Face 저장소 id", text: modelIDBinding)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                 Menu("프리셋에서 선택") {
                     ForEach(ModelPresets.all, id: \.self) { preset in
-                        Button(preset) { settings.modelID = preset }
+                        Button(preset) { changeModel(preset) }
                     }
                 }
                 caption("모델 변경은 다음 제안부터 적용 — 새 모델은 첫 사용 시 다운로드돼요(수 GB).")
             }
 
             Section("제안") {
-                Toggle("자동완성 사용", isOn: $settings.autocompleteEnabled)
+                Toggle("자동완성 사용", isOn: autocompleteBinding)
                 Picker("프롬프트 방식", selection: $settings.promptStyle) {
                     ForEach(PromptStyle.allCases, id: \.self) { style in
                         Text(style.label).tag(style)
@@ -278,6 +286,37 @@ public struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    // MARK: - 예측 의유 바인딩 (이슈 #11)
+
+    /// 컨트롤러가 있으면 의유 API로, 없으면(프리뷰) 직접 쓴다.
+    private func changeModel(_ id: String) {
+        guard let completion else {
+            settings.modelID = id
+            return
+        }
+        completion.changeModel(to: id)
+    }
+
+    private var autocompleteBinding: Binding<Bool> {
+        Binding(
+            get: { settings.autocompleteEnabled },
+            set: { enabled in
+                guard let completion else {
+                    settings.autocompleteEnabled = enabled
+                    return
+                }
+                completion.setAutocompleteEnabled(enabled)
+            })
+    }
+
+    /// TextField는 타이핑마다 set을 부른다 — 같은 id 재요청은 컨트롤러가
+    /// 무시하므로(가드) 커밋 시점만 걸린다.
+    private var modelIDBinding: Binding<String> {
+        Binding(
+            get: { settings.modelID },
+            set: { changeModel($0) })
     }
 
     // MARK: - 공용 조각

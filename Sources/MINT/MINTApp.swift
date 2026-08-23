@@ -28,8 +28,10 @@ struct MINTApp: App {
         .commands { MintCommands(store: store) }
 
         // ⌘, — 자동완성 설정 (M4): 모델 · 프롬프트 방식 · 디바운스 · 토큰.
+        // 컨트롤러를 함께 넘겨 설정 창의 스위치·모델 변경도 의유 API로 무효화를
+        // 발화하게 한다 (이슈 #11).
         Settings {
-            SettingsView()
+            SettingsView(settings: completion.settings, completion: completion)
         }
     }
 }
