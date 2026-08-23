@@ -349,7 +349,6 @@ public final class EntryStore: ObservableObject {
         um.setActionName(change.name)
         um.registerUndo(withTarget: self) { store in
             store.structureUndoManager = um  // 창 재배선 전에도 이어지게
-            FileHandle.standardError.write(Data("DBG revert[\(change.name)]\n".utf8))
             change.backward()
             store.registerRevert(
                 StructureChange(
@@ -396,28 +395,77 @@ public final class EntryStore: ObservableObject {
         }
     }
 
+    /// 저장 정책 — 연속 편집(타이핑)은 디바운스, 이산 구조 변경만 즉시 (#49/H1).
+    enum SavePolicy { case immediate, debounced }
+
+    /// 디바운스 버스트별 undo 코얼레싱 상태 — 버스트 시작 시점의 before 스냅샷을
+    /// 저장해, 여러 글자 입력이 **하나의 undo 단위**로 되돌아가게 한다 (#65 H1).
+    private struct DebouncedBurst {
+        let name: String
+        let before: JournalEntry
+    }
+    private var debouncedBursts: [UUID: DebouncedBurst] = [:]
+
     /// 단일 저널의 필드 변경을 스냅샷 undo로 감싼다 — 바이블 메타(인물·핵심
     /// 장면·무시한 후보·대화 기록)와 종류 전환이 공유한다 (#9).
     private func commitEntryChange(
-        _ id: UUID, name: String, mutate: (inout JournalEntry) -> Void
+        _ id: UUID, name: String,
+        policy: SavePolicy = .immediate,
+        mutate: (inout JournalEntry) -> Void
     ) {
         guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
         let before = entries[index]
         var after = before
         mutate(&after)
         guard after != before else { return }
-        // TEMP-DBG
-        FileHandle.standardError.write(Data("DBG commit[\(name)] beforeChars=\(before.characters?.count ?? -1) afterChars=\(after.characters?.count ?? -1)\n".utf8))
         entries[index] = after
-        commitStructure(name, before: { [weak self] in
-            guard let self else { return }
-            self.restoreEntries([before])
-            self.saveNow()
-        }, after: { [weak self] in
-            guard let self else { return }
-            self.restoreEntries([after])
-            self.saveNow()
-        })
+
+        switch policy {
+        case .immediate:
+            flushDebouncedUndo(for: id)  // 직전 버스트 먼저 확정해 순서 보존
+            commitStructure(name, before: { [weak self] in
+                guard let self else { return }
+                self.restoreEntries([before])
+                self.saveNow()
+            }, after: { [weak self] in
+                guard let self else { return }
+                self.restoreEntries([after])
+                self.saveNow()
+            })
+        case .debounced:
+            // 같은 저널 연속 편집은 최초 before만 유지 — 여러 글자가 한 undo 단위.
+            if debouncedBursts[id] == nil {
+                debouncedBursts[id] = DebouncedBurst(name: name, before: before)
+            }
+            scheduleSave()
+        }
+    }
+
+    /// 모든 대기 버스트 undo 확정 — 디바운스 저장·flush 직전에 호출 (#49/H1).
+    private func flushAllDebouncedUndo() {
+        for id in Array(debouncedBursts.keys) {
+            flushDebouncedUndo(for: id)
+        }
+    }
+
+    /// 버스트 undo 등록 — before(버스트 시작)↔현재(after) 쌍 하나.
+    private func flushDebouncedUndo(for id: UUID) {
+        guard let burst = debouncedBursts.removeValue(forKey: id),
+              let um = structureUndoManager,
+              let currentIndex = entries.firstIndex(where: { $0.id == id })
+        else { return }
+        let before = burst.before
+        let after = entries[currentIndex]
+        um.setActionName(burst.name)
+        um.registerUndo(withTarget: self) { store in
+            store.structureUndoManager = um
+            store.restoreEntries([before]); store.saveNow()
+            // redo 등록 — 현재 시점 값으로.
+            um.registerUndo(withTarget: store) { s2 in
+                s2.structureUndoManager = um
+                s2.restoreEntries([after]); s2.saveNow()
+            }
+        }
     }
 
     /// 휴지통 항목을 문서 구조로 되살린다 — 폴더 묶음이면 폴더와 저널 전체.
@@ -1144,8 +1192,26 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 인물 카드 추가/수정 — 팝오버 텍스트 필드가 매 키 입력마다 부르므로 디바운스 저장.
-    public func upsertCharacter(_ card: CharacterCard, in id: UUID) {
-        commitEntryChange(id, name: "인물 카드 편집") { entry in
+    /// 인물 카드 추가/수정.
+    ///
+    /// 커밋 경계 규칙을 **스토어에서** 적용한다 (이슈 #49/H1-5 — 뷰 의존 제거):
+    /// - 소개를 직접 수정하면 잠긴다 (자동 프로파일링이 덮지 못하게).
+    /// - 사용자가 손대면 자동등록 표식이 사라진다.
+    ///
+    /// 저장 정책(#49/H1): 새 카드·잠금 토글 같은 이산 변경은 즉시, 이름/별칭/
+    /// 소개 연속 타이핑은 디바운스 — 글자마다 entries.json 전체 쓰기 금지.
+    public func upsertCharacter(_ cardInput: CharacterCard, in id: UUID) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        let existing = entries[index].characters?.first(where: { $0.id == cardInput.id })
+        var card = cardInput
+        if let existing {
+            if card.note != existing.note { card.locked = true }
+            if card != existing { card.autoRegistered = nil }
+        }
+        let isDiscrete = existing == nil || card.locked != existing?.locked
+
+        commitEntryChange(id, name: "인물 카드 편집",
+                          policy: isDiscrete ? .immediate : .debounced) { entry in
             var cards = entry.characters ?? []
             if let i = cards.firstIndex(where: { $0.id == card.id }) {
                 cards[i] = card
@@ -1338,6 +1404,7 @@ public final class EntryStore: ObservableObject {
         saveTask = Task { [weak self, autosaveDelay, target] in
             try? await Task.sleep(for: autosaveDelay)
             guard !Task.isCancelled else { return }
+            self?.flushAllDebouncedUndo()
             await self?.persist(snapshot, to: target, generation: generation)
         }
     }
@@ -1378,15 +1445,23 @@ public final class EntryStore: ObservableObject {
     }
 
     /// 구조 변경(생성·삭제·이름변경 등) 즉시 저장 — 호출이 끝나면 디스크에 반영돼 있다.
+    /// 즉시 저장 호출 횟수 — 저장 정책(즉시 vs 디바운스) 회귀의 관측 훅 (이슈 #49).
+    public private(set) var immediateSaveCount = 0
+
     private func saveNow() {
         saveTask?.cancel()
         saveGeneration += 1
+        immediateSaveCount += 1
         noteOutcome(writeAndWait(currentSnapshot))
     }
+
+    /// 대기 중인 디바운스 버스트의 undo 확정 — 종료 직전에도 마지막 타이핑 묶음이
+    /// 되돌아갈 수 있게 한다 (flush 계약과 짝, 이슈 #49/H1 게이트 4).
 
     /// 대기 중인 디바운스 저장을 즉시 디스크에 쓴다 — 앱 종료·백그라운드 전환 직전에
     /// 호출해, 입력 직후 ⌘Q로 마지막 문장을 잃는 일을 막는다 (원자적 쓰기라 반복 호출도 안전).
     public func flush() {
+        flushAllDebouncedUndo()  // 마지막 타이핑 묶음의 undo도 확정 (H1 게이트 4)
         saveTask?.cancel()
         saveTask = nil
         saveGeneration += 1
