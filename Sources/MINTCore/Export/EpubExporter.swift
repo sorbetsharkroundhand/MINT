@@ -97,8 +97,9 @@ public enum EpubExporter {
 
     /// 본문을 `# ` 제목마다 챕터로 나누고, 각 챕터를 XHTML 조각으로 변환한다.
     /// 이미지(`![](images/…)`)는 OEBPS/images/로 복사해 참조를 살린다.
-    @MainActor
-    private static func makeChapters(
+    /// export(@MainActor)에서만 호출된다 — 이미지 URL 해석이 MintImageStore(메인
+    /// 격리)를 거치므로 같은 격리를 따른다 (이슈 #45).
+    @MainActor private static func makeChapters(
         from entry: JournalEntry, copyingImagesInto oebps: URL, collected images: inout [String]
     ) -> [Chapter] {
         var chapters: [Chapter] = []
@@ -199,7 +200,7 @@ public enum EpubExporter {
     }
 
     /// 원본 이미지를 OEBPS/images/로 복사하고 EPUB 내 상대경로를 돌려준다.
-    private static func copyImage(_ src: String, into oebps: URL) -> String? {
+    @MainActor private static func copyImage(_ src: String, into oebps: URL) -> String? {
         let sourceURL = MintImageStore.url(for: src)
         guard FileManager.default.fileExists(atPath: sourceURL.path) else { return nil }
         let dir = oebps.appendingPathComponent("images", isDirectory: true)

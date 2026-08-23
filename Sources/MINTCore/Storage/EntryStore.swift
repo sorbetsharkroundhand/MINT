@@ -298,8 +298,9 @@ public final class EntryStore: ObservableObject {
     private var writeTargetURL: URL { recoveredSessionURL ?? fileURL }
 
     /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
-    /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
-    public nonisolated(unsafe) static weak var current: EntryStore?
+    /// 하는 약참조. 클래스 격리(@MainActor)가 접근을 메인으로 강제한다 —
+    /// nonisolated(unsafe) 탈출구를 없앴다 (이슈 #45). 메인 스레드에서만 읽고 쓴다.
+    public static weak var current: EntryStore?
 
     /// 본문 편집·문서 전환 알림 (M6) — BackgroundIndexer가 배선한다.
     /// 지식 로직은 여기 두지 않는다 (CLAUDE.md §4) — 신호만 내보낸다.
