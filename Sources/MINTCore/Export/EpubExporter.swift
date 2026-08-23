@@ -201,6 +201,12 @@ public enum EpubExporter {
 
     /// 원본 이미지를 OEBPS/images/로 복사하고 EPUB 내 상대경로를 돌려준다.
     @MainActor private static func copyImage(_ src: String, into oebps: URL) -> String? {
+        // 원격·차단 소스는 EPUB에 실을 로컬 asset이 아니다 — 파일로 오해해
+        // 이상한 경로를 만들지 않는다 (이슈 #12). 누락 보고는 #15 몫.
+        switch ImageReferenceParser.classify(src) {
+        case .managedRelative, .externalFile: break
+        case .remote, .blocked: return nil
+        }
         let sourceURL = MintImageStore.url(for: src)
         guard FileManager.default.fileExists(atPath: sourceURL.path) else { return nil }
         let dir = oebps.appendingPathComponent("images", isDirectory: true)
