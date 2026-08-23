@@ -290,11 +290,23 @@ public final class CompletionController: ObservableObject {
     }
 
     /// 모델 스위처에서 모델을 바꿨다 — 고스트 폐기 후 새 모델을 즉시 로드.
+    /// 인스펙터 리포트도 함께 폐기한다 — 이전 모델이 참고한 맥락이 새 모델
+    /// 상태 표시 옆에 남으면 사용자를 오도한다 (이슈 #11).
     public func modelDidChange() {
         invalidate()
+        lastContextReport = nil
         engineState = .idle
         failedModelID = nil
         preloadEngine()
+    }
+
+    /// 모델 변경 의도 (이슈 #11) — 설정 값과 무효화를 한 번에. 설정 창·툴바가
+    /// settings.modelID를 직접 고치면 이 무효화를 우회해 이전 모델 결과가
+    /// 나타날 수 있었다. 같은 id면 아무 일도 일어나지 않는다.
+    public func changeModel(to id: String) {
+        guard id != settings.modelID else { return }
+        settings.modelID = id
+        modelDidChange()
     }
 
     /// 자동완성 마스터 스위치 토글 (모델 드롭다운의 스위치).
@@ -306,6 +318,9 @@ public final class CompletionController: ObservableObject {
             preloadEngine()
         } else {
             invalidate()
+            // 꺼진 순간 마지막 리포트도 과거의 것이다 — 남겨두면 꺼져 있는데
+            // 컨텍스트 화면이 살아 있는 모순이 생긴다 (이슈 #11).
+            lastContextReport = nil
             // 이름 생성도 접는다 — 스위치가 꺼진 뒤엔 이 이름이 도착해도 어긋난다.
             cancelAllFolderNaming()
         }
