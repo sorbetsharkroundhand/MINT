@@ -391,6 +391,16 @@ public final class EntryStore: ObservableObject {
             entries.contains(where: { $0.id == id }) ? id : nil
         } ?? entries[0].id
         Self.current = self
+        // 고아 asset 청소 — 장부에 유예 중인 후보가 있을 때만 실제로 돈다.
+        // 시작 직후 한 번, 메인 액터 상속 Task라 편집 경로와 겹치지 않는다 (이슈 #17).
+        let bodies = entries.map(\.body)
+        if !AssetJanitor.hasPendingCandidates() {
+            // 장부가 비었으면 파일 접근조차 하지 않는다.
+        } else {
+            Task(priority: .utility) { [bodies] in
+                _ = AssetJanitor.sweepAll(bodies: bodies)
+            }
+        }
     }
 
     /// `~/Documents/MINT/` 경로. 디렉터리가 없으면 만든다.

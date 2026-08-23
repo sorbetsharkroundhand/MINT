@@ -1948,6 +1948,7 @@ final class BlockTextView: NSTextView {
             newText = otherText + imageText
         }
         guard shouldChangeText(in: span, replacementString: newText) else { return }
+        nameCurrentUndo("이미지 이동")
         isTransforming = true
         storage.replaceCharacters(in: span, with: newText)
         isTransforming = false
@@ -2042,7 +2043,13 @@ final class BlockTextView: NSTextView {
 
     /// 페이스트보드에서 이미지(파일 URL 또는 비트맵)를 찾아 삽입한다. 하나라도 넣었으면 true.
     @discardableResult
-    private func insertImages(from pasteboard: NSPasteboard) -> Bool {
+    /// 페이스트보드에서 이미지를 찾아 삽입한다. 하나라도 넣었으면 true.
+    /// internal — 객체 붙여넣기 우선순위의 회귀 테스트용 (이슈 #17).
+    func insertImages(from pasteboard: NSPasteboard) -> Bool {
+        // 0) MINT 이미지 객체 — 메타데이터 전체를 보존하는 내부 붙여넣기 (#17).
+        // 파일 URL 분기보다 먼저 본다: 자체 복사물엔 항상 객체가 함께 담겨 있고,
+        // 같은 asset을 새 UUID로 복사하지 않는 것이 수명 정책상 정답이다.
+        if pasteImageObject(from: pasteboard) { return true }
         // 1) 이미지 파일 URL — 원본 확장자를 유지해 복사한다.
         if let urls = pasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] {
@@ -2079,6 +2086,7 @@ final class BlockTextView: NSTextView {
 
     /// 페이스트보드에 삽입 가능한 이미지가 있는지 (드래그 수락 판정용).
     private func pasteboardHasImage(_ pasteboard: NSPasteboard) -> Bool {
+        if pasteboard.data(forType: .mintImageObject) != nil { return true }
         if let urls = pasteboard.readObjects(
             forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
             urls.contains(where: {
@@ -2096,13 +2104,29 @@ final class BlockTextView: NSTextView {
     /// 앞이 비어 있지 않으면 줄을 나누고, 뒤에는 일반 문단을 만들어 커서를 옮긴다
     /// (`consumeDivider`와 같은 흐름).
     func insertImageBlock(relativePath: String) {
-        let markdown = "![](\(relativePath))"
+        insertImageParagraph(markdown: "![](\(relativePath))")
+    }
+
+    /// 완성된 마크다운 한 줄을 이미지 문단으로 삽입하는 공용 코어 — 상대경로
+    /// 삽입과 객체 붙여넣기(#17)가 공유한다. undo 이름을 "이미지 삽입"으로 남긴다.
+    private func insertImageParagraph(markdown: String) {
+        // 스마트 따옴표·대시 치환은 마크다운 구문("title", --)을 망가뜨린다 —
+        // 프로그램 삽입은 원문 그대로 들어가야 한다.
+        let previousQuotes = isAutomaticQuoteSubstitutionEnabled
+        let previousDashes = isAutomaticDashSubstitutionEnabled
+        isAutomaticQuoteSubstitutionEnabled = false
+        isAutomaticDashSubstitutionEnabled = false
+        defer {
+            isAutomaticQuoteSubstitutionEnabled = previousQuotes
+            isAutomaticDashSubstitutionEnabled = previousDashes
+        }
         let ns = string as NSString
         let sel = selectedRange()
         let para = ns.paragraphRange(for: sel)
         let onEmptyLine = paragraphContent(para).isEmpty
         let prefix = onEmptyLine && sel.location == para.location ? "" : "\n"
         insertText(prefix + markdown + "\n", replacementRange: sel)
+        nameCurrentUndo("이미지 삽입")
 
         // 방금 삽입한 이미지 문단(커서 바로 앞 줄)을 찾아 블록을 지정한다.
         let caret = selectedRange().location
@@ -2115,6 +2139,12 @@ final class BlockTextView: NSTextView {
         applyBlock(.p, to: caretPara)
         // 커서는 이미지 다음 문단에 있으므로 이미지가 곧바로 렌더된다.
         refreshRenderedBlocks()
+    }
+
+    /// 열려 있는 undo 그룹의 이름을 붙인다 — 편집 이력이 "무엇"이었는지 읽게
+    /// 한다 (이슈 #17, 이름 있는 원자적 undo).
+    fileprivate func nameCurrentUndo(_ name: String) {
+        undoManager?.setActionName(name)
     }
 
     // MARK: 이미지 객체 선택 (정렬·크기·줄바꿈)
@@ -2210,13 +2240,13 @@ final class BlockTextView: NSTextView {
     /// 이미지 객체 선택 중 ⌘C/⌘X — 이미지 비트맵을 클립보드로 (그림 블럭 완성도).
     /// 붙여넣기는 기존 insertImages의 TIFF 경로로 다시 이미지 블록이 된다.
     override func copy(_ sender: Any?) {
-        if let loc = selectedImageLocation, copySelectedImage(atParagraph: loc) { return }
+        if let loc = selectedImageLocation, copyImageObject(atParagraph: loc) { return }
         super.copy(sender)
     }
 
     override func cut(_ sender: Any?) {
         if let loc = selectedImageLocation {
-            guard copySelectedImage(atParagraph: loc) else { return }
+            guard copyImageObject(atParagraph: loc) else { return }
             let para = (string as NSString).paragraphRange(
                 for: NSRange(location: min(loc, (string as NSString).length), length: 0))
             deleteImageParagraph(para)
@@ -2225,8 +2255,11 @@ final class BlockTextView: NSTextView {
         super.cut(sender)
     }
 
-    /// 선택된 이미지 문단의 비트맵을 클립보드에 쓴다. 원본을 못 읽으면 false.
-    private func copySelectedImage(atParagraph loc: Int) -> Bool {
+    /// 선택된 이미지 문단을 클립보드에 기록한다 — MINT 객체(JSON)·Markdown
+    /// 소스·파일 URL·호환 비트맵을 함께 담아, 내부 붙여넣기는 메타데이터를
+    /// 온전히 되살리고 외부 앱도 각자 알아볼 형태를 얻는다 (이슈 #17).
+    @discardableResult
+    func copyImageObject(atParagraph loc: Int) -> Bool {
         let ns = string as NSString
         let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
         guard let attrs = Self.imageAttrs(
@@ -2235,7 +2268,29 @@ final class BlockTextView: NSTextView {
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        return pasteboard.writeObjects([image])
+        // 1) MINT 전용 객체 — 메타데이터 전체.
+        let object = MintImageObject(attrs: attrs)
+        if let payload = object.encoded() {
+            pasteboard.setData(payload, forType: .mintImageObject)
+        }
+        // 2) Markdown 소스 — 텍스트 편집기로 붙이면 구문째로.
+        pasteboard.setString(attrs.markdown, forType: .string)
+        // 3) 원본 파일 URL — 파일을 받아들이는 앱용.
+        pasteboard.writeObjects([MintImageStore.url(for: attrs.src) as NSURL])
+        // 4) 호환 비트맵 — 이미지를 받는 모든 앱용 (기존 동작).
+        pasteboard.writeObjects([image])
+        return true
+    }
+
+    /// 클립보드의 MINT 이미지 객체를 그대로 삽입한다 — src를 새로 만들지 않고
+    /// alt/title/width/align까지 보존 (이슈 #17). 넣었으면 true.
+    @discardableResult
+    func pasteImageObject(from pasteboard: NSPasteboard) -> Bool {
+        guard let data = pasteboard.data(forType: .mintImageObject),
+            let object = MintImageObject(data: data)
+        else { return false }
+        insertImageParagraph(markdown: object.markdown)
+        return true
     }
 
     /// 렌더된 이미지 위에서는 포인터 커서 — 클릭(객체 선택) 대상임을 알린다.
@@ -2335,7 +2390,8 @@ final class BlockTextView: NSTextView {
 
     /// 이미지 소스 줄의 `{width align}`·alt/title 속성을 새 값으로 바꿔 다시 쓴다
     /// (undo 포함). `setTitle`: nil=무변화, .some(nil)=해제, .some(문자열)=지정.
-    private func rewriteImage(
+    /// internal — 이름 있는 undo·왕복 보존의 회귀 테스트용 (이슈 #14·#17).
+    func rewriteImage(
         _ para: NSRange, setAlign: String? = nil, setWidth: Int? = nil,
         setAlt: String? = nil, setTitle: String?? = nil, setSrc: String? = nil
     ) {
@@ -2360,11 +2416,19 @@ final class BlockTextView: NSTextView {
             attrs.optionsPrefix = nil
         }
         let newLine = attrs.markdown
+        // 어떤 속성을 바꿨는지로 이력 이름을 정한다 — 이력 줄이 동작을 말하게.
+        let actionName: String
+        if setAlign != nil { actionName = "이미지 정렬" }
+        else if setWidth != nil { actionName = "이미지 크기 조절" }
+        else if setAlt != nil || setTitle != nil { actionName = "대체 텍스트 편집" }
+        else if setSrc != nil { actionName = "이미지 경로 변경" }
+        else { actionName = "이미지 서식" }
         let contentRange = NSRange(
             location: para.location, length: (content as NSString).length)
         guard newLine != content,
             shouldChangeText(in: contentRange, replacementString: newLine)
         else { return }
+        nameCurrentUndo(actionName)
         isTransforming = true
         storage.replaceCharacters(in: contentRange, with: newLine)
         isTransforming = false
@@ -2394,10 +2458,21 @@ final class BlockTextView: NSTextView {
     }
 
     /// 이미지 문단을 개행째 지운다 (요구 3 · 백스페이스 공통).
-    private func deleteImageParagraph(_ para: NSRange) {
+    /// 이미지 문단을 개행째 지운다 (요구 3 · 백스페이스 공통).
+    /// internal — 삭제 undo·asset 장부 등록의 회귀 테스트용 (이슈 #17).
+    func deleteImageParagraph(_ para: NSRange) {
         guard let storage = textStorage else { return }
         clearImageSelection()
+        // 지워지는 asset을 장부에 적어 둔다 — undo/redo가 끝난 뒤 참조가 없으면
+        // Janitor가 정리한다. 즉시 지우지 않는 것이 redo의 전제다 (이슈 #17).
+        if let attrs = Self.imageAttrs(
+            from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
+            case .managedRelative = ImageReferenceParser.classify(attrs.src)
+        {
+            AssetJanitor.record(attrs.src)
+        }
         guard shouldChangeText(in: para, replacementString: "") else { return }
+        nameCurrentUndo("이미지 삭제")
         isTransforming = true
         storage.replaceCharacters(in: para, with: "")
         isTransforming = false
@@ -2608,6 +2683,7 @@ final class BlockTextView: NSTextView {
         guard shouldChangeText(
             in: NSRange(location: 0, length: ns.length), replacementString: nil)
         else { return }
+        nameCurrentUndo("이미지 이동")
         isTransforming = true
         storage.replaceCharacters(in: removeRange, with: "")
         // 삭제로 밀린 삽입 위치 보정.
