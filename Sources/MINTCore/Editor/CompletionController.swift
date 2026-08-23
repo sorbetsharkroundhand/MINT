@@ -32,8 +32,19 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var lastLatency: TimeInterval?
     /// 최근 예측이 실제로 참고한 컨텍스트 (요구사항 §17 인스펙터) — 조립기가
     /// 프롬프트를 만들며 남긴 기록이라 프롬프트와 항상 일치한다. 별도 프리뷰
-    /// 데이터가 아니다.
-    @Published public private(set) var lastContextReport: ContextReport?
+    /// 데이터가 아니다. 소속 문서(entryID)가 활성 문서와 다르면 인스펙터가
+    /// 숨긴다 (이슈 #8). 쓰기는 모듈 내부(테스트 포함)로 제한.
+    @Published public internal(set) var lastContextReport: ContextReport?
+
+    /// 문서 전환 알림 — 이전 문서의 예측·리포트를 즉시 무효화한다 (이슈 #8).
+    /// A 작품 예측 도중 B로 전환하면 세대가 올라 늦은 결과가 폐기되고, 고스트와
+    /// 리포트도 A 것이 화면에 남지 않는다.
+    public func noteDocumentSwitch(to entryID: UUID) {
+        if let current = lastContextReport, current.entryID != entryID {
+            lastContextReport = nil
+        }
+        invalidate()
+    }
     /// 제안 요청이 예약·진행 중인가 — 툴바 칩의 "예측 중" 표시용 (에디터 v3).
     @Published public private(set) var isPredicting = false
 
@@ -552,7 +563,7 @@ public final class CompletionController: ObservableObject {
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let document = documentContextProvider?()
         let knowledge = knowledgeProvider?()
-        let (prompt, report) = ContextAssembler.assembleWithReport(
+        var (prompt, report) = ContextAssembler.assembleWithReport(
             prefix: prefix,
             document: document,
             knowledge: knowledge,
@@ -561,7 +572,10 @@ public final class CompletionController: ObservableObject {
             style: parameters.promptStyle
         )
         // 인스펙터 갱신 — 이 요청이 실제로 쓰는 컨텍스트다 (생성 성패와 무관:
-        // 무엇이 주입됐는지가 관심사다).
+        // 무엇이 주입됐는지가 관심사다). 소속 문서·세대를 찍어 다른 작품 화면에서
+        // 보여지거나 그 오버라이드에 기록되는 일을 막는다 (이슈 #8).
+        report.entryID = document?.entryID
+        report.generation = expected
         lastContextReport = report
         // 대화 모드 (PLAN §10) — 커서가 열린 따옴표 안이면 정지 사다리를 발화
         // 끝으로 확장한다. 조립기의 말투 승격과 같은 감지를 써서 어긋나지 않는다.
