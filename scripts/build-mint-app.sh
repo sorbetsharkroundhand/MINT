@@ -51,6 +51,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 PLIST
 
 # 로컬 실행용 애드혹 서명 — `open` 실행과 TCC 권한 대화의 엉킴을 줄인다.
-codesign --force -s - "$APP" >/dev/null 2>&1 || echo "⚠ 애드혹 서명 실패 — 직접 실행에는 지장 없음" >&2
+# --deep 필요: Contents/MacOS/mlx.metallib은 무서명 코드 객체라 번들 단독
+# 서명이 거절된다 (서브컴포넌트 먼저 서명).
+codesign --force --deep -s - "$APP" >/dev/null 2>&1 || echo "⚠ 애드혹 서명 실패 — 직접 실행에는 지장 없음" >&2
 
 echo "✓ $APP"

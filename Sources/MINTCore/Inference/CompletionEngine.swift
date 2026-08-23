@@ -790,7 +790,7 @@ public actor CompletionEngine {
         guard stripped.hasPrefix("<think>") || stripped.hasPrefix("</think>") else {
             return text
         }
-        var rest = String(stripped)
+        let rest = String(stripped)
         if let range = rest.range(of: "</think>") {
             return String(rest[range.upperBound...])
                 .trimmingCharacters(in: .whitespacesAndNewlines)
