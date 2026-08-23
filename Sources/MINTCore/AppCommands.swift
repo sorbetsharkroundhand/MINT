@@ -140,7 +140,9 @@ public struct MintCommands: Commands {
         NSApp.sendAction(selector, to: nil, from: nil)
     }
 
-    /// 현재 저널을 순수 마크다운(.md)으로 저장한다 — 본문 자체가 마크다운이라 그대로 쓴다.
+    /// 현재 저널을 일반 Markdown(.md)으로 내보낸다 — 이미지 asset을 목적지 옆
+    /// `images/`로 복사하고 상대경로를 고쳐 외부 편집기에서도 이미지가 살아
+    /// 있게 한다 (이슈 #13).
     private func exportMarkdown() {
         guard let entry = store.activeEntry else { return }
         let panel = NSSavePanel()
@@ -149,9 +151,28 @@ public struct MintCommands: Commands {
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
-            try entry.body.write(to: url, atomically: true, encoding: .utf8)
+            let report = try MarkdownExporter.export(entry, to: url)
             // 성공 위치를 명시한다 — 어디에 저장됐는지 사용자가 바로 확인 (이슈 #10).
             NSWorkspace.shared.activateFileViewerSelecting([url])
+            // 소스 정책 경고 (이슈 #13) — 복사 못 한/안 한 참조가 있으면 조용한
+            // 성공으로 오해하지 않게 알려준다.
+            var notes: [String] = []
+            if !report.missingSources.isEmpty {
+                notes.append("원본 파일을 찾지 못한 이미지 \(report.missingSources.count)건은 참조를 그대로 남겼어요:\n\(report.missingSources.joined(separator: ", "))")
+            }
+            if report.remoteCount > 0 {
+                notes.append("웹 이미지 \(report.remoteCount)건은 주소 그대로 내보냈어요 — 오프라인에서는 안 보일 수 있어요.")
+            }
+            if report.blockedCount > 0 {
+                notes.append("해석할 수 없는 참조 \(report.blockedCount)건은 그대로 남겼어요.")
+            }
+            if !notes.isEmpty {
+                let alert = NSAlert()
+                alert.messageText = "Markdown 내보내기 완료"
+                alert.informativeText = notes.joined(separator: "\n\n")
+                alert.alertStyle = .warning
+                alert.runModal()
+            }
         } catch {
             let alert = NSAlert()
             alert.messageText = "Markdown 내보내기 실패"

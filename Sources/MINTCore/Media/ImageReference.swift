@@ -22,6 +22,11 @@ public struct ImageReference: Equatable {
     public let title: String?
     /// `[alt][label]` 형태일 때의 라벨 (정규화됨). 인라인 형태면 nil.
     public let label: String?
+    /// 인라인 형태에서 destination **원문**(이스케이프 포함)의 범위 — export 등
+    /// 소비자가 참조 전체를 재조립하지 않고 경로만 수술적으로 바꾸게 한다
+    /// (이슈 #13). angle 괄호는 범위 밖이다. 참조 형태는 경로가 정의 줄에
+    /// 있으므로 nil.
+    public let destinationRange: Range<String.Index>?
 
     /// 원본 줄에서 이미지 구문(`![…](…)` 또는 `[…][…]`)의 범위 — {…} 옵션 스플라이스용.
     public let bodyRange: Range<String.Index>
@@ -94,14 +99,14 @@ public enum ImageReferenceParser {
         // destination — angle(<…>) 또는 균형 괄호 일반 형태.
         var work = altClose
         skipSpaces(body, &work)
-        let dest: (raw: String, end: Substring.Index)?
+        let dest: (raw: String, end: Substring.Index, range: Range<Substring.Index>)?
         if match(body, &work, "<") {
             guard let close = scanUntilUnescaped(body, from: work, stoppingAt: ">") else { return nil }
             let raw = String(body[work..<close])
-            dest = (raw, body.index(after: close))
+            dest = (raw, body.index(after: close), work..<close)
         } else {
             guard let end = scanPlainDestination(body, from: work) else { return nil }
-            dest = (String(body[work..<end]), end)
+            dest = (String(body[work..<end]), end, work..<end)
         }
         // title — 세 인용 형식. destination 뒤 공백이 있어야 시작한다.
         var cursor = dest!.end
@@ -127,6 +132,7 @@ public enum ImageReferenceParser {
             destinationKind: classify(raw),
             title: title.map(unescape),
             label: nil,
+            destinationRange: dest!.range,
             bodyRange: body.startIndex..<cursor)
     }
 
@@ -167,6 +173,7 @@ public enum ImageReferenceParser {
             destinationKind: classify(def.destinationRaw),
             title: def.title,
             label: normalizeLabel(rawLabel),
+            destinationRange: nil,
             bodyRange: body.startIndex..<cursor)
     }
 
