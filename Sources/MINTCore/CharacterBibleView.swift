@@ -221,9 +221,9 @@ struct CharacterBibleView: View {
         )
     }
 
-    /// 카드 필드 편집 → 스토어 upsert (디바운스 저장). get은 항상 스토어의
-    /// 최신 값 — 팝오버가 열린 채 다른 경로로 바뀌어도 어긋나지 않는다.
-    /// **소개를 직접 고치면 잠근다** — 자동 프로파일링이 덮지 못한다 (PLAN §6.2).
+    /// 카드 필드 편집 → 스토어 upsert. 잠금·자동등록 해제 규칙은 **스토어 커밋
+    /// 경계**로 옮겨졌다 (#49/H1) — 뷰는 값만 넘긴다. 저장도 스토어 정책을 따른다:
+    /// 연속 타이핑은 디바운스, 새 카드·잠금 토글은 즉시.
     private func binding(for card: CharacterCard) -> Binding<CharacterCard> {
         Binding(
             get: {
@@ -231,14 +231,6 @@ struct CharacterBibleView: View {
             },
             set: { updated in
                 guard let id = store.activeEntry?.id else { return }
-                var updated = updated
-                let current = store.activeEntry?.characters?.first(where: { $0.id == card.id })
-                if let current, updated.note != current.note {
-                    updated.locked = true
-                }
-                // 사용자가 손을 대면 자동 등록 표식은 사라진다 — 이제 사용자의
-                // 카드다 (요구사항 §16).
-                if let current, updated != current { updated.autoRegistered = nil }
                 store.upsertCharacter(updated, in: id)
             }
         )
