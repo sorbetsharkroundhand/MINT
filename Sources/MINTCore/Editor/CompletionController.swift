@@ -265,21 +265,28 @@ public final class CompletionController: ObservableObject {
         }
         engineState = .downloading(0)
         let parameters = settings.parameters
-        // 로드가 끝날 때까지 self를 붙잡는다(수명 유한) — 상태 갱신이 목적이므로 의도적.
-        Task { [engine] in
+        // 진행률 coalescing — 허브 로더는 초당 수십 번 부르지만 UI 갱신은
+        // 250ms면 충분하다. 틱마다 MainActor 태스크를 스폰하던 낭비 제거 (이슈 #46).
+        let throttle = ProgressCoalescer()
+        // 로드 태스크를 보관한다 — 스위치를 끄면 수 GB 네트워크가 혼자 도는
+        // 일을 끊는 유일한 손잡이다 (이슈 #46). 이전 로드가 살아 있으면 먼저 접는다.
+        preloadTask?.cancel()
+        let task = Task { [engine] in
             do {
                 try await engine.preload(parameters: parameters) { fraction in
+                    guard throttle.shouldEmit(fraction) else { return }
                     Task { @MainActor [weak self] in
                         self?.noteLoadProgress(fraction)
                     }
                 }
                 self.markEngineReady()
             } catch is CancellationError {
-                // 모델 교체 등으로 이 로드가 취소됨 — 새 로드가 상태를 이어받는다.
+                // 모델 교체·스위치 OFF로 이 로드가 취소됨 — 상태는 요청자가 정리한다.
             } catch {
                 self.markEngineFailed(error, modelID: parameters.modelID)
             }
         }
+        preloadTask = task
     }
 
     /// 로드 실패 후 재시도 (모델 id를 바꾼 뒤 등).
@@ -318,6 +325,10 @@ public final class CompletionController: ObservableObject {
             preloadEngine()
         } else {
             invalidate()
+            // 진행 중 모델 로드(다운로드)도 함께 접는다 — 이게 없으면 OFF 후에도
+            // 수 GB 전송이 계속된다 (이슈 #46).
+            preloadTask?.cancel()
+            preloadTask = nil
             // 꺼진 순간 마지막 리포트도 과거의 것이다 — 남겨두면 꺼져 있는데
             // 컨텍스트 화면이 살아 있는 모순이 생긴다 (이슈 #11).
             lastContextReport = nil
@@ -476,6 +487,10 @@ public final class CompletionController: ObservableObject {
 
     /// AI 이름 생성이 진행 중인 폴더들 — 사이드바 행의 로딩 점 표시용.
     @Published public private(set) var namingFolderIDs: Set<UUID> = []
+
+    /// 모델 로드(다운로드 포함) 태스크 — 마스터 스위치 OFF 때 접는 손잡이.
+    /// 보관하지 않으면 수 GB 네트워크 전송이 끝까지 혼자 돈다 (이슈 #46).
+    private var preloadTask: Task<Void, Never>?
 
     /// 폴더별 이름 생성 태스크 (이슈 #47). 미추적이면 콜드 모델 로드 수 분 동안
     /// 스피너가 도는 걸 끊을 방법이 없었다. 취소는 소유자(아래 cancel 계열)만
