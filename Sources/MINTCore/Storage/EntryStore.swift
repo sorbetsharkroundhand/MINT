@@ -257,6 +257,46 @@ public final class EntryStore: ObservableObject {
     /// 원고 저장의 유일한 통로 (아래 `SnapshotWriter`).
     private let writer = SnapshotWriter()
 
+    // MARK: - 복구 모드 (이슈 #6)
+
+    /// 손상 복구 안내에 쓰는 컨텍스트 — UI가 원본·사본·세션 파일 위치를 보여준다.
+    public struct RecoveryContext: Equatable, Sendable {
+        public enum Cause: Equatable, Sendable {
+            /// 파일을 읽었으나 JSON 디코딩 실패 — 부분쓰기·외부 훼손.
+            case corrupted(reason: String)
+            /// 권한·I/O 오류로 읽기 자체가 실패 — 원본은 제자리에 무사하다.
+            case unreadable(message: String)
+        }
+
+        public let cause: Cause
+        /// 라이브러리 원본(entries.json) — 복구 모드에서는 절대 덮지 않는다.
+        public let originalURL: URL
+        /// 손상 직후 남긴 타임스탬프 사본. 읽기 자체가 실패하면 nil.
+        public let preservedCopyURL: URL?
+        /// 이번 세션 편집이 기록되는 우회 파일 (`entries-recovered-<시각>.json`).
+        public let sessionURL: URL
+
+        public static func == (lhs: Self, rhs: Self) -> Bool {
+            lhs.originalURL == rhs.originalURL
+                && lhs.preservedCopyURL == rhs.preservedCopyURL
+                && lhs.sessionURL == rhs.sessionURL
+                && "\(lhs.cause)" == "\(rhs.cause)"
+        }
+    }
+
+    /// nil이 아니면 복구 모드 — 저장은 세션 복구 파일로 우회되고 손상 원본은
+    /// 건드리지 않는다. 사용자 결정(승계·내보내기·새 시작)은 ContentView 안내
+    /// 대화가 받는다.
+    @Published public private(set) var pendingRecovery: RecoveryContext?
+
+    /// 복구 모드에서 이번 세션 편집이 기록되는 파일. nil이면 정상 모드.
+    private var recoveredSessionURL: URL?
+
+    /// 실제 쓰기 대상 — 정상이면 라이브러리 파일, 복구 모드면 세션 복구 파일.
+    /// 모든 저장 경로(autosave·saveNow·flush)는 이 값을 써야 손상 원본을
+    /// 덮는 사고가 구조적으로 불가능해진다.
+    private var writeTargetURL: URL { recoveredSessionURL ?? fileURL }
+
     /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
     /// 하는 약참조. 메인 스레드에서만 읽고 쓴다.
     public nonisolated(unsafe) static weak var current: EntryStore?
@@ -284,16 +324,40 @@ public final class EntryStore: ObservableObject {
         self.fileURL = directory.appendingPathComponent("entries.json", isDirectory: false)
 
         let loaded: Snapshot
+        var recovery: RecoveryContext?
+        var sessionTarget: URL?
+        // 클로저가 초기화 도중의 self를 잡지 않게 원본 위치를 지역 상수로.
+        let original = fileURL
         switch Self.loadSnapshot(from: fileURL) {
         case .loaded(let snapshot):
             loaded = snapshot
         case .missing:
             loaded = Self.migratedOrEmptySnapshot(in: directory)
-        case .corrupted:
-            // 원본은 .corrupt-* 사본으로 보존됐다 — 빈 저널로 시작해도 복구 가능.
-            // M1 이관(journal.md)은 정상 첫 실행 전용이라 여기선 하지 않는다.
-            loaded = Snapshot(entries: [], activeID: nil)
+        case .corrupted(let reason, let preservedCopy):
+            // 원본은 .corrupt-* 사본으로 보존됐다 — M1 이관(journal.md)은 정상 첫
+            // 실행 전용이라 여기선 하지 않는다.
+            (loaded, sessionTarget) = Self.recoverySetup(
+                in: directory, originalURL: original,
+                cause: .corrupted(reason: reason), preservedCopyURL: preservedCopy)
+            recovery = sessionTarget.map {
+                RecoveryContext(
+                    cause: .corrupted(reason: reason), originalURL: original,
+                    preservedCopyURL: preservedCopy, sessionURL: $0)
+            }
+        case .unreadable(let message):
+            // 읽기 자체가 실패한 경우엔 사본도 못 만든다 — 원본 파일 자체가 무사히
+            // 제자리에 남고, 여기선 그 사실만 컨텍스트로 넘긴다.
+            (loaded, sessionTarget) = Self.recoverySetup(
+                in: directory, originalURL: original,
+                cause: .unreadable(message: message), preservedCopyURL: nil)
+            recovery = sessionTarget.map {
+                RecoveryContext(
+                    cause: .unreadable(message: message), originalURL: original,
+                    preservedCopyURL: nil, sessionURL: $0)
+            }
         }
+        self.pendingRecovery = recovery
+        self.recoveredSessionURL = sessionTarget
         var entries = loaded.entries
         if entries.isEmpty { entries = [JournalEntry()] }
         // 마이그레이션: 예전 파생 버그로 제목에 인라인 마크업(<font …>)이 얼어붙은
@@ -344,31 +408,100 @@ public final class EntryStore: ObservableObject {
     private enum SnapshotLoad {
         case loaded(Snapshot)
         case missing
-        case corrupted
+        /// 파일을 읽었으나 디코딩에 실패 — 부분쓰기·외부 훼손. 사본 위치를 함께 돌려준다.
+        case corrupted(reason: String, preservedCopy: URL?)
+        /// 권한·I/O 오류로 읽기 자체가 실패 — 원본 파일은 제자리에 무사하다.
+        case unreadable(message: String)
     }
 
     private static func loadSnapshot(from url: URL) -> SnapshotLoad {
         guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
-        guard let data = try? Data(contentsOf: url) else {
-            preserveCorruptedFile(at: url)
-            return .corrupted
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            // 읽기 실패엔 복구할 바이트도 없다 — 사본 만들기는 의미가 없고,
+            // 원본 파일 자체가 그대로 남는 것이 곧 보존이다 (이슈 #6).
+            return .unreadable(message: error.localizedDescription)
         }
+        return decodeSnapshot(from: data, originalURL: url)
+    }
+
+    private static func decodeSnapshot(from data: Data, originalURL url: URL) -> SnapshotLoad {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let snapshot = try? decoder.decode(Snapshot.self, from: data) else {
-            preserveCorruptedFile(at: url)
-            return .corrupted
+        do {
+            return .loaded(try decoder.decode(Snapshot.self, from: data))
+        } catch {
+            let preserved = preserveCorruptedFile(at: url)
+            return .corrupted(reason: error.localizedDescription, preservedCopy: preserved)
         }
-        return .loaded(snapshot)
     }
 
     /// 손상된 원고 파일을 타임스탬프 사본으로 보존한다 — 스토어는 빈 상태로 다시
     /// 시작하지만 원본은 항상 디스크에 남아 수동 복구가 가능하게 (조용한 전멸 금지).
-    static func preserveCorruptedFile(at url: URL) {
+    /// 성공하면 사본 위치를 돌려준다 (복구 안내 UI가 쓴다).
+    static func preserveCorruptedFile(at url: URL) -> URL? {
         let stamp = Self.corruptStampFormatter.string(from: .now)
         let backup = url.deletingPathExtension()
             .appendingPathExtension("corrupt-\(stamp).json")
-        try? FileManager.default.copyItem(at: url, to: backup)
+        guard (try? FileManager.default.copyItem(at: url, to: backup)) != nil else {
+            return nil
+        }
+        return backup
+    }
+
+    /// 과거 세션의 복구 파일(`entries-recovered-*.json`) 중 최신 것 — 수정일 내림차순.
+    private static func newestRecoveredFile(in directory: URL) -> URL? {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey]))
+            ?? []
+        return files
+            .filter { $0.lastPathComponent.hasPrefix("entries-recovered-") }
+            .sorted { lhs, rhs -> Bool in
+                let l = (try? lhs.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                let r = (try? rhs.resourceValues(forKeys: [.contentModificationDateKey]))?
+                    .contentModificationDate ?? .distantPast
+                return l > r
+            }
+            .first
+    }
+
+    /// 손상 감지 후의 시작 상태를 정한다 (이슈 #6).
+    ///
+    /// 1. 과거 세션 복구 파일이 디코딩되면 **라이브러리로 승계**해 마지막 작업을
+    ///    그대로 이어준다 — 사용자 개입 없이 되돌아오는 게 최선의 복구다. 이때는
+    ///    정상 모드로 돌아간다 (손상 원본은 이미 .corrupt-* 사본이 남아 있다).
+    /// 2. 아니면 빈 저널로 시작하되, 이번 세션 저장은 `entries-recovered-<시각>.json`
+    ///    으로 우회해 손상 원본을 절대 덮지 않게 한다. 세션 URL을 돌려주면 호출부가
+    ///    복구 모드(pendingRecovery)로 진입한다.
+    private static func recoverySetup(
+        in directory: URL,
+        originalURL: URL,
+        cause: RecoveryContext.Cause,
+        preservedCopyURL: URL?
+    ) -> (snapshot: Snapshot, sessionTarget: URL?) {
+        if let previous = newestRecoveredFile(in: directory),
+           case .loaded(let snapshot) = decodeSnapshotFromDisk(previous) {
+            // 손상 원본을 복구 파일로 대체 — 사본은 이미 남아 있어 안전하다.
+            // 승계된 원본은 반드시 제거한다 — 남겨두면 훗날 새 손상 시 이 낡은
+            // 사본이 최신 라이브러리를 덮어버리는 재발 경로가 된다.
+            try? FileManager.default.removeItem(at: originalURL)
+            try? FileManager.default.copyItem(at: previous, to: originalURL)
+            try? FileManager.default.removeItem(at: previous)
+            return (snapshot, nil)
+        }
+
+        let stamp = corruptStampFormatter.string(from: .now)
+        let session = directory.appendingPathComponent(
+            "entries-recovered-\(stamp).json", isDirectory: false)
+        return (Snapshot(entries: [], activeID: nil), session)
+    }
+
+    private static func decodeSnapshotFromDisk(_ url: URL) -> SnapshotLoad {
+        guard let data = try? Data(contentsOf: url) else { return .unreadable(message: "읽기 실패") }
+        return decodeSnapshot(from: data, originalURL: url)
     }
 
     /// M1 단일 문서(journal.md) 이관 — 없으면 빈 저널 하나로 시작.
@@ -959,10 +1092,12 @@ public final class EntryStore: ObservableObject {
         saveGeneration += 1
         let generation = saveGeneration
         let snapshot = currentSnapshot
-        saveTask = Task { [weak self, autosaveDelay, fileURL] in
+        // 복구 모드면 세션 파일로 — 손상 원본을 덮는 길을 없앤다 (이슈 #6).
+        let target = writeTargetURL
+        saveTask = Task { [weak self, autosaveDelay, target] in
             try? await Task.sleep(for: autosaveDelay)
             guard !Task.isCancelled else { return }
-            await self?.persist(snapshot, to: fileURL, generation: generation)
+            await self?.persist(snapshot, to: target, generation: generation)
         }
     }
 
@@ -981,7 +1116,9 @@ public final class EntryStore: ObservableObject {
     private func writeAndWait(_ snapshot: Snapshot) {
         let semaphore = DispatchSemaphore(value: 0)
         let writer = self.writer
-        let url = self.fileURL
+        // 복구 모드면 세션 파일로 — flush 계약("반환 = 디스크 반영")은 대상 파일
+        // 기준으로 지켜진다 (이슈 #6).
+        let url = writeTargetURL
         Task.detached(priority: .userInitiated) {
             await writer.write(snapshot, to: url)
             semaphore.signal()
@@ -1005,6 +1142,43 @@ public final class EntryStore: ObservableObject {
         saveGeneration += 1
         writeAndWait(currentSnapshot)
         isSaving = false
+    }
+
+    // MARK: - 복구 액션 (이슈 #6)
+
+    /// 복구 파일을 라이브러리로 승계하고 정상 모드로 복귀한다 — 사용자가 안내
+    /// 대화에서 "새 라이브러리로 시작"을 고른 때만 호출된다. 지금까지의 세션
+    /// 편집은 사라지지 않고 원본 자리로 옮겨진다. 손상 원본은 이미 .corrupt-*
+    /// 사본으로 남아 있다.
+    public func adoptRecoveredAsLibrary() {
+        guard pendingRecovery != nil else { return }
+        if let session = recoveredSessionURL,
+            FileManager.default.fileExists(atPath: session.path) {
+            try? FileManager.default.removeItem(at: fileURL)
+            try? FileManager.default.copyItem(at: session, to: fileURL)
+            // 승계 후엔 세션 파일을 치운다 — 낡은 복구 파일이 훗날 최신 라이브러리를
+            // 덮는 재발 경로가 되지 않게 (recoverySetup의 승계와 같은 이유).
+            try? FileManager.default.removeItem(at: session)
+        }
+        pendingRecovery = nil
+        recoveredSessionURL = nil
+        saveNow()  // 정상 경로 복귀를 바로 검증한다 — 실패하면 #10 상태 표시가 받는다.
+    }
+
+    /// 세션 스냅샷을 사용자가 고른 위치로 내보낸다 — 백업 로테이션 없는 순수 사본.
+    /// 복구 모드가 아니어도 동작한다 (안전한 별도 내보내기).
+    @discardableResult
+    public func exportSessionCopy(to url: URL) -> Bool {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(currentSnapshot) else { return false }
+        do {
+            try data.write(to: url, options: .atomic)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// JSON 인코딩 + 원자적 쓰기 — 라이터 액터(백그라운드)에서만 호출된다.
