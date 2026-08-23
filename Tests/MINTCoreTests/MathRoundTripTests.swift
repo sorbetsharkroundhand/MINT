@@ -299,29 +299,78 @@ final class MathRoundTripTests: XCTestCase {
 
     // MARK: EPUB
 
-    @MainActor func testEPUB_다중행수식() {
+    /// 이슈 #22 — 수식은 PNG로 심기고 LaTeX 원문은 alt fallback으로 남는다.
+    @MainActor func testEPUB_다중행수식_PNG와altfallback() throws {
         let entry = JournalEntry(
             title: "소설",
             body: "# 1장\n$$\n\\begin{aligned}\na &= b\n\\end{aligned}\n$$\n본문")
+        let oebps = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mint-math-epub-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: oebps) }
+        try FileManager.default.createDirectory(at: oebps, withIntermediateDirectories: true)
+
         var images: [String] = []
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
-            from: entry, copyingImagesInto: URL(fileURLWithPath: "/tmp/epub-test"),
+            from: entry, copyingImagesInto: oebps,
             collected: &images, missing: &missing)
         let html = chapters.map(\.html).joined(separator: "\n")
-        XCTAssertTrue(html.contains(#"<p class="math"><code>"#))
-        XCTAssertTrue(html.contains("\\begin{aligned}\na &amp;= b\n\\end{aligned}"), "줄이 보존된다")
+
+        // PNG 참조 + LaTeX alt fallback
+        XCTAssertTrue(html.contains(#"<p class="math"><img src="images/math-"#), html)
+        XCTAssertTrue(html.contains("LaTeX: "), html)
+        XCTAssertTrue(html.contains("\\begin{aligned}"), html)
+        XCTAssertTrue(html.contains("a &amp;= b"), "줄이 alt에서 보존된다")
         XCTAssertFalse(html.contains("<pre><code>$$"), "구분자 줄이 코드블록으로 새면 안 된다")
+        // 실제 파일이 심기고 OPF 목록에 등록된다
+        XCTAssertEqual(images.count, 1)
+        let asset = try XCTUnwrap(images.first)
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: oebps.appendingPathComponent(asset).path))
     }
 
-    @MainActor func testEPUB_한줄수식_기존출력유지() {
+    @MainActor func testEPUB_한줄수식도PNG로() throws {
         let entry = JournalEntry(title: "소설", body: "# 1장\n$$E=mc^2$$")
+        let oebps = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mint-math-epub-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: oebps) }
+        try FileManager.default.createDirectory(at: oebps, withIntermediateDirectories: true)
+
         var images: [String] = []
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
-            from: entry, copyingImagesInto: URL(fileURLWithPath: "/tmp/epub-test"),
+            from: entry, copyingImagesInto: oebps,
             collected: &images, missing: &missing)
         let html = chapters.map(\.html).joined(separator: "\n")
-        XCTAssertTrue(html.contains("<code>E=mc^2</code>"))
+
+        XCTAssertTrue(html.contains(#"alt="LaTeX: E=mc^2""#), html)
+        XCTAssertEqual(images, ["images/math-" + EpubExporter.stableHash("E=mc^2") + ".png"])
+        // 같은 수식 재등장 — 안정 해시로 하나의 파일만 (#22 멱등).
+        let entry2 = JournalEntry(title: "소설", body: "# 1장\n$$E=mc^2$$\n$$E=mc^2$$")
+        var images2: [String] = []
+        var missing2: [String] = []
+        _ = EpubExporter.makeChapters(
+            from: entry2, copyingImagesInto: oebps,
+            collected: &images2, missing: &missing2)
+        XCTAssertEqual(images2.count, 1)
+    }
+
+    /// 렌더가 불가능한 LaTeX는 code 소스로 남아 의미가 사라지지 않는다 (#15 승계).
+    @MainActor func testEPUB_렌더불가수식은code소스보존() throws {
+        let entry = JournalEntry(title: "소설", body: "# 1장\n$$\\frac{1{$$")
+        let oebps = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mint-math-epub-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: oebps) }
+        try FileManager.default.createDirectory(at: oebps, withIntermediateDirectories: true)
+
+        var images: [String] = []
+        var missing: [String] = []
+        let chapters = EpubExporter.makeChapters(
+            from: entry, copyingImagesInto: oebps,
+            collected: &images, missing: &missing)
+        let html = chapters.map(\.html).joined(separator: "\n")
+
+        XCTAssertTrue(html.contains("<p class=\"math\"><code>"), html)
+        XCTAssertTrue(images.isEmpty)
     }
 }

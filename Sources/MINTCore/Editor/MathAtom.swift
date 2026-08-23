@@ -21,6 +21,9 @@ final class MathAtomAttachment: NSTextAttachment {
         return nil
     }
 
+    /// VoiceOver 라벨은 storage의 .accessibilityLabel 속성으로 부여된다
+    /// (convertInlineMath) — attachment 자체엔 AX 노출 면이 없다 (이슈 #22).
+
     /// 폰트 크기·테마 잉크색으로 렌더해 attachment를 준비한다 (text 모드 —
     /// 인라인은 display와 달리 위첨자·분수를 줄 안에 맞춰 그린다).
     /// 렌더 캐시가 메인 격리라 같은 격리를 따른다.
