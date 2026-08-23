@@ -79,10 +79,8 @@ struct SidebarView: View {
     @State private var editingID: UUID?
     @State private var draftTitle = ""
     @State private var hoveredID: UUID?
-    /// 내용이 있어 삭제 전 확인이 필요한 저널 — alert 표시 중.
-    @State private var deleteCandidate: JournalEntry?
-    /// 내용이 있어 삭제 전 확인이 필요한 폴더 — alert 표시 중.
-    @State private var folderDeleteCandidate: JournalFolder?
+    /// 휴지통 화면 표시 중 — 복원·영구 삭제는 여기서만 (#9).
+    @State private var showingTrash = false
     @FocusState private var renameFieldFocused: Bool
     /// 전역 검색어 — 비어 있지 않으면 트리 대신 검색 결과(평탄)를 보여준다.
     @State private var searchText = ""
@@ -122,31 +120,8 @@ struct SidebarView: View {
             sectionRaw = SidebarSection.files.rawValue
             if let entry = store.activeEntry { startRename(entry) }
         }
-        .alert(
-            "‘\(deleteCandidate?.title ?? "")’을(를) 삭제할까요?",
-            isPresented: Binding(
-                get: { deleteCandidate != nil },
-                set: { if !$0 { deleteCandidate = nil } }
-            ),
-            presenting: deleteCandidate
-        ) { entry in
-            Button("삭제", role: .destructive) { store.delete(entry.id) }
-            Button("취소", role: .cancel) {}
-        } message: { _ in
-            Text("작성한 내용이 함께 삭제되며 되돌릴 수 없어요.")
-        }
-        .alert(
-            "‘\(folderDeleteCandidate?.name ?? "")’ 폴더를 삭제할까요?",
-            isPresented: Binding(
-                get: { folderDeleteCandidate != nil },
-                set: { if !$0 { folderDeleteCandidate = nil } }
-            ),
-            presenting: folderDeleteCandidate
-        ) { folder in
-            Button("삭제", role: .destructive) { store.deleteFolder(folder.id) }
-            Button("취소", role: .cancel) {}
-        } message: { _ in
-            Text("폴더 안의 하위 폴더와 저널이 함께 삭제되며 되돌릴 수 없어요.")
+        .sheet(isPresented: $showingTrash) {
+            TrashSheetView(store: store, trash: store.trash, theme: theme)
         }
     }
 
@@ -315,22 +290,15 @@ struct SidebarView: View {
 
     // MARK: - 삭제
 
-    /// 저널 삭제 요청 — 비어 있으면 바로 지우고, 내용이 있으면 한 번 더 묻는다.
+    /// 저널 삭제 요청 — 휴지통으로 가며 ⌘Z를 안내한다. 확인 Alert는 영구
+    /// 삭제(휴지통 비우기)의 마지막 단계에만 쓴다 (이슈 #9).
     private func requestDelete(_ entry: JournalEntry) {
-        if entry.body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            store.delete(entry.id)
-        } else {
-            deleteCandidate = entry
-        }
+        store.delete(entry.id)
     }
 
-    /// 폴더 삭제 요청 — 비어 있으면 바로 지우고, 내용물이 있으면 한 번 더 묻는다.
+    /// 폴더 삭제 요청 — 내용물째 휴지통으로.
     private func requestDeleteFolder(_ folder: JournalFolder) {
-        if store.folderHasContents(folder.id) {
-            folderDeleteCandidate = folder
-        } else {
-            store.deleteFolder(folder.id)
-        }
+        store.deleteFolder(folder.id)
     }
 
     // MARK: - 헤더
@@ -340,6 +308,13 @@ struct SidebarView: View {
         // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
         HStack(spacing: 2) {
             Spacer(minLength: 0)
+            HeaderIconButton(theme: theme, help: "휴지통") {
+                showingTrash = true
+            } label: {
+                Image(systemName: "trash")
+                    .font(.system(size: 12.5, weight: .medium))
+            }
+            .accessibilityLabel(Text("휴지통"))
             HeaderIconButton(theme: theme, help: "새 폴더") {
                 store.newFolder()
             } label: {
@@ -869,5 +844,95 @@ private struct DeleteButton: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help("이 저널 삭제")
+    }
+}
+
+
+/// 휴지통 화면 — 삭제된 저널·폴더 묶음의 복원과 **영구 삭제** (이슈 #9).
+/// 영구 삭제만 확인 Alert를 묻는다: 일반 삭제는 언제든 여기서 되살아난다.
+struct TrashSheetView: View {
+    @ObservedObject var store: EntryStore
+    @ObservedObject var trash: TrashStore
+    let theme: MintTheme
+    @Environment(\.dismiss) private var dismiss
+    @State private var purgeCandidate: TrashStore.Item?
+    @State private var purgeAllRequested = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("휴지통")
+                    .font(MintFonts.uiFont(15, .semibold))
+                Spacer()
+                if !trash.items.isEmpty {
+                    Button("비우기", role: .destructive) { purgeAllRequested = true }
+                        .controlSize(.small)
+                }
+                Button("닫기") { dismiss() }
+                    .controlSize(.small)
+            }
+            .padding(14)
+
+            theme.sepC.frame(height: 1)
+
+            if trash.items.isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "trash")
+                        .foregroundStyle(theme.ink3C)
+                    Text("비어 있어요")
+                        .font(MintFonts.uiFont(12))
+                        .foregroundStyle(theme.ink2C)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(trash.items) { item in
+                    HStack {
+                        Image(systemName: item.isFolderBundle ? "folder" : "doc.text")
+                            .foregroundStyle(theme.ink2C)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.title)
+                                .font(MintFonts.uiFont(12.5))
+                                .lineLimit(1)
+                            Text(item.deletedAt.formatted(date: .abbreviated, time: .shortened))
+                                .font(MintFonts.monoUI(10))
+                                .foregroundStyle(theme.ink3C)
+                        }
+                        Spacer()
+                        Button("복원") { store.restoreFromTrash(itemID: item.id) }
+                            .controlSize(.small)
+                        Button(role: .destructive) { purgeCandidate = item } label: {
+                            Text("영구 삭제")
+                        }
+                        .controlSize(.small)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .listStyle(.plain)
+            }
+        }
+        .frame(width: 420, height: 380)
+        .background(theme.glassWinC)
+        .alert(
+            "‘\(purgeCandidate?.title ?? "")’을(를) 영구 삭제할까요?",
+            isPresented: Binding(
+                get: { purgeCandidate != nil },
+                set: { if !$0 { purgeCandidate = nil } }
+            ),
+            presenting: purgeCandidate
+        ) { item in
+            Button("영구 삭제", role: .destructive) { trash.purge(id: item.id) }
+            Button("취소", role: .cancel) {}
+        } message: { _ in
+            Text("휴지통에서도 사라지며 되돌릴 수 없어요.")
+        }
+        .alert(
+            "휴지통을 비울까요?",
+            isPresented: $purgeAllRequested
+        ) {
+            Button("비우기", role: .destructive) { trash.purgeAll() }
+            Button("취소", role: .cancel) {}
+        } message: {
+            Text("\(trash.items.count)개 항목이 완전히 사라져요.")
+        }
     }
 }

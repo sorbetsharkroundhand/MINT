@@ -168,6 +168,9 @@ private struct MainSurface: View {
     /// 인물 감지 후보 UI 배선용 (M6) — 프리뷰 등에서는 nil.
     var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
+    /// 창의 undo manager — 구조 변경(삭제·이동·바이블 메타) undo가 텍스트
+    /// 편집과 같은 ⌘Z 흐름을 타게 배선한다 (이슈 #9).
+    @Environment(\.undoManager) private var windowUndoManager
     /// 사용자 색상 팔레트 — 관찰해서 설정에서 색을 바꾸는 즉시 화면에 반영한다.
     @ObservedObject private var palette = PaletteSettings.shared
     /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
@@ -187,7 +190,9 @@ private struct MainSurface: View {
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
-        ZStack {
+        // 구조 undo 배선 — 창마다 다시 잡는다 (⌘Z가 스토어 변경을 되돌린다).
+        store.structureUndoManager = windowUndoManager
+        return ZStack {
             GlassBackground()
             theme.glassWinC
             // 콘텐츠는 타이틀바(신호등 줄) 안전영역 아래부터 — 사이드바 헤더가
@@ -1149,6 +1154,13 @@ struct EditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
+            if let notice = store.notice {
+                Text(notice)
+                    .font(MintFonts.uiFont(11))
+                    .foregroundStyle(theme.blueC)
+                    .lineLimit(1)
+                separator
+            }
             Text("\(stats.words) 단어")
             separator
             Text("\(stats.characters) 자")
