@@ -9,17 +9,20 @@ import AppKit
 ///
 /// 저장 위치 규칙은 `EntryStore.storageDirectory()`와 같은 `~/Documents/MINT/`를
 /// 공유한다 — 여기서 다시 계산하는 이유는 파일 관심사를 분리하기 위해서다.
+/// 캐시의 "메인 전용" 불변식은 주석이 아니라 격리로 강제한다 (이슈 #45) —
+/// 호출부(BlockTextView·EpubExporter.export·테스트)는 모두 MainActor 맥락이다.
+@MainActor
 public enum MintImageStore {
     /// 지원 이미지 확장자 (붙여넣기·드롭·파일 선택 공통 필터).
     public static let imageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "gif", "heic", "heif", "tiff", "tif", "webp", "bmp",
     ]
 
-    nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
+    private static var cache: [String: NSImage] = [:]
 
     /// 테스트 전용 저장소 격리 — 기본값 nil(실제 `~/Documents/MINT`).
     /// 회귀 테스트가 사용자 원고·asset을 건드리지 않게 한다 (이슈 #7).
-    nonisolated(unsafe) private static var directoryOverride: URL?
+    private static var directoryOverride: URL?
 
     public static func setDirectoryOverride(_ url: URL?) {
         directoryOverride = url

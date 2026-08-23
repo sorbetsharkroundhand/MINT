@@ -19,11 +19,13 @@ final class ImageStoreGCTests: XCTestCase {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(
             at: root.appendingPathComponent("images"), withIntermediateDirectories: true)
-        MintImageStore.setDirectoryOverride(root)
+        // XCTest setup/teardown은 메인 스레드에서 실행된다.
+        let isolatedRoot = root
+        MainActor.assumeIsolated { MintImageStore.setDirectoryOverride(isolatedRoot) }
     }
 
     override func tearDownWithError() throws {
-        MintImageStore.setDirectoryOverride(nil)
+        MainActor.assumeIsolated { MintImageStore.setDirectoryOverride(nil) }
         try? FileManager.default.removeItem(at: root)
     }
 

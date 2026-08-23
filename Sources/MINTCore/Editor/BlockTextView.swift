@@ -471,6 +471,8 @@ extension NSAttributedString.Key {
 final class BlockTextView: NSTextView {
 
     /// 레이아웃 매니저(nonisolated 드로잉)에서도 읽는다 — 쓰기는 메인 스레드뿐.
+    /// nonisolated 드로잉이 읽기 때문에 @MainActor 전환이 불가능하다 — 이 탈출구는
+    /// 렌더 경로 재설계(#53·#61)에서 스냅샷 패턴으로 없앨 과제다 (이슈 #45).
     nonisolated(unsafe) var palette: MintTheme = .light
 
     /// 문서 끝 빈 문단(typingAttributes에만 존재)의 블록 스냅샷 —
@@ -3746,9 +3748,11 @@ final class MintLayoutManager: NSLayoutManager {
 // MARK: - LaTeX 렌더러 (SwiftMath)
 
 /// 수식 블록의 LaTeX → NSImage 렌더 캐시. 메인 스레드에서만 접근한다
-/// (편집 갱신·드로잉 모두 메인).
+/// (편집 갱신·드로잉 모두 메인). 격리로 강제한다 — 주석이 아니라 컴파일러가
+/// 지키게 한다 (이슈 #45).
+@MainActor
 enum MathRenderer {
-    nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
+    private static var cache: [String: NSImage] = [:]
 
     /// LaTeX가 파싱되지 않으면 nil — 뷰는 소스 텍스트를 그대로 보여준다.
     static func image(latex: String, color: NSColor, fontSize: CGFloat) -> NSImage? {
