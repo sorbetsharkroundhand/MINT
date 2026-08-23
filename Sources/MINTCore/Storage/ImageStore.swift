@@ -17,8 +17,18 @@ public enum MintImageStore {
 
     nonisolated(unsafe) private static var cache: [String: NSImage] = [:]
 
+    /// 테스트 전용 저장소 격리 — 기본값 nil(실제 `~/Documents/MINT`).
+    /// 회귀 테스트가 사용자 원고·asset을 건드리지 않게 한다 (이슈 #7).
+    nonisolated(unsafe) private static var directoryOverride: URL?
+
+    public static func setDirectoryOverride(_ url: URL?) {
+        directoryOverride = url
+        cache.removeAll()
+    }
+
     /// `~/Documents/MINT/` — 없으면 만든다.
     private static func mintDirectory() -> URL {
+        if let override = directoryOverride { return override }
         let base = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)
             .first ?? FileManager.default.homeDirectoryForCurrentUser
@@ -68,20 +78,14 @@ public enum MintImageStore {
         return image
     }
 
-    /// 어떤 저널에서도 참조하지 않는 이미지 파일을 지운다 — 저널·폴더 삭제로 생긴
-    /// 고아 파일을 정리한다 (L4). `referenced`는 살려 둘 상대경로 집합.
-    public static func pruneUnreferenced(keeping referenced: Set<String>) {
-        let dir = imagesDirectory()
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: dir, includingPropertiesForKeys: nil)
-        else { return }
-        for file in files {
-            let relative = "images/\(file.lastPathComponent)"
-            guard !referenced.contains(relative) else { continue }
-            try? FileManager.default.removeItem(at: file)
-            cache.removeValue(forKey: relative)
-        }
-    }
+    // MARK: - 고아 정리는 금지 (이슈 #7)
+
+    /// 과거 `pruneUnreferenced(keeping:)`는 정규식 하나로 "참조 중"을 판정해
+    /// 나머지를 **영구 삭제**했다. title·angle destination·괄호·reference 문법을
+    /// 못 읽어 실제 참조 중인 파일을 지웠고(이슈 #7 재현), 다른 저널 삭제만으로
+    /// 표지 이미지가 사라질 수 있었다. 파서와 같은 참조 모델(#12)과 휴지통/지연
+    /// GC(#17)가 준비될 때까지 **어떤 자동 삭제도 하지 않는다** — 고아 파일은
+    /// 디스크 몇 KB의 비용이지만, 오삭제는 원고 일부의 영구 손실이다 (AGENTS §1).
 
     private static func normalizedExtension(_ ext: String) -> String {
         let lowered = ext.lowercased()
