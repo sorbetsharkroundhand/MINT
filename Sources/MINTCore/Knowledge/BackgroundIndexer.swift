@@ -79,12 +79,17 @@ public final class BackgroundIndexer: ObservableObject {
     private var deepTimer: Task<Void, Never>?
     private var passTask: Task<Void, Never>?
 
+    /// 앱 수명 동안의 인덱서 — 종료 훅(AppDelegate)이 접근하려고 둔다.
+    /// EntryStore.current와 같은 패턴 (이슈 #65 Gate 0 teardown 수정).
+    public private(set) weak static var current: BackgroundIndexer?
+
     public init(
         engine: CompletionEngine,
         settings: CompletionSettings = .shared
     ) {
         self.engine = engine
         self.settings = settings
+        Self.current = self
         // 앱 비활성 = 장기 유휴와 같은 신호 — 곧바로 깊은 패스 (PLAN §9).
         // 앱 수명 싱글턴이라 옵저버를 해제하지 않는다 (weak self라 누수 없음).
         NotificationCenter.default.addObserver(
@@ -98,6 +103,21 @@ public final class BackgroundIndexer: ObservableObject {
     /// ContentView가 1회 배선 — 패스 시점에 활성 문서를 pull하기 위한 약참조.
     public func attach(store: EntryStore) {
         self.store = store
+    }
+
+    /// 앱 종료 직전 호출 — 유휴 타이머와 진행 패스를 접어, 엔진의 드레인이
+    /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 종료 시점의
+    /// 백그라운드 이해는 어차피 버려질 결과다 — 원문은 flush로 이미 안전하다.
+    public func shutdown() {
+        fastTimer?.cancel()
+        fastTimer = nil
+        deepTimer?.cancel()
+        deepTimer = nil
+        hydrateTask?.cancel()
+        hydrateTask = nil
+        passTask?.cancel()
+        passTask = nil
+        isIndexing = false
     }
 
     // MARK: - 트리거

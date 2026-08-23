@@ -13,7 +13,8 @@ struct MINTApp: App {
     @StateObject private var store = EntryStore()
     // 단일 모델 원칙 (CLAUDE.md §2-6) — 예측과 백그라운드 이해가 같은 엔진
     // (같은 상주 모델)을 쓴다. 인덱서는 예측에 항상 양보한다 (PLAN §9 선점).
-    private static let sharedEngine = CompletionEngine()
+    // 종료 훅(AppDelegate)에서도 접근하므로 internal.
+    static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
     @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
 
@@ -46,7 +47,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
     func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated { EntryStore.current?.flush() }
+        MainActor.assumeIsolated {
+            EntryStore.current?.flush()
+            // 진행 중 생성의 부모 태스크부터 접는다 — 이 순서라 엔진 드레인은
+            // 밀리초 단위다. 취소 없이 기다리면 생성이 끝날 때까지 종료가 막힌다.
+            CompletionController.current?.shutdown()
+            BackgroundIndexer.current?.shutdown()
+        }
+        // 남은 GPU 연산(프리필·토큰 루프)이 완전히 물러난 뒤 프로세스를 내려보낸다.
+        // 이 대기가 없으면 teardown이 mlx eval 스레드와 경합해 종료 세그폴트가
+        // 난다 — 앱 번들 스모크에서 3/3 재현 후 수정 (이슈 #65 Gate 0).
+        //
+        // 종료 컨텍스트에선 Swift 동시성 스케줄링이 보장되지 않는다 — detached
+        // 태스크가 액터 진입 전에 정지하는 것을 스모크로 확인했다. 그래서 액터를
+        // 거치지 않는 잠금 기반 카운터를 짧게 폴링한다 (50ms × 100 = 최대 5초).
+        var polls = 0
+        while polls < 100 {
+            if MINTApp.sharedEngine.pendingOperationCount == 0 { break }
+            usleep(50_000)
+            polls += 1
+        }
     }
 
     func applicationDidResignActive(_ notification: Notification) {

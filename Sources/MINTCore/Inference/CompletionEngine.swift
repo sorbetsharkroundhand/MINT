@@ -26,7 +26,6 @@ actor ModelLifetimeCoordinator {
     }
 
     private var currentModelID: String?
-    private var activeOperations = 0
     private var switching = false
     private struct Waiter {
         let id: UUID
@@ -42,13 +41,13 @@ actor ModelLifetimeCoordinator {
         }
         if currentModelID == modelID {
             try Task.checkCancellation()
-            if reservingOperation { activeOperations += 1 }
+            if reservingOperation { operationCounter.add(1) }
             return .current
         }
 
         switching = true
         do {
-            while activeOperations > 0 {
+            while operationCounter.snapshot > 0 {
                 try await wait(in: .drainQueue)
             }
             try Task.checkCancellation()
@@ -64,7 +63,7 @@ actor ModelLifetimeCoordinator {
     ) {
         precondition(switching)
         currentModelID = succeeded ? modelID : nil
-        if succeeded, reservingOperation { activeOperations += 1 }
+        if succeeded, reservingOperation { operationCounter.add(1) }
         switching = false
         let waiters = switchWaiters
         switchWaiters.removeAll(keepingCapacity: true)
@@ -72,16 +71,59 @@ actor ModelLifetimeCoordinator {
     }
 
     func releaseOperation() {
-        precondition(activeOperations > 0)
-        activeOperations -= 1
-        guard activeOperations == 0 else { return }
+        precondition(operationCounter.snapshot > 0)
+        operationCounter.add(-1)
+        guard operationCounter.snapshot == 0 else { return }
         let waiters = drainWaiters
         drainWaiters.removeAll(keepingCapacity: true)
         for waiter in waiters { waiter.continuation.resume() }
     }
 
+    /// 종료 훅(AppDelegate)이 액터 진입 없이 읽는다. willTerminate 같은 비동기
+    /// 불가 컨텍스트에서는 Swift 동시성 스케줄링이 보장되지 않는다 — 스모크에서
+    /// detached 태스크가 액터 진입 전 정지하는 것을 확인했다 (이슈 #65 Gate 0).
+    nonisolated func snapshotCount() -> Int {
+        operationCounter.snapshot
+    }
+
+    /// 활성 연산 카운터 — 원래 액터 격리로만 지켰지만, 종료 훅(AppDelegate)이
+    /// willTerminate에서 액터 진입 없이 읽어야 한다(스모크에서 detached 태스크가
+    /// 액터 진입 전 정지하는 것을 확인). 모든 접근이 잠금 안이라
+    /// `@unchecked Sendable`이 안전하다 (이슈 #65 Gate 0).
+    private final class OperationCounter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = 0
+
+        func add(_ delta: Int) {
+            lock.lock()
+            value += delta
+            lock.unlock()
+        }
+
+        var snapshot: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return value
+        }
+    }
+
+    private let operationCounter = OperationCounter()
+
     func cancelSwitch() {
         abandonSwitch()
+    }
+
+    /// 종료 경로용 드레인 대기 — 활성 연산이 모두 반환(0)될 때까지 멈춘다.
+    /// 호출자는 먼저 진행 중 생성의 부모 태스크를 취소해 둔다. 취소로 물러난
+    /// 연산은 `releaseOperation`으로 돌아오고 그 신호(drainQueue 재개)로 깨어난다.
+    /// 이 대기 없이 프로세스가 내려가면 mlx eval 스레드와 Metal 객체 해제가
+    /// 겹쳐 teardown 세그폴트가 난다 (이슈 #65 Gate 0 스모크에서 재현).
+    func waitUntilDrained() async {
+        guard operationCounter.snapshot > 0 else { return }
+        await withCheckedContinuation { continuation in
+            let waiter = Waiter(id: UUID(), continuation: continuation)
+            drainWaiters.append(waiter)
+        }
     }
 
     private enum WaitQueue: Sendable {
@@ -200,6 +242,20 @@ public actor CompletionEngine {
     /// 모델 교체 외의 무효화 지점(메모리 압박·벤치의 콜드 기준선 복원)용 (PLAN §12).
     public func resetPromptCache() {
         promptCache.invalidate()
+    }
+
+    /// 앱 종료 직전의 정리 대기. 진행 중 생성·프리필의 부모 태스크를 취소한
+    /// **뒤** 호출해야 빨리 드레인된다(취소 없이 기다리면 생성이 끝날 때까지
+    /// 종료가 막힌다). 반환 시점에는 GPU에 MINT가 건 활성 연산이 없으므로,
+    /// 이후 프로세스 teardown이 mlx eval 스레드와 경합하지 않는다.
+    public func shutdown() async {
+        await modelLifetime.waitUntilDrained()
+    }
+
+    /// 종료 훅용 동기 스냅샷 — willTerminate 같은 비동기 불가 컨텍스트에서
+    /// 액터 진입 없이 드레인 여부를 읽는다 (이슈 #65 Gate 0).
+    nonisolated public var pendingOperationCount: Int {
+        modelLifetime.snapshotCount()
     }
 
     /// 조립된 프롬프트로 다음 단어/구를 생성한다 (PLAN §10).

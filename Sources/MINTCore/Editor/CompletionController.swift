@@ -149,6 +149,11 @@ public final class CompletionController: ObservableObject {
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
+    /// 앱 수명 동안의 컨트롤러 — 종료 훅(AppDelegate)이 접근하려고 둔다.
+    /// EntryStore.current와 같은 패턴. 테스트가 여러 인스턴스를 만들면 마지막이
+    /// 이기지만, current를 쓰는 곳은 앱 종료뿐이라 무해하다.
+    public private(set) weak static var current: CompletionController?
+
     /// 활성 문서 스냅샷 공급자 — ContentView가 1회 배선한다. 예측 직전에 pull해
     /// 제목·장르·인물 카드를 조립기에 넘긴다 (PLAN §10). 푸시(onChange) 대신
     /// pull인 이유: 본문이 큰 저널에서 매 키 입력마다 Equatable 비교를 하지 않는다.
@@ -234,6 +239,7 @@ public final class CompletionController: ObservableObject {
     ) {
         self.settings = settings
         self.engine = engine
+        Self.current = self
     }
 
     // MARK: - 엔진 로드
@@ -506,6 +512,14 @@ public final class CompletionController: ObservableObject {
     }
 
     // MARK: - 내부
+
+    /// 앱 종료 직전 호출 — 예측·폴더 명명 태스크를 접어, 엔진의 드레인 대기가
+    /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 고스트 UI
+    /// 정리도 겸하지만 종료 직후라 화면은 신경 쓰지 않는다.
+    public func shutdown() {
+        invalidate()
+        cancelAllFolderNaming()
+    }
 
     private func invalidate() {
         generation += 1
