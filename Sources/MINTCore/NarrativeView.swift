@@ -410,8 +410,10 @@ struct NarrativeView: View {
                 },
                 onCommitTitle: { hash, start in
                     let trimmed = draftTitle.trimmingCharacters(in: .whitespaces)
-                    editingSceneHash = nil
+                    // 빈 제목은 조용히 버리지 않는다 — 편집기를 열어 둬 원인이
+                    // 보이게 한다 (이슈 #37: silent guard 실패 금지).
                     guard !trimmed.isEmpty else { return }
+                    editingSceneHash = nil
                     setSceneOverride(.sceneTitle, sceneHash: hash, start: start, value: trimmed)
                 },
                 onSetSceneType: { hash, start, type in
