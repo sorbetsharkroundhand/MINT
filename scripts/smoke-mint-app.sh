@@ -43,6 +43,13 @@ fi
 echo "✓ 부팅 생존 (pid $PID)"
 
 osascript -e "tell application id \"$BUNDLE_ID\" to quit" >/dev/null
+# LaunchServices가 다른 워크트리의 동명 빌드를 가리키면 id 종료가 무시된다 —
+# 3초 뒤에도 살아 있으면 PID 기반으로 재시도한다 (#65 세션 메모).
+sleep 3
+if kill -0 "$PID" 2>/dev/null; then
+    SPID=$(pgrep -x MINT | head -1)
+    [ -n "$SPID" ] && osascript -e "tell application \"System Events\" to tell (first process whose unix id is $SPID) to quit" >/dev/null
+fi
 
 DEAD=""
 for i in $(seq 1 30); do
