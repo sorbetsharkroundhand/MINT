@@ -899,12 +899,12 @@ private struct DeleteButton: View {
         Button(action: action) {
             Text("✕")
                 .font(.system(size: 12))
-                .foregroundStyle(hovered ? Color(nsColor: NSColor(hex: 0xFF453A)) : theme.ink3C)
+                .foregroundStyle(hovered ? theme.dangerC : theme.ink3C)
                 .frame(width: 20, height: 20)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .fill(hovered
-                            ? Color(nsColor: NSColor(hex: 0xFF453A, alpha: 0.14)) : .clear)
+                            ? theme.dangerBgC : .clear)
                 )
                 .contentShape(Rectangle())
         }

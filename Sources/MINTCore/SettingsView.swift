@@ -159,7 +159,7 @@ public struct SettingsView: View {
                 if let modelIDError {
                     Text(modelIDError)
                         .font(MintFonts.uiFont(11))
-                        .foregroundStyle(.red)
+                        .foregroundStyle(MintTheme.of(colorScheme).dangerC)
                         .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
                 }
                 HStack {

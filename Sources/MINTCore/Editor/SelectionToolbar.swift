@@ -39,6 +39,8 @@ struct SelectionToolbarView: View {
     let onAction: (SelectionToolbarAction) -> Void
 
     /// 인라인 색 프리셋 (시스템 팔레트 계열).
+    /// ⚠️ Theme 토큰 규칙의 **문서화된 예외** (이슈 #56): 사용자가 본문에 칠하는
+    /// 글자색 프리셋이라 UI 크롬 팔레트와 무관하다 — Theme 범위 밖이 정당하다.
     static let colorPresets = ["FF453A", "FF9F0A", "30D158", "0A84FF", "BF5AF2"]
     /// 글자 크기 허용 범위 (± 버튼·키보드 입력 공통 한계).
     static let minFontSize = 10.0
