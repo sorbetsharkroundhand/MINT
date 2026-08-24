@@ -1762,6 +1762,10 @@ private struct ThreadGraphArea: View {
                 .font(MintFonts.uiFont(11, event.importance >= 4 ? .semibold : .regular))
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
+            // 그래프 노드의 VoiceOver 대응 (#55) — 노드 원은 Canvas라 개별 요소가
+            // 못 되므로 행 콘텐츠에 사건 요약을 레이블로 단다.
+            .accessibilityLabel(Text(event.summary))
+            .accessibilityHint(Text("사건 상세 보기"))
             if event.perspectives.count >= 2 {
                 Text("관점 \(event.perspectives.count)")
                     .font(MintFonts.uiFont(8.5))

@@ -94,6 +94,7 @@ struct ContextInspectorView: View {
                     }
                     .buttonStyle(.plain)
                     .help(item.pinned ? "고정 해제" : "고정 — 항상 컨텍스트에 유지")
+                    .accessibilityLabel(Text(item.pinned ? "고정 해제" : "항목 고정"))  // #55
                     Button {
                         exclude(item, in: targetID)
                     } label: {
@@ -103,6 +104,7 @@ struct ContextInspectorView: View {
                     }
                     .buttonStyle(.plain)
                     .help("제외 — 자동 컨텍스트에서 빼요 (아래 목록에서 복원 가능)")
+                    .accessibilityLabel(Text("항목 제외"))  // #55
                 }
                 if hasJump(item) {
                     Button {

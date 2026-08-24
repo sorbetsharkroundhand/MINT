@@ -549,6 +549,7 @@ struct EditorToolbar: View {
                 }
                 .buttonStyle(.plain)
                 .help("스토리 바이블 — 사이드바에서 장르·인물·자동 이해")
+                .accessibilityLabel(Text("스토리 바이블"))
             }
 
             // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
@@ -612,6 +613,7 @@ struct EditorToolbar: View {
         .buttonStyle(.plain)
         .onHover { sidebarButtonHovered = $0 }
         .help(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기")
+            .accessibilityLabel(Text(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기"))
     }
 
     /// 설정 — ⌘,와 같은 Settings 창을 연다. 모델·제안·다크 모드·저자 이름·
@@ -633,6 +635,7 @@ struct EditorToolbar: View {
         .buttonStyle(.plain)
         .onHover { settingsButtonHovered = $0 }
         .help("설정 (⌘,) — 모델·제안·다크 모드·저자 이름·사용 방법")
+            .accessibilityLabel(Text("설정"))
     }
 }
 
@@ -794,6 +797,7 @@ struct ModelChip: View {
         }
         .buttonStyle(.plain)
         .help("자동완성 켜기/끄기")
+        .accessibilityLabel(Text("자동완성"))
     }
 
     // 행 전체는 탭 제스처(모델 선택), 다운로드 버튼은 내부의 독립 Button —
@@ -852,11 +856,13 @@ struct ModelChip: View {
             }
             .buttonStyle(.plain)
             .help("다운로드 중 — 누르면 취소")
+                .accessibilityLabel(Text("다운로드 취소"))
         case .downloaded:
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(theme.ink3C)
                 .help("다운로드됨 — 전환 시 바로 로드")
+                    .accessibilityLabel(Text("다운로드됨 — 이 모델로 전환"))
         case .failed(let message):
             Button {
                 downloads.download(choice.id)
@@ -867,6 +873,7 @@ struct ModelChip: View {
             }
             .buttonStyle(.plain)
             .help("실패 — 다시 시도 (\(message))")
+                    .accessibilityLabel(Text("모델 다운로드 실패 — 다시 시도"))
         case .notDownloaded, .none:
             Button {
                 downloads.download(choice.id)
@@ -877,6 +884,7 @@ struct ModelChip: View {
             }
             .buttonStyle(.plain)
             .help("모델 미리 받기 (\(choice.sizeLabel))")
+                    .accessibilityLabel(Text("\(choice.name) 모델 미리 받기"))
         }
     }
 
