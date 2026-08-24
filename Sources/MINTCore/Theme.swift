@@ -5,7 +5,7 @@ import SwiftUI
 ///
 /// 값은 목업의 CSS 변수(themeVars)를 그대로 옮긴 것 — 라이트/다크 두 벌.
 /// 에디터(NSTextView)와 SwiftUI 크롬이 같은 팔레트를 공유한다.
-public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
+public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
     public let ink: NSColor
     public let ink2: NSColor
     public let ink3: NSColor
@@ -138,6 +138,23 @@ public struct MintTheme: @unchecked Sendable {  // NSColor 불변 보관만 하�
     public var statusbarC: Color { Color(nsColor: statusbar) }
     public var novelC: Color { Color(nsColor: novel) }
     public var novelBgC: Color { Color(nsColor: novelBg) }
+
+
+    /// 토큰 전체 동등성 — `.equatable()`·조기 종료 등 diffing 최적화의 전제 (#54).
+    public static func == (lhs: MintTheme, rhs: MintTheme) -> Bool {
+        lhs.ink == rhs.ink && lhs.ink2 == rhs.ink2 && lhs.ink3 == rhs.ink3
+            && lhs.ghost == rhs.ghost && lhs.blue == rhs.blue
+            && lhs.sep == rhs.sep && lhs.sepStrong == rhs.sepStrong
+            && lhs.hover == rhs.hover && lhs.activeBg == rhs.activeBg
+            && lhs.chip == rhs.chip && lhs.chipBorder == rhs.chipBorder
+            && lhs.pill == rhs.pill && lhs.pillBorder == rhs.pillBorder
+            && lhs.kbd == rhs.kbd && lhs.codeBg == rhs.codeBg
+            && lhs.glassWin == rhs.glassWin && lhs.toolbar == rhs.toolbar
+            && lhs.sidebarTint == rhs.sidebarTint && lhs.statusbar == rhs.statusbar
+            && lhs.activeLine == rhs.activeLine && lhs.selection == rhs.selection
+            && lhs.selectionBorder == rhs.selectionBorder
+            && lhs.novel == rhs.novel && lhs.novelBg == rhs.novelBg
+    }
 }
 
 extension NSColor {
@@ -322,11 +339,27 @@ public final class PaletteSettings: ObservableObject {
         scheme == .dark ? dark : light
     }
 
+    /// 파생 테마 캐시 — SwiftUI 패스마다 돌던 색변환 루프(tinted의 20여 회
+    /// NSColor 생성+대비 보정)를 팔레트가 바뀔 때 1회로 묶는다 (#54).
+    private var themeCache: (
+        lightHexKey: String, darkHexKey: String, enabled: Bool,
+        light: MintTheme, dark: MintTheme
+    )?
+
     /// 화면이 쓸 테마 — 꺼져 있으면 기본 테마 그대로, 켜져 있으면 팔레트를 입힌다.
     public func theme(for scheme: ColorScheme) -> MintTheme {
-        enabled
-            ? MintTheme.of(scheme, palette: palette(for: scheme))
-            : MintTheme.of(scheme)
+        let lightKey = light.hexes.map { String($0, radix: 16) }.joined(separator: "|")
+        let darkKey = dark.hexes.map { String($0, radix: 16) }.joined(separator: "|")
+        if let cache = themeCache,
+            cache.lightHexKey == lightKey, cache.darkHexKey == darkKey,
+            cache.enabled == enabled
+        {
+            return scheme == .dark ? cache.dark : cache.light
+        }
+        let lightTheme = enabled ? MintTheme.of(.light, palette: light) : MintTheme.of(.light)
+        let darkTheme = enabled ? MintTheme.of(.dark, palette: dark) : MintTheme.of(.dark)
+        themeCache = (lightKey, darkKey, enabled, lightTheme, darkTheme)
+        return scheme == .dark ? darkTheme : lightTheme
     }
 
     /// 기본값으로 되돌리기 — 색을 잘못 골라 UI가 안 보이게 됐을 때의 탈출구.
