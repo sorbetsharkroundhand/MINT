@@ -666,6 +666,7 @@ struct ModelChip: View {
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .fill(chipHovered ? theme.hoverC : theme.chipC)
             )
+            .focusedValue(\.hasMintEditor, true)
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                     .strokeBorder(theme.chipBorderC)
