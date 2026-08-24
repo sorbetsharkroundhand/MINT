@@ -162,6 +162,14 @@ public struct MintBlockEditor: NSViewRepresentable {
         let entryChanged = entryID != context.coordinator.loadedEntryID
         if entryChanged, let prev = context.coordinator.loadedEntryID {
             context.coordinator.caretByEntry[prev] = textView.selectedRange().location
+            // 재실행 후 복원용 영속 기록 (#36) — IME 조합 중은 스냅샷이 nil을
+            // 돌려 저장하지 않는다 (완료 조건 4).
+            if let snapshot = textView.writingPositionSnapshot() {
+                WritingPositionStore.shared.record(
+                    entryID: prev, location: snapshot.location,
+                    before: snapshot.before, after: snapshot.after,
+                    marked: snapshot.marked)
+            }
         }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
         // serialize() 재비교가 아니라 "마지막 동기화 텍스트"와 비교한다 —
@@ -176,8 +184,15 @@ public struct MintBlockEditor: NSViewRepresentable {
             controller?.dismissConversationSuggestion(remember: false)
             // 다시 찾은 저널이면 마지막으로 있던 위치로 커서·스크롤을 복원한다.
             // (처음 여는 저널은 저장값이 없어 load의 맨 위 규칙을 그대로 둔다.)
+            // 세션 메모리에 없으면 **재실행 전 저장값**으로 재안착 복원 (#36) —
+            // 장편 원고를 다시 열면 상단이 아니라 마지막 집필 자리에서 시작한다.
             if entryChanged, let saved = context.coordinator.caretByEntry[entryID] {
                 textView.restoreCaret(to: saved)
+            } else if entryChanged,
+                let persisted = WritingPositionStore.shared.position(for: entryID),
+                textView.restoreWritingPosition(persisted, entryID: entryID)
+            {
+                // 복원 성공 — 추가 작업 없음.
             }
             // 긴 문단 감지는 문서 로드 때 1회 — 키 입력 경로에 O(문서)를 안 넣는다.
             controller?.refreshLongParagraphDetection()
@@ -218,6 +233,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         var lastSearchJumpSeq = 0
         /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
         var caretByEntry: [UUID: Int] = [:]
+        /// 마지막으로 위치를 기록한 문서 — 전환·종료 시 스냅샷을 뜯기 위한 키 (#36).
+        var lastActiveEntryID: UUID?
         /// 현재 로드된 저널 id — 전환 감지·커서 저장/복원 키.
         var loadedEntryID: UUID?
 
@@ -258,6 +275,15 @@ public struct MintBlockEditor: NSViewRepresentable {
             let serialized = textView.serialize()
             lastSyncedText = serialized
             parent.text = serialized
+            // 집필 위치 영속 기록 (#36) — 메모리 갱신 + 디바운스 디스크. 조합 중은
+            // record가 무시한다. 전환 없이 ⌘Q해도 마지막 자리가 남는 이유다.
+            if let snapshot = textView.writingPositionSnapshot() {
+                let id = loadedEntryID ?? parent.entryID
+                WritingPositionStore.shared.record(
+                    entryID: id, location: snapshot.location,
+                    before: snapshot.before, after: snapshot.after,
+                    marked: snapshot.marked)
+            }
             forwardEditEvent(textView)
             let handlerMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
             let controller = parent.controller
@@ -910,6 +936,29 @@ final class BlockTextView: NSTextView {
             scrollRangeToVisible(match)
         }
         refreshActiveLineHighlight()
+    }
+
+    /// 현재 집필 위치 스냅샷 — 문서별 복원 저장용 (#36).
+    /// IME 조합(marked) 중이면 nil — 확정되지 않은 조합 자리는 저장 금지 (#36).
+    func writingPositionSnapshot() -> (location: Int, before: String, after: String, marked: Bool)? {
+        let ns = string as NSString
+        let location = max(0, min(selectedRange().location, ns.length))
+        let beforeStart = max(0, location - 24)
+        let afterEnd = min(ns.length, location + 24)
+        return (
+            location,
+            ns.substring(with: NSRange(location: beforeStart, length: location - beforeStart)),
+            ns.substring(with: NSRange(location: location, length: afterEnd - location)),
+            hasMarkedText()
+        )
+    }
+
+    /// 재안착 사다리를 통과한 위치로 복원(#36) — 앵커가 문맥에 맞으면 true.
+    func restoreWritingPosition(_ position: WritingPositionStore.Position, entryID: UUID) -> Bool {
+        guard let resolved = WritingPositionStore.shared.resolve(for: entryID, in: string)
+        else { return false }
+        restoreCaret(to: resolved)
+        return true
     }
 
     /// 저장해 둔 커서 위치로 되돌리고 그 자리로 스크롤한다 (저널 재방문, M6).
