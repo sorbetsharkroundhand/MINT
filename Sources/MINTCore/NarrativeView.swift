@@ -263,7 +263,8 @@ struct NarrativeView: View {
                         .font(MintFonts.uiFont(10.5))
                         .foregroundStyle(name == nil ? theme.ink3C : theme.novelC)
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .help("인물 필터 — 그 인물이 참여한 사건만 강조")
             }
@@ -752,7 +753,8 @@ struct ManualIndexButton: View {
             } primaryAction: {
                 indexer.requestPass()
             }
-            .menuStyle(.borderlessButton)
+            .menuStyle(.button)
+                .menuIndicator(.hidden)
             .fixedSize()
             .help("클릭: 바뀐 씬만 읽기 · 메뉴: 전체 다시 읽기 (직접 수정한 내용은 보존돼요)")
         }
@@ -1259,6 +1261,8 @@ private struct ThreadGraphArea: View {
             : FlowPalette.color(seed: lane.thread.colorSeed, theme: theme, dark: dark)
     }
 
+    @FocusState private var titleFieldFocused: Bool
+
     // MARK: 레인 그리기
 
     private func drawLanes(context: inout GraphicsContext, geometry: GraphRowGeometry) {
@@ -1500,13 +1504,19 @@ private struct ThreadGraphArea: View {
     @ViewBuilder private func sceneMarkerContent(_ scene: GraphRow.SceneInfo) -> some View {
         HStack(spacing: 6) {
             if isEditingTitle(scene.hash) {
-                TextField(
-                    "씬 제목", text: $draftTitle,
-                    onCommit: { onCommitTitle(scene.hash, scene.start) }
-                )
-                .textFieldStyle(.roundedBorder)
-                .font(MintFonts.uiFont(10.5))
-                .frame(width: 180)
+                // onCommit 폐기 대체 (이슈 #58) — Enter(onSubmit)와 포커스 상실
+                // 모두에서 커밋한다. SidebarView 이름 변경과 같은 패턴.
+                TextField("씬 제목", text: $draftTitle)
+                    .textFieldStyle(.roundedBorder)
+                    .font(MintFonts.uiFont(10.5))
+                    .focused($titleFieldFocused)
+                    .onSubmit { onCommitTitle(scene.hash, scene.start) }
+                    .onChange(of: titleFieldFocused) { _, focused in
+                        if !focused, isEditingTitle(scene.hash) {
+                            onCommitTitle(scene.hash, scene.start)
+                        }
+                    }
+                    .frame(width: 180)
             } else {
                 Text(scene.title ?? scene.path)
                     .font(MintFonts.uiFont(10, .semibold))
@@ -1800,7 +1810,8 @@ private struct NarrativeEventDetail: View {
                     } label: {
                         ImportanceDots(importance: event.importance, theme: theme)
                     }
-                    .menuStyle(.borderlessButton)
+                    .menuStyle(.button)
+                .menuIndicator(.hidden)
                     .fixedSize()
                     .help("중요도 수정")
                     Spacer()
@@ -1920,7 +1931,8 @@ private struct NarrativeEventDetail: View {
                         .font(.system(size: 9))
                         .foregroundStyle(theme.ink3C)
                 }
-                .menuStyle(.borderlessButton)
+                .menuStyle(.button)
+                .menuIndicator(.hidden)
                 .fixedSize()
                 .help("이 사건을 다른 플롯에 추가")
             }
