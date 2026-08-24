@@ -535,6 +535,16 @@ public final class CompletionController: ObservableObject {
         folderNamingTasks[folderID] = task
     }
 
+    /// 테스트 전용 — 실제 엔진 호출 없이 진행 상태와 장수 태스크를 심어
+    /// 취소 경로(스피너 즉시 해제)를 검증한다 (이슈 #47).
+    @discardableResult
+    func _testInjectNamingTask(folderID: UUID) -> Task<Void, Never> {
+        namingFolderIDs.insert(folderID)
+        let task = Task<Void, Never> { try? await Task.sleep(for: .seconds(60)) }
+        folderNamingTasks[folderID] = task
+        return task
+    }
+
     /// 사이드바 행이 사라졌다(삭제·접힘·필터) — 그 폴더의 이름 생성을 접는다.
     /// 보이지 않는 스피너를 위해 수 분 생성을 돌려두는 일이 없게 (이슈 #47).
     public func cancelFolderName(for folderID: UUID) {
