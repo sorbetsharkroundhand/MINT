@@ -51,6 +51,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             EntryStore.current?.flush()
+            WritingPositionStore.shared.persistNow()  // 집필 위치 영속 (#36)
             // 진행 중 생성의 부모 태스크부터 접는다 — 이 순서라 엔진 드레인은
             // 밀리초 단위다. 취소 없이 기다리면 생성이 끝날 때까지 종료가 막힌다.
             CompletionController.current?.shutdown()
