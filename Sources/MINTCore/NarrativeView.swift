@@ -201,10 +201,22 @@ struct NarrativeView: View {
     }
 
     /// 델타·메뉴용 인물 id → 이름.
+    /// 패스마다 사전을 다시 만들지 않게 카드·문서 키로 캐시한다 (#48/#50) —
+    /// 타이핑은 store를 무효화하지만 카드 배열은 그대로다.
+    @State private var namesCache: (
+        entryID: UUID?, cards: [CharacterCard], names: [UUID: String]
+    )?
     private var characterNames: [UUID: String] {
-        Dictionary(
-            uniqueKeysWithValues: (store.activeEntry?.characters ?? [])
-                .map { ($0.id, $0.name) })
+        let entry = store.activeEntry
+        if let cache = namesCache,
+            cache.entryID == entry?.id, cache.cards == (entry?.characters ?? [])
+        {
+            return cache.names
+        }
+        let cards = entry?.characters ?? []
+        let names = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0.name) })
+        namesCache = (entry?.id, cards, names)
+        return names
     }
 
     /// 활성 문서의 스냅샷만 — 문서를 막 바꾸면 인덱서 스냅샷이 이전 문서 것일
