@@ -1,4 +1,5 @@
 import AppKit
+import SwiftMath
 import UniformTypeIdentifiers
 
 /// 소설을 EPUB 3으로 내보낸다 (요구 7 — 파일 메뉴·사이드바 문맥 메뉴).
@@ -27,6 +28,7 @@ public enum EpubExporter {
 
     /// 저장 패널을 띄워 내보낸다 — 파일 메뉴와 사이드바 문맥 메뉴가 공유한다.
     /// 누락 이미지가 있으면 **미리** 알리고 명시적 계속을 요구한다 (이슈 #15).
+    /// 변환·복사·압축은 백그라운드에서 돌고 완료 위치를 알린다 (이슈 #33).
     @MainActor
     public static func exportWithPanel(_ entry: JournalEntry) {
         let panel = NSSavePanel()
@@ -34,26 +36,92 @@ public enum EpubExporter {
         panel.nameFieldStringValue = sanitizedFileName(entry.title) + ".epub"
         panel.canCreateDirectories = true
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            // 설정의 저자 이름은 값 스냅샷으로만 넘긴다 (CLAUDE.md §4 격리 경계).
-            guard ImageAssetScanner.confirmContinueDespiteMissing(in: entry.body) else {
-                return
+        // 설정의 저자 이름은 값 스냅샷으로만 넘긴다 (CLAUDE.md §4 격리 경계).
+        guard ImageAssetScanner.confirmContinueDespiteMissing(in: entry.body) else {
+            return
+        }
+        let author = CompletionSettings.shared.authorName
+        Task {
+            do {
+                try await exportAsync(entry, to: url, author: author)
+                let done = NSAlert()
+                done.messageText = "EPUB 내보내기 완료"
+                done.informativeText = url.path
+                done.alertStyle = .informational
+                done.runModal()
+            } catch is CancellationError {
+                return  // 사용자 취소 — 조용히.
+            } catch {
+                let alert = NSAlert()
+                alert.messageText = "EPUB 내보내기 실패"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.runModal()
             }
-            try export(entry, to: url, author: CompletionSettings.shared.authorName)
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "EPUB 내보내기 실패"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
         }
     }
 
     /// 저널 한 편을 EPUB 파일로 만든다. UI 없이 파일만 쓴다.
     /// `author`는 설정의 저자 이름(필명) — 비어 있으면 저자 메타데이터를 생략한다.
+    ///
+    /// 이미지 URL 해석(메인 격리 MintImageStore)만 메인에서 끝내고, 변환·파일
+    /// 쓰기·압축은 호출 스레드에서 돈다 (#33). 비동기가 필요하면 `exportAsync`.
     @MainActor
     public static func export(
         _ entry: JournalEntry, to destination: URL, author: String = ""
+    ) throws {
+        try buildEPUB(
+            entry, assetURLs: resolveAssetURLs(in: entry.body),
+            to: destination, author: author)
+    }
+
+    /// 백그라운드 내보내기 — 자산 해석만 메인, 나머지는 유틸리티 우선순위
+    /// 분리 작업으로 (#33). 진행률(0…1)과 취소를 지원한다. 분리 작업은 취소를
+    /// 물려받지 않으므로 onCancel로 명시 전파한다.
+    @MainActor
+    public static func exportAsync(
+        _ entry: JournalEntry, to destination: URL, author: String = "",
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        let assetURLs = resolveAssetURLs(in: entry.body)
+        let work = Task.detached(priority: .userInitiated) {
+            try Self.buildEPUB(
+                entry, assetURLs: assetURLs, to: destination, author: author,
+                progress: progress)
+        }
+        return try await withTaskCancellationHandler(operation: {
+            try await work.value
+        }, onCancel: {
+            work.cancel()
+        })
+    }
+
+    /// 본문의 로컬 이미지 src를 실제 파일 URL로 풀어 둔다 — 메인 격리
+    /// MintImageStore 접근은 여기서 끝난다. 이후 단계는 격리 없이 순수하다 (#33).
+    @MainActor
+    static func resolveAssetURLs(in body: String) -> [String: URL] {
+        var map: [String: URL] = [:]
+        for rawLine in body.components(separatedBy: "\n") {
+            guard let attrs = BlockTextView.imageAttrs(
+                from: rawLine.trimmingCharacters(in: .whitespaces))
+            else { continue }
+            switch ImageReferenceParser.classify(attrs.src) {
+            case .managedRelative, .externalFile:
+                if map[attrs.src] == nil {
+                    map[attrs.src] = MintImageStore.url(for: attrs.src)
+                }
+            case .remote, .blocked:
+                break
+            }
+        }
+        return map
+    }
+
+    /// EPUB 조립 본체 — 메인 격리 의존이 없다 (자산은 미리 풀어 받는다).
+    /// 진행률 콜백과 취소 협조를 갖춘다 (백그라운드 3요건, AGENTS §4).
+    private static func buildEPUB(
+        _ entry: JournalEntry, assetURLs: [String: URL], to destination: URL,
+        author: String, progress: (@Sendable (Double) -> Void)? = nil
     ) throws {
         let fm = FileManager.default
         let staging = fm.temporaryDirectory
@@ -76,11 +144,15 @@ public enum EpubExporter {
         // 조용히 사라지지 않게 목록을 유지한다 (이슈 #15).
         var missingAssets: [String] = []
         let chapters = makeChapters(
-            from: entry, copyingImagesInto: oebps, collected: &images, missing: &missingAssets)
+            from: entry, copyingImagesInto: oebps, collected: &images,
+            missing: &missingAssets, assetURLs: assetURLs,
+            progress: progress)
         for (index, chapter) in chapters.enumerated() {
+            try Task.checkCancellation()
             try chapterXHTML(chapter).write(
                 to: oebps.appendingPathComponent(chapterFile(index)),
                 atomically: true, encoding: .utf8)
+            progress?(0.3 + 0.4 * Double(index + 1) / Double(max(chapters.count, 1)))
         }
         try styleCSS.write(
             to: oebps.appendingPathComponent("style.css"), atomically: true, encoding: .utf8)
@@ -89,11 +161,15 @@ public enum EpubExporter {
         try packageOPF(entry: entry, chapters: chapters, images: images, author: author).write(
             to: oebps.appendingPathComponent("content.opf"), atomically: true, encoding: .utf8)
 
+        try Task.checkCancellation()
+        progress?(0.75)
         try runZip(["-X", "-0", "book.epub", "mimetype"], in: staging)
         try runZip(["-rX", "book.epub", "META-INF", "OEBPS"], in: staging)
+        progress?(0.95)
 
         if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
         try fm.moveItem(at: staging.appendingPathComponent("book.epub"), to: destination)
+        progress?(1)
     }
 
     // MARK: - 마크다운 → 챕터 XHTML
@@ -105,12 +181,14 @@ public enum EpubExporter {
 
     /// 본문을 `# ` 제목마다 챕터로 나누고, 각 챕터를 XHTML 조각으로 변환한다.
     /// 이미지(`![](images/…)`)는 OEBPS/images/로 복사해 참조를 살린다.
-    /// export(@MainActor)에서만 호출된다 — 이미지 URL 해석이 MintImageStore(메인
-    /// 격리)를 거치므로 같은 격리를 따른다 (이슈 #45). private가 아닌 이유는
-    /// alt/title 반영을 단위 테스트로 고정하기 위해서다 (packageOPF와 같은 선례).
-    @MainActor static func makeChapters(
+    /// 메인 격리가 없다 — 이미지 URL은 `resolveAssetURLs`가 미리 풀어 준다 (#33).
+    /// private가 아닌 이유는 alt/title 반영을 단위 테스트로 고정하기 위해서다
+    /// (packageOPF와 같은 선례).
+    static func makeChapters(
         from entry: JournalEntry, copyingImagesInto oebps: URL,
-        collected images: inout [String], missing: inout [String]
+        collected images: inout [String], missing: inout [String],
+        assetURLs: [String: URL] = [:],
+        progress: (@Sendable (Double) -> Void)? = nil
     ) -> [Chapter] {
         var chapters: [Chapter] = []
         var title = plainTitle(entry.title)
@@ -139,6 +217,7 @@ public enum EpubExporter {
                 images.append(asset)  // OPF manifest 등록 (#22)
             }
             mathLines = []
+            progress?(0.1)
         }
         func openList(_ tag: String) {
             if listTag != tag {
@@ -234,7 +313,9 @@ public enum EpubExporter {
             } else if let attrs = BlockTextView.imageAttrs(
                 from: line.trimmingCharacters(in: .whitespaces)) {
                 closeList()
-                if let relative = copyImage(attrs.src, into: oebps, missing: &missing) {
+                if let relative = copyImage(
+                    attrs.src, into: oebps, missing: &missing, assetURLs: assetURLs)
+                {
                     if !images.contains(relative) { images.append(relative) }
                     html += imageTag(src: relative, attrs: attrs)
                 }
@@ -268,15 +349,15 @@ public enum EpubExporter {
     /// 수식을 OEBPS/images/에 PNG로 심고 (html 태그, OPF 등록용 asset 파일명?)을
     /// 돌려준다 — 리더 호환 표현. LaTeX 원문은 alt에 남겨 의미 fallback을 제공하고,
     /// 렌더 실패 시엔 code 소스를 남긴다 (이슈 #22).
-    @MainActor static func mathHTML(
+    ///
+    /// 메인 격리가 없다 — 내보내기 경로는 공유 캐시를 거치지 않는 자체 렌더로
+    /// 백그라운드에서 돈다 (#33). 편집기 화면의 MathRenderer(메인 전용 캐시)와
+    /// 결과는 같다.
+    static func mathHTML(
         _ source: String, into oebps: URL
     ) -> (html: String, asset: String?) {
         guard !source.trimmingCharacters(in: .whitespaces).isEmpty,
-            let image = MathRenderer.image(
-                latex: source, color: .black, fontSize: 16, labelMode: .display),
-            let tiff = image.tiffRepresentation,
-            let rep = NSBitmapImageRep(data: tiff),
-            let png = rep.representation(using: .png, properties: [:])
+            let png = Self.mathPNG(source)
         else {
             // 렌더 실패 — 소스를 남겨 의미가 완전히 사라지지 않게 한다 (#15 승계).
             return ("<p class=\"math\"><code>\(escape(source))</code></p>\n", nil)
@@ -292,6 +373,20 @@ public enum EpubExporter {
         )
     }
 
+    /// LaTeX → PNG 데이터 — 메인 격리 밖의 순수 렌더. MathRenderer와 같은
+    /// SwiftMath 파이프라인이지만 공유 캐시(NSImage 보관, 메인 전용)를 쓰지
+    /// 않아 백그라운드 내보내기에서 안전하다 (#33).
+    static func mathPNG(_ source: String) -> Data? {
+        let image = MTMathImage(
+            latex: source, fontSize: 16, textColor: .black, labelMode: .display)
+        let (error, nsImage) = image.asImage()
+        guard error == nil, let nsImage, nsImage.size.width > 0,
+            let tiff = nsImage.tiffRepresentation,
+            let rep = NSBitmapImageRep(data: tiff)
+        else { return nil }
+        return rep.representation(using: .png, properties: [:])
+    }
+
     /// 실행마다 달라지는 HashValue 대신 안정 해시 — 같은 수식은 같은 파일명.
     static func stableHash(_ source: String) -> String {
         var h: UInt64 = 0xcbf2_9ce4_8422_2325
@@ -302,20 +397,28 @@ public enum EpubExporter {
     }
 
     /// 원본 이미지를 OEBPS/images/로 복사하고 EPUB 내 상대경로를 돌려준다.
-    /// 원격·차단 소스는 nil — 호출부가 주소 통과로 처리한다 (#12). 원본이 없는
-    /// 로컬 파일은 missing에 기록하고 nil (이슈 #15).
-    @MainActor private static func copyImage(
-        _ src: String, into oebps: URL, missing: inout [String]
+    /// 원격·차단 소스는 nil — 호출부가 주소 통과로 처리한다 (#12).
+    /// 파일 위치는 반드시 미리 풀린 지도(`resolveAssetURLs`)에서만 읽는다 —
+    /// 메인 격리 접근이 없어야 백그라운드 조립이 안전하다 (#33). 지도에 없는
+    /// 로컬 소스는 누락으로 기록한다 (이슈 #15).
+    private static func copyImage(
+        _ src: String, into oebps: URL, missing: inout [String],
+        assetURLs: [String: URL]
     ) -> String? {
         switch ImageReferenceParser.classify(src) {
         case .managedRelative, .externalFile: break
         case .remote, .blocked: return nil
         }
-        let sourceURL = MintImageStore.url(for: src)
-        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+        guard let sourceURL = assetURLs[src] else {
             if !missing.contains(src) { missing.append(src) }
             return nil
         }
+        return copyFile(sourceURL, src: src, into: oebps, missing: &missing)
+    }
+
+    private static func copyFile(
+        _ sourceURL: URL, src: String, into oebps: URL, missing: inout [String]
+    ) -> String? {
         let dir = oebps.appendingPathComponent("images", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let name = sourceURL.lastPathComponent
@@ -389,8 +492,7 @@ public enum EpubExporter {
     }
 
     /// 제목용 — 마커·태그를 벗겨 순수 글자만 남긴다 (nav·opf에 들어간다).
-    /// EntryStore의 태그 스트리퍼(MainActor)를 재사용한다.
-    @MainActor
+    /// EntryStore의 태그 스트리퍼(비격리 순수 정규식)를 재사용한다.
     private static func plainTitle(_ text: String) -> String {
         let stripped = EntryStore.strippedInlineTags(text)
             .replacingOccurrences(of: #"[*`]+"#, with: "", options: .regularExpression)
@@ -494,8 +596,8 @@ public enum EpubExporter {
     }
 
     /// OPF 패키지 문서. `private`가 아닌 이유는 저자 메타데이터를 zip 없이
-    /// 단위 테스트로 고정하기 위해서다 (EpubMetadataTests).
-    @MainActor
+    /// 단위 테스트로 고정하기 위해서다 (EpubMetadataTests). 순수 문자열 조립이라
+    /// 비격리 — 백그라운드 내보내기에서도 안전하다 (#33).
     static func packageOPF(
         entry: JournalEntry, chapters: [Chapter], images: [String], author: String = ""
     ) -> String {
@@ -566,18 +668,36 @@ public enum EpubExporter {
         process.currentDirectoryURL = directory
         process.arguments = arguments
         let errPipe = Pipe()
-        process.standardOutput = Pipe()
+        let outPipe = Pipe()
+        process.standardOutput = outPipe
         process.standardError = errPipe
         do {
             try process.run()
         } catch {
             throw ExportError.zipFailed(error.localizedDescription)
         }
+        // 파이프를 **동시에 흡수**한다 — 장편(챕터 수천 개)의 zip 목록 출력이
+        // 버퍼(64KB)를 채우면 zip은 쓰기가 막히고 waitUntilExit는 영원히 안 끝난다.
+        // 과거 동기 readDataToEndOfFile 순서(대기→읽기)가 이 데드락을 품고 있었다 (#33).
+        var stderrData = Data()
+        let drained = DispatchGroup()
+        drained.enter()
+        DispatchQueue.global().async {
+            _ = outPipe.fileHandleForReading.readDataToEndOfFile()
+            drained.leave()
+        }
+        drained.enter()
+        DispatchQueue.global().async {
+            stderrData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            drained.leave()
+        }
         process.waitUntilExit()
+        drained.wait()
         guard process.terminationStatus == 0 else {
             let message = String(
-                data: errPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8
-            )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "zip 종료 코드 \(process.terminationStatus)"
+                data: stderrData, encoding: .utf8
+            )?.trimmingCharacters(in: .whitespacesAndNewlines)
+                ?? "zip 종료 코드 \(process.terminationStatus)"
             throw ExportError.zipFailed(message)
         }
     }

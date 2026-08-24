@@ -238,7 +238,15 @@ public final class EntryStore: ObservableObject {
 
     /// 제목·본문에서 질의어를 포함하는 저널 (대소문자 무시). 전역 검색용.
     public func search(_ query: String) -> [JournalEntry] {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        Self.filterMatches(entries, query: query)
+    }
+
+    /// 검색 필터 본체 — 비격리 순수 함수. 값 스냅샷만 받으므로 백그라운드에서
+    /// 돌 수 있다 (#33): 사이드바는 메인에서 스냅샷을 떼어 이 함수로 넘긴다.
+    nonisolated static func filterMatches(
+        _ entries: [JournalEntry], query rawQuery: String
+    ) -> [JournalEntry] {
+        let q = rawQuery.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return [] }
         return entries.filter {
             $0.title.range(of: q, options: .caseInsensitive) != nil
@@ -736,7 +744,7 @@ public final class EntryStore: ObservableObject {
     /// 파생할 내용이 없으면 빈 문자열(호출부에서 기본 제목으로 대체).
     /// 인라인 래퍼 태그(<font …>·</font>·<p align="…">·</p>)만 벗긴다 —
     /// 안의 글자는 남는다. 제목 파생·마이그레이션 공용.
-    static func strippedInlineTags(_ text: String) -> String {
+    nonisolated static func strippedInlineTags(_ text: String) -> String {
         text.replacingOccurrences(
             of: #"</?(?:font|p)\b[^>]*>"#,
             with: "", options: .regularExpression)

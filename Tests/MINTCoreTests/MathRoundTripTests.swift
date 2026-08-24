@@ -313,7 +313,7 @@ final class MathRoundTripTests: XCTestCase {
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
             from: entry, copyingImagesInto: oebps,
-            collected: &images, missing: &missing)
+            collected: &images, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         let html = chapters.map(\.html).joined(separator: "\n")
 
         // PNG 참조 + LaTeX alt fallback
@@ -340,7 +340,7 @@ final class MathRoundTripTests: XCTestCase {
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
             from: entry, copyingImagesInto: oebps,
-            collected: &images, missing: &missing)
+            collected: &images, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         let html = chapters.map(\.html).joined(separator: "\n")
 
         XCTAssertTrue(html.contains(#"alt="LaTeX: E=mc^2""#), html)
@@ -351,7 +351,7 @@ final class MathRoundTripTests: XCTestCase {
         var missing2: [String] = []
         _ = EpubExporter.makeChapters(
             from: entry2, copyingImagesInto: oebps,
-            collected: &images2, missing: &missing2)
+            collected: &images2, missing: &missing2, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         XCTAssertEqual(images2.count, 1)
     }
 
@@ -367,7 +367,7 @@ final class MathRoundTripTests: XCTestCase {
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
             from: entry, copyingImagesInto: oebps,
-            collected: &images, missing: &missing)
+            collected: &images, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         let html = chapters.map(\.html).joined(separator: "\n")
 
         XCTAssertTrue(html.contains("<p class=\"math\"><code>"), html)

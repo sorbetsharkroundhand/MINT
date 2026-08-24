@@ -136,7 +136,7 @@ final class ImageMetadataTests: XCTestCase {
         var collected: [String] = []
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
-            from: entry, copyingImagesInto: oebps, collected: &collected, missing: &missing)
+            from: entry, copyingImagesInto: oebps, collected: &collected, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
 
         let html = chapters[0].html
         XCTAssertTrue(html.contains(#"alt="주인공 &lt;초상&gt;""#), html)
