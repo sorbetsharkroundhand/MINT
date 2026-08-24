@@ -4300,28 +4300,16 @@ final class BlockTextView: NSTextView {
         }
     }
 
-    // MARK: 고스트 렌더 (M3 그대로)
+    // MARK: 고스트 렌더
 
-    /// AI 제안이 처음 뜰 때 투명도를 0→1로 올려 부드럽게 스며들게 한다
-    /// (약 150ms, ease-out). 경과 시간 기반이라 프레임 지터에 흔들리지 않는다.
-    /// 커서 이동·이어지는 입력은 ghostText를 nil로 바꾸며 이 태스크를 취소한다
-    /// (updateSelectionToolbar의 Task 패턴과 동일 — 메인 액터 상속).
+    /// AI 제안을 **즉시** 표시한다 (#27 모션 감사). 과거엔 150ms 페이드인을
+    /// 12ms redraw 루프로 그렸는데, 제안 하나마다 메인 액터가 12회 다시 그려졌고
+    /// 첫 글자 지연 예산(PLAN §10)을 깎아 먹었다. "고스트는 조용히"의 정답은
+    /// 모션이 아니라 침묵이다 — 나타나고, 거절되면 흔적 없이 사라진다.
     private func startGhostFadeIn() {
         ghostFadeTask?.cancel()
-        ghostOpacity = 0
+        ghostOpacity = 1
         needsDisplay = true
-        let start = Date()
-        let duration = 0.15
-        ghostFadeTask = Task { [weak self] in
-            while true {
-                guard !Task.isCancelled, let self else { return }
-                let t = min(1, Date().timeIntervalSince(start) / duration)
-                self.ghostOpacity = CGFloat(t * (2 - t))  // ease-out quad
-                self.needsDisplay = true
-                if t >= 1 { break }
-                try? await Task.sleep(for: .milliseconds(12))
-            }
-        }
     }
 
     override func draw(_ dirtyRect: NSRect) {

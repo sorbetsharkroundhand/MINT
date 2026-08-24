@@ -546,7 +546,12 @@ public final class CompletionController: ObservableObject {
             self.namingFolderIDs.remove(folderID)
             guard !name.isEmpty, let store else { return }
             // 사용자가 그 사이 직접 이름을 바꿨다면 스토어 쪽 가드가 조용히 무시한다.
-            withAnimation(.easeOut(duration: 0.18)) {
+            // 모션 정책 (#27): Reduce Motion이면 즉시 반영. 저빈도(폴더당 1회)
+            // 이지만 시스템 설정을 존중하는 게 규약이다.
+            let namingAnimation: Animation? =
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil : .easeOut(duration: 0.18)
+            withAnimation(namingAnimation) {
                 store.renameFolderIfPlaceholder(folderID, to: name)
             }
         }

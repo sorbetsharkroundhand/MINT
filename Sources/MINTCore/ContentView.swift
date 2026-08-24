@@ -995,13 +995,31 @@ struct GlassSwitch: View {
                 .offset(x: isOn ? 19 : 2)
         }
         .frame(width: 42, height: 25)
-        .animation(.spring(duration: 0.25), value: isOn)
+        // Reduce Motion에선 즉시 전환 — 상태 변화 자체가 피드백이다 (#27).
+        .modifier(ReduceMotionAnimation(animation: .spring(duration: 0.25), value: isOn))
+    }
+}
+
+/// Reduce Motion을 존중하는 animation 수정자 헬퍼 (#27) — 설정이 켜져 있으면
+/// 값 변화를 애니메이션 없이 즉시 반영한다. SwiftUI 크롬 전역에서 재사용.
+struct ReduceMotionAnimation<Value: Equatable>: ViewModifier {
+    let animation: Animation?
+    let value: Value
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        content.animation(reduceMotion ? nil : animation, value: value)
     }
 }
 
 /// "예측 중" 점 세 개 애니메이션 (디자인 mint-dot).
+///
+/// 모션 정책 (#27 감사): 무한 반복 모션이라 Reduce Motion에서는 **정적** 0.65로
+/// 만든다 — 진행 표시의 의미는 밝기 하나로도 성립한다. 일반 모드도 450ms →
+/// 250ms·점 간 80ms로 줄여 프레임 예산 밖으로 나가지 않게 했다.
 struct PulsingDots: View {
     let color: Color
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pulsing = false
 
     var body: some View {
@@ -1010,11 +1028,11 @@ struct PulsingDots: View {
                 Circle()
                     .fill(color)
                     .frame(width: 4, height: 4)
-                    .opacity(pulsing ? 1 : 0.25)
+                    .opacity(pulsing ? 1 : (reduceMotion ? 0.65 : 0.25))
                     .animation(
-                        .easeInOut(duration: 0.45)
+                        reduceMotion ? nil : .easeInOut(duration: 0.25)
                             .repeatForever(autoreverses: true)
-                            .delay(Double(index) * 0.15),
+                            .delay(Double(index) * 0.08),
                         value: pulsing
                     )
             }
@@ -1129,7 +1147,8 @@ struct ShortcutHintPill: View {
         )
         .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
         .opacity(active ? 1 : 0.6)
-        .animation(.easeOut(duration: 0.2), value: active)
+        // 모션 없음 — Tab/→/Esc마다 도는 고빈도 경로다 (감사 표, #27).
+        // 과거 200ms fade가 키 피드백을 늦췄다.
         .allowsHitTesting(false)
     }
 

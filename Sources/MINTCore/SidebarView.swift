@@ -541,7 +541,7 @@ struct SidebarView: View {
                 .font(.system(size: 9, weight: .semibold))
                 .foregroundStyle(theme.ink3C)
                 .rotationEffect(.degrees(expanded ? 90 : 0))
-                .animation(.easeOut(duration: 0.15), value: expanded)
+                .modifier(ReduceMotionAnimation(animation: .easeOut(duration: 0.15), value: expanded))
                 .frame(width: 12)
 
             Image(systemName: "folder")
