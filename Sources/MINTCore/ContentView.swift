@@ -301,11 +301,41 @@ private struct SidebarResizeDivider: NSViewRepresentable {
 }
 
 /// SidebarResizeDivider의 실제 AppKit 뷰. 좌표 x만 다루므로 flipped 여부는 무관.
+///
+/// 접근성 (#59): 마우스 드래그 전용이던 너비 조절을 **조절 가능(adjustable) AX
+/// 요소**로 노출한다 — VoiceOver 스와이프·Full Keyboard Access 방향키로 ±20pt.
 final class DividerHandleView: NSView {
     var onWidthChange: ((CGFloat) -> Void)?
     var currentWidth: (() -> CGFloat)?
     var minWidth: CGFloat = 200
     var maxWidth: CGFloat = 360
+
+    // NSAccessibility 프로토콜 위트니스 중 상위에 선언이 있는 것(isAccessibility·
+    // Role·Label)만 override이고, 값·증감(NSAccessibilityValue/Incrementor
+    // 프로토콜 기본 구현)은 키워드 없이 대체한다.
+    override func isAccessibilityElement() -> Bool { true }
+    override func accessibilityRole() -> NSAccessibility.Role? { .slider }
+    override func accessibilityLabel() -> String? { "사이드바 너비" }
+    override func accessibilityValue() -> Any? {
+        Int(currentWidth?() ?? 0)
+    }
+    // 증감은 NSAccessibilityIncrementor/Decrementor 프로토콜 기본 구현 대체 —
+    // 상위 클래스 선언이 없어 override 키워드를 쓰지 않는다.
+    func accessibilityIncrement() {
+        adjust(by: 20)
+    }
+    func accessibilityDecrement() {
+        adjust(by: -20)
+    }
+
+    private func adjust(by delta: CGFloat) {
+        guard let onWidthChange else { return }
+        let next = min(max((currentWidth?() ?? 0) + delta, minWidth), maxWidth)
+        onWidthChange(next)
+        // 값 변화를 VoiceOver에 알린다 — 슬라이더 규약 (요구사항 §33의 로컬 원칙).
+        NSAccessibility.post(
+            element: self, notification: .valueChanged)
+    }
     var idleLineColor: NSColor = .clear { didSet { needsDisplay = true } }
     var nearLineColor: NSColor = .clear { didSet { needsDisplay = true } }
 
@@ -550,6 +580,9 @@ struct EditorToolbar: View {
                 .buttonStyle(.plain)
                 .help("스토리 바이블 — 사이드바에서 장르·인물·자동 이해")
                 .accessibilityLabel(Text("스토리 바이블"))
+                // 색점 없이도 후보 대기를 알 수 있게 (#59-3).
+                .accessibilityValue(
+                    Text(bibleBadgeAXValue(indexer: indexer, store: store)))
             }
 
             // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
@@ -639,6 +672,16 @@ struct EditorToolbar: View {
     }
 }
 
+/// 스토리 바이블 배지의 VoiceOver 값 — 후보 대기 수를 읽는다 (#59-3).
+@MainActor
+private func bibleBadgeAXValue(indexer: BackgroundIndexer?, store: EntryStore) -> String {
+    guard let indexer,
+        indexer.candidatesEntryID == store.activeID,
+        !indexer.characterCandidates.isEmpty
+    else { return "" }
+    return "인물 후보 검토 \(indexer.characterCandidates.count)명 대기"
+}
+
 /// 소설 배지 안의 인물 후보 대기 점 (M6, PLAN §7) — 감지는 자동이지만 UI는
 /// 점 하나뿐이다. 화면을 흔들지 않는다 (CLAUDE.md §3 "고스트는 조용히"의 연장).
 private struct CandidateDot: View {
@@ -653,6 +696,9 @@ private struct CandidateDot: View {
             Circle()
                 .fill(theme.novelC)
                 .frame(width: 5, height: 5)
+                // 상태 의미는 색이 아니라 소리로 전달한다 (#59): 점은 AX에서 숨기고
+                // 부모 배지의 accessibilityValue가 "검토 후보 N명"을 말한다.
+                .accessibilityHidden(true)
         }
     }
 }
@@ -677,7 +723,10 @@ struct ModelChip: View {
                 if completion.isPredicting {
                     PulsingDots(color: theme.blueC)
                 } else {
-                    Circle().fill(dotColor).frame(width: 6, height: 6)
+                    Circle()
+                        .fill(dotColor)
+                        .frame(width: 6, height: 6)
+                        .accessibilityHidden(true)  // 의미는 아래 AX 값이 말한다 (#59-3).
                 }
                 Text(statusLabel)
                     .font(MintFonts.monoUI(11, .semibold))
@@ -939,6 +988,19 @@ struct ModelChip: View {
         case .downloading, .loading: theme.warningC
         case .ready: completion.suggestion != nil ? theme.inkC : theme.ink3C
         case .failed: theme.dangerC
+        }
+    }
+
+    /// 상태점의 의미를 텍스트로 — 색만 보고 판단하지 않게 (#59-3).
+    fileprivate var engineStateAXValue: String {
+        if !settings.autocompleteEnabled { return "자동완성 꺼짐" }
+        switch completion.engineState {
+        case .idle: return "대기"
+        case .downloading(let fraction):
+            return String(format: "다운로드 %.0f%%", fraction * 100)
+        case .loading: return "모델 로드 중"
+        case .ready: return completion.suggestion != nil ? "제안 준비됨" : "준비됨"
+        case .failed: return "오류"
         }
     }
 
