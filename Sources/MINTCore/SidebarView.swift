@@ -280,10 +280,59 @@ struct SidebarView: View {
         }
     }
 
+    /// 트리 캐시 키 (#48) — 본문 타이핑은 entries 배열을 바꾸지만 트리 모양
+    /// (id·소속·순서·종류)은 그대로다. 배열 전체가 아니라 모양 서명만 비교해
+    /// 평탄화(O(n log n) 정렬 포함)를 건너뛴다.
+    struct TreeKey: Equatable {
+        struct EntrySig: Equatable {
+            var id: UUID
+            var folderID: UUID?
+            var sortOrder: Double?
+            var kind: EntryKind?
+        }
+        struct FolderSig: Equatable {
+            var id: UUID
+            var parentID: UUID?
+            var sortOrder: Double?
+        }
+        var entrySigs: [EntrySig]
+        var folderSigs: [FolderSig]
+        var expanded: Set<UUID>
+    }
+
+    @State private var treeCache: (key: TreeKey, items: [SidebarItem])?
+
+    /// 현재 스토어 상태의 트리 모양 서명.
+    private func treeKey() -> TreeKey {
+        Self.treeKey(
+            entries: store.entries, folders: store.folders,
+            expanded: store.expandedFolderIDs)
+    }
+
+    /// 트리 모양 서명 빌더 — 본문·제목 같은 표시 필드는 의도적으로 제외했다:
+    /// 키 입력의 주범(entries[i].body 변화)이 서명을 바꾸지 않아야 캐시가
+    /// 적중한다 (#48). 정적이라 단위 테스트가 규약을 고정한다.
+    static func treeKey(
+        entries: [JournalEntry], folders: [JournalFolder], expanded: Set<UUID>
+    ) -> TreeKey {
+        TreeKey(
+            entrySigs: entries.map {
+                .init(id: $0.id, folderID: $0.folderID, sortOrder: $0.sortOrder, kind: $0.kind)
+            },
+            folderSigs: folders.map {
+                .init(id: $0.id, parentID: $0.parentID, sortOrder: $0.sortOrder)
+            },
+            expanded: expanded)
+    }
+
     /// 트리를 위에서 아래로 편 목록 — 각 단계에서 폴더 먼저, 그다음 저널.
+    /// 모양이 바뀐 것으로 보일 때만 다시 평탄화한다 (#48).
     private var items: [SidebarItem] {
+        let key = treeKey()
+        if let cache = treeCache, cache.key == key { return cache.items }
         var result: [SidebarItem] = []
         appendChildren(of: nil, depth: 0, into: &result)
+        treeCache = (key, result)
         return result
     }
 

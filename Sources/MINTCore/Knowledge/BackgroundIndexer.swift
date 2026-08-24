@@ -30,6 +30,10 @@ public final class BackgroundIndexer: ObservableObject {
     private func setIsIndexing(_ newValue: Bool) {
         if isIndexing != newValue { isIndexing = newValue }
     }
+    /// 스냅샷 세대 — 실제 발행마다 증가하는 싸구려 신분증 (#48). 지식 뷰들이
+    /// 캐시 키로 쓴다: 스냅샷 전체 동등 비교(사건 수천 개 배열)를 매 패스
+    /// 반복하는 대신 정수 비교로 "바뀌었나"를 판정한다.
+    @Published public private(set) var snapshotGeneration = 0
     /// 인물 감지 후보 (M6, PLAN §7) — 감지는 자동, **등록은 사용자 확인**
     /// (CLAUDE.md §3). 바이블 팝오버가 전부 나열해 검토받는다 (M6-8).
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
@@ -38,6 +42,12 @@ public final class BackgroundIndexer: ObservableObject {
     /// 일관성 경고 (M7) — 스냅샷과 같은 주기로 갱신. **비침습**: 사이드바
     /// 배지·목록만, 본문엔 아무것도 긋지 않는다 (ConsistencyChecker 참조).
     @Published public private(set) var warnings: [ConsistencyWarning] = []
+
+    /// 동일 값 발행 가드 — 같은 경고 배열을 다시 대입해도 objectWillChange가
+    /// 울리지 않는다 (#48: 관찰 fan-out의 3번째 축, @Published 쓰기 최소화).
+    private func setWarnings(_ newValue: [ConsistencyWarning]) {
+        if warnings != newValue { warnings = newValue }
+    }
 
     /// 사이드카·스냅샷 성능 측정 (요구사항 §33) — 로컬 전용, SQLite 이관 시점
     /// 판단의 근거 데이터. 원격 전송 절대 금지 (CLAUDE.md §1-3).
@@ -123,6 +133,19 @@ public final class BackgroundIndexer: ObservableObject {
     /// 발행 가드 — 토큰·대상 문서 일치만 통과 (스냅샷·후보·지표 공용, #82).
     func canPublish(token: Int, entryID: UUID) -> Bool {
         passGeneration == token && passEntryID == entryID
+    }
+
+    /// 테스트 전용 — 패스 출력 적용 경로(동일 값 가드 포함)를 엔진 없이 재현한다 (#48).
+    func _testApplyPassOutputs(
+        snapshot: KnowledgeSnapshot?, warnings: [ConsistencyWarning],
+        metrics: KnowledgeMetrics?
+    ) {
+        if let snapshot {
+            self.snapshot = snapshot
+            snapshotGeneration += 1
+        }
+        setWarnings(warnings)
+        if let metrics, self.metrics != metrics { self.metrics = metrics }
     }
 
     /// 앱 수명 동안의 인덱서 — 종료 훅(AppDelegate)이 접근하려고 둔다.
@@ -257,8 +280,9 @@ public final class BackgroundIndexer: ObservableObject {
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
                 guard force || self.snapshot?.entryID != entryID else { return }
                 self.snapshot = snapshot
-                self.warnings = warnings
-                self.metrics = metrics
+                self.snapshotGeneration += 1
+                self.setWarnings(warnings)
+                if self.metrics != metrics { self.metrics = metrics }
             }
         }
     }
@@ -382,10 +406,13 @@ public final class BackgroundIndexer: ObservableObject {
                     $0.confidence == .high && $0.aliasOfKnown == nil
                 }
                 for candidate in auto { self.autoRegister(candidate, in: entryID) }
-                self.characterCandidates = candidates.filter { candidate in
+                let remaining = candidates.filter { candidate in
                     !auto.contains(where: { $0.name == candidate.name })
                 }
-                self.candidatesEntryID = entryID
+                if self.characterCandidates != remaining {
+                    self.characterCandidates = remaining
+                }
+                if self.candidatesEntryID != entryID { self.candidatesEntryID = entryID }
             }
             if superseded {
                 await MainActor.run { self.finishPass(token: token) }
@@ -413,14 +440,15 @@ public final class BackgroundIndexer: ObservableObject {
                         self.passBodyHash == bodyHash
                     else { return }
                     self.snapshot = snapshot
-                    self.warnings = warnings
+                    self.snapshotGeneration += 1
+                    self.setWarnings(warnings)
                 }
             } publishMetrics: { metrics in
                 Task { @MainActor in
                     guard self.canPublish(token: token, entryID: entryID),
                         self.passBodyHash == bodyHash
                     else { return }
-                    self.metrics = metrics
+                    if self.metrics != metrics { self.metrics = metrics }
                 }
             }
             await MainActor.run {

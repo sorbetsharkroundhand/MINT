@@ -18,8 +18,54 @@ struct CharacterBibleView: View {
     /// 사이드바 섹션에 임베드됐는가 — 고정 폭·높이 상한을 풀고 공간을 채운다.
     var embedded = false
 
+    /// 카드별 파생 지식 캐시 (#48) — 키 입력이 store를 무효화해도 카드·스냅샷
+    /// 세대가 그대로면 카드당 지식 폴딩(understanding·연대기·앎·관계·대화,
+    /// O(카드 × 델타))을 다시 하지 않는다.
+    private struct CardLines {
+        var understanding: [String] = []
+        var chronicle: [String] = []
+        var knowledge: [(text: String, jump: String?)] = []
+        var relations: [(text: String, jump: String?)] = []
+        var conversations: [(text: String, jump: String?)] = []
+    }
+    private struct BibleCacheKey: Equatable {
+        var entryID: UUID?
+        /// 카드 배열 전체 동등 비교 — 필드가 짧은 문자열뿐이라 저렴한다.
+        var cards: [CharacterCard]
+        var generation: Int
+    }
+    @State private var bibleCache: (key: BibleCacheKey, lines: [UUID: CardLines])?
+
+    /// 캐시된 카드별 줄 — 키가 같으면 전 패스의 폴딩 결과를 재사용한다.
+    private func cachedLines() -> [UUID: CardLines] {
+        let key = BibleCacheKey(
+            entryID: store.activeID, cards: cards,
+            generation: indexer?.snapshotGeneration ?? -1)
+        if let cache = bibleCache, cache.key == key { return cache.lines }
+        guard let snapshot else {
+            bibleCache = (key, [:])
+            return [:]
+        }
+        let names = Dictionary(uniqueKeysWithValues: cards.map { ($0.id, $0.name) })
+        var lines: [UUID: CardLines] = [:]
+        lines.reserveCapacity(cards.count)
+        for card in cards {
+            var item = CardLines()
+            item.understanding = Self.understanding(of: card.id, snapshot: snapshot)
+            item.chronicle = Self.chronicle(of: card.id, snapshot: snapshot)
+            item.knowledge = Self.knowledgeLines(of: card.id, snapshot: snapshot)
+            item.relations = Self.relationLines(of: card.id, snapshot: snapshot, names: names)
+            item.conversations =
+                Self.conversationLines(of: card, snapshot: snapshot, names: names)
+            lines[card.id] = item
+        }
+        bibleCache = (key, lines)
+        return lines
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let linesByCard = cachedLines()
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 Image(systemName: "book.closed.fill")
                     .font(.system(size: 11))
@@ -54,14 +100,15 @@ struct CharacterBibleView: View {
             ScrollView {
                 VStack(spacing: 8) {
                     ForEach(cards) { card in
+                        let lines = linesByCard[card.id] ?? CardLines()
                         CharacterCardRow(
                             card: binding(for: card),
                             theme: theme,
-                            understanding: understanding(of: card),
-                            chronicle: chronicle(of: card),
-                            knowledge: knowledgeLines(of: card),
-                            relations: relationLines(of: card),
-                            conversations: conversationLines(of: card),
+                            understanding: lines.understanding,
+                            chronicle: lines.chronicle,
+                            knowledge: lines.knowledge,
+                            relations: lines.relations,
+                            conversations: lines.conversations,
                             onJump: { query in
                                 // 재앵커 사다리 (요구사항 §28) — 인용이 수정됐으면
                                 // 어절 지문으로 되찾는다.
@@ -99,25 +146,32 @@ struct CharacterBibleView: View {
         store.activeEntry?.characters ?? []
     }
 
+    /// 활성 문서의 스냅샷 (문서 일치 확인 포함).
+    private var snapshot: KnowledgeSnapshot? {
+        guard let snapshot = indexer?.snapshot, snapshot.entryID == store.activeID
+        else { return nil }
+        return snapshot
+    }
+
     /// 카드 하나에 대한 자동 이해 요약 (열람 전용, CLAUDE.md §1-5) — 프롬프트
     /// 카드 줄과 같은 질의(`stateAt`·`lastAppearance`·`speechProfile`)를 문서 끝
     /// 기준으로 접는다. 사용자가 보는 것과 예측이 아는 것이 같은 소스다.
-    private func understanding(of card: CharacterCard) -> [String] {
-        guard let snapshot = indexer?.snapshot,
-            snapshot.entryID == store.activeID
-        else { return [] }
+    /// 순수 함수로 분리 — 캐시 빌더가 카드당 한 번만 부른다 (#48).
+    static func understanding(
+        of characterID: UUID, snapshot: KnowledgeSnapshot
+    ) -> [String] {
         var lines: [String] = []
-        let state = snapshot.stateAt(of: card.id, before: .max)
+        let state = snapshot.stateAt(of: characterID, before: .max)
         if !state.isEmpty {
             let rendered = StateDelta.Field.allCases
                 .compactMap { field in state[field].map { "\(field.rawValue) \($0)" } }
                 .joined(separator: " · ")
             lines.append("상태: \(rendered)")
         }
-        if let recent = snapshot.lastAppearance(of: card.id, before: .max) {
+        if let recent = snapshot.lastAppearance(of: characterID, before: .max) {
             lines.append("최근: \(recent.summary)")
         }
-        if let profile = snapshot.speechProfile(of: card.id, before: .max) {
+        if let profile = snapshot.speechProfile(of: characterID, before: .max) {
             var speech: [String] = []
             if let base = profile.defaultPoliteness { speech.append("\(base.rawValue) 기본") }
             if let example = profile.examples.last { speech.append("\"\(example)\"") }
@@ -129,16 +183,15 @@ struct CharacterBibleView: View {
     /// 인물 연대기 (M7, PLAN §14) — 그 인물이 겪은 사건과 상태 변화를 담화
     /// 순서로 편다. StateDelta가 append-only인 덕에 이 UI가 "공짜로" 나온다
     /// (PLAN §7 — 상태를 덮어썼다면 역사가 없어 연대기도 없다).
-    private func chronicle(of card: CharacterCard) -> [String] {
-        guard let snapshot = indexer?.snapshot,
-            snapshot.entryID == store.activeID,
-            let offsets = snapshot.eventIndexByCharacter[card.id]
-        else { return [] }
+    static func chronicle(
+        of characterID: UUID, snapshot: KnowledgeSnapshot
+    ) -> [String] {
+        guard let offsets = snapshot.eventIndexByCharacter[characterID] else { return [] }
         return offsets.map { offset in
             let event = snapshot.events[offset]
             var line = event.summary
             let changes = event.deltas
-                .filter { $0.characterID == card.id }
+                .filter { $0.characterID == characterID }
                 .map { "\($0.field.rawValue) \($0.value)" }
             if !changes.isEmpty {
                 line += " → \(changes.joined(separator: " · "))"
@@ -147,33 +200,26 @@ struct CharacterBibleView: View {
         }
     }
 
-    /// 활성 문서의 스냅샷 (문서 일치 확인 포함).
-    private var snapshot: KnowledgeSnapshot? {
-        guard let snapshot = indexer?.snapshot, snapshot.entryID == store.activeID
-        else { return nil }
-        return snapshot
-    }
-
     /// 인물의 앎 (v4, 요구사항 §11) — 문서 끝 기준으로 접은 현재 앎.
     /// (text, 점프 질의) — 질의는 근거 인용, 없으면 nil (추론).
-    private func knowledgeLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
-        guard let snapshot else { return [] }
-        return snapshot.knowledge(of: card.id, before: .max).map { delta in
+    static func knowledgeLines(
+        of characterID: UUID, snapshot: KnowledgeSnapshot
+    ) -> [(text: String, jump: String?)] {
+        snapshot.knowledge(of: characterID, before: .max).map { delta in
             ("\(delta.stance.rawValue): \(delta.fact)", delta.quote)
         }
     }
 
     /// 인물이 얽힌 관계들의 변화 이력 (v4, 요구사항 §12) — 방향 쌍별로
     /// "남편→아내: 사랑 → 의심 → 적대" 한 줄.
-    private func relationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
-        guard let snapshot else { return [] }
-        let names = Dictionary(
-            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
+    static func relationLines(
+        of characterID: UUID, snapshot: KnowledgeSnapshot, names: [UUID: String]
+    ) -> [(text: String, jump: String?)] {
         // 방향 쌍별 그룹 (담화 순서 유지).
         var order: [String] = []
         var grouped: [String: [RelationDelta]] = [:]
         for delta in snapshot.relationDeltas
-        where delta.fromID == card.id || delta.toID == card.id {
+        where delta.fromID == characterID || delta.toID == characterID {
             let key = "\(delta.fromID.uuidString)>\(delta.toID.uuidString)"
             if grouped[key] == nil { order.append(key) }
             grouped[key, default: []].append(delta)
@@ -189,11 +235,10 @@ struct CharacterBibleView: View {
 
     /// 인물의 대화 인덱스 (v4, 요구사항 §13) — 원문 복제 없이 위치 참조.
     /// 점프 질의 = 첫 대사 (본문 부분 문자열이라 그대로 검색된다).
-    private func conversationLines(of card: CharacterCard) -> [(text: String, jump: String?)] {
-        guard let snapshot else { return [] }
-        let names = Dictionary(
-            uniqueKeysWithValues: (store.activeEntry?.characters ?? []).map { ($0.id, $0.name) })
-        return snapshot.conversations(involving: card.id).map { conversation in
+    static func conversationLines(
+        of card: CharacterCard, snapshot: KnowledgeSnapshot, names: [UUID: String]
+    ) -> [(text: String, jump: String?)] {
+        snapshot.conversations(involving: card.id).map { conversation in
             let others = conversation.participants
                 .filter { $0 != card.id }
                 .compactMap { names[$0] }

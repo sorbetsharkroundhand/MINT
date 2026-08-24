@@ -65,6 +65,40 @@ struct NarrativeView: View {
     @State private var editingThreadID: String?
     @State private var draftThreadTitle = ""
 
+    /// 그래프 행·레이아웃 캐시 (#48) — 키 입력마다 store가 objectWillChange를
+    /// 울려도 스냅샷(세대)·projection·사소 펼침이 그대로면 행 재구축 O(사건)과
+    /// 레인 배치를 다시 하지 않는다. 세대는 BackgroundIndexer.snapshotGeneration —
+    /// 스냅샷 전체 동등 비교 대신 정수 비교로 무효화를 판정한다.
+    private struct GraphCacheKey: Equatable {
+        var generation: Int
+        var projection: Projection
+        var expandedMinors: Set<String>
+    }
+    private struct GraphCache {
+        var key: GraphCacheKey
+        var rows: [GraphRow]
+        var layout: ThreadGraphLayout
+    }
+    @State private var graphCache: GraphCache?
+
+    /// 캐시된 행·레이아웃 — 키가 같으면 전 패스의 결과를 재사용한다.
+    private func cachedGraph(
+        _ snapshot: KnowledgeSnapshot
+    ) -> (rows: [GraphRow], layout: ThreadGraphLayout) {
+        let key = GraphCacheKey(
+            generation: indexer.snapshotGeneration,
+            projection: projection,
+            expandedMinors: expandedMinors)
+        if let cache = graphCache, cache.key == key { return (cache.rows, cache.layout) }
+        let rows =
+            projection == .flow
+            ? GraphRow.flowRows(from: snapshot, expandedMinors: expandedMinors)
+            : GraphRow.chronoRows(from: snapshot)
+        let layout = ThreadGraphLayout.compute(rows: rows, threads: snapshot.plotThreads)
+        graphCache = GraphCache(key: key, rows: rows, layout: layout)
+        return (rows, layout)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
@@ -362,10 +396,7 @@ struct NarrativeView: View {
     // MARK: - 그래프 영역 (두 Projection 공용)
 
     @ViewBuilder private func graphArea(_ snapshot: KnowledgeSnapshot) -> some View {
-        let rows =
-            projection == .flow
-            ? GraphRow.flowRows(from: snapshot, expandedMinors: expandedMinors)
-            : GraphRow.chronoRows(from: snapshot)
+        let (rows, layout) = cachedGraph(snapshot)
         if rows.isEmpty {
             Text("사건이 아직 없어요. 「지금 읽기」를 누르면 사건이 추출돼요.")
                 .font(MintFonts.uiFont(11))
@@ -376,8 +407,7 @@ struct NarrativeView: View {
             // 보조 설명이 사건 목록보다 먼저 시선을 끌지 않는다.
             ThreadGraphArea(
                 rows: rows,
-                layout: ThreadGraphLayout.compute(
-                    rows: rows, threads: snapshot.plotThreads),
+                layout: layout,
                 snapshot: snapshot,
                 theme: theme,
                 dark: colorScheme == .dark,
@@ -486,13 +516,26 @@ struct NarrativeView: View {
     }
 
     /// 인물 필터로 흐려질 정본 사건 키 집합 — 필터 없으면 nil.
+    /// 선택·세대가 같으면 전 패스 결과를 재사용한다 (#48).
     private func dimmedKeys(_ snapshot: KnowledgeSnapshot) -> Set<String>? {
         guard let characterID = selectedCharacterID else { return nil }
-        return Set(
+        if let cached = dimmedCache, cached.generation == indexer.snapshotGeneration,
+            cached.characterID == characterID
+        {
+            return cached.keys
+        }
+        let keys = Set(
             snapshot.canonicalEvents
                 .filter { !$0.participants.contains(characterID) }
                 .map(\.canonicalKey))
+        dimmedCache = (
+            generation: indexer.snapshotGeneration, characterID: characterID, keys: keys)
+        return keys
     }
+
+    @State private var dimmedCache: (
+        generation: Int, characterID: UUID, keys: Set<String>
+    )?
 
     private func branchStart(_ branch: NarrativeBranch, _ snapshot: KnowledgeSnapshot) -> Int {
         snapshot.outline.scenes[branch.sceneRange.lowerBound].utf16Range.lowerBound
