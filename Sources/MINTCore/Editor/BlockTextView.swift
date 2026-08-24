@@ -3314,7 +3314,15 @@ final class BlockTextView: NSTextView {
                 }
             case .image:
                 attrs = Self.imageAttrs(from: source)
-                rendered = attrs.flatMap { MintImageStore.image(for: $0.src) }
+                // 표시용 다운샘플 (#53) — 그리기엔 컬럼 폭×배율이면 충분하다.
+                // 전체 해상도 디코딩은 복사·내보내기 경로만 남는다.
+                rendered = attrs.flatMap {
+                    MintImageStore.displayImage(
+                        for: $0.src,
+                        maxPixelWidth: Self.imageDecodePixelWidth(
+                            containerWidth: textContainer?.size.width,
+                            backingScale: window?.backingScaleFactor ?? 2))
+                }
             default:
                 rendered = nil
             }
@@ -3407,10 +3415,12 @@ final class BlockTextView: NSTextView {
         // 델리게이트가 보수적으로 true를 켠 오탐을 정리하는 자리다.
         syncMarkerFlag()
         repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
-        // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다.
+        // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다 — 글자당 조판
+        // 대신 150ms 디바운스 (#53): 연속 타이핑 중엔 마지막 소스만 렌더한다.
         if let (para, source) = editingMath {
-            presentMathPreview(source: source, below: para)
+            scheduleMathPreview(source: source, below: para)
         } else {
+            cancelMathPreview()
             hideMathPreview()
         }
         // 렌더된 이미지 위 포인터 커서 rect를 새 위치로 갱신한다.
@@ -3422,6 +3432,31 @@ final class BlockTextView: NSTextView {
 
     /// 수식 편집 중 미리보기 패널 — 소스가 바뀔 때마다 refreshRenderedBlocks가 갱신.
     private var mathPreviewHost: NSHostingView<MathPreviewView>?
+    /// 미리보기 디바운스 (#53) — 글자마다 MTMathList 조판(메인)을 하지 않고
+    /// 입력이 150ms 멈췄을 때 마지막 소스만 렌더한다. 대기 중 소스는 계속 갈아끼운다.
+    private var mathPreviewTask: Task<Void, Never>?
+    private var mathPreviewPending: (source: String, para: NSRange)?
+
+    /// 미리보기 렌더 예약 — 이미 예약이 있으면 소스만 교체한다 (타이머 리셋 없음,
+    /// 연속 타이핑에서 최대 한 번의 조판).
+    private func scheduleMathPreview(source: String, below para: NSRange) {
+        mathPreviewPending = (source, para)
+        guard mathPreviewTask == nil else { return }
+        mathPreviewTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(150))
+            guard !Task.isCancelled, let self else { return }
+            self.mathPreviewTask = nil
+            guard let pending = self.mathPreviewPending else { return }
+            self.mathPreviewPending = nil
+            self.presentMathPreview(source: pending.source, below: pending.para)
+        }
+    }
+
+    private func cancelMathPreview() {
+        mathPreviewTask?.cancel()
+        mathPreviewTask = nil
+        mathPreviewPending = nil
+    }
 
     /// 편집 중인 수식 문단 아래에 렌더 결과(또는 힌트·오류 안내)를 띄운다.
     private func presentMathPreview(source: String, below para: NSRange) {
@@ -3510,6 +3545,15 @@ final class BlockTextView: NSTextView {
             attrs.optionsPrefix = nil
         }
         return attrs
+    }
+
+    /// 표시용 이미지 디코딩 상한 픽셀 — 컬럼 폭 × 배율 × 여유(1.5), 800–2400 클램프.
+    /// 이 이상은 화면에서 구분할 수 없다 — 디코딩·메모리만 늘어난다 (#53).
+    nonisolated static func imageDecodePixelWidth(
+        containerWidth: CGFloat?, backingScale: CGFloat
+    ) -> CGFloat {
+        let target = (containerWidth ?? 800) * max(1, backingScale) * 1.5
+        return min(2400, max(800, target))
     }
 
     /// drawMath와 같은 규칙(폭 초과 시 축소)으로 실제 그려질 수식 높이를 구한다.
@@ -4882,7 +4926,16 @@ final class MintLayoutManager: NSLayoutManager {
 /// 지키게 한다 (이슈 #45).
 @MainActor
 enum MathRenderer {
-    private static var cache: [String: NSImage] = [:]
+    /// 렌더 캐시 — 바이트 상한 LRU (#53). 과거의 count 256 `removeAll()` 클리프는
+    /// 수식 많은 문서에서 "캐시 통과 → 전부 비움 → 글자당 재조판" 스파이크를
+    /// 만들었다. 이제 한도를 넘기면 가장 오래된 항목부터 하나씩 내보낸다.
+    private static var cache = ImageLRU(budgetBytes: mathCacheBudgetBytes)
+    nonisolated private static let mathCacheBudgetBytes = 64 * 1024 * 1024
+
+    /// 테스트 전용 — LRU 축출 규약을 작은 한도로 검증한다 (#53).
+    static func _testResetCache(budgetBytes: Int? = nil) {
+        cache = ImageLRU(budgetBytes: budgetBytes ?? Self.mathCacheBudgetBytes)
+    }
 
     /// LaTeX가 파싱되지 않으면 nil — 뷰는 소스 텍스트를 그대로 보여준다.
     /// `labelMode` — display 블록은 `.display`, 인라인 원자는 `.text` (이슈 #20).
@@ -4900,15 +4953,16 @@ enum MathRenderer {
         labelMode: MTMathUILabelMode = .display
     ) -> (image: NSImage?, error: String?) {
         let key = "\(labelMode == .display ? "D" : "T")|\(fontSize)|\(color.description)|\(latex)"
-        if let hit = cache[key] { return (hit, nil) }
+        if let hit = cache.find(key) { return (hit, nil) }
         let renderer = MTMathImage(
             latex: latex, fontSize: fontSize, textColor: color, labelMode: labelMode)
         let (error, image) = renderer.asImage()
         guard error == nil, let image, image.size.width > 0 else {
             return (nil, error?.localizedDescription ?? "수식을 해석하지 못했어요")
         }
-        if cache.count > 256 { cache.removeAll() }  // 폭주 방지 — 단순 전체 비움
-        cache[key] = image
+        // RGBA 4바이트 × 배율 2 여유 — 정밀도 불필요한 LRU 판정값.
+        let bytes = max(1, Int(image.size.width) * Int(image.size.height) * 4 * 2)
+        cache.insert(key: key, image: image, bytes: bytes)
         return (image, nil)
     }
 
