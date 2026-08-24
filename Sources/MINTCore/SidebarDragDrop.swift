@@ -53,6 +53,12 @@ enum SidebarDropIndicator: Equatable, Sendable {
 /// 드래그 세션 상태 — `.onDrag`가 시작 시 세팅, 델리게이트가 갱신·해제한다.
 @MainActor
 final class SidebarDragModel: ObservableObject {
+    /// 드롭 재배치 애니메이션 — Reduce Motion이면 nil(즉시) (#27).
+    /// DropDelegate는 Environment를 못 받으므로 시스템 설정을 직접 읽는다.
+    static var dropAnimation: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .spring(duration: 0.25)
+    }
+
     @Published private(set) var dragged: SidebarDragNode?
     @Published private(set) var indicator: SidebarDropIndicator?
     private var springLoadTask: Task<Void, Never>?
@@ -163,7 +169,7 @@ struct EntryRowDropDelegate: DropDelegate {
         let store = store
         let requestNaming = requestNaming
         let accepted = applyVerified(info: info, expecting: .entry(id: draggedID)) {
-            withAnimation(.spring(duration: 0.25)) {
+            withAnimation(SidebarDragModel.dropAnimation) {
                 switch zone {
                 case .before:
                     store.moveEntry(draggedID, toFolder: target.folderID, before: target.id)
@@ -256,7 +262,7 @@ struct FolderRowDropDelegate: DropDelegate {
             let store = store
             let requestNaming = requestNaming
             return applyVerified(info: info, expecting: .entry(id: draggedID)) {
-                withAnimation(.spring(duration: 0.25)) {
+                withAnimation(SidebarDragModel.dropAnimation) {
                     store.moveEntry(draggedID, toFolder: target.id, before: nil)
                 }
                 // 이름이 아직 자동 생성 기본값이면(명명 실패·미실행) 새 멤버까지
@@ -272,7 +278,7 @@ struct FolderRowDropDelegate: DropDelegate {
             let target = folder
             let store = store
             return applyVerified(info: info, expecting: .folder(id: draggedID)) {
-                withAnimation(.spring(duration: 0.25)) {
+                withAnimation(SidebarDragModel.dropAnimation) {
                     switch zone {
                     case .before:
                         store.moveFolder(
@@ -343,7 +349,7 @@ struct RootAreaDropDelegate: DropDelegate {
         guard let dragged = model.dragged else { return false }
         let store = store
         return applyVerified(info: info, expecting: dragged) {
-            withAnimation(.spring(duration: 0.25)) {
+            withAnimation(SidebarDragModel.dropAnimation) {
                 switch dragged {
                 case .entry(let id):
                     store.moveEntry(id, toFolder: nil, before: nil)
