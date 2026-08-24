@@ -23,7 +23,8 @@ public struct SettingsView: View {
     @AppStorage("mint.appearance") private var appearance = ""
     @Environment(\.colorScheme) private var colorScheme
     /// 색상 팔레트 — 고르는 즉시 앱 전체에 반영된다 (ContentView도 관찰).
-    @ObservedObject private var palette = PaletteSettings.shared
+    // 앱 수명 싱글턴 — StateObject 소유 의미 (#60).
+    @StateObject private var palette = PaletteSettings.shared
     /// 모델 ID 초안 — 커밋(Enter/적용)까지 settings에 쓰지 않는다 (#65 H2).
     @State private var modelIDDraft = ""
     /// 초안 검증 실패 문구 — nil이면 오류 없음.
@@ -61,6 +62,7 @@ public struct SettingsView: View {
             metrics = await Task.detached(priority: .utility) {
                 AcceptanceMetrics.summarize()
             }.value
+            guard !Task.isCancelled else { return }  // stale 결과 할당 금지 (#60)
         }
     }
 

@@ -555,8 +555,12 @@ struct NarrativeView: View {
     private func setSceneOverride(
         _ kind: NarrativeOverride.Kind, sceneHash: String, start: Int, value: String
     ) {
-        let anchor = store.activeEntry?.body.isEmpty == false
-            ? Self.jumpSnippet(in: store.activeEntry!.body, atUTF16: start) : nil
+        let anchor: String?
+        if let body = store.activeEntry?.body, !body.isEmpty {
+            anchor = Self.jumpSnippet(in: body, atUTF16: start)
+        } else {
+            anchor = nil
+        }
         store.setNarrativeOverride(
             NarrativeOverride(kind: kind, key: sceneHash, value: value, anchor: anchor),
             in: store.activeID)

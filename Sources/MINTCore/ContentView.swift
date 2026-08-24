@@ -172,7 +172,8 @@ private struct MainSurface: View {
     /// 편집과 같은 ⌘Z 흐름을 타게 배선한다 (이슈 #9).
     @Environment(\.undoManager) private var windowUndoManager
     /// 사용자 색상 팔레트 — 관찰해서 설정에서 색을 바꾸는 즉시 화면에 반영한다.
-    @ObservedObject private var palette = PaletteSettings.shared
+    // 앱 수명 싱글턴 — 뷰 수명과 무관한 소유 의미라 StateObject가 맞다 (#60).
+    @StateObject private var palette = PaletteSettings.shared
     /// 파일 목록(사이드바) 표시 여부 — 끄면 텍스트 입력에 집중하는 모드.
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     /// 사이드바 폭 — 사용자가 divider를 끌어 조절하며 UserDefaults에 보존된다.
@@ -1218,6 +1219,7 @@ struct EditorStatusBar: View {
             stats = await Task.detached(priority: .utility) {
                 TextStats.compute(text)
             }.value
+            guard !Task.isCancelled else { return }  // stale 결과 할당 금지 (#60)
         }
     }
 
