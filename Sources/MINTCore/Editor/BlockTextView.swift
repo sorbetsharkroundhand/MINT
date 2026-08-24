@@ -140,7 +140,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scrollView.documentView as? BlockTextView else { return }
 
-        if textView.palette.ink != theme.ink {
+        // 팔레트는 ink를 바꾸지 않을 수 있다 — 테마 **전체** 동등성으로 판정해야
+        // 선택색·현재 줄·코드 배경이 이전 팔레트에 남지 않는다 (이슈 #34, #54 Equatable).
+        if textView.palette != theme {
             textView.palette = theme
             textView.insertionPointColor = theme.ink
             textView.restyleAll()
@@ -2282,6 +2284,7 @@ final class BlockTextView: NSTextView {
         let box: ImageBoxOverlay
         if let existing = imageBox {
             box = existing
+            box.theme = palette  // 재사용 시에도 최신 팔레트 — stale 색 방지 (#34)
         } else {
             box = ImageBoxOverlay(textView: self, theme: palette)
             imageBox = box
