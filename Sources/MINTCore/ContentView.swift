@@ -928,9 +928,9 @@ struct ModelChip: View {
         if !settings.autocompleteEnabled { return theme.ink3C }
         return switch completion.engineState {
         case .idle: theme.ink3C
-        case .downloading, .loading: .orange
+        case .downloading, .loading: theme.warningC
         case .ready: completion.suggestion != nil ? theme.inkC : theme.ink3C
-        case .failed: .red
+        case .failed: theme.dangerC
         }
     }
 
@@ -989,7 +989,7 @@ struct GlassSwitch: View {
                 .overlay(Capsule().strokeBorder(theme.chipBorderC))
                 .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
             Circle()
-                .fill(.white)
+                .fill(theme.knobC)
                 .frame(width: 21, height: 21)
                 .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
                 .offset(x: isOn ? 19 : 2)
@@ -1195,7 +1195,7 @@ struct EditorStatusBar: View {
             if case .failed = completion.engineState {
                 separator
                 Text("자동완성 로드 실패")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.dangerC)
                     .lineLimit(1)
                 Button("다시 시도") { completion.retryEngineLoad() }
                     .buttonStyle(.link)
@@ -1212,7 +1212,7 @@ struct EditorStatusBar: View {
             // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
             if case .failed(let message, _) = store.savePhase {
                 Text("저장 실패")
-                    .foregroundStyle(.red)
+                    .foregroundStyle(theme.dangerC)
                     .help("\(message)\n대상: \(store.saveTargetFileName)")
                 Button("다시 시도") { store.retrySave() }
                     .buttonStyle(.link)

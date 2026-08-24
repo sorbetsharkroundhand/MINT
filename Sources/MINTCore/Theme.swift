@@ -37,6 +37,16 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public let novel: NSColor
     /// 소설 액센트의 은은한 배경 틴트 (활성 행·배지).
     public let novelBg: NSColor
+    /// 위험(삭제·오류·파괴적 동작) 상태색 (#56) — 라이트는 흰 바탕 대비를 위해
+    /// 진하게, 다크는 시스템 레드 계열.
+    public let danger: NSColor
+    /// 위험 배경 틴트 — 삭제 확인 배지·호버 면.
+    public let dangerBg: NSColor
+    /// 주의(다운로드 중·로딩 등 진행 경고) 상태색 (#56) — 상태 점·배지.
+    public let warning: NSColor
+    /// 토글 스위치 노브(GlassSwitch) — 유리 위에서도 읽히는 불투명 밝은 원.
+    /// 그림자는 정의상 항상 검정 알파라 토큰으로 만들지 않는다 (예외, #56).
+    public let knob: NSColor
 
     /// 소설 액센트 원색 — 기본 팔레트의 대표색과 같은 연둣빛.
     ///
@@ -75,7 +85,11 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         selectionBorder: NSColor(hex: 0x00A89E, alpha: 0.45),
         novel: accentLight,
         // 배경 틴트는 원색 그대로 — 옅게 깔리는 면이라 대비 문제가 없다.
-        novelBg: NSColor(hex: accentSeed, alpha: 0.28)
+        novelBg: NSColor(hex: accentSeed, alpha: 0.28),
+        danger: NSColor(hex: 0xD93025),
+        dangerBg: NSColor(hex: 0xD93025, alpha: 0.14),
+        warning: NSColor(hex: 0xC77800),
+        knob: NSColor.white
     )
 
     public static let dark = MintTheme(
@@ -105,7 +119,11 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         selectionBorder: NSColor(hex: 0x4DE0D6, alpha: 0.55),
         // 어두운 배경 위에서는 지정색 그대로가 가장 잘 읽힌다 (~16:1).
         novel: NSColor(hex: accentSeed),
-        novelBg: NSColor(hex: accentSeed, alpha: 0.18)
+        novelBg: NSColor(hex: accentSeed, alpha: 0.18),
+        danger: NSColor(hex: 0xFF453A),
+        dangerBg: NSColor(hex: 0xFF453A, alpha: 0.18),
+        warning: NSColor(hex: 0xFF9F0A),
+        knob: NSColor.white
     )
 
     public static func of(_ scheme: ColorScheme) -> MintTheme {
@@ -138,6 +156,10 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public var statusbarC: Color { Color(nsColor: statusbar) }
     public var novelC: Color { Color(nsColor: novel) }
     public var novelBgC: Color { Color(nsColor: novelBg) }
+    public var dangerC: Color { Color(nsColor: danger) }
+    public var dangerBgC: Color { Color(nsColor: dangerBg) }
+    public var warningC: Color { Color(nsColor: warning) }
+    public var knobC: Color { Color(nsColor: knob) }
 
 
     /// 토큰 전체 동등성 — `.equatable()`·조기 종료 등 diffing 최적화의 전제 (#54).
@@ -154,6 +176,8 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
             && lhs.activeLine == rhs.activeLine && lhs.selection == rhs.selection
             && lhs.selectionBorder == rhs.selectionBorder
             && lhs.novel == rhs.novel && lhs.novelBg == rhs.novelBg
+            && lhs.danger == rhs.danger && lhs.dangerBg == rhs.dangerBg
+            && lhs.warning == rhs.warning && lhs.knob == rhs.knob
     }
 }
 
@@ -314,7 +338,9 @@ extension MintTheme {
             selection: palette.color(4, alpha: dark ? 0.30 : 0.35),
             selectionBorder: accent.withAlphaComponent(0.45),
             novel: accent,
-            novelBg: palette.color(3, alpha: dark ? 0.28 : 0.30)
+            novelBg: palette.color(3, alpha: dark ? 0.28 : 0.30),
+            // 상태색(위험·주의)과 노브는 의미가 고정 — 팔레트에 물리지 않는다.
+            danger: danger, dangerBg: dangerBg, warning: warning, knob: knob
         )
     }
 }

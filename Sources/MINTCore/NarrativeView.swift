@@ -824,6 +824,9 @@ struct ManualIndexButton: View {
 
 /// persistent ID 기반 안정 색 — 재분석·재실행 후에도 같은 플롯·인물은 같은 색.
 /// 선명한 8색 (형광 금지, 라이트/다크 두 벌).
+/// ⚠️ Theme 토큰 규칙의 **문서화된 예외** (이슈 #56) — 데이터 시각화 고정 팔레트.
+/// 레인·브랜치 구분색은 의미 매핑(플롯 정체성)이라 라이트/다크 크롬 팔레트를
+/// 따르지 않는다. 다크 대비는 `color(seed:theme:dark:)`에서 스스로 조정한다.
 enum FlowPalette {
     static let hues: [(light: UInt32, dark: UInt32)] = [
         (0x2F80D0, 0x5AA7F0),  // 청
