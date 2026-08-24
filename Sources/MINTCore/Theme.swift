@@ -158,6 +158,24 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
 }
 
 extension NSColor {
+    /// 강조 배경(캡슐·배지) 위에서 WCAG AA(4.5:1)를 만족하는 전경색 —
+    /// 검정·흰색 중 대비가 큰 쪽을 고른다. 밝은 라임 위 흰 글자(≈1.5:1) 문제의
+    /// 일반해다 (이슈 #57).
+    func accessibleForeground() -> NSColor {
+        func luminance(_ c: NSColor) -> CGFloat {
+            guard let s = c.usingColorSpace(.sRGB) else { return 0 }
+            @inline(__always) func linear(_ v: CGFloat) -> CGFloat {
+                v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+            }
+            return 0.2126 * linear(s.redComponent)
+                + 0.7152 * linear(s.greenComponent)
+                + 0.0722 * linear(s.blueComponent)
+        }
+        let l = luminance(self)
+        // 검정 대비 (l+0.05)/0.05 ≥ 흰색 대비 1.05/(l+0.05) ⇔ l ≤ 0.179
+        return l > 0.179 ? .black : .white
+    }
+
     convenience init(hex: UInt32, alpha: CGFloat = 1) {
         self.init(
             red: CGFloat((hex >> 16) & 0xFF) / 255,
@@ -466,5 +484,13 @@ public enum MintFonts {
         case .black: 11
         default: 5
         }
+    }
+}
+
+
+extension Color {
+    /// SwiftUI 래퍼 — NSColor.accessibleForeground() 참조 (#57).
+    var accessibleForegroundC: Color {
+        Color(nsColor: NSColor(self).accessibleForeground())
     }
 }

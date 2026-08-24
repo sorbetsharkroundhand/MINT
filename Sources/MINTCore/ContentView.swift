@@ -1295,7 +1295,7 @@ struct LongParagraphNotice: View {
                     } label: {
                         Text("문단 나누기")
                             .font(MintFonts.uiFont(12, .semibold))
-                            .foregroundStyle(.white)
+                            .foregroundStyle(theme.novelC.accessibleForegroundC)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 12)
                             .background(Capsule().fill(theme.novelC))

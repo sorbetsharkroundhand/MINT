@@ -71,3 +71,16 @@ final class ThemeEquatabilityTests: XCTestCase {
         _ = settings.theme(for: .light)
     }
 }
+
+/// 강조 배경 위 접근 가능한 전경색 (이슈 #57).
+final class AccessibleForegroundTests: XCTestCase {
+
+    func test밝은라임에는검정_어두운남색에는흰색() {
+        // 기본 액센트 시드(밝은 라임 0xE9FF7A) → 검정이어야 4.5:1 확장
+        let lime = NSColor(hex: 0xE9FF7A)
+        XCTAssertEqual(lime.accessibleForeground(), NSColor.black)
+
+        let navy = NSColor(hex: 0x10143C)
+        XCTAssertEqual(navy.accessibleForeground(), NSColor.white)
+    }
+}
