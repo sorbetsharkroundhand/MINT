@@ -161,10 +161,13 @@ struct ContextInspectorView: View {
                     .foregroundStyle(theme.ink3C)
                 ForEach(excluded) { override in
                     HStack(spacing: 5) {
-                        Text(override.key)
-                            .font(MintFonts.monoUI(9))
+                        // stable key를 그대로 보여주지 않고 사람이 을 수 있는
+                        // 종류·대상으로 번역한다 (#38). key는 help로 남긴다.
+                        Text(Self.readableExclusion(override.key))
+                            .font(MintFonts.uiFont(9.5))
                             .foregroundStyle(theme.ink3C)
                             .lineLimit(1)
+                            .help(override.key)
                         Spacer()
                         Button("복원") {
                             store.removeNarrativeOverride(
@@ -175,10 +178,38 @@ struct ContextInspectorView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                     }
+                    .accessibilityElement(children: .combine)
                 }
             }
             .padding(.top, 6)
         }
+    }
+
+    /// 제외 키 → 사람이 읽을 수 있는 한 줄 ("장면(해시 앞 6자)") (#38).
+    fileprivate static func readableExclusion(_ key: String) -> String {
+        let parts = key.split(separator: "|").map(String.init)
+        let kindLabel =
+            parts.first.map { kind -> String in
+                switch kind {
+                case "scene": return "장면"
+                case "chapter": return "장"
+                case "card": return "인물"
+                case "state": return "상태"
+                case "knowledge": return "앎"
+                case "recent": return "최근 사건"
+                case "flow": return "흐름 사건"
+                case "work": return "지난 줄거리"
+                case "current": return "지금 장면"
+                case "cohort": return "장면 인물"
+                case "narrative": return "서사 위치"
+                case "dialogue": return "대화"
+                case "relation": return "관계"
+                case "meta": return "문서 정보"
+                default: return kind
+                }
+            } ?? "항목"
+        let tail = parts.count >= 2 ? String(parts[1].prefix(6)) : ""
+        return tail.isEmpty ? kindLabel : "\(kindLabel)(\(tail))"
     }
 
     private func hasJump(_ item: ContextReport.Item) -> Bool {
