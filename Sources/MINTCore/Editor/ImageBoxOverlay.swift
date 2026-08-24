@@ -10,7 +10,7 @@ final class ImageBoxOverlay: NSView {
     private weak var textView: BlockTextView?
     /// 감싸고 있는 이미지 문단의 시작 위치.
     var paraLocation: Int = 0
-    private let theme: MintTheme
+    var theme: MintTheme
 
     /// 핸들 한 변(pt)과, 핸들이 프레임 밖으로 삐져나오지 않도록 두는 여유.
     private let handle: CGFloat = 12
