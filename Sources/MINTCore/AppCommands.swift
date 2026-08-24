@@ -7,8 +7,23 @@ import UniformTypeIdentifiers
 /// 단일 `Window` 씬으로 바꾸며 ⌘N을 "새 저널"로 되돌린다. 서식·정렬·목록 명령은
 /// 리스폰더 체인(NSApp.sendAction)으로 포커스된 `BlockTextView`에 도달한다 —
 /// 단축키의 단일 소스라 에디터의 performKeyEquivalent과 이중 처리되지 않는다.
+/// 에디터(BlockTextView 서브트리)에 포커스가 있는가 — 서식·찾기 명령의
+/// 실행 가능 판정용 (이슈 #26). 사용처는 ContentView의 에디터 체인.
+struct HasMintEditorKey: FocusedValueKey {
+    typealias Value = Bool
+}
+extension FocusedValues {
+    var hasMintEditor: Bool? {
+        get { self[HasMintEditorKey.self] }
+        set { self[HasMintEditorKey.self] = newValue }
+    }
+}
+
 public struct MintCommands: Commands {
     let store: EntryStore
+    /// 에디터 포커스 여부 — 없으면 서식·찾기 명령을 비활성화해 "눌러도 무반응"을
+    /// 없앤다 (이슈 #26).
+    @FocusedValue(\.hasMintEditor) private var hasMintEditor
     @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
@@ -41,13 +56,17 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("e", modifiers: [.command, .shift])
             // 소설을 전자책으로 (요구 7) — 소설이 아닌 저널도 내보낼 수는 있다.
             Button("EPUB으로 내보내기…") { exportEpub() }
-            // 인쇄 대화상자의 "PDF로 저장"으로 PDF 내보내기까지 커버한다.
-            Button("인쇄…") { NSApp.sendAction(#selector(NSView.printView(_:)), to: nil, from: nil) }
+            // 인쇄는 first responder가 아니라 **현재 저널 전용 뷰**로 — 검색창·
+            // 사이드바 포커스에서 엉뚱한 대상을 찍지 않게 (이슈 #26).
+            Button("인쇄…") { printActiveManuscript() }
                 .keyboardShortcut("p", modifiers: .command)
+                .disabled(store.activeEntry == nil)
         }
 
         // 서식 ▸ 텍스트 스타일 · 블록 · 정렬 · 이미지.
+        // 편집 대상 명령이므로 에디터 포커스가 없으면 메뉴째 비활성 (이슈 #26).
         CommandMenu("서식") {
+            Group {
             Button("굵게") { send(#selector(BlockTextView.mintFormatBold(_:))) }
                 .keyboardShortcut("b", modifiers: .command)
             Button("기울임") { send(#selector(BlockTextView.mintFormatItalic(_:))) }
@@ -85,18 +104,23 @@ public struct MintCommands: Commands {
 
             Button("이미지 삽입…") { send(#selector(BlockTextView.insertImageFromMenu(_:))) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            }
+            .disabled(hasMintEditor != true)
         }
 
         // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
             // 문서 내 검색 — 에디터의 performKeyEquivalent(⌘F)가 우선 처리하고,
             // 한글 IME 등으로 뷰에 닿지 못한 경우 이 메뉴가 안전망이 된다.
-            Button("문서에서 찾기") { send(#selector(BlockTextView.mintFindInDocument(_:))) }
-                .keyboardShortcut("f", modifiers: .command)
-            Button("다음 찾기") { send(#selector(BlockTextView.mintFindNext(_:))) }
-                .keyboardShortcut("g", modifiers: .command)
-            Button("이전 찾기") { send(#selector(BlockTextView.mintFindPrevious(_:))) }
-                .keyboardShortcut("g", modifiers: [.command, .shift])
+            Group {
+                Button("문서에서 찾기") { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                    .keyboardShortcut("f", modifiers: .command)
+                Button("다음 찾기") { send(#selector(BlockTextView.mintFindNext(_:))) }
+                    .keyboardShortcut("g", modifiers: .command)
+                Button("이전 찾기") { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                    .keyboardShortcut("g", modifiers: [.command, .shift])
+            }
+            .disabled(hasMintEditor != true)
 
             Button("저널 검색") {
                 sidebarVisible = true
@@ -138,6 +162,29 @@ public struct MintCommands: Commands {
 
     private func send(_ selector: Selector) {
         NSApp.sendAction(selector, to: nil, from: nil)
+    }
+
+    /// 편집 대상 명령 공통 — 에디터 포커스가 없으면 비활성(무반응 제거, 이슈 #26).
+    @ViewBuilder
+    private func editCommand<Content: View>(_ title: String, shortcut: KeyEquivalent? = nil,
+        modifiers: EventModifiers = [.command], _ action: @escaping () -> Void,
+        @ViewBuilder content: () -> Content) -> some View {
+        Button(title, action: action)
+            .modifier(OptionalShortcut(shortcut: shortcut, modifiers: modifiers))
+            .disabled(hasMintEditor != true)
+        content()
+    }
+
+    struct OptionalShortcut: ViewModifier {
+        let shortcut: KeyEquivalent?
+        let modifiers: EventModifiers
+        func body(content: Content) -> some View {
+            if let shortcut {
+                content.keyboardShortcut(shortcut, modifiers: modifiers)
+            } else {
+                content
+            }
+        }
     }
 
     /// 현재 저널을 일반 Markdown(.md)으로 내보낸다 — 이미지 asset을 목적지 옆
@@ -191,6 +238,26 @@ public struct MintCommands: Commands {
     private func exportEpub() {
         guard let entry = store.activeEntry else { return }
         EpubExporter.exportWithPanel(entry)
+    }
+
+    /// 현재 저널을 전용 뷰로 조립해 인쇄한다 — 포커스와 무관하게 항상 같은
+    /// 원고가 나온다 (이슈 #26). 마크다운 마커는 그대로 두되 세리프 본문으로.
+    private func printActiveManuscript() {
+        guard let entry = store.activeEntry else { return }
+        let page = NSTextView(
+            frame: NSRect(x: 0, y: 0, width: 620, height: 792))
+        page.textStorage?.setAttributedString(NSAttributedString(
+            string: entry.body.isEmpty ? "(빈 원고)" : entry.body,
+            attributes: [
+                .font: MintFonts.serif(12),
+                .foregroundColor: NSColor.black,
+                .paragraphStyle: {
+                    let ps = NSMutableParagraphStyle()
+                    ps.lineSpacing = 6
+                    return ps
+                }(),
+            ]))
+        page.printView(nil)
     }
 
     /// 파일 이름에 쓸 수 없는 문자를 정리한다.
