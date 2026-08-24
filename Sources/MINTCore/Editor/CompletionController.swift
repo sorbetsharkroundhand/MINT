@@ -347,6 +347,22 @@ public final class CompletionController: ObservableObject {
     private func markEngineReady() {
         engineState = .ready
         failedModelID = nil
+        // 모델이 새로 로드됐을 수 있다 — 토큰 카운터 캐시를 무효화해 다음 예측이
+        // 최신 스냅샷을 뽑게 한다 (#43).
+        cachedCounterModelID = nil
+    }
+
+    /// 토큰 카운터 캐시 (#43) — 모델당 한 번만 액터 hop한다. nil도 "로드 전"이라는
+    /// 유효한 결과라 모델ID와 함께 기록한다 (매 키 입력마다 hop 금지).
+    private var cachedCounter: TokenCounter?
+    private var cachedCounterModelID: String?
+
+    private func tokenCounter(for modelID: String) async -> TokenCounter? {
+        if cachedCounterModelID == modelID { return cachedCounter }
+        let counter = await engine.makeTokenCounter()
+        cachedCounter = counter
+        cachedCounterModelID = modelID
+        return counter
     }
 
     private func markEngineFailed(_ error: Error, modelID: String) {
@@ -605,13 +621,18 @@ public final class CompletionController: ObservableObject {
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let document = documentContextProvider?()
         let knowledge = knowledgeProvider?()
+        // 토큰 카운터 (#43) — 로드된 모델이 있으면 예산을 토큰으로 접고, 없으면
+        // 조립기가 현행 문자 상수를 쓴다 (동작 불변).
+        let counter = await tokenCounter(for: parameters.modelID)
         var (prompt, report) = ContextAssembler.assembleWithReport(
             prefix: prefix,
             document: document,
             knowledge: knowledge,
             // C 창이 본문 어디서 시작하는지 — 이 앞에서 끝난 씬만 B로 들어간다.
             prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
-            style: parameters.promptStyle
+            style: parameters.promptStyle,
+            tokenCounter: counter,
+            tokenBudget: parameters.maxPromptTokens
         )
         // 인스펙터 갱신 — 이 요청이 실제로 쓰는 컨텍스트다 (생성 성패와 무관:
         // 무엇이 주입됐는지가 관심사다). 소속 문서·세대를 찍어 다른 작품 화면에서
