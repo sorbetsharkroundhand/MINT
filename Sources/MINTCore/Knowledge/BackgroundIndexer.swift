@@ -78,6 +78,48 @@ public final class BackgroundIndexer: ObservableObject {
     private var fastTimer: Task<Void, Never>?
     private var deepTimer: Task<Void, Never>?
     private var passTask: Task<Void, Never>?
+    /// 패스 소유권 토큰 — 선점(새 noteChange·requestPass·전체 다시 읽기)마다
+    /// 올라간다. 늦게 끝난 이전 작업은 자기 토큰이 현재와 같을 때만 상태를
+    /// 건드린다 (이슈 #82).
+    public private(set) var passGeneration = 0
+    /// 현재 패스가 읽고 있는 문서·본문 지문 — 발행 가드의 entryID/hash 절반.
+    public private(set) var passEntryID: UUID?
+    public private(set) var passBodyHash: String?
+
+    /// 본문 지문 — 실행마다 달라지는 HashValue 대신 안정 해시 (이슈 #82).
+    nonisolated static func contentFingerprint(_ body: String) -> String {
+        var h: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in body.utf8 {
+            h = (h ^ UInt64(byte)) &* 0x1000_0000_01b3
+        }
+        return String(h, radix: 16)
+    }
+
+    /// 테스트 전용 상태 주입 — 소유권 가드를 엔진 실행 없이 검증하기 위한 것 (#82).
+    func _testInjectPassState(task: Task<Void, Never>?, indexing: Bool) {
+        passTask = task
+        isIndexing = indexing
+    }
+
+    /// 테스트 전용 — startPass의 소유권 장부(세대·문서·지문)만 재현해 토큰을 돌려준다.
+    func _testBeginPassForOwnership(entryID: UUID, body: String) -> Int {
+        passGeneration += 1
+        passEntryID = entryID
+        passBodyHash = Self.contentFingerprint(body)
+        return passGeneration
+    }
+
+    /// 이 토큰의 패스가 아직 현재 소유자인가 — 작업 종료 시 핸들 정리 가드.
+    func finishPass(token: Int) {
+        guard passGeneration == token else { return }  // 늦은 이전 작업 — 무시
+        passTask = nil
+        isIndexing = false
+    }
+
+    /// 발행 가드 — 토큰·대상 문서 일치만 통과 (스냅샷·후보·지표 공용, #82).
+    func canPublish(token: Int, entryID: UUID) -> Bool {
+        passGeneration == token && passEntryID == entryID
+    }
 
     /// 앱 수명 동안의 인덱서 — 종료 훅(AppDelegate)이 접근하려고 둔다.
     /// EntryStore.current와 같은 패턴 (이슈 #65 Gate 0 teardown 수정).
@@ -126,6 +168,10 @@ public final class BackgroundIndexer: ObservableObject {
     /// 유휴 타이머를 다시 감는다.
     public func noteChange(entryID: UUID) {
         // 선점: 백그라운드 생성은 예측(그리고 그 앞의 타이핑)에 항상 진다 (CLAUDE.md §2-6).
+        // 세대를 먼저 올린다 — 취소가 늦게 끝난 이전 작업의 모든 발행/정리를 무효화 (#82).
+        passGeneration += 1
+        passEntryID = nil
+        passBodyHash = nil
         passTask?.cancel()
         passTask = nil
         isIndexing = false
@@ -158,6 +204,8 @@ public final class BackgroundIndexer: ObservableObject {
     // MARK: - 웜 로드 (저장된 지식 → 스냅샷, LLM 없음)
 
     private var hydrateTask: Task<Void, Never>?
+    /// hydrate 소유권 토큰 — 새 요청마다 올라가 늦은 발행을 무효화 (#82).
+    public private(set) var hydrateGeneration = 0
 
     /// 활성 문서의 스냅샷이 없으면 사이드카에서 만든다 — 결정적·읽기 전용이라
     /// 게이트(열·저전력·자동완성) 대상이 아니다. 사이드카가 비어 있어도
@@ -175,6 +223,8 @@ public final class BackgroundIndexer: ObservableObject {
         let overrides = entry.narrativeOverrides ?? []
         let recorded = entry.recordedConversations ?? []
 
+        hydrateGeneration += 1
+        let token = hydrateGeneration
         hydrateTask?.cancel()
         // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
         hydrateTask = Task.detached(priority: .utility) { [weak self] in
@@ -197,6 +247,9 @@ public final class BackgroundIndexer: ObservableObject {
                 snapshot: snapshot, characters: characters)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                // 늦은 이전 hydrate는 현재 문서에만, 자기 토큰이 유효할 때만 (#82).
+                guard self.hydrateGeneration == token else { return }
+                guard self.store?.activeEntry?.id == entryID else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
                 guard force || self.snapshot?.entryID != entryID else { return }
                 self.snapshot = snapshot
@@ -253,6 +306,7 @@ public final class BackgroundIndexer: ObservableObject {
     public func requestFullPass() {
         guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
         // 진행 중 패스 선점 — 낡은 사이드카에 체크포인트를 덧쓰지 않게 먼저 멈춘다.
+        passGeneration += 1
         passTask?.cancel()
         passTask = nil
         isIndexing = false
@@ -294,16 +348,28 @@ public final class BackgroundIndexer: ObservableObject {
         let caret = caretProvider?()
 
         isIndexing = true
+        passGeneration += 1
+        let token = passGeneration
+        let bodyHash = Self.contentFingerprint(body)
+        passEntryID = entryID
+        passBodyHash = bodyHash
         // 파싱·디스크 IO·프롬프트 준비를 메인에서 떼어낸다 — 생성 자체는 엔진
         // actor에서 돌므로, 여기서 중요한 건 30만 자 파싱이 메인을 막지 않는 것.
         // self는 앱 수명 객체라 패스 동안의 강참조가 수명을 늘리지 않는다.
         passTask = Task.detached(priority: .utility) { [engine, self] in
+            let owned = { @MainActor () -> Bool in
+                self.canPublish(token: token, entryID: entryID)
+                    && self.passBodyHash == bodyHash && !Task.isCancelled
+            }
             // 인물 감지 — 결정적·LLM 없음이라 게이트·예산 밖에서 먼저 (PLAN §7).
             let outline = DocumentOutline.parse(body)
             let candidates = CharacterDetector.detect(
                 body: body, outline: outline,
                 known: knownNames, rejected: rejectedNames)
+            var superseded = false
             await MainActor.run {
+                // 늦은 이전 작업은 후보 발표·자동 등록조차 하지 않는다 (#82).
+                guard owned() else { superseded = true; return }
                 // HIGH 신뢰(구조 신호 다수) 후보는 자동 등록한다 (요구사항 §16,
                 // CLAUDE.md §3 갱신) — 카드에 자동 등록 표식이 남고 삭제는 한 번의
                 // 클릭이다. 별칭 후보(기존 인물의 변형일 가능성)는 자동 등록하지
@@ -316,6 +382,10 @@ public final class BackgroundIndexer: ObservableObject {
                     !auto.contains(where: { $0.name == candidate.name })
                 }
                 self.candidatesEntryID = entryID
+            }
+            if superseded {
+                await MainActor.run { self.finishPass(token: token) }
+                return
             }
             // 자동 등록이 카드를 늘렸을 수 있다 — 패스는 최신 카드로 돈다.
             let liveCharacters = await MainActor.run {
@@ -333,15 +403,24 @@ public final class BackgroundIndexer: ObservableObject {
                 let warnings = ConsistencyChecker.check(
                     snapshot: snapshot, characters: characters)
                 Task { @MainActor in
+                    // 이 새 Task는 부모 취소를 물려받지 않는다 — 소유권 가드가 대신
+                    // 걸러낸다 (토큰·문서 일치, #82).
+                    guard self.canPublish(token: token, entryID: entryID),
+                        self.passBodyHash == bodyHash
+                    else { return }
                     self.snapshot = snapshot
                     self.warnings = warnings
                 }
             } publishMetrics: { metrics in
-                Task { @MainActor in self.metrics = metrics }
+                Task { @MainActor in
+                    guard self.canPublish(token: token, entryID: entryID),
+                        self.passBodyHash == bodyHash
+                    else { return }
+                    self.metrics = metrics
+                }
             }
             await MainActor.run {
-                self.passTask = nil
-                self.isIndexing = false
+                self.finishPass(token: token)
             }
         }
     }
@@ -522,6 +601,7 @@ public final class BackgroundIndexer: ObservableObject {
             let analysis = await analyzeScene(
                 sceneText, engine: engine, parameters: parameters)
             callBudget -= 1
+            guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
             guard let analysis else { continue }  // 실패는 다음 패스가 재시도
 
             sidecar.sceneSummaries[scene.contentHash] = .init(
@@ -561,6 +641,7 @@ public final class BackgroundIndexer: ObservableObject {
                 let extracted = await extractEvents(
                     sceneText, sceneHash: scene.contentHash,
                     characters: characters, engine: engine, parameters: parameters)
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let extracted else { continue }  // 실패·인물 미등록 — 재시도 여지
                 sidecar.events[scene.contentHash] = extracted
                 sidecar.save()  // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
@@ -582,6 +663,7 @@ public final class BackgroundIndexer: ObservableObject {
                 let insights = await extractInsights(
                     sceneText, sceneHash: scene.contentHash,
                     characters: characters, engine: engine, parameters: parameters)
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let insights else { continue }  // 실패 — 다음 패스가 재시도
                 sidecar.insights[scene.contentHash] = insights
                 sidecar.save()
@@ -620,6 +702,7 @@ public final class BackgroundIndexer: ObservableObject {
                 let segments = await analyzeSegments(
                     sceneText, sceneHash: scene.contentHash,
                     engine: engine, parameters: parameters)
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let segments else { continue }  // 실패 — 다음 패스가 재시도
                 sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
                 sidecar.save()
@@ -637,6 +720,7 @@ public final class BackgroundIndexer: ObservableObject {
             await propagate(
                 outline: outline, sidecar: &sidecar,
                 parameters: parameters, engine: engine)
+            guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
             // 어떤 저널도 참조하지 않는 사이드카 정리 (삭제된 작품의 파생물).
             pruneOrphans(keeping: liveEntryIDs)
         }
@@ -657,10 +741,11 @@ public final class BackgroundIndexer: ObservableObject {
             }
             let memoHash = combinedHash(analysisEvents.map(\.stableKey))
             if analysisEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
-                if let analysis = await analyzeEventGraph(
+                let analysis = await analyzeEventGraph(
                     events: analysisEvents, characters: characters,
                     engine: engine, parameters: parameters)
-                {
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
+                if let analysis = analysis {
                     sidecar.eventGraph = EventGraphAnalysis(
                         causalLinks: analysis.causalLinks,
                         identities: analysis.identities,
@@ -683,11 +768,12 @@ public final class BackgroundIndexer: ObservableObject {
             let analysisEvents = uniqueEventsForAnalysis(orderedEvents)
             let memoHash = combinedHash(analysisEvents.map(\.stableKey) + ["plot"])
             if analysisEvents.count >= 3, sidecar.plotThreads?.memoHash != memoHash {
-                if let threads = await analyzePlotThreads(
+                let threads = await analyzePlotThreads(
                     events: analysisEvents, characters: characters,
                     causalLinks: sidecar.eventGraph?.causalLinks ?? [],
                     engine: engine, parameters: parameters)
-                {
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
+                if let threads = threads {
                     sidecar.plotThreads = PlotThreadAnalysis(
                         threads: PlotThreadParser.reconcile(
                             new: threads,
@@ -713,10 +799,11 @@ public final class BackgroundIndexer: ObservableObject {
                 let conversationText = String(
                     text.substring(with: NSRange(location: start, length: end - start))
                         .prefix(maxSceneCharacters))
-                guard let meta = await analyzeConversation(
+                let meta = await analyzeConversation(
                     conversationText, contentHash: record.contentHash,
                     engine: engine, parameters: parameters)
-                else { continue }
+                guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
+                guard let meta else { continue }
                 sidecar.conversationMeta[key] = meta
                 sidecar.save()
             }
