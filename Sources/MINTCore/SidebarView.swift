@@ -84,6 +84,9 @@ struct SidebarView: View {
     @FocusState private var renameFieldFocused: Bool
     /// 전역 검색어 — 비어 있지 않으면 트리 대신 검색 결과(평탄)를 보여준다.
     @State private var searchText = ""
+    /// 검색 결과 — body 패스마다 전체 본문 스캔하지 않게 .task(id:)로 디바운스해
+    /// 갱신한다 (이슈 #52). 스캔은 스토어의 결정적 search가 담당한다.
+    @State private var cachedSearchResults: [JournalEntry] = []
     @FocusState private var searchFieldFocused: Bool
 
     private var isSearching: Bool {
@@ -109,6 +112,14 @@ struct SidebarView: View {
             // Enter(onSubmit) 외에 포커스를 잃어도 커밋 — Esc는 editingID를
             // 먼저 비우므로 여기 걸리지 않는다.
             if !focused, let id = editingID { commitRename(id) }
+        }
+        // 검색어 변경 → 200ms 디바운스 후 한 번만 전체 스캔 (이슈 #52).
+        // hover 등 무관한 재평가에는 스캔이 다시 돌지 않는다.
+        .task(id: searchText) {
+            guard isSearching else { cachedSearchResults = []; return }
+            try? await Task.sleep(for: .milliseconds(200))
+            guard !Task.isCancelled else { return }
+            cachedSearchResults = store.search(searchText)
         }
         .onChange(of: store.searchFocusRequests) { _, _ in
             // ⌘⇧F — 검색 필드로 포커스 (문서 섹션으로 전환해서).
@@ -378,7 +389,7 @@ struct SidebarView: View {
 
     @ViewBuilder
     private var searchResults: some View {
-        let results = store.search(searchText)
+        let results = cachedSearchResults
         if results.isEmpty {
             Text("일치하는 저널이 없어요")
                 .font(MintFonts.uiFont(12))
