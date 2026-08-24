@@ -113,13 +113,20 @@ struct SidebarView: View {
             // 먼저 비우므로 여기 걸리지 않는다.
             if !focused, let id = editingID { commitRename(id) }
         }
-        // 검색어 변경 → 200ms 디바운스 후 한 번만 전체 스캔 (이슈 #52).
-        // hover 등 무관한 재평가에는 스캔이 다시 돌지 않는다.
+        // 검색어 변경 → 200ms 디바운스 후 백그라운드에서 한 번만 전체 스캔
+        // (이슈 #52·#33). 메인은 값 스냅샷만 떼어 넘긴다 — 30만 자 원고의
+        // 본문 스캔이 타이핑 프레임을 먹지 않게.
         .task(id: searchText) {
             guard isSearching else { cachedSearchResults = []; return }
             try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
-            cachedSearchResults = store.search(searchText)
+            let snapshot = store.entries
+            let query = searchText
+            let results = await Task.detached(priority: .userInitiated) {
+                EntryStore.filterMatches(snapshot, query: query)
+            }.value
+            guard !Task.isCancelled else { return }
+            cachedSearchResults = results
         }
         .onChange(of: store.searchFocusRequests) { _, _ in
             // ⌘⇧F — 검색 필드로 포커스 (문서 섹션으로 전환해서).

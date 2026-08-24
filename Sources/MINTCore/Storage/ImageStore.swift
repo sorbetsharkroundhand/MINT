@@ -65,11 +65,28 @@ public enum MintImageStore {
     }
 
     /// 상대경로(또는 절대경로)를 MINT 폴더 기준 파일 URL로 해석한다.
+    /// 테스트 격리(directoryOverride)를 존중한다 — 앱·테스트의 정상 통로.
     public static func url(for relativePath: String) -> URL {
         if relativePath.hasPrefix("/") {
             return URL(fileURLWithPath: relativePath)
         }
         return mintDirectory().appendingPathComponent(relativePath, isDirectory: false)
+    }
+
+    /// 격리 밖 해석기 — 오버라이드 없는 기본 위치만 계산하는 순수 함수.
+    /// **백그라운드 내보내기(EpubExporter) 전용** (#33): 메인 hop 없이 자산
+    /// 후보 위치를 알아야 하기 때문이다. 테스트가 자산을 심는 경로는 반드시
+    /// MainActor `url(for:)`/`resolveAssetURLs`를 거친다 — 이 함수는 폴백일 뿐.
+    public nonisolated static func resolveURL(for relativePath: String) -> URL {
+        if relativePath.hasPrefix("/") {
+            return URL(fileURLWithPath: relativePath)
+        }
+        let base = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser
+        return base
+            .appendingPathComponent("MINT", isDirectory: true)
+            .appendingPathComponent(relativePath, isDirectory: false)
     }
 
     /// 상대경로의 이미지를 로드한다 (경로별 캐시). 없거나 못 읽으면 nil.

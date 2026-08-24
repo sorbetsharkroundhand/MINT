@@ -126,7 +126,7 @@ final class BrokenImageTests: XCTestCase {
         var collected: [String] = []
         var missing: [String] = []
         let chapters = EpubExporter.makeChapters(
-            from: entry, copyingImagesInto: oebps, collected: &collected, missing: &missing)
+            from: entry, copyingImagesInto: oebps, collected: &collected, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
 
         XCTAssertEqual(missing, ["images/gone.png"], "누락이 조용히 생략됐다")
         let html = chapters[0].html

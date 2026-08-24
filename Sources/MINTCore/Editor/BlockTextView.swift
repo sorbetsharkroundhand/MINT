@@ -3475,7 +3475,8 @@ final class BlockTextView: NSTextView {
     /// 이미지 문단 한 줄 해석 — 공용 파서(ImageReferenceParser, 이슈 #12)의
     /// 결과만 쓴다. 옛 한 줄 정규식은 title·angle·괄호·reference를 놓쳤다.
     /// 원격·차단 소스는 렌더 대상에서 제외한다 (완전 로컬 원칙).
-    static func imageAttrs(from line: String) -> ImageAttrs? {
+    /// 비격리 순수 파서 — 백그라운드 EPUB 내보내기가 같은 규칙을 쓴다 (#33).
+    nonisolated static func imageAttrs(from line: String) -> ImageAttrs? {
         guard let ref = ImageReferenceParser.parse(line) else { return nil }
         switch ref.destinationKind {
         case .managedRelative, .externalFile:
