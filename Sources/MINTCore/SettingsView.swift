@@ -24,6 +24,10 @@ public struct SettingsView: View {
     @Environment(\.colorScheme) private var colorScheme
     /// 색상 팔레트 — 고르는 즉시 앱 전체에 반영된다 (ContentView도 관찰).
     @ObservedObject private var palette = PaletteSettings.shared
+    /// 모델 ID 초안 — 커밋(Enter/적용)까지 settings에 쓰지 않는다 (#65 H2).
+    @State private var modelIDDraft = ""
+    /// 초안 검증 실패 문구 — nil이면 오류 없음.
+    @State private var modelIDError: String?
 
     public init(
         settings: CompletionSettings = .shared,
@@ -49,6 +53,9 @@ public struct SettingsView: View {
         // 고정 크기 — 탭 안의 Form이 이 높이를 넘으면 그 안에서 스크롤한다.
         // 창이 내용을 따라 늘어나면 다시 "아래가 안 보이는" 문제로 돌아간다.
         .frame(width: 500, height: 520)
+        .onAppear { syncModelIDDraft() }
+        // 프리셋 적용 등 외부 경로로 모델이 바뀌면 초안·오류를 따라 맞춘다.
+        .onChange(of: settings.modelID) { _, _ in syncModelIDDraft() }
         .task {
             // 파일 집계는 백그라운드에서 — 설정 창이 뜨는 프레임을 안 막는다.
             metrics = await Task.detached(priority: .utility) {
@@ -140,13 +147,28 @@ public struct SettingsView: View {
     private var predictionTab: some View {
         Form {
             Section("모델") {
-                TextField("Hugging Face 저장소 id", text: modelIDBinding)
+                // 초안/커밋 경계 (이슈 #25 / #65 H2) — TextField는 modelIDDraft만
+                // 편집한다. 타이핑이 changeModel을 부르면 불완전한 ID마다 취소·
+                // 다운로드·preload가 반복됐다. 커밋은 Enter/적용에서 1회.
+                TextField("Hugging Face 저장소 id (namespace/model)", text: $modelIDDraft)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
-                Menu("프리셋에서 선택") {
-                    ForEach(ModelPresets.all, id: \.self) { preset in
-                        Button(preset) { changeModel(preset) }
+                    .onSubmit(commitModelIDDraft)
+                if let modelIDError {
+                    Text(modelIDError)
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(.red)
+                        .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
+                }
+                HStack {
+                    Menu("프리셋에서 선택") {
+                        ForEach(ModelPresets.all, id: \.self) { preset in
+                            Button(preset) { changeModel(preset) }  // 프리셋은 형식 보장 — 즉시 적용
+                        }
                     }
+                    Spacer()
+                    Button("적용", action: commitModelIDDraft)
+                        .disabled(modelIDDraft.trimmingCharacters(in: .whitespaces) == settings.modelID)
                 }
                 caption("모델 변경은 다음 제안부터 적용 — 새 모델은 첫 사용 시 다운로드돼요(수 GB).")
             }
@@ -311,12 +333,23 @@ public struct SettingsView: View {
             })
     }
 
-    /// TextField는 타이핑마다 set을 부른다 — 같은 id 재요청은 컨트롤러가
-    /// 무시하므로(가드) 커밋 시점만 걸린다.
-    private var modelIDBinding: Binding<String> {
-        Binding(
-            get: { settings.modelID },
-            set: { changeModel($0) })
+    /// 초안을 검증해 유효한 새 ID일 때만 changeModel을 **한 번** 호출한다 (#65 H2).
+    /// 같은 ID는 무해(무동작), 잘못된 ID는 인라인 오류로 현재 모델을 건드리지 않는다.
+    private func commitModelIDDraft() {
+        switch ModelIDCommit.validate(modelIDDraft) {
+        case .failure(let error):
+            modelIDError = error.message
+        case .success(let id):
+            modelIDError = nil
+            guard id != settings.modelID else { return }
+            changeModel(id)
+        }
+    }
+
+    /// 프리셋·외부 경로로 모델이 바뀌면 초안을 따라 맞춘다.
+    private func syncModelIDDraft() {
+        modelIDDraft = settings.modelID
+        modelIDError = nil
     }
 
     // MARK: - 공용 조각

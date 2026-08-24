@@ -142,6 +142,42 @@ public struct CompletionParameters: Sendable, Equatable {
 
 /// 자동완성 동작 설정 (M3 배선 · M4 Settings UI).
 ///
+/// 모델 ID 수동 입력의 커밋 경계 검증 (이슈 #25 / #65 H2).
+/// TextField는 초안만 편집하고, 이 검증을 통과한 값만 changeModel로 간다 —
+/// 불완전한 ID가 네트워크 작업(취소·다운로드·preload)을 시작하지 않게.
+public enum ModelIDCommit {
+
+    public enum ValidationError: Swift.Error, Equatable, CustomStringConvertible {
+        case empty
+        case malformed(String)
+
+        public var message: String {
+            switch self {
+            case .empty:
+                return "모델 ID를 입력해 주세요."
+            case .malformed(let raw):
+                return "'\(raw)'은(는) Hugging Face 형식이 아니에요 — namespace/model"
+            }
+        }
+
+        public var description: String { message }
+    }
+
+    /// 공백 제거 후 namespace/model 형식을 검증해 정제된 ID를 돌려준다.
+    public static func validate(_ raw: String) -> Result<String, ValidationError> {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return .failure(.empty) }
+        if trimmed.contains(where: { $0 == " " || $0 == "\t" }) {
+            return .failure(.malformed(trimmed))
+        }
+        let parts = trimmed.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+            !parts[0].isEmpty, !parts[1].isEmpty
+        else { return .failure(.malformed(trimmed)) }
+        return .success(trimmed)
+    }
+}
+
 /// 값은 `UserDefaults`에 보존된다. UI(SettingsView)는 이 객체에 바인딩하고,
 /// 추론 쪽에는 `parameters` 스냅샷만 넘긴다.
 @MainActor
