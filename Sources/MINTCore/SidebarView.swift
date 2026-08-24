@@ -15,20 +15,35 @@ enum SidebarSection: String {
 }
 
 /// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
+///
+/// 상태 의미는 색 하나에만 맡기지 않는다 (#38): 점은 시각 신호일 뿐, VoiceOver에는
+/// "일관성 경고 N개"라는 읽을 수 있는 값으로 전달한다. 점 자체를 장식(hidden)으로
+/// 빼 AX 트리 오염을 막는다.
 private struct WarningDot: View {
     @ObservedObject var indexer: BackgroundIndexer
     @ObservedObject var store: EntryStore
     let theme: MintTheme
 
+    private var warningCountForActiveEntry: Int {
+        guard indexer.snapshot?.entryID == store.activeID else { return 0 }
+        return indexer.warnings.count
+    }
+
     var body: some View {
         // 일관성 경고 — "확인해 보세요" 신호.
-        if indexer.snapshot?.entryID == store.activeID,
-            !indexer.warnings.isEmpty
-        {
+        if warningCountForActiveEntry > 0 {
             Circle()
                 .fill(theme.novelC)
                 .frame(width: 5, height: 5)
                 .offset(x: -3, y: 3)
+                .hidden()  // 장식 — 대신 아래 요소가 AX 값을 말한다 (#38).
+            Text("일관성 경고 \(warningCountForActiveEntry)개")
+                .font(MintFonts.uiFont(0.1))
+                .foregroundStyle(.clear)
+                .accessibilityAddTraits(.isStaticText)
+                .accessibilityLabel(Text("일관성 경고 \(warningCountForActiveEntry)개 — 서사 탭에서 검토"))
+        } else {
+            EmptyView()
         }
     }
 }
