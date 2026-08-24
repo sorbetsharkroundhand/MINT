@@ -26,6 +26,24 @@ public struct DocumentContext: Sendable, Equatable {
     }
 }
 
+/// 토큰 카운터 스냅샷 (#43, PLAN §11 "예산은 토큰 기준") — 엔진 액터가 로드된
+/// 모델의 토크나이저로 만들어 넘기는 값 객체. 원시 토크나이저 타입은 actor 경계를
+/// 넘지 않고, 카운트 클로저만 Sendable 값으로 통과한다 (메타 이슈 #65 Phase 4).
+/// encode는 어휘 사전에 대한 읽기 전용 변환이라 로드 이후 불변 — 동시 호출 안전을
+/// 전제로 한다 (swift-transformers PreTrainedTokenizer의 불변 어휘 구조).
+public struct TokenCounter: @unchecked Sendable {
+    private let impl: @Sendable (String) -> Int
+
+    public init(_ impl: @escaping @Sendable (String) -> Int) {
+        self.impl = impl
+    }
+
+    /// 문자열의 모델 토큰 수.
+    public func count(_ text: String) -> Int {
+        impl(text)
+    }
+}
+
 /// 엔진에 넘기는 조립 완료 프롬프트 (PLAN §10) — 엔진은 조립에 관여하지 않는다.
 public enum AssembledPrompt: Sendable, Equatable {
     /// 챗 템플릿 없이 그대로 이어쓸 텍스트 — KV 프리필 재사용 대상 (PLAN §12).
@@ -125,6 +143,38 @@ public enum ContextAssembler {
     /// 한다 (토큰당 품질, CLAUDE.md §5-1).
     static let maxCohortNames = 4
 
+    /// 토큰 예산 경로의 상수 (#43) — 카운터 주입 시에만 쓴다. nil 경로는
+    /// 위 문자 상수를 그대로 쓴다 (동작 불변).
+    /// A+B 헤더 토큰 상한 — 문자 700자 상한과 같은 지점을 겨눈다.
+    static let maxHeaderTokens = 400
+    /// B(요약 지식) 토큰 상한.
+    static let maxKnowledgeTokens = 400
+    /// 전체 프롬프트 기본 토큰 예산 — 엔진 안전망(기본 3072)보다 여유를 남겨
+    /// 조립 단계에서 먼저 맞춘다. 호출부가 `parameters.maxPromptTokens`로 덮는다.
+    public static let defaultPromptTokenBudget = 2_560
+
+    /// 삭감 사다리 손잡이 (#43) — 사건 → 카드 3→2장 → 요약 축소 → (최후) C 축소.
+    /// A(고정 헤더)는 어떤 단계에서도 버리지 않는다 (PLAN §11).
+    struct BudgetKnobs {
+        var maxCardsOverride: Int?
+        var knowledgeTokenOverride: Int?
+        var includeFlowEvents: Bool = true
+
+        static let defaults = BudgetKnobs()
+        /// 사다리 — 앞에서부터 시도하고 처음 맞는 단계로 확정한다.
+        static let ladder: [BudgetKnobs] = [
+            .defaults,
+            BudgetKnobs(includeFlowEvents: false),
+            BudgetKnobs(maxCardsOverride: 2, includeFlowEvents: false),
+            BudgetKnobs(
+                maxCardsOverride: 2, knowledgeTokenOverride: maxKnowledgeTokens / 2,
+                includeFlowEvents: false),
+            BudgetKnobs(
+                maxCardsOverride: 1, knowledgeTokenOverride: maxKnowledgeTokens / 4,
+                includeFlowEvents: false),
+        ]
+    }
+
     /// C(최근 원문 창)에 A·B를 얹어 최종 프롬프트를 만든다.
     ///
     /// `knowledge`/`prefixStartUTF16`은 M6 — 인덱서가 발행한 스냅샷에서 C 창
@@ -174,8 +224,88 @@ public enum ContextAssembler {
         document: DocumentContext?,
         knowledge: KnowledgeSnapshot? = nil,
         prefixStartUTF16: Int = 0,
-        style: PromptStyle
+        style: PromptStyle,
+        tokenCounter: TokenCounter? = nil,
+        tokenBudget: Int? = nil
     ) -> (prompt: AssembledPrompt, report: ContextReport) {
+        guard let counter = tokenCounter else {
+            // 현행 문자 예산 경로 — 동작 불변 (#43).
+            return assembleCore(
+                prefix: prefix, document: document, knowledge: knowledge,
+                prefixStartUTF16: prefixStartUTF16, style: style,
+                knobs: .defaults, counter: nil).result
+        }
+        // 토큰 예산 경로 (#43, PLAN §11) — 삭감 사다리를 순서대로 시도하고 처음
+        // 맞는 단계로 확정한다. 순서: 사건 → 카드 3→2장 → 요약 축소 → 최후 C 축소.
+        let budget = tokenBudget ?? defaultPromptTokenBudget
+        var window = prefix
+        var outcome = assembleCore(
+            prefix: window, document: document, knowledge: knowledge,
+            prefixStartUTF16: prefixStartUTF16, style: style,
+            knobs: BudgetKnobs.ladder[0], counter: counter, tokenBudget: budget)
+        for index in BudgetKnobs.ladder.indices.dropFirst() {
+            if (outcome.totalTokens ?? .max) <= budget { break }
+            // 다음 단계로 넘어가기 전에 C 창을 어절 경계에서 한 단계 줄인다 —
+            // 단어 중간 절단은 KV 재사용 모델의 LCP와 문장 품질을 함께 깬다.
+            let trimmed = Self.wordBoundaryTrimmed(window, keepingFraction: 0.8)
+            if trimmed != window { window = trimmed }
+            outcome = assembleCore(
+                prefix: window, document: document, knowledge: knowledge,
+                prefixStartUTF16: max(0, prefixStartUTF16 - ((prefix.count) - (window.count))),
+                style: style,
+                knobs: BudgetKnobs.ladder[index], counter: counter, tokenBudget: budget)
+        }
+        // 사다리를 다 타고도 넘치면 — C 창만 계속 줄인다 (최후 수단). 지식·카드는
+        // 이미 최소라 A 헤더와 남은 C 중에서는 C가 늘 희생이다. 무한 루프 가드.
+        var safety = 0
+        while (outcome.totalTokens ?? .max) > budget, !window.isEmpty, safety < 48 {
+            let trimmed = Self.wordBoundaryTrimmed(window, keepingFraction: 0.7)
+            if trimmed == window { break }  // 더는 못 자른다 — 안전망(엔진 클램프)으로.
+            window = trimmed
+            outcome = assembleCore(
+                prefix: window, document: document, knowledge: knowledge,
+                prefixStartUTF16: max(0, prefixStartUTF16 - ((prefix.count) - (window.count))),
+                style: style,
+                knobs: BudgetKnobs.ladder.last!, counter: counter, tokenBudget: budget)
+            safety += 1
+        }
+        return outcome.result
+    }
+
+    /// 어절(공백·줄바꿈) 경계에서 **앞부분**을 잘라낸다 — 단어 중간 절단 금지 (#43).
+    /// 한 번에 keepingFraction만큼 남긴다. 자를 게 없으면 원문을 돌려준다.
+    static func wordBoundaryTrimmed(_ text: String, keepingFraction: Double) -> String {
+        guard keepingFraction < 1, !text.isEmpty else { return text }
+        var starts: [Int] = []
+        var previousWasBoundary = true
+        var offset = 0
+        for scalar in text.unicodeScalars {
+            let isSpace = scalar == " " || scalar.properties.isWhitespace
+            if previousWasBoundary, !isSpace { starts.append(offset) }
+            previousWasBoundary = isSpace
+            offset += 1
+        }
+        let keepCount = max(1, Int(Double(starts.count) * keepingFraction))
+        guard keepCount < starts.count else { return text }
+        let cutOffset = starts[starts.count - keepCount]
+        guard cutOffset > 0 else { return text }
+        let ns = text as NSString
+        guard cutOffset < ns.length else { return text }
+        return ns.substring(from: cutOffset)
+    }
+
+    /// 조립 본체 — 문자/토큰 두 예산 단위를 knobs·counter로 갈라 낸다.
+    /// counter가 nil이면 기존 산술과 결과가 동일하다 (회귀 그물: nil 경로 불변, #43).
+    static func assembleCore(
+        prefix: String,
+        document: DocumentContext?,
+        knowledge: KnowledgeSnapshot?,
+        prefixStartUTF16: Int,
+        style: PromptStyle,
+        knobs: BudgetKnobs,
+        counter: TokenCounter?,
+        tokenBudget: Int? = nil
+    ) -> (result: (prompt: AssembledPrompt, report: ContextReport), totalTokens: Int?) {
         var items: [ContextReport.Item] = []
         let controls = Controls(knowledge)
         let cursor = prefixStartUTF16 + (prefix as NSString).length
@@ -186,12 +316,14 @@ public enum ContextAssembler {
         var header = headerText(
             document: document, window: prefix,
             knowledge: knowledge, windowStart: prefixStartUTF16,
-            position: position, controls: controls, report: &items)
+            position: position, controls: controls, report: &items,
+            knobs: knobs, counter: counter)
         if document?.kind == .novel,
             let knowledge,
             case let block = knowledgeText(
                 knowledge, before: prefixStartUTF16, position: position,
-                controls: controls, report: &items),
+                controls: controls, report: &items,
+                knobs: knobs, counter: counter),
             !block.isEmpty
         {
             header = header.isEmpty ? block : header + "\n" + block
@@ -213,7 +345,6 @@ public enum ContextAssembler {
         if document?.kind == .novel, let knowledge, let document,
             isInsideUtterance(prefix)
         {
-            let cursor = prefixStartUTF16 + (prefix as NSString).length
             let block = dialogueText(
                 knowledge, document: document, cursor: cursor, report: &items)
             if !block.isEmpty {
@@ -221,17 +352,24 @@ public enum ContextAssembler {
             }
         }
         let report = ContextReport(items: items)
+        let assembled: AssembledPrompt
         switch style {
         case .continuation:
             // 헤더와 본문은 빈 줄 하나로만 구분 — 이어쓰기 흐름을 깨지 않는 최소 구조.
-            return (.continuation(header.isEmpty ? prefix : header + "\n\n" + prefix), report)
+            assembled =
+                header.isEmpty ? .continuation(prefix) : .continuation(header + "\n\n" + prefix)
         case .instruct:
             let system =
                 header.isEmpty
                 ? instructSystem
                 : instructSystem + "\n\n[작품 정보]\n" + header
-            return (.instruct(system: system, user: instructUser(prefix: prefix)), report)
+            assembled = .instruct(system: system, user: instructUser(prefix: prefix))
         }
+        // 총량 보고 — 토큰 경로에서만 (사다리 판정용, #43).
+        if let counter, case .continuation(let text) = assembled {
+            return ((assembled, report), counter.count(text))
+        }
+        return (((assembled, report)), nil)
     }
 
     /// 커서가 속한 씬의 메타 + 서사 위치 + 그라운딩 — "지금 장면: 아내의 외출 (회상)" +
@@ -321,7 +459,9 @@ public enum ContextAssembler {
         _ knowledge: KnowledgeSnapshot, before windowStart: Int,
         position: KnowledgeSnapshot.NarrativePosition? = nil,
         controls: Controls = Controls(nil),
-        report: inout [ContextReport.Item]
+        report: inout [ContextReport.Item],
+        knobs: BudgetKnobs = .defaults,
+        counter: TokenCounter? = nil
     ) -> String {
         let scenes = knowledge.outline.scenes
         // C 창 이전에 완전히 끝난 씬들 — 창과 겹치는 씬은 원문이 이미 C에 있다.
@@ -356,13 +496,18 @@ public enum ContextAssembler {
         let cursorChapter = scenes.last(where: { $0.utf16Range.lowerBound <= windowStart })
             .map { Array($0.headingPath.prefix(2)) }
 
-        var budget = maxKnowledgeCharacters
+        // 예산 단위 (#43) — 카운터가 있으면 토큰으로 접는다. nil이면 문자(불변).
+        func cost(_ text: String) -> Int { counter?.count(text) ?? text.count }
+        var budget =
+            knobs.knowledgeTokenOverride
+            ?? (counter != nil ? maxKnowledgeTokens : maxKnowledgeCharacters)
         var lines: [String] = []
         var reported: [ContextReport.Item] = []
 
         // 흐름 사건 (v5, 요구사항 §30) — 회상 집필 중이면 그 인물 흐름의 이전
         // 사건을 우선 주입한다: "이 회상의 주인이 겪어온 일"이 가장 진한 신호다.
-        if writingInPast, let flowID = position?.flowID {
+        // 삭감 사다리 1단 — 예산 초과 시 이 블록부터 빠진다 (#43).
+        if knobs.includeFlowEvents, writingInPast, let flowID = position?.flowID {
             let flowEvents = knowledge.flowEvents(of: flowID)
             for event in flowEvents.suffix(2) {
                 // stableKey에 정본 사건 키를 넣는다 — 두 사건이 "flow" 하나를
@@ -371,13 +516,13 @@ public enum ContextAssembler {
                 let key = "flow|\(event.canonicalKey)"
                 guard controls.allows(key) else { continue }
                 let line = "이 흐름의 사건: \(event.summary)"
-                guard line.count <= budget else { break }
+                guard cost(line) <= budget else { break }
                 lines.append(line)
                 reported.append(
                     ContextReport.Item(
                         kind: .flowEvent, text: line, jumpQuery: event.quote,
                         stableKey: key, pinned: controls.pinned(key)))
-                budget -= line.count
+                budget -= cost(line)
             }
         }
 
@@ -433,7 +578,7 @@ public enum ContextAssembler {
                 kind = .chapterSummary
                 stableKey = "chapter|\(chapterKey)"
             }
-            guard line.count <= budget else {
+            guard cost(line) <= budget else {
                 if controls.pinned(stableKey) { continue } else { break }
             }
             picked.append(
@@ -442,7 +587,7 @@ public enum ContextAssembler {
                     kind: kind, text: line,
                     jumpUTF16: scene.utf16Range.lowerBound,
                     stableKey: stableKey, pinned: controls.pinned(stableKey))))
-            budget -= line.count
+            budget -= cost(line)
         }
         // 문서 순서 복원 — 씬 시작 위치로 정렬 (Pin 우선 수집과 무관하게 안정 출력).
         let ordered = picked.sorted {
@@ -460,7 +605,7 @@ public enum ContextAssembler {
             !writingInPast || controls.pinned("work")
         {
             let line = "지난 줄거리: \(work)"
-            if line.count + 1 <= budget {
+            if cost(line) + 1 <= budget {
                 lines.append(line)
                 reported.append(
                     ContextReport.Item(
@@ -573,6 +718,11 @@ public enum ContextAssembler {
             windowStart: windowStart, report: &report)
     }
 
+    /// 헤더 예산 단위 — 카운터가 있으면 토큰 상한, 없으면 문자 상한 (#43).
+    static func headerCost(_ text: String, counter: TokenCounter?) -> Int {
+        counter?.count(text) ?? text.count
+    }
+
     static func headerText(
         document: DocumentContext?,
         window: String,
@@ -580,7 +730,9 @@ public enum ContextAssembler {
         windowStart: Int = 0,
         position: KnowledgeSnapshot.NarrativePosition? = nil,
         controls: Controls = Controls(nil),
-        report: inout [ContextReport.Item]
+        report: inout [ContextReport.Item],
+        knobs: BudgetKnobs = .defaults,
+        counter: TokenCounter? = nil
     ) -> String {
         guard let document, document.kind == .novel else { return "" }
         // 줄 + 그 줄이 만든 리포트 항목들 — 예산에서 줄이 떨어지면 항목도
@@ -608,7 +760,8 @@ public enum ContextAssembler {
             position?.chrono == .before && position?.layer.isTemporalShift == true
 
         for card in selectCards(
-            from: document.characters, window: window, controls: controls)
+            from: document.characters, window: window, controls: controls,
+            maxCards: knobs.maxCardsOverride ?? Self.maxCards)
         {
             guard controls.allows("card|\(card.id.uuidString)") else { continue }
             let aliases = aliasList(card)
@@ -692,12 +845,17 @@ public enum ContextAssembler {
         }
         // 줄 단위 예산 — 통짜 prefix는 마지막 줄을 중간에서 잘라 리포트와
         // 프롬프트가 어긋난다. 예산을 넘는 줄부터 통째로 버린다.
+        // 줄 단위 예산 — 통짜 prefix는 마지막 줄을 중간에서 잘라 리포트와
+        // 프롬프트가 어긋난다. 예산을 넘는 줄부터 통째로 버린다. 단위(#43):
+        // 카운터 주입 시 토큰, 미주입 시 문자 (동작 불변).
+        let headerLimit =
+            counter != nil ? maxHeaderTokens : maxHeaderCharacters
         var total = 0
         var kept: [String] = []
         for (text, items) in lines {
-            guard total + text.count + 1 <= maxHeaderCharacters else { break }
+            guard total + headerCost(text, counter: counter) + 1 <= headerLimit else { break }
             kept.append(text)
-            total += text.count + 1
+            total += headerCost(text, counter: counter) + 1
             report.append(contentsOf: items)
         }
         return kept.joined(separator: "\n")
@@ -763,31 +921,33 @@ public enum ContextAssembler {
     /// 언급 최신순 정렬은 창이 밀릴 때마다 순서를 흔들어 KV 프리픽스를 식힌다.
     /// 세대 단위 랭킹은 M6 (PLAN §11).
     static func selectCards(
-        from cards: [CharacterCard], window: String, controls: Controls = Controls(nil)
+        from cards: [CharacterCard], window: String, controls: Controls = Controls(nil),
+        maxCards overrideMax: Int? = nil
     ) -> [CharacterCard] {
+        let limit = overrideMax ?? maxCards
         let valid = cards.filter {
             !$0.name.trimmingCharacters(in: .whitespaces).isEmpty
         }
-        guard valid.count > maxCards else { return valid }
+        guard valid.count > limit else { return valid }
 
         // Pin된 카드는 상한과 무관하게 **전부** 실린다 — 사용자 지정(§31)이 휴리스틱
         // 예산을 이긴다 (CLAUDE.md §1-5). prefix로 자르면 초과분이 말없이 탈락해
         // "고정했는데 빠졌다"는 신뢰 붕괴가 된다. 토큰 안전망은 엔진의 3072 클램프가 담당.
         var picked = valid.filter { controls.pinned("card|\($0.id.uuidString)") }
-        if picked.count < maxCards {
+        if picked.count < limit {
             for card in valid where !picked.contains(where: { $0.id == card.id }) {
                 if window.contains(card.name)
                     || aliasList(card).contains(where: { window.contains($0) })
                 {
                     picked.append(card)
-                    if picked.count >= maxCards { break }
+                    if picked.count >= limit { break }
                 }
             }
         }
-        if picked.count < maxCards {
+        if picked.count < limit {
             for card in valid where !picked.contains(where: { $0.id == card.id }) {
                 picked.append(card)
-                if picked.count >= maxCards { break }
+                if picked.count >= limit { break }
             }
         }
         let chosen = Set(picked.map(\.id))

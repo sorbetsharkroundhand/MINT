@@ -185,6 +185,20 @@ actor ModelLifetimeCoordinator {
 /// - 토큰 상한(기본 12) + **문장 경계 조기 종료**로 단어/구 단위 제안을 보장.
 public actor CompletionEngine {
 
+    /// 로드된 모델의 토큰 카운터 스냅샷 (#43) — 조립기(메인)가 프롬프트 예산을
+    /// 판정하는 데 쓴다. **원시 토크나이저는 경계를 넘지 않는다**: 카운트 클로저만
+    /// Sendable 값으로 통과한다 (메타 이슈 #65 Phase 4 — "토큰 카운터 스냅샷 주입").
+    /// 모델이 로드 전이면 nil — 호출부는 현행 문자 상수를 쓴다 (동작 불변).
+    public func makeTokenCounter() async -> TokenCounter? {
+        guard let container else { return nil }
+        return await container.perform { context in
+            let tokenizer = context.tokenizer
+            return TokenCounter { text in
+                tokenizer.encode(text: text).count
+            }
+        }
+    }
+
     /// 한 번의 자동완성 결과 + 지연 측정치(M2 로그·상태 바 표시용).
     public struct Completion: Sendable {
         /// 고스트로 띄울 제안 텍스트(후처리 완료). 비어 있으면 "제안 없음".
