@@ -35,3 +35,39 @@ final class PublishedWriteGuardTests: XCTestCase {
         token.cancel()
     }
 }
+
+/// MintTheme Equatable과 팔레트 파생 캐시 (이슈 #54).
+@MainActor
+final class ThemeEquatabilityTests: XCTestCase {
+
+    func test같은입력은동등하고다른팔레트는비동등이다() {
+        XCTAssertEqual(MintTheme.of(.light), MintTheme.of(.light))
+        XCTAssertNotEqual(MintTheme.of(.light), MintTheme.of(.dark))
+
+        var hexes = PaletteSettings.shared.light.hexes
+        let original = hexes[3]
+        hexes[3] = 0x123456
+        defer { PaletteSettings.shared.light.hexes[3] = original }
+        XCTAssertNotEqual(
+            MintTheme.of(.light, palette: MintPalette(hexes: hexes)),
+            MintTheme.of(.light))
+    }
+
+    func test팔레트캐시는hex변화에즉시무효화된다() {
+        let settings = PaletteSettings.shared
+        settings.enabled = true
+        let originalHex = settings.light.hexes[3]
+        let original = settings.theme(for: .light)
+
+        // 같은 입력 — 캐시가 같은 결과를 준다.
+        XCTAssertEqual(settings.theme(for: .light), original)
+
+        // hex 변경 — 캐시가 무효화돼 새 색이 반영된다.
+        settings.light.hexes[3] = 0x123456 &+ 0x000001
+        let changed = settings.theme(for: .light)
+        XCTAssertNotEqual(changed, original, "hex 변경이 캐시에 묻혔다")
+
+        settings.light.hexes[3] = originalHex
+        _ = settings.theme(for: .light)
+    }
+}
