@@ -428,6 +428,7 @@ private struct CharacterCardRow: View {
                     card.locked == true
                         ? "잠김 — 자동 이해가 이 카드를 고치지 않아요"
                         : "열림 — 소개가 비어 있으면 자동 이해가 채울 수 있어요")
+                .accessibilityLabel(Text(card.locked == true ? "카드 잠금 해제" : "카드 잠금"))  // #55
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                         .font(.system(size: 11))
@@ -438,6 +439,7 @@ private struct CharacterCardRow: View {
                 .buttonStyle(.plain)
                 .onHover { deleteHovered = $0 }
                 .help("인물 삭제")
+                .accessibilityLabel(Text("인물 삭제"))  // #55
             }
             TextField("성격·말투·관계 — 짧게 (예: 신중하고 직설적. 반말, \"…거든\" 버릇)",
                 text: $card.note, axis: .vertical)

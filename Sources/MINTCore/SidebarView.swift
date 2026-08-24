@@ -860,6 +860,8 @@ private struct HeaderIconButton<Label: View>: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
+        // 아이콘 전용 버튼의 VoiceOver 레이블 — help는 힌트일 뿐이다 (#55).
+        .accessibilityLabel(Text(help))
     }
 }
 
@@ -886,6 +888,7 @@ private struct RowIconButton: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
+        .accessibilityLabel(Text(help))  // #55
     }
 }
 
@@ -911,6 +914,7 @@ private struct DeleteButton: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help("이 저널 삭제")
+        .accessibilityLabel(Text("이 저널 삭제"))  // #55
     }
 }
 
