@@ -35,10 +35,11 @@
   전역 검색(⌘⇧F), 작성일 변경(사이드바에서 저널 오른쪽 클릭).
 - **내보내기**: Markdown · **EPUB 3**(소설, 설정의 저자 이름이 메타데이터로 실림) ·
   인쇄(PDF 저장 포함).
-- **모델 선택**: 툴바의 모델 스위처에서 **MINT**(27B 밀집·2bit, ~8.5GB) /
-  **Basil**(30B·A3B MoE, ~16.9GB) / **Peppermint**(35B·A3B MoE, ~20GB) 전환.
-  기본은 설치가 가장 작은 **MINT**입니다. 셋은 크기 사다리가 아니라 성격이
-  다른 모델이라 허브 이름을 씁니다.
+- **모델 선택**: 툴바의 모델 스위처에서 **Basil**(MoE 30B·활성 3B, ~16.9GB, 기본) /
+  **MINT**(27B 밀집·2bit, ~8.5GB) / **Peppermint**(35B·A3B MoE, ~20GB) 전환.
+  셋은 크기 사다리가 아니라 성격이 다른 모델이라 허브 이름을 씁니다. 벤치 실측
+  (docs/model-lineup-bench.md)으로 Basil만 지연 예산·KV 재사용을 충족해 기본이
+  되었고, MINT는 한국어 제안 오염·느린 웜 시작이 확인되어 기본에서 해제됐습니다.
 - 저장은 전부 로컬: `~/Documents/MINT/entries.json`(본문 마크다운 + 사용자
   결정), `~/Documents/MINT/knowledge/`(AI 이해 캐시), `~/Documents/MINT/images/`.
 
@@ -219,7 +220,7 @@ git graph의 시각 언어를 소설의 서사 구조에 옮겼습니다. 핵심
 
 - **Apple Silicon Mac** (M1 이상) — AI 추론이 Apple Silicon GPU 기반이라 필수.
 - **macOS 14+**, **Xcode 16+** (Swift 6).
-- 첫 실행 시 AI 모델(**MINT**, ~8.5GB)을 자동으로 내려받습니다. 툴바 스위처나
+- 첫 실행 시 AI 모델(**Basil**, ~16.9GB)을 선택 화면에서 고르면 내려받습니다. 툴바 스위처나
   설정(⌘,)에서 Basil·Peppermint로 바꿀 수 있습니다(용량 증가).
   디스크·회선이 부담이면 설정에서 더 가벼운 모델 id를 직접 넣을 수 있습니다
   (예: `mlx-community/Qwen2.5-3B-Instruct-4bit`, ~1.9GB).
