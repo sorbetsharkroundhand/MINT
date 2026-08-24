@@ -929,7 +929,7 @@ public final class EntryStore: ObservableObject {
         let movedNow = entries[index]
         if movedNow.folderID == folderID,
             childEntries(of: folderID).firstIndex(where: { $0.id == id })
-                == beforeID.flatMap { b in childEntries(of: folderID).firstIndex { $0.id == b } }
+                == beforeID.flatMap({ b in childEntries(of: folderID).firstIndex { $0.id == b } })
         {
             return
         }
@@ -965,9 +965,9 @@ public final class EntryStore: ObservableObject {
         guard canMoveFolder(id, toParent: parentID),
             let index = folders.firstIndex(where: { $0.id == id })
         else { return false }
-        var siblings = childFolders(of: parentID).filter { $0.id != id }
-        let insertAt = beforeID.flatMap { b in siblings.firstIndex { $0.id == b } }
-            ?? siblings.count
+        let insertAt = beforeID.flatMap { b in
+            childFolders(of: parentID).firstIndex { $0.id == b }
+        } ?? childFolders(of: parentID).count
         var moved = folders[index]
         let orderUnchanged = moved.parentID == parentID
             && childFolders(of: parentID).firstIndex(where: { $0.id == id }) == insertAt
@@ -1395,7 +1395,9 @@ public final class EntryStore: ObservableObject {
     /// 라이터 액터로 hop하므로 대형 원고에서도 메인이 막히지 않는다.
     private func scheduleSave() {
         saveTask?.cancel()
-        savePhase = .saving
+        // 이미 saving이면 재발행하지 않는다 — 타이핑마다 objectWillChange가
+        // 상태 바를 다시 그리지 않게 (이슈 #51).
+        if case .saving = savePhase {} else { savePhase = .saving }
         saveGeneration += 1
         let generation = saveGeneration
         let snapshot = currentSnapshot

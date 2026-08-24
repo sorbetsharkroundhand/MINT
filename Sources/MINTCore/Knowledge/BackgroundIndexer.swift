@@ -26,6 +26,10 @@ public final class BackgroundIndexer: ObservableObject {
     @Published public private(set) var snapshot: KnowledgeSnapshot?
     /// 진행 중 패스 표시 (툴바 칩 등 UI 관찰용 — 조용한 UI 원칙상 필수는 아니다).
     @Published public private(set) var isIndexing = false
+    /// 동일 값 재발행 방지 — noteChange(키 입력당)의 무의미한 objectWillChange 차단 (#51).
+    private func setIsIndexing(_ newValue: Bool) {
+        if isIndexing != newValue { isIndexing = newValue }
+    }
     /// 인물 감지 후보 (M6, PLAN §7) — 감지는 자동, **등록은 사용자 확인**
     /// (CLAUDE.md §3). 바이블 팝오버가 전부 나열해 검토받는다 (M6-8).
     @Published public private(set) var characterCandidates: [CharacterDetector.Candidate] = []
@@ -113,7 +117,7 @@ public final class BackgroundIndexer: ObservableObject {
     func finishPass(token: Int) {
         guard passGeneration == token else { return }  // 늦은 이전 작업 — 무시
         passTask = nil
-        isIndexing = false
+        setIsIndexing(false)
     }
 
     /// 발행 가드 — 토큰·대상 문서 일치만 통과 (스냅샷·후보·지표 공용, #82).
@@ -159,7 +163,7 @@ public final class BackgroundIndexer: ObservableObject {
         hydrateTask = nil
         passTask?.cancel()
         passTask = nil
-        isIndexing = false
+        setIsIndexing(false)
     }
 
     // MARK: - 트리거
@@ -174,7 +178,7 @@ public final class BackgroundIndexer: ObservableObject {
         passBodyHash = nil
         passTask?.cancel()
         passTask = nil
-        isIndexing = false
+        setIsIndexing(false)
 
         // 저장된 지식의 웜 로드 — 앱 시작·문서 전환 직후 사이드카를 읽어 즉시
         // 발행한다 (LLM 없음). 이게 없으면 껐다 켠 뒤 패스가 돌 때까지(자동완성
@@ -309,7 +313,7 @@ public final class BackgroundIndexer: ObservableObject {
         passGeneration += 1
         passTask?.cancel()
         passTask = nil
-        isIndexing = false
+        setIsIndexing(false)
         let entryID = entry.id
         var fresh = KnowledgeSidecar(entryID: entryID)
         fresh.generation = KnowledgeSidecar.load(entryID: entryID).generation + 1
@@ -347,7 +351,7 @@ public final class BackgroundIndexer: ObservableObject {
         let recorded = entry.recordedConversations ?? []
         let caret = caretProvider?()
 
-        isIndexing = true
+        setIsIndexing(true)
         passGeneration += 1
         let token = passGeneration
         let bodyHash = Self.contentFingerprint(body)

@@ -401,12 +401,14 @@ public final class CompletionController: ObservableObject {
         let parameters = settings.parameters
         let debounce = Duration.milliseconds(settings.debounceMilliseconds)
 
-        isPredicting = true
         pendingCaret = caretLocation
         pendingTask = Task { [weak self] in
             // 입력이 멈출 때까지 대기 — 그 사이 새 입력이 오면 이 태스크가 취소된다.
             try? await Task.sleep(for: debounce)
             guard !Task.isCancelled, let self else { return }
+            // "예측 중" 표시는 디바운스가 끝난 실제 생성 개시에만 켠다 —
+            // 타이핑 중 ModelChip 애니메이션이 진동하지 않게 (이슈 #51).
+            if !self.isPredicting { self.isPredicting = true }
             await self.runCompletion(
                 prefix: prefix,
                 caretLocation: caretLocation,
@@ -578,7 +580,7 @@ public final class CompletionController: ObservableObject {
         pendingTask = nil
         pendingCaret = nil
         suggestionAnchor = nil
-        isPredicting = false
+        if isPredicting { isPredicting = false }
         if suggestion != nil {
             // 수락 경로가 아니면 이 소멸은 거절이다 (편집·Esc·커서 이동).
             if !suppressDismissLog {
@@ -598,7 +600,7 @@ public final class CompletionController: ObservableObject {
         expected: Int
     ) async {
         // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
-        defer { if expected == generation { isPredicting = false } }
+        defer { if expected == generation, isPredicting { isPredicting = false } }
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let document = documentContextProvider?()
