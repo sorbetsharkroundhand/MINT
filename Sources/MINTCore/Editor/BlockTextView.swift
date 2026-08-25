@@ -3394,6 +3394,9 @@ final class BlockTextView: NSTextView {
             guard let firstMember = members.first, let lastMember = members.last else {
                 continue
             }
+            // 가시 한정 (#18 2단계) — LaTeX 추출(문단 복사)은 비싸다. 화면 밖
+            // 그룹은 높이가 이미 유지되므로 여기서 건너뛴다.
+            if limitToVisible, !isVisible(group, in: []) { continue }
             // 그룹 문단은 원문($$ 포함)이 저장돼 있다 — 렌더할 LaTeX만 추출한다.
             let latex = members.map { member -> String in
                 var source =
@@ -3418,7 +3421,6 @@ final class BlockTextView: NSTextView {
                 editingMath = (firstMember.range, latex)
                 continue
             }
-            if !isVisible(group, in: groups) { continue }
             guard let image = MathRenderer.image(
                 latex: latex, color: palette.ink, fontSize: mathFontSize)
             else { continue }  // 파싱 불가 — 직전 높이 유지 (기존 정책)
