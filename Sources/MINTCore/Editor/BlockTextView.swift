@@ -329,6 +329,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             if commandSelector == #selector(NSStandardKeyBindingResponding.insertTab(_:)) {
                 guard let accepted = controller.acceptSuggestion() else { return false }
                 textView.insertText(accepted, replacementRange: textView.selectedRange())
+                (textView as? BlockTextView)?.postGhostAnnouncement("제안을 수락했어요")  // #24
                 return true
             }
 
@@ -344,6 +345,15 @@ public struct MintBlockEditor: NSViewRepresentable {
                     let word = controller.acceptWord(insertionLocation: range.location)
                 else { return false }
                 textView.insertText(word, replacementRange: range)
+                // 부분 수락 상태도 VoiceOver에 안내 (#24 완료 조건 2).
+                if let blockView = textView as? BlockTextView {
+                    if let remaining = blockView.ghostText, !remaining.isEmpty {
+                        blockView.postGhostAnnouncement(
+                            "한 단어를 수락했어요 — 남은 제안: \(remaining.prefix(60))")
+                    } else {
+                        blockView.postGhostAnnouncement("제안 전체를 수락했어요")
+                    }
+                }
                 return true
             }
 
@@ -351,6 +361,7 @@ public struct MintBlockEditor: NSViewRepresentable {
                 || commandSelector == #selector(NSStandardKeyBindingResponding.complete(_:)) {
                 if controller.hasSuggestion {
                     controller.dismissSuggestion()
+                    (textView as? BlockTextView)?.postGhostAnnouncement("제안을 거절했어요")  // #24
                     return true
                 }
                 if controller.hasConversationSuggestion {
@@ -611,10 +622,25 @@ final class BlockTextView: NSTextView {
     /// 페이드 인 애니메이션 태스크 — 새 제안·폐기 때 취소하고 다시 건다.
     private var ghostFadeTask: Task<Void, Never>?
 
+    /// 고스트 세대 (#24) — 새 제안이 뜰 때마다 증가한다. 시각 고스트와 접근성
+    /// 노출이 같은 원천(`ghostText`)에서 같은 세대로 읽힘을 보장하는 근거다.
+    /// 사라짐(→nil)은 세대를 올리지 않는다 — 같은 제안의 생애주기 동안 불변.
+    private(set) var ghostGeneration = 0
+
+    /// 접근성 경로가 쓰는 현재 제안 스냅샷 — 시각 드로잉과 **같은 원천**이다 (#24).
+    func ghostSnapshotForAccessibility() -> (text: String, generation: Int)? {
+        guard let ghost = ghostText, !ghost.isEmpty else { return nil }
+        return (ghost, ghostGeneration)
+    }
+
     /// 현재 고스트 텍스트. nil/빈 문자열이면 그리지 않는다.
     var ghostText: String? {
         didSet {
             guard ghostText != oldValue else { return }
+            if let ghost = ghostText, !ghost.isEmpty, (oldValue == nil || oldValue?.isEmpty == true) {
+                ghostGeneration += 1
+                announceGhostAppearance(ghost)
+            }
             // 없던 자리에 제안이 새로 뜰 때만 페이드 인 — 짧아짐·사라짐은 즉시 반영.
             if let ghost = ghostText, !ghost.isEmpty, oldValue == nil {
                 startGhostFadeIn()
@@ -4398,8 +4424,73 @@ final class BlockTextView: NSTextView {
         // 프래그먼트 top(caretRect.minY)이 아니라 본문 글리프와 같은
         // 베이스라인에 맞춰야 실제 글자 높이와 일치한다 (줄 간격과 무관하게).
         let y = caretBaselineY().map { $0 - font.ascender } ?? caretRect.minY
-        NSAttributedString(string: ghost, attributes: attributes)
-            .draw(at: NSPoint(x: caretRect.maxX, y: y))
+        let attributed = NSAttributedString(string: ghost, attributes: attributes)
+        let containerWidth = textContainer?.size.width ?? bounds.width
+        // 커서 오른쪽 남은 폭 — 줄 끝·좁은 창에서 클리핑되지 않게 (#24).
+        let inlineAvailable = containerWidth - caretRect.maxX + textContainerOrigin.x
+        if Self.ghostFitsInline(
+            textWidth: attributed.size().width, availableWidth: inlineAvailable)
+        {
+            attributed.draw(at: NSPoint(x: caretRect.maxX, y: y))
+            return
+        }
+        // 줄바꿈 — 다음 줄 시작(컨테이너 좌측)에서 최대 3줄로 감싸 그린다.
+        let wrappedWidth = max(120, containerWidth)
+        var bounding = attributed.boundingRect(
+            with: NSSize(width: wrappedWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin])
+        let lineHeight = ceil(font.ascender - font.descender + font.leading)
+        bounding.size.height = min(bounding.height, CGFloat(Self.ghostMaxLines) * lineHeight)
+        let belowY = y - lineHeight * 1.1  // 같은 좌표계 — 커서 줄 아래.
+        attributed.draw(
+            with: NSRect(
+                x: textContainerOrigin.x + 2, y: belowY,
+                width: wrappedWidth, height: bounding.height),
+            options: [.usesLineFragmentOrigin])
+    }
+
+    /// 고스트가 커서 오른쪽에 그대로 들어가는가 — 순수 판정 (#24 테스트 대상).
+    nonisolated static func ghostFitsInline(textWidth: CGFloat, availableWidth: CGFloat) -> Bool {
+        textWidth <= availableWidth && availableWidth > 0
+    }
+    /// 줄바꿈 상한 줄 수 — 화면을 흔들지 않는 절제 (#24).
+    nonisolated static let ghostMaxLines = 3
+
+    // MARK: 고스트 접근성 (#24)
+
+    /// VoiceOver 사용자에게만 조용한 알림 — 일반 사용자의 시각 흐름을 건드리지 않는다.
+    func postGhostAnnouncement(_ message: String) {
+        guard NSWorkspace.shared.isVoiceOverEnabled else { return }
+        NSAccessibility.post(
+            element: self, notification: .announcementRequested,
+            userInfo: [
+                .announcement: message,
+                .priority: NSAccessibilityPriorityLevel.low,
+            ])
+    }
+
+    /// 제안 등장 안내 — 내용과 조작법을 함께 (완료 조건 1).
+    func announceGhostAppearance(_ ghost: String) {
+        postGhostAnnouncement("AI 제안: \(ghost.prefix(80)) — Tab으로 수락, Esc로 거절")
+    }
+
+    /// NSAccessibility 값 위트니스 — 셀렉터를 프로토콜과 맞춰 기본 구현을
+    /// 대체한다(상위 클래스 선언이 없어 override는 불가). #24
+    @objc(accessibilityValue)
+    public func accessibilityValue() -> Any? {
+        return ghostAwareAccessibilityValue()
+    }
+
+    /// 실제 조립 본체 — 위트니스와 테스트가 공유한다(모듈 내 자기 호출은
+    /// 자기 선언으로 결정적 귀결된다). #24
+    func ghostAwareAccessibilityValue() -> Any? {
+        // 제안은 텍스트 영역 값의 일부로 노출 — VO가 읽고 복사할 수 있게 (#24).
+        guard let snapshot = ghostSnapshotForAccessibility(), !hasMarkedText() else {
+            return super.accessibilityValue()
+        }
+        let base = super.accessibilityValue() as? String ?? ""
+        return base + "\n[AI 제안 #\(snapshot.generation) · Tab 수락 · Esc 거절] "
+            + snapshot.text
     }
 
     /// 선택 영역을 하나의 병합 실루엣으로 그린다 — 글자 주위를 살짝(3pt) 감싸는
