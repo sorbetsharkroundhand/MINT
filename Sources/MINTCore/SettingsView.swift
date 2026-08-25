@@ -83,6 +83,13 @@ public struct SettingsView: View {
 
             Section("색상") {
                 Toggle("색상 직접 고르기", isOn: $palette.enabled)
+                if let warning = palette.contrastWarning {
+                    Text(warning)
+                        .font(MintFonts.uiFont(11))
+                        .foregroundStyle(MintTheme.of(colorScheme).warningC)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityLabel(Text("대비 경고: \(warning)"))
+                }
                 caption(
                     palette.enabled
                         ? "아래에서 고른 색이 배경·툴바·사이드바·배지에 쓰여요 — 글자는 항상 읽히도록 따로 관리돼요."
