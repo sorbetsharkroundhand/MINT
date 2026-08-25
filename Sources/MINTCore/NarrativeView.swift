@@ -713,7 +713,7 @@ struct NarrativeView: View {
                 .padding(6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(theme.novelBgC))
                 .contentShape(Rectangle())
             }
@@ -771,7 +771,7 @@ struct NarrativeView: View {
                 .padding(6)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(theme.novelBgC))
             }
         }

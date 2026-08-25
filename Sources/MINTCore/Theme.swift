@@ -434,6 +434,42 @@ public final class PaletteSettings: ObservableObject {
 /// 폰트 고정이 한글마다 대체 런을 쪼갠다 — 88k자 원고에서 속성 런이 537개 →
 /// **42,678개**로 폭발하고, 매 키 입력마다 도는 `serialize()`가 5ms → **43ms**가
 /// 되어 프레임을 놓친다. 한국어 앱에서 라틴 전용 폰트 폴백은 금지다.
+/// 모서리 반경 토큰 (#32) — 값은 기존 목업의 스케일을 그대로 이름에 붙인 것.
+/// 새 UI는 이 토큰만 쓴다: "얼마나 둥글게"가 컴포넌트별 제멋대로 다르지 않게.
+public enum MintRadius {
+    /// 헤어라인 요소(작은 배지·삽입선 캡).
+    public static let xs: CGFloat = 4
+    /// 작은 칩·툴팁.
+    public static let sm: CGFloat = 6
+    /// 행·카드 기본 (8–10을 흡수).
+    public static let md: CGFloat = 9
+    /// 패널·시트 (11–12를 흡수).
+    public static let lg: CGFloat = 12
+}
+
+/// 간격 단위 토큰 (#32) — 4pt 그리드 기준. 패딩 숫자의 의미를 통일한다.
+public enum MintSpacing {
+    public static let xs: CGFloat = 3
+    public static let sm: CGFloat = 6
+    public static let md: CGFloat = 10
+    public static let lg: CGFloat = 14
+    public static let xl: CGFloat = 20
+}
+
+/// 고도(그림자) 토큰 (#32) — 유리 크롬의 미세한 층감. 색이 아니라 오프셋·블러 조합.
+public enum MintElevation {
+    /// 노브 같은 떠 있는 소형 요소.
+    public static let raised = ShadowSpec(radius: 1.5, y: 1, opacity: 0.30)
+    /// 토글 트랙 같은 얇은 면.
+    public static let flat = ShadowSpec(radius: 1, y: 1, opacity: 0.14)
+
+    public struct ShadowSpec: Sendable {
+        public let radius: CGFloat
+        public let y: CGFloat
+        public let opacity: Double
+    }
+}
+
 public enum MintFonts {
     /// 설치된 본문 세리프 패밀리. 전부 **한글 커버 필수** — 앞에서부터 고른다.
     /// Nanum Myeongjo·AppleMyungjo는 macOS 한국어 지원에 딸려 오는 명조체다
