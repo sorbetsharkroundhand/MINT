@@ -151,7 +151,12 @@ struct NarrativeView: View {
             }
         }
         .padding(14)
-        .frame(width: embedded ? nil : 480)
+        // 적응형 폭 (#30) — 그래프 좌표는 컨테이너 폭을 따라가므로 고정 폭이
+        // 아니라 범위로 둔다 (레인 x좌표 계산은 slot 기반, 폭 무관).
+        .frame(
+            minWidth: embedded ? nil : 380,
+            idealWidth: embedded ? nil : 480,
+            maxWidth: embedded ? nil : 600)
         .alert(
             editingBoundary?.isStart == true ? "구간 시작 경계 수정" : "구간 끝(복귀) 경계 수정",
             isPresented: Binding(
@@ -354,6 +359,12 @@ struct NarrativeView: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 3)
             .background(Capsule().fill(selected ? color.opacity(0.18) : theme.chipC))
+            // 색 비의존 선택 표시 — 테두리 링 + ✓ 마크 (색 약화만이 아닌 형태 신호, #21).
+            .overlay(
+                Capsule().strokeBorder(
+                    selected ? theme.inkC : .clear,
+                    style: StrokeStyle(lineWidth: selected ? 1.5 : 0))
+            )
             .contentShape(Capsule())
         }
         .buttonStyle(.plain)
@@ -361,6 +372,10 @@ struct NarrativeView: View {
             thread.summary.isEmpty
                 ? (selected ? "다시 클릭: 강조 해제" : "클릭: 이 플롯의 경로만 강조")
                 : thread.summary)
+        .accessibilityLabel(Text("플롯 \(thread.title)"))
+        .accessibilityValue(Text([thread.status.rawValue, selected ? "강조 중" : nil]
+            .compactMap { $0 }.joined(separator: " · ")))
+        .accessibilityHint(Text(thread.summary.isEmpty ? "클릭으로 이 플롯만 강조" : thread.summary))
         .contextMenu {
             Button("이름 바꾸기…") {
                 draftThreadTitle = thread.title
@@ -1858,6 +1873,13 @@ private struct ThreadGraphArea: View {
         // hover 없음 — 포인터가 지나가는 것만으로 강조가 바뀌면 안 되고,
         // 스크롤 중 그 상태 변화가 곧 프레임 드롭이었다.
         .help("클릭: 사건 상세 보기")
+        // 캔버스 조작의 키보드·VO 축 (#21): 행 = 버튼(선택), 흐림 상태도 값으로.
+        .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityValue(Text(dimmed ? "필터로 흐려짐" : ""))
+        .accessibilityAction(named: Text("사건 상세 보기")) {
+            onSelectEvent(event.canonicalKey)
+        }
         .contextMenu {
             Menu("중요도") {
                 ForEach(1...5, id: \.self) { level in

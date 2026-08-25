@@ -658,6 +658,25 @@ struct SidebarView: View {
         // 행이 사라지면(삭제·접힘·필터) AI 이름 생성을 접는다 — 안 보이는
         // 스피너를 위해 수 분 생성을 돌려두지 않는다 (이슈 #47).
         .onDisappear { completion.cancelFolderName(for: folder.id) }
+        // 표준 트리 탐색 모델의 VO 축 (#23): 행 = 버튼, 펼침 상태 = 값,
+        // 트리 작업 = 사용자 지정 액션 (Full Keyboard Access로도 활성 가능).
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(Text("폴더 \(folder.name)"))
+        .accessibilityValue(Text(expanded ? "펼침" : "접힘"))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(Text("클릭으로 펼치거나 접어요"))
+        .accessibilityAction(named: Text("펼치기/접기")) {
+            store.toggleExpanded(folder.id)
+        }
+        .accessibilityAction(named: Text("새 저널")) {
+            store.newEntry(in: folder.id)
+        }
+        .accessibilityAction(named: Text("이름 바꾸기")) {
+            startRenameFolder(folder)
+        }
+        .accessibilityAction(named: Text("삭제")) {
+            requestDeleteFolder(folder)
+        }
     }
 
     // MARK: - 저널 행
@@ -771,6 +790,15 @@ struct SidebarView: View {
             delegate: EntryRowDropDelegate(
                 entry: entry, store: store, model: dragModel,
                 requestNaming: { completion.requestFolderName(for: $0, in: store) }))
+        // VO 축 (#23): 문서 행 = 버튼(선택), 트리 작업 = 사용자 지정 액션.
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(entry.resolvedKind == .novel ? "소설" : "저널") \(entry.title)"))
+        .accessibilityValue(Text(active ? "열려 있음 · \(store.dayLabel(for: entry))" : store.dayLabel(for: entry)))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(Text("클릭으로 열어요"))
+        .accessibilityAction(named: Text("이름 바꾸기")) { startRename(entry) }
+        .accessibilityAction(named: Text("작성일 바꾸기")) { promptForDate(entry) }
+        .accessibilityAction(named: Text("삭제")) { requestDelete(entry) }
         .contextMenu {
             Button("이름 바꾸기") { startRename(entry) }
             // 작성일 바꾸기 (L9) — 상단바 달력 버튼이 사라진 뒤의 유일한 진입점.

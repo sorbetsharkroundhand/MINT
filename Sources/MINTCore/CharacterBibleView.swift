@@ -139,7 +139,12 @@ struct CharacterBibleView: View {
             }
         }
         .padding(14)
-        .frame(width: embedded ? nil : 400)
+        // 적응형 폭 (#30) — 고정 대신 min/ideal/max: 좁은 사이드바에선 줄어들고
+        // 넓은 팝오버에선 이상 폭을 유지한다. embedded(nil)는 공간을 채운다.
+        .frame(
+            minWidth: embedded ? nil : 320,
+            idealWidth: embedded ? nil : 400,
+            maxWidth: embedded ? nil : 520)
     }
 
     private var cards: [CharacterCard] {
