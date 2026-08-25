@@ -415,11 +415,11 @@ struct SidebarView: View {
                 Text("＋").font(.system(size: 19))
             }
         }
-        // 신호등 줄(타이틀바 안전영역) 바로 아래 — 우측 툴바(52px)와 같은
-        // 높이라 날짜 줄과 헤더 줄이 한 줄로 이어진다.
+        // 신호등 줄(타이틀바 안전영역) 바로 아래 — 우측 툴바와 같은 높이 기준.
+        // 고정 대신 **최소** 높이 — Dynamic Type 큰 글자에서 아이콘이 눌리지 않게 (#31).
         .padding(.leading, 18)
         .padding(.trailing, 12)
-        .frame(height: 52)
+        .frame(minHeight: 52)
     }
 
     // MARK: - 전역 검색

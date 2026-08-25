@@ -624,7 +624,7 @@ struct EditorToolbar: View {
         // 겹친다 — 접힘 상태에선 신호등을 비켜 갈 만큼 왼쪽 여백을 준다.
         .padding(.leading, sidebarVisible ? 22 : 84)
         .padding(.trailing, 22)
-        .frame(height: 52)
+        .frame(minHeight: 52)
         .background(theme.toolbarC)
     }
 
