@@ -133,6 +133,19 @@ public struct MintBlockEditor: NSViewRepresentable {
         scrollView.automaticallyAdjustsContentInsets = false
 
         context.coordinator.attach(to: textView)
+        // 스크롤 주도 가시 렌더 (#18 2단계) — 스크롤이 멈출 때 화면 밖을 건너뛴
+        // 블록을 채워 그린다 (편집·커서 경로는 여전히 전체 패스).
+        let clipView = scrollView.contentView
+        clipView.postsBoundsChangedNotifications = true
+        context.coordinator.scrollObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: clipView, queue: .main
+        ) { [weak textView] _ in
+            MainActor.assumeIsolated {
+                guard let textView else { return }
+                textView.scheduleVisibleRefresh()
+            }
+        }
         return scrollView
     }
 
@@ -225,6 +238,9 @@ public struct MintBlockEditor: NSViewRepresentable {
     @MainActor
     public final class Coordinator: NSObject, NSTextViewDelegate {
         var parent: MintBlockEditor
+        /// 스크롤 경계 관찰자 소유 (#18 2단계) — 뷰 수명과 함께 해제.
+        var scrollObserver: NSObjectProtocol?
+
         /// 마지막으로 바인딩과 동기화된 마크다운 — updateNSView의 reload 기준.
         var lastSyncedText = ""
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
@@ -680,6 +696,18 @@ final class BlockTextView: NSTextView {
     /// 속성은 TextStorage가 스스로 떨어뜨리므로, 기록된 범위(문단 경계 확장)만
     /// 닦으면 누수가 없다.
     private var previousClearRanges: [NSRange] = []
+    /// 스크롤 틱 coalescing (#18 2단계) — 연속 스크롤 중 마지막 위치만 갱신.
+    private var visibleRefreshTask: Task<Void, Never>?
+
+    /// 스크롤이 멈춘 뒤 120ms에 1번만 가시 범위 재수집.
+    func scheduleVisibleRefresh() {
+        visibleRefreshTask?.cancel()
+        visibleRefreshTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(120))
+            guard !Task.isCancelled, let self else { return }
+            self.refreshVisibleBlocks()
+        }
+    }
 
     /// 현재 렌더 모드인 이미지 문단들 — 문단 range·이미지·표시 크기·정렬·선택 여부.
     /// 정렬/크기는 소스(`![](src){width=NN align=X}`)에서 파싱해 담고, 레이아웃
@@ -3253,7 +3281,38 @@ final class BlockTextView: NSTextView {
         return groups
     }
 
-    func refreshRenderedBlocks(forceRender: Bool = false) {
+    /// 스크롤 주도 갱신용 — 가시 범위 밖 블록의 **렌더 수집을 건너뛴다** (#18 2단계).
+    ///
+    /// 줄 높이는 updateRenderedLineHeight가 문단별로 이미 심어 둔 값이 유지되므로
+    /// (스크롤해도 레이아웃이 흔들리지 않는다), 화면 밖은 다음 스크롤 틱에
+    /// 그려지면 충분하다. 편집·커서 경로는 항상 전체 패스(정확성 우선).
+    func refreshVisibleBlocks() {
+        refreshRenderedBlocks(limitToVisible: true)
+    }
+
+    /// 가시 사각형(±버퍼 문단)이 덮는 본문 범위 — 스크롤 한정 렌더의 필터 (#18).
+    func visibleTextRange(bufferParagraphs: Int = 4) -> NSRange? {
+        guard let layoutManager, let textContainer,
+            let scrollView = enclosingScrollView
+        else { return nil }
+        let visibleRect = scrollView.contentView.bounds
+        guard visibleRect.height > 0 else { return nil }
+        let origin = textContainerOrigin
+        // 위아래로 버퍼 문단 높이만큼 넓힌다 — 스크롤 직후 가장자리 공백 방지.
+        let lineHeight = max(12, layoutManager.defaultLineHeight(for: bodyFont))
+        let inflated = visibleRect.insetBy(
+            dx: 0, dy: -CGFloat(bufferParagraphs) * lineHeight)
+        let glyphRange = layoutManager.glyphRange(
+            forBoundingRect: inflated.offsetBy(dx: -origin.x, dy: -origin.y),
+            in: textContainer)
+        let charRange = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        guard charRange.length > 0 else { return nil }
+        return charRange
+    }
+
+    func refreshRenderedBlocks(
+        forceRender: Bool = false, limitToVisible: Bool = false
+    ) {
         guard let layoutManager, let storage = textStorage else { return }
         // 빠른 경로: 렌더 중인 블록도, 이미 렌더된 것도, 이미지 선택도 없고 소스에
         // 수식/이미지 마커("$$"·"![")와 raw 인라인 수식("$")조차 없으면 — 즉 대다수의
@@ -3313,6 +3372,18 @@ final class BlockTextView: NSTextView {
                 (para, blockInfo(in: para).block, delim == "open", delim == "close"))
         }
         let groups = Self.mathGroupRanges(paras)
+        // 스크롤 한정 (#18 2단계) — 화면 밖 블록은 이번 틱의 수집·렌더를 건너뛴다.
+        // 편집 중 문단은 예외 없이 포함되지 않아도 된다: 편집 경로는 limitToVisible
+        // false로 전체 패스를 탄다. nil이면(헤드리스·레이아웃 전) 제한 없음.
+        let visibleRange: NSRange? =
+            limitToVisible ? visibleTextRange() : nil
+        func isVisible(_ para: NSRange, in groups: [NSRange]) -> Bool {
+            guard let visibleRange else { return true }
+            if NSIntersectionRange(visibleRange, para).length > 0 { return true }
+            // 소속 그룹의 어느 부분이라도 보이면 처리 (다중 행 그룹 경계).
+            return groups.contains { NSIntersectionRange(visibleRange, $0).length > 0
+                && NSIntersectionRange($0, para).length > 0 }
+        }
 
         // 2단계 — 다중 행 display 그룹 렌더. 커서가 그룹 어느 줄에든 들어오면
         // 그룹 전체가 소스 편집 모드가 되고, 나가면 하나의 이미지로 합쳐 그린다.
@@ -3347,6 +3418,7 @@ final class BlockTextView: NSTextView {
                 editingMath = (firstMember.range, latex)
                 continue
             }
+            if !isVisible(group, in: groups) { continue }
             guard let image = MathRenderer.image(
                 latex: latex, color: palette.ink, fontSize: mathFontSize)
             else { continue }  // 파싱 불가 — 직전 높이 유지 (기존 정책)
@@ -3376,6 +3448,7 @@ final class BlockTextView: NSTextView {
                 continue  // 그룹 소속은 2단계에서 처리됐다
             }
             guard block == .math || block == .image else { continue }
+            if !isVisible(para, in: []) { continue }
 
             let content = paragraphContent(para)
             let contentEnd = para.location + (content as NSString).length
