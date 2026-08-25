@@ -674,6 +674,12 @@ final class BlockTextView: NSTextView {
     /// 직전 패스에서 감지된 다중 행 수식 그룹 범위 — 구조 편집 후 줄 높이 잔상을
     /// 되돌리는 기준 (이슈 #22 valid→invalid→valid 잔상 예방).
     private var previousMathGroups: [NSRange] = []
+    /// 이번 패스에서 clear 전경을 심은 범위들 (#18) — 다음 패스에서 **이 범위만**
+    /// 제거한다. 과거엔 문서 전체(0..length)를 지웠는데, 이것이 매 키 입력·커서
+    /// 이동마다 O(문서) 레이아웃 무효화를 만드는 주범이었다. 편집 범위의 임시
+    /// 속성은 TextStorage가 스스로 떨어뜨리므로, 기록된 범위(문단 경계 확장)만
+    /// 닦으면 누수가 없다.
+    private var previousClearRanges: [NSRange] = []
 
     /// 현재 렌더 모드인 이미지 문단들 — 문단 range·이미지·표시 크기·정렬·선택 여부.
     /// 정렬/크기는 소스(`![](src){width=NN align=X}`)에서 파싱해 담고, 레이아웃
@@ -3270,9 +3276,17 @@ final class BlockTextView: NSTextView {
         }
         // 커서가 떠난 문단의 raw `$…$`를 원자로 접는다 (이슈 #20).
         collapseRawInlineMath(awayFrom: selectedRange())
-        layoutManager.removeTemporaryAttribute(
-            .foregroundColor,
-            forCharacterRange: NSRange(location: 0, length: storage.length))
+        // 전 문서 제거 금지 (#18) — 직전 패스가 심은 곳만 문단 경계로 닦는다.
+        // (편집으로 위치가 밀린 지점은 편집 자체가 temp attribute를 떨어뜨린다.)
+        for old in previousClearRanges {
+            let clamped = NSRange(
+                location: min(old.location, max(storage.length - 1, 0)),
+                length: 0)
+            if clamped.location >= storage.length { continue }
+            let para = (storage.string as NSString).paragraphRange(for: clamped)
+            layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: para)
+        }
+        previousClearRanges = []
         var maths: [(range: NSRange, image: NSImage)] = []
         var collectedMathErrors: [Int: String] = [:]
         var images: [ImageRender] = []
@@ -3337,6 +3351,7 @@ final class BlockTextView: NSTextView {
                 latex: latex, color: palette.ink, fontSize: mathFontSize)
             else { continue }  // 파싱 불가 — 직전 높이 유지 (기존 정책)
             maths.append((group, image))
+            previousClearRanges.append(group)
             layoutManager.addTemporaryAttribute(
                 .foregroundColor, value: NSColor.clear, forCharacterRange: group)
             // 그룹 박스 총높이(렌더±마진+틈)를 문단 수로 나눠 배분한다 — 표시
@@ -3411,6 +3426,7 @@ final class BlockTextView: NSTextView {
                     updateRenderedLineHeight(displayHeight(of: image), block: .math, in: para)
                     if !editing {
                         maths.append((para, image))
+                        previousClearRanges.append(para)
                         layoutManager.addTemporaryAttribute(
                             .foregroundColor, value: NSColor.clear, forCharacterRange: para)
                     }
@@ -3425,6 +3441,7 @@ final class BlockTextView: NSTextView {
                     if !editing {
                         maths.append((para, placeholder))
                         collectedMathErrors[para.location] = error
+                        previousClearRanges.append(para)
                         layoutManager.addTemporaryAttribute(
                             .foregroundColor, value: NSColor.clear, forCharacterRange: para)
                     }
@@ -3444,6 +3461,7 @@ final class BlockTextView: NSTextView {
                                 range: para, image: placeholder, size: size,
                                 align: a.align, selected: objectSelected, failure: failure))
                         updateRenderedLineHeight(size.height, block: .image, in: para)
+                        previousClearRanges.append(para)
                         layoutManager.addTemporaryAttribute(
                             .foregroundColor, value: NSColor.clear, forCharacterRange: para)
                     } else {
@@ -3462,6 +3480,7 @@ final class BlockTextView: NSTextView {
                         range: para, image: image, size: size, align: a.align,
                         selected: objectSelected))
                 updateRenderedLineHeight(size.height, block: .image, in: para)
+                previousClearRanges.append(para)
                 layoutManager.addTemporaryAttribute(
                     .foregroundColor, value: NSColor.clear, forCharacterRange: para)
             default:
