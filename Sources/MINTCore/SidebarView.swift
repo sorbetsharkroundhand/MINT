@@ -521,24 +521,9 @@ struct SidebarView: View {
         .buttonStyle(.plain)
     }
 
-    /// 매치 주변 발췌 — 앞뒤 24자에 줄임표. 본문 인덱스로 직접 잘라 안전하다.
+    /// 본체는 SourceAnchor.searchSnippet으로 통합 (#61 PR1).
     private static func snippet(_ body: String, query: String) -> String? {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty,
-            let range = body.range(of: q, options: .caseInsensitive)
-        else { return nil }
-        let start =
-            body.index(range.lowerBound, offsetBy: -24, limitedBy: body.startIndex)
-            ?? body.startIndex
-        let end =
-            body.index(range.upperBound, offsetBy: 24, limitedBy: body.endIndex)
-            ?? body.endIndex
-        var text = String(body[start..<end])
-            .replacingOccurrences(of: "\n", with: " ")
-            .trimmingCharacters(in: .whitespaces)
-        if start != body.startIndex { text = "…" + text }
-        if end != body.endIndex { text += "…" }
-        return text
+        SourceAnchor.searchSnippet(body, query: query)
     }
 
     // MARK: - 폴더 행

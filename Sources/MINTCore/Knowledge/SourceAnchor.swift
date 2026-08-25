@@ -40,4 +40,46 @@ public enum SourceAnchor {
         let snippet = best.line.trimmingCharacters(in: .whitespaces).prefix(40)
         return snippet.count >= 2 ? String(snippet) : nil
     }
+    // MARK: - 스니펫 추출기 통합 (이슈 #61 PR1)
+
+    /// 오프셋 자리에서 검색 가능한 스니펫 — 마크다운 마커·공백을 건너뛰고 산문
+    /// 한 토막(≤40 UTF-16)을 취한다. NarrativeView.jumpSnippet의 본체였던 것.
+    public static func jumpSnippet(in body: String, atUTF16 offset: Int) -> String? {
+        let ns = body as NSString
+        var start = min(max(0, offset), ns.length)
+        while start < ns.length,
+            "#>*- \t\n".unicodeScalars.map({ UInt16($0.value) })
+                .contains(ns.character(at: start))
+        {
+            start += 1
+        }
+        guard start < ns.length else { return nil }
+        let end = min(start + 40, ns.length)
+        var snippet = ns.substring(with: NSRange(location: start, length: end - start))
+        if let newline = snippet.firstIndex(of: "\n") {
+            snippet = String(snippet[..<newline])
+        }
+        snippet = snippet.trimmingCharacters(in: .whitespaces)
+        return snippet.count >= 2 ? snippet : nil
+    }
+
+    /// 매치 주변 발췌 — 앞뒤 24자에 줄임표. SidebarView 검색 결과용이었던 것.
+    public static func searchSnippet(_ body: String, query: String) -> String? {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty,
+            let range = body.range(of: q, options: .caseInsensitive)
+        else { return nil }
+        let start =
+            body.index(range.lowerBound, offsetBy: -24, limitedBy: body.startIndex)
+            ?? body.startIndex
+        let end =
+            body.index(range.upperBound, offsetBy: 24, limitedBy: body.endIndex)
+            ?? body.endIndex
+        var text = String(body[start..<end])
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespaces)
+        if start != body.startIndex { text = "…" + text }
+        if end != body.endIndex { text += "…" }
+        return text
+    }
 }
