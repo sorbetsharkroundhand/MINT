@@ -43,6 +43,12 @@
 - 저장은 전부 로컬: `~/Documents/MINT/entries.json`(본문 마크다운 + 사용자
   결정), `~/Documents/MINT/knowledge/`(AI 이해 캐시), `~/Documents/MINT/images/`.
 
+## 모델 크레딧
+
+- **Basil** — GLM-4.7-Flash (mlx-community 4bit 변환)
+- **A.X-4.0-Light** — SKT A.X 4.0 Light (Apache-2.0) · meetLog MLX 4bit 변환
+- **Peppermint** — Qwen3.6-35B-A3B · **MINT** — Ternary-Bonsai-27B
+
 ## 기술 스택
 
 ### 언어·플랫폼
