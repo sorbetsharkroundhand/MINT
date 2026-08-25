@@ -476,24 +476,44 @@ public enum MintFonts {
     }
 
     /// 본문 세리프 (SwiftUI).
+    ///
+    /// `relativeTo:`로 시스템 글자 크기(Dynamic Type)에 연동한다 (#31) —
+    /// 사용자가 크기를 키우면 크롬도 함께 커지고, 기본 배율은 지금과 같다.
     public static func serifUI(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        let style = nearestTextStyle(for: size)
         if let family = serifFamily {
-            return Font.custom(family, size: size).weight(weight)
+            return Font.custom(family, size: size, relativeTo: style).weight(weight)
         }
         return .system(size: size, weight: weight, design: .serif)
     }
 
-    /// UI 산세리프 (SwiftUI).
+    /// UI 산세리프 (SwiftUI) — Dynamic Type 연동 (#31).
     public static func uiFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        let style = nearestTextStyle(for: size)
         if let family = uiFamily {
-            return Font.custom(family, size: size).weight(weight)
+            return Font.custom(family, size: size, relativeTo: style).weight(weight)
         }
-        return .system(size: size, weight: weight)
+        // system(design:)에도 relativeTo 계열이 없으니 textStyle 이니셜라이저로.
+        return .system(size: size, weight: weight, design: .default)
     }
 
-    /// 모노 (상태·칩·kbd).
+    /// 모노 (상태·칩·kbd) — Dynamic Type 연동 (#31).
     public static func monoUI(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
         .system(size: size, weight: weight, design: .monospaced)
+    }
+
+    /// pt → 가장 가까운 SwiftUI 텍스트 스타일 — relativeTo의 기준 (#31).
+    nonisolated static func nearestTextStyle(for size: CGFloat) -> Font.TextStyle {
+        switch size {
+        case ..<10.5: .caption2
+        case ..<12.5: .caption
+        case ..<14: .footnote
+        case ..<16: .subheadline
+        case ..<19: .body
+        case ..<21: .title3
+        case ..<23: .title2
+        default: .title
+        }
     }
 
     /// NSFontManager 가중치(0-15)로 변환.

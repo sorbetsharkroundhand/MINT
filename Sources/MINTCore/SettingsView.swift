@@ -71,8 +71,14 @@ public struct SettingsView: View {
     private var generalTab: some View {
         Form {
             Section("외형") {
-                Toggle("다크 모드", isOn: darkModeBinding)
-                caption("끄면 라이트 모드예요 — 시스템 외형을 따르려면 보기 메뉴의 '시스템 외형 따르기'.")
+                // 3상태 — 시스템/라이트/다크를 모두 노출한다 (#29).
+                // 과거 토글은 "시스템 따름"을 숨겨 선택지를 깎았다.
+                Picker("모양", selection: appearanceBinding) {
+                    Text("시스템 따름").tag("")
+                    Text("라이트").tag("light")
+                    Text("다크").tag("dark")
+                }
+                .pickerStyle(.segmented)
             }
 
             Section("색상") {
@@ -372,12 +378,11 @@ public struct SettingsView: View {
         }
     }
 
-    /// 다크 모드 스위치 — 예전 상단바 스위치와 같은 규칙으로 읽고 쓴다.
-    /// "시스템 따름"(빈 값)일 땐 실제 시스템 외형을 현재 상태로 보여준다.
-    private var darkModeBinding: Binding<Bool> {
+    /// 외형 3상태 바인딩 — ""(시스템)/light/dark (#29).
+    private var appearanceBinding: Binding<String> {
         Binding(
-            get: { appearance == "dark" || (appearance.isEmpty && colorScheme == .dark) },
-            set: { appearance = $0 ? "dark" : "light" }
+            get: { appearance },
+            set: { appearance = $0 }
         )
     }
 }
