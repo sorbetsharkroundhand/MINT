@@ -30,6 +30,44 @@ public final class BackgroundIndexer: ObservableObject {
     private func setIsIndexing(_ newValue: Bool) {
         if isIndexing != newValue { isIndexing = newValue }
     }
+    /// 사용자 요청 패스("지금 읽기")의 단계 (#35) — 큐·진행(결정적 진행률)·취소·
+    /// 차단(열/저전력)·완료/무변경을 UI가 구분해 보여준다. 자동 패스(유휴 트리거)
+    /// 는 조용한 UI 원칙상 여기에 기록하지 않는다.
+    public enum PassPhase: Equatable, Sendable {
+        case idle
+        /// 접수됨 — 백그라운드 파싱·준비 중.
+        case queued
+        /// 씬 단위 결정적 진행 — 처리한 더티 항목 / 전체 더티 항목.
+        case reading(done: Int, total: Int)
+        /// 열·저전력 게이트로 보류 — reason은 사람이 을 수 있는 문장.
+        case blocked(reason: String)
+        /// 패스가 돌았지만 아무것도 새로 읽지 못했다 — 모델 오류 가능성.
+        case stalled(message: String)
+        /// 정상 완료 — 새로 이해한 것이 있었다.
+        case completedNew
+        /// 이미 최신 — 더티 씬이 없어 새로 읽은 게 없었다.
+        case completedNoChange
+        /// 사용자가 취소했다.
+        case cancelled
+
+        /// 일시 표시 후 자동으로 idle로 돌아가는 단계인가.
+        var isTransient: Bool {
+            switch self {
+            case .completedNew, .completedNoChange, .cancelled: true
+            default: false
+            }
+        }
+    }
+
+    @Published public private(set) var manualPhase: PassPhase = .idle
+    /// 사용자 요청 패스의 소유권 토큰 — finish/cancel 가드 (#82와 같은 규약).
+    private var manualPassToken: Int?
+    /// 시작 시점 스냅샷 세대 — "새로 읽은 것이 있나" 판정 기준.
+    private var snapshotGenerationAtManualStart = 0
+    private var manualProcessedAny = false
+    private var manualDirtyTotal = 0
+    private var transientClearTask: Task<Void, Never>?
+
     /// 스냅샷 세대 — 실제 발행마다 증가하는 싸구려 신분증 (#48). 지식 뷰들이
     /// 캐시 키로 쓴다: 스냅샷 전체 동등 비교(사건 수천 개 배열)를 매 패스
     /// 반복하는 대신 정수 비교로 "바뀌었나"를 판정한다.
@@ -123,11 +161,20 @@ public final class BackgroundIndexer: ObservableObject {
         return passGeneration
     }
 
+    /// 테스트 전용 — 사용자 패스 단계를 소유권과 함께 심는다 (#35).
+    func _testSetManualPhase(_ phase: PassPhase, token: Int) {
+        manualPassToken = token
+        manualPhase = phase
+    }
+
     /// 이 토큰의 패스가 아직 현재 소유자인가 — 작업 종료 시 핸들 정리 가드.
     func finishPass(token: Int) {
         guard passGeneration == token else { return }  // 늦은 이전 작업 — 무시
         passTask = nil
         setIsIndexing(false)
+        if manualPassToken == token {
+            manualPassToken = nil  // 소유권 해제 — 다음 요청을 받는다 (#35).
+        }
     }
 
     /// 발행 가드 — 토큰·대상 문서 일치만 통과 (스냅샷·후보·지표 공용, #82).
@@ -321,7 +368,66 @@ public final class BackgroundIndexer: ObservableObject {
     public func requestPass() {
         // 자동 패스가 이미 돌고 있으면 그걸로 충분하다 — 중복 금지.
         guard passTask == nil else { return }
+        beginManualPhase()
         startPass(deep: true, userInitiated: true)
+        manualPassToken = passGeneration  // startPass가 방금 올린 토큰 (#35)
+    }
+
+    /// 사용자 요청 패스 취소 (#35) — 진행 중 생성을 접고 상태를 정리한다.
+    /// 체크포인트 덕에 여기까지 읽은 것은 남는다 (씬 단위 save).
+    public func cancelManualPass() {
+        guard manualPassToken != nil else { return }
+        manualPassToken = nil
+        passGeneration += 1
+        passTask?.cancel()
+        passTask = nil
+        setIsIndexing(false)
+        setTransientPhase(.cancelled)
+    }
+
+    /// 수동 패스 시작 기록 — 세대 스냅샷을 잡아 완료 판정("새로 읽은 것이 있는가")
+    /// 의 기준으로 삼는다. 토큰은 startPass가 확정한 뒤 호출부가 따낸다 (#35).
+    private func beginManualPhase() {
+        transientClearTask?.cancel()
+        snapshotGenerationAtManualStart = snapshotGeneration
+        manualProcessedAny = false
+        manualDirtyTotal = 0
+        manualPhase = .queued
+    }
+
+    /// 수동 패스 종료 판정 (#35) — 새 이해(세대 증가)·무변경·조용한 중단을 갈라
+    /// 표시한다. 취소는 cancelManualPass가 직접 표시하고, 게이트 차단은 진행 중
+    /// onBlocked가 이미 표시했으므로 여기서 덮지 않는다.
+    private func finishManualPhase(token: Int) {
+        guard manualPassToken == token else { return }
+        switch manualPhase {
+        case .blocked, .cancelled:
+            return  // 이미 의미 있는 상태 — 유지.
+        default:
+            break
+        }
+        let producedNew = snapshotGeneration > snapshotGenerationAtManualStart
+        if producedNew {
+            setTransientPhase(.completedNew)
+        } else if manualProcessedAny || manualDirtyTotal == 0 {
+            // 처리는 했으나 발행이 없었거나(오버라이드만 재조립) 애초 더티가 없었다.
+            setTransientPhase(.completedNoChange)
+        } else {
+            // 더티가 있었는데 하나도 처리하지 못했다 — 모델 오류 가능성 (#35).
+            setTransientPhase(.stalled(message: "씬을 읽지 못했어요 — 모델 상태를 확인하거나 다시 시도해 주세요"))
+        }
+    }
+
+    /// 일시 단계 표시 후 자동 복귀 — completed/cancelled 계열 (#35).
+    private func setTransientPhase(_ phase: PassPhase) {
+        manualPhase = phase
+        transientClearTask?.cancel()
+        guard phase.isTransient else { return }
+        transientClearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            if self?.manualPhase == phase { self?.manualPhase = .idle }
+        }
     }
 
     /// 전체 다시 읽기 — 파생 캐시(사이드카)를 버리고 처음부터 깊은 패스를 돈다.
@@ -333,6 +439,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 파생 캐시뿐이다 (CLAUDE.md §5-5: 실패해도 원문이 안전).
     public func requestFullPass() {
         guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
+        beginManualPhase()
         // 진행 중 패스 선점 — 낡은 사이드카에 체크포인트를 덧쓰지 않게 먼저 멈춘다.
         passGeneration += 1
         passTask?.cancel()
@@ -343,6 +450,7 @@ public final class BackgroundIndexer: ObservableObject {
         fresh.generation = KnowledgeSidecar.load(entryID: entryID).generation + 1
         fresh.save()
         startPass(deep: true, userInitiated: true)
+        manualPassToken = passGeneration  // startPass가 방금 올린 토큰 (#35)
     }
 
     private func startPass(deep: Bool, userInitiated: Bool = false) {
@@ -450,8 +558,22 @@ public final class BackgroundIndexer: ObservableObject {
                     else { return }
                     if self.metrics != metrics { self.metrics = metrics }
                 }
+            } progress: { done, total in
+                // "지금 읽기"의 결정적 진행률 (#35) — 자동 패스엔 노출 안 함.
+                Task { @MainActor in
+                    guard self.manualPassToken == token else { return }
+                    if done > 0 { self.manualProcessedAny = true }
+                    self.manualDirtyTotal = total
+                    self.manualPhase = .reading(done: done, total: total)
+                }
+            } onBlocked: { reason in
+                Task { @MainActor in
+                    guard self.manualPassToken == token else { return }
+                    self.manualPhase = .blocked(reason: reason)
+                }
             }
             await MainActor.run {
+                self.finishManualPhase(token: token)
                 self.finishPass(token: token)
             }
         }
@@ -591,7 +713,11 @@ public final class BackgroundIndexer: ObservableObject {
         recordedConversations: [RecordedConversation] = [],
         caretUTF16: Int?,
         publish: @Sendable @escaping (KnowledgeSnapshot) -> Void,
-        publishMetrics: @Sendable @escaping (KnowledgeMetrics) -> Void = { _ in }
+        publishMetrics: @Sendable @escaping (KnowledgeMetrics) -> Void = { _ in },
+        /// 씬 단위 결정적 진행 (처리한 수, 전체 더티 수) — "지금 읽기" 표시용 (#35).
+        progress: (@Sendable (Int, Int) -> Void)? = nil,
+        /// 게이트(열·저전력)로 보류될 때 사유 보고 (#35).
+        onBlocked: (@Sendable (String) -> Void)? = nil
     ) async {
         guard gateAllows(deep: deep) else { return }
 
@@ -610,6 +736,34 @@ public final class BackgroundIndexer: ObservableObject {
         }
         var sidecar = KnowledgeSidecar.load(entryID: entryID)
         let text = body as NSString
+
+        // 결정적 진행률의 분모 — 더티 항목 수 (요약·사건·앎·구간 중 하나라도 없는 씬).
+        let dirtyTotal = orderedScenes.filter { scene in
+            sidecar.sceneSummaries[scene.contentHash] == nil
+                || (!deep ? false :
+                    sidecar.events[scene.contentHash] == nil
+                    || sidecar.insights[scene.contentHash] == nil
+                    || sidecar.segments[scene.contentHash] == nil)
+        }.count
+        var dirtyDone = 0
+        func reportProgress() {
+            guard let progress else { return }
+            progress(dirtyDone, max(dirtyTotal, 1))
+        }
+        reportProgress()
+        // 게이트 차단은 조용히 return하지 않고 이유를 남긴다 (#35).
+        func gateOrReport(_ deepFlag: Bool) -> Bool {
+            if gateAllows(deep: deepFlag) { return true }
+            if let reason = gateBlockReason(
+                deep: deepFlag,
+                thermalState: ProcessInfo.processInfo.thermalState,
+                lowPowerModeEnabled: ProcessInfo.processInfo.isLowPowerModeEnabled),
+                let onBlocked
+            {
+                onBlocked(reason)
+            }
+            return false
+        }
         // 대화 귀속 (PLAN §7·§6.4) — 결정적·LLM 없음이라 패스마다 재계산.
         // 사이드카에 저장하지 않는 파생 — 스냅샷에만 실린다.
         let utterances = DialogueAttribution.utterances(in: body, cards: characters)
@@ -619,7 +773,8 @@ public final class BackgroundIndexer: ObservableObject {
         for scene in orderedScenes {
             guard callBudget > 0 else { break }
             guard sidecar.sceneSummaries[scene.contentHash] == nil else { continue }
-            guard !Task.isCancelled, gateAllows(deep: deep) else { return }
+            guard !Task.isCancelled else { return }
+            guard gateOrReport(deep) else { return }
 
             let sceneText = String(
                 text.substring(
@@ -645,6 +800,8 @@ public final class BackgroundIndexer: ObservableObject {
                 pov: analysis.pov,
                 location: analysis.location,
                 updatedAt: .now)
+            dirtyDone += 1
+            reportProgress()
             // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
             sidecar.save()
             publish(
@@ -661,7 +818,8 @@ public final class BackgroundIndexer: ObservableObject {
         if deep, !Task.isCancelled {
             relinkParticipants(sidecar: &sidecar, characters: characters)
             for scene in orderedScenes {
-                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                guard !Task.isCancelled else { return }
+                guard gateOrReport(true) else { return }
                 // 키 존재 = 추출 완료(빈 배열이면 "사건 없음") — 메모 적중은 건너뛴다.
                 guard sidecar.events[scene.contentHash] == nil else { continue }
                 let sceneText = String(
@@ -676,6 +834,8 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let extracted else { continue }  // 실패·인물 미등록 — 재시도 여지
                 sidecar.events[scene.contentHash] = extracted
+                dirtyDone += 1
+                reportProgress()
                 sidecar.save()  // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
             }
         }
@@ -684,7 +844,8 @@ public final class BackgroundIndexer: ObservableObject {
         // 메모 키(insights) — 한쪽 실패가 다른 쪽을 지우지 않는다 (실패 격리).
         if deep, !Task.isCancelled {
             for scene in orderedScenes {
-                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                guard !Task.isCancelled else { return }
+                guard gateOrReport(true) else { return }
                 guard sidecar.insights[scene.contentHash] == nil else { continue }
                 let sceneText = String(
                     text.substring(
@@ -698,6 +859,8 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let insights else { continue }  // 실패 — 다음 패스가 재시도
                 sidecar.insights[scene.contentHash] = insights
+                dirtyDone += 1
+                reportProgress()
                 sidecar.save()
                 publish(
                     makeSnapshot(
@@ -713,7 +876,8 @@ public final class BackgroundIndexer: ObservableObject {
         // 유형도 현재면 LLM 없이 "단일 현재 서사"로 메모한다 (토큰 절약).
         if deep, !Task.isCancelled {
             for scene in orderedScenes {
-                guard !Task.isCancelled, gateAllows(deep: true) else { return }
+                guard !Task.isCancelled else { return }
+                guard gateOrReport(true) else { return }
                 guard sidecar.segments[scene.contentHash] == nil else { continue }
                 let sceneText = String(
                     text.substring(
@@ -1325,6 +1489,20 @@ public final class BackgroundIndexer: ObservableObject {
         return gateAllows(
             deep: deep, thermalState: process.thermalState,
             lowPowerModeEnabled: process.isLowPowerModeEnabled)
+    }
+
+    /// 게이트 차단 이유 — UI가 "왜 멈췄는지"를 말해야 하기 때문 (#35).
+    /// nil이면 차단 아님. 순수 함수라 게이트와 함께 테스트한다.
+    nonisolated static func gateBlockReason(
+        deep: Bool, thermalState: ProcessInfo.ThermalState,
+        lowPowerModeEnabled: Bool
+    ) -> String? {
+        switch thermalState {
+        case .serious, .critical: return "기기가 뜨거워요(열 상태) — 식으면 자동으로 다시 시작할 수 있어요"
+        default: break
+        }
+        if deep, lowPowerModeEnabled { return "저전력 모드예요 — 저전력을 끄거나 나중에 다시 시도해 주세요" }
+        return nil
     }
 
     nonisolated private static func makeSnapshot(
