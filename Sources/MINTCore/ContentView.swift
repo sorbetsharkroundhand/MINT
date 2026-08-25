@@ -790,6 +790,7 @@ struct ModelChip: View {
         }
         .frame(width: 264)
         // 열 때마다 로컬 캐시를 다시 확인한다 — 엔진 로드로 받아진 모델도 반영.
+        .overlay(alignment: .bottom) { downloadFailureFooter }
         .onAppear { downloads.refresh(ModelChoice.all.map(\.id)) }
     }
 
@@ -849,45 +850,101 @@ struct ModelChip: View {
         .accessibilityLabel(Text("자동완성"))
     }
 
-    // 행 전체는 탭 제스처(모델 선택), 다운로드 버튼은 내부의 독립 Button —
-    // Button 안에 Button을 겹치면 탭이 엉키므로 행을 제스처로 구성한다.
+    /// 모델 행 — **실제 Button**이라 Tab 포커스·Enter 활성화·VO 버튼 역할을 갖는다
+    /// (#25). 다운로드 액세서리는 trailing overlay의 독립 Button으로 올려,
+    /// 버튼 중첩 충돌 없이(overlay가 히트를 먼저 가져간다) 두 동작을 분리한다.
+    /// 실패 원인은 AX value로 읽혀 색·help에만 의존하지 않는다.
     private func row(_ choice: ModelChoice) -> some View {
         let selected = settings.modelID == choice.id
-        return HStack(spacing: 10) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(alignment: .firstTextBaseline, spacing: 7) {
-                    Text(choice.name)
-                        .font(MintFonts.uiFont(13, .semibold))
-                        .foregroundStyle(theme.inkC)
-                    Text(choice.sizeLabel)
-                        .font(MintFonts.monoUI(10.5))
-                        .foregroundStyle(theme.ink3C)
+        return Button {
+            pick(choice.id)
+        } label: {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                        Text(choice.name)
+                            .font(MintFonts.uiFont(13, .semibold))
+                            .foregroundStyle(theme.inkC)
+                        Text(choice.sizeLabel)
+                            .font(MintFonts.monoUI(10.5))
+                            .foregroundStyle(theme.ink3C)
+                    }
+                    Text(choice.detail)
+                        .font(MintFonts.uiFont(11.5))
+                        .foregroundStyle(theme.ink2C)
                 }
-                Text(choice.detail)
-                    .font(MintFonts.uiFont(11.5))
-                    .foregroundStyle(theme.ink2C)
+                Spacer(minLength: 0)
+                Text(choice.latencyLabel)
+                    .font(MintFonts.monoUI(10.5))
+                    .foregroundStyle(theme.ink3C)
+                Text(selected ? "✓" : "")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(theme.blueC)
+                    .frame(width: 16)
             }
-            Spacer(minLength: 0)
-            downloadAccessory(choice)
-            Text(choice.latencyLabel)
-                .font(MintFonts.monoUI(10.5))
-                .foregroundStyle(theme.ink3C)
-            Text(selected ? "✓" : "")
-                .font(.system(size: 12, weight: .bold))
-                .foregroundStyle(theme.blueC)
-                .frame(width: 16)
+            .padding(.vertical, 9)
+            .padding(.horizontal, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(selected
+                        ? theme.activeBgC
+                        : (hoveredID == choice.id ? theme.hoverC : .clear))
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
         }
-        .padding(.vertical, 9)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                .fill(selected
-                    ? theme.activeBgC
-                    : (hoveredID == choice.id ? theme.hoverC : .clear))
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .onTapGesture { pick(choice.id) }
+        .buttonStyle(.plain)
         .onHover { hoveredID = $0 ? choice.id : nil }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text("\(choice.name) 모델"))
+        .accessibilityValue(Text(selected ? "선택됨 · \(choice.latencyLabel)" : choice.latencyLabel))
+        .accessibilityHint(Text("이 모델로 전환"))
+        .overlay(alignment: .trailing) {
+            downloadAccessory(choice)
+                .padding(.trailing, 30)   // ✓ 칼럼 폭만큼 비켜난다
+                .padding(.leading, 8)
+        }
+    }
+
+    /// 다운로드 실패 원인 가시 푸터 (#25 완료 조건 3) — help 뒤에 숨기지 않는다.
+    @ViewBuilder
+    private var downloadFailureFooter: some View {
+        let failure = downloads.states.first { state in
+            if case .failed = state.value { return true }
+            return false
+        }
+        if let failure {
+            if case .failed(let message) = failure.value {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("\(ModelChip.displayName(failure.key)) 다운로드 실패")
+                        .font(MintFonts.uiFont(11, .semibold))
+                        .foregroundStyle(theme.dangerC)
+                    Text(Self.recoveryAdvice(for: message))
+                        .font(MintFonts.uiFont(10.5))
+                        .foregroundStyle(theme.ink2C)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(theme.pillC)
+            }
+        }
+    }
+
+    /// 오류 메시지 → 다음 행동 제안 (#25). 결정적 매핑 — 네트워크/디스크/형식.
+    static func recoveryAdvice(for message: String) -> String {
+        let lowered = message.lowercased()
+        if lowered.contains("network") || lowered.contains("인터넷") || lowered.contains("연결") {
+            return "네트워크 상태를 확인한 뒤 다시 시도해 주세요."
+        }
+        if lowered.contains("disk") || lowered.contains("space") || lowered.contains("공간")
+            || lowered.contains("no space")
+        {
+            return "디스크 여유 공간을 확보한 뒤 다시 시도해 주세요."
+        }
+        if lowered.contains("404") || lowered.contains("not found") || lowered.contains("찾을 수 없") {
+            return "저장소 id가 맞는지 확인해 주세요 (설정에서 직접 입력한 경우 오타 확인)."
+        }
+        return "잠시 후 다시 시도해 주세요."
     }
 
     /// 행 우측의 다운로드 상태 — 안 받았으면 받기 버튼, 진행 중엔 %, 받았으면 체크.
@@ -923,6 +980,7 @@ struct ModelChip: View {
             .buttonStyle(.plain)
             .help("실패 — 다시 시도 (\(message))")
                     .accessibilityLabel(Text("모델 다운로드 실패 — 다시 시도"))
+                    .accessibilityValue(Text(message))
         case .notDownloaded, .none:
             Button {
                 downloads.download(choice.id)
