@@ -866,83 +866,51 @@ struct SidebarView: View {
     }
 }
 
-/// 헤더의 아이콘 버튼 — hover 시 라운드 배경 (기존 ＋ 버튼 디테일 공유).
+/// 헤더의 아이콘 버튼 — 본체는 Components/HoverIconButton (#61 PR3).
 private struct HeaderIconButton<Label: View>: View {
     let theme: MintTheme
     let help: String
     let action: () -> Void
     @ViewBuilder let label: () -> Label
-    @State private var hovered = false
 
     var body: some View {
-        Button(action: action) {
-            label()
-                .foregroundStyle(theme.ink2C)
-                .frame(width: 30, height: 30)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.md)
-                        .fill(hovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help(help)
-        // 아이콘 전용 버튼의 VoiceOver 레이블 — help는 힌트일 뿐이다 (#55).
-        .accessibilityLabel(Text(help))
+        HoverIconButton(
+            theme: theme, help: help,
+            contentWidth: 30, contentHeight: 30, cornerRadius: MintRadius.md,
+            action: action, label: label)
     }
 }
 
-/// 폴더 행 hover 시 나타나는 작은 추가 버튼 (하위 폴더·저널).
+/// 폴더 행 hover 시 나타나는 작은 추가 버튼 — HoverIconButton 위임 (#61 PR3).
 private struct RowIconButton: View {
     let systemName: String
     let help: String
     let theme: MintTheme
     let action: () -> Void
-    @State private var hovered = false
 
     var body: some View {
-        Button(action: action) {
+        HoverIconButton(
+            theme: theme, help: help,
+            contentWidth: 20, contentHeight: 20, cornerRadius: MintRadius.sm,
+            action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(hovered ? theme.inkC : theme.ink3C)
-                .frame(width: 20, height: 20)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.sm)
-                        .fill(hovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help(help)
-        .accessibilityLabel(Text(help))  // #55
     }
 }
 
-/// 활성 행의 ✕ — hover 시 빨간 배경 (디자인).
+/// 활성 행의 ✕ — 위험색 틴트 변형 (#56 dangerC). 본체는 HoverIconButton.
 private struct DeleteButton: View {
     let theme: MintTheme
     let action: () -> Void
-    @State private var hovered = false
 
     var body: some View {
-        Button(action: action) {
-            Text("✕")
-                .font(.system(size: 12))
-                .foregroundStyle(hovered ? theme.dangerC : theme.ink3C)
-                .frame(width: 20, height: 20)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.sm)
-                        .fill(hovered
-                            ? theme.dangerBgC : .clear)
-                )
-                .contentShape(Rectangle())
+        HoverIconButton(
+            theme: theme, help: "이 저널 삭제", tint: theme.dangerC,
+            contentWidth: 20, contentHeight: 20, cornerRadius: MintRadius.sm,
+            action: action) {
+            Text("✕").font(.system(size: 12))
         }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help("이 저널 삭제")
-        .accessibilityLabel(Text("이 저널 삭제"))  // #55
     }
 }
 

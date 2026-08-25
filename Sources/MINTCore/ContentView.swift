@@ -1071,33 +1071,21 @@ struct ModelChip: View {
     }
 }
 
-/// 드롭다운의 작은 ± 스텝 버튼 — 칩과 같은 유리 톤.
+/// 드롭다운의 작은 ± 스텝 버튼 — HoverIconButton 위임 (#61 PR3).
 private struct StepIconButton: View {
     let systemName: String
     let theme: MintTheme
     let help: String
     let action: () -> Void
-    @State private var hovered = false
 
     var body: some View {
-        Button(action: action) {
+        HoverIconButton(
+            theme: theme, help: help,
+            contentWidth: 22, contentHeight: 22, cornerRadius: MintRadius.sm,
+            action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(theme.ink2C)
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                        .fill(hovered ? theme.hoverC : theme.chipC)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                        .strokeBorder(theme.chipBorderC)
-                )
-                .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
-        .onHover { hovered = $0 }
-        .help(help)
     }
 }
 
