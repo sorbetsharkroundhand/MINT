@@ -41,14 +41,19 @@ public enum ModelPresets {
 
     /// mlx-swift-lm LLMRegistry에 수록된 검증된 MoE 대안 (활성 ~3B, ~17GB).
     public static let qwen3_30B_A3B = "mlx-community/Qwen3-30B-A3B-4bit"
-    /// 가벼운 대안 (~1.9GB) — 위 셋이 안 올라가는 기기의 대체재.
+    /// 경량 대안 (~4.7GB, 2026-08-25 벤치 통과로 슬롯 교체 — 이슈 #63).
+    /// A.X-4.0-Light(SKT, Apache-2.0) 한국어 특화 · 순수 어텐션(qwen2)이라
+    /// §12 KV 재사용이 온전히 작동(웜 460/461 tok, 웜 TTFC 0.03s). 같은 fixture에서
+    /// 이전 경량 후보 Qwen2.5-3B보다 어절 적중률 17% vs 8%.
+    public static let ax4Light = "meetLog/A.X-4.0-Light-mlx-4bit"
+    /// 가벼운 대안 (~1.9GB).
     public static let qwen2_5_3B = "mlx-community/Qwen2.5-3B-Instruct-4bit"
     /// 가장 가벼운 대안 (~1GB).
     public static let qwen2_5_1_5B = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
 
     public static let all: [String] = [
         ternaryBonsai27B, glm4_7_flash, qwen3_6_35B_A3B,
-        qwen3_30B_A3B, qwen2_5_3B, qwen2_5_1_5B,
+        qwen3_30B_A3B, ax4Light, qwen2_5_3B, qwen2_5_1_5B,
     ]
 }
 
