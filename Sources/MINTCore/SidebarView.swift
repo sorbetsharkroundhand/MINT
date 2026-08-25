@@ -184,7 +184,7 @@ struct SidebarView: View {
                 .foregroundStyle(section == target ? theme.novelC : theme.ink3C)
                 .frame(width: 30, height: 24)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(section == target ? theme.novelBgC : .clear)
                 )
                 .overlay(alignment: .topTrailing) {
@@ -450,9 +450,9 @@ struct SidebarView: View {
         .padding(.vertical, 6)
         .padding(.horizontal, 10)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.chipC))
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous).fill(theme.chipC))
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .strokeBorder(theme.chipBorderC))
         .padding(.horizontal, 10)
         .padding(.vertical, 8)
@@ -514,9 +514,9 @@ struct SidebarView: View {
             .padding(.vertical, 8)
             .padding(.horizontal, 11)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .fill(active ? theme.activeBgC : .clear))
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
         }
         .buttonStyle(.plain)
     }
@@ -570,9 +570,9 @@ struct SidebarView: View {
                     .foregroundStyle(theme.inkC)
                     .padding(.vertical, 3)
                     .padding(.horizontal, 7)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(theme.kbdC))
+                    .background(RoundedRectangle(cornerRadius: MintRadius.sm).fill(theme.kbdC))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6).strokeBorder(theme.blueC)
+                        RoundedRectangle(cornerRadius: MintRadius.sm).strokeBorder(theme.blueC)
                     )
                     .focused($renameFieldFocused)
                     .onSubmit { commitRename(folder.id) }
@@ -611,13 +611,13 @@ struct SidebarView: View {
         .padding(.horizontal, 11)
         .padding(.leading, CGFloat(depth) * 14)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .fill(dropTarget ? theme.activeBgC : (hovered ? theme.hoverC : .clear))
         )
         // 드롭 "안으로" 대상 표시 — 파란 링 (접힌 폴더에도 이동을 약속).
         .overlay {
             if dropTarget {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .strokeBorder(theme.blueC, lineWidth: 1.5)
             }
         }
@@ -632,7 +632,7 @@ struct SidebarView: View {
                 SidebarInsertionLine(theme: theme, depth: depth).offset(y: 2)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
         .onHover { hoveredID = $0 ? folder.id : nil }
         // 저널 행과 같은 이유 — 첫 탭 즉시 펼침/접힘 (더블탭이 오면 두 번
         // 토글돼 원상복구된 채 이름변경으로 들어간다).
@@ -712,9 +712,9 @@ struct SidebarView: View {
                     .foregroundStyle(theme.inkC)
                     .padding(.vertical, 3)
                     .padding(.horizontal, 7)
-                    .background(RoundedRectangle(cornerRadius: 6).fill(theme.kbdC))
+                    .background(RoundedRectangle(cornerRadius: MintRadius.sm).fill(theme.kbdC))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6).strokeBorder(theme.blueC)
+                        RoundedRectangle(cornerRadius: MintRadius.sm).strokeBorder(theme.blueC)
                     )
                     .focused($renameFieldFocused)
                     .onSubmit { commitRename(entry.id) }
@@ -746,7 +746,7 @@ struct SidebarView: View {
         .padding(.horizontal, 11)
         .padding(.leading, CGFloat(depth) * 14)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .fill(dropTarget
                     ? theme.activeBgC
                     : active
@@ -756,7 +756,7 @@ struct SidebarView: View {
         // 드롭 "안으로"(= 두 저널을 새 폴더로 병합) 대상 표시 — 파란 링.
         .overlay {
             if dropTarget {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .strokeBorder(theme.blueC, lineWidth: 1.5)
             }
         }
@@ -771,7 +771,7 @@ struct SidebarView: View {
                 SidebarInsertionLine(theme: theme, depth: depth).offset(y: 2)
             }
         }
-        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
         .onHover { hoveredID = $0 ? entry.id : nil }
         // onTapGesture(count:2)+onTapGesture 조합은 단일 클릭이 더블클릭 판별
         // 타임아웃(수백 ms)을 기다린다 — 전환이 느려 보이는 주범. simultaneous로
@@ -895,7 +895,7 @@ private struct HeaderIconButton<Label: View>: View {
                 .foregroundStyle(theme.ink2C)
                 .frame(width: 30, height: 30)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: MintRadius.md)
                         .fill(hovered ? theme.hoverC : .clear)
                 )
                 .contentShape(Rectangle())
@@ -923,7 +923,7 @@ private struct RowIconButton: View {
                 .foregroundStyle(hovered ? theme.inkC : theme.ink3C)
                 .frame(width: 20, height: 20)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: MintRadius.sm)
                         .fill(hovered ? theme.hoverC : .clear)
                 )
                 .contentShape(Rectangle())
@@ -948,7 +948,7 @@ private struct DeleteButton: View {
                 .foregroundStyle(hovered ? theme.dangerC : theme.ink3C)
                 .frame(width: 20, height: 20)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: MintRadius.sm)
                         .fill(hovered
                             ? theme.dangerBgC : .clear)
                 )

@@ -638,7 +638,7 @@ struct EditorToolbar: View {
                 .foregroundStyle(sidebarVisible ? theme.ink2C : theme.ink3C)
                 .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(sidebarButtonHovered ? theme.hoverC : .clear)
                 )
                 .contentShape(Rectangle())
@@ -660,7 +660,7 @@ struct EditorToolbar: View {
                 .foregroundStyle(theme.ink2C)
                 .frame(width: 28, height: 28)
                 .background(
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(settingsButtonHovered ? theme.hoverC : .clear)
                 )
                 .contentShape(Rectangle())
@@ -738,12 +738,12 @@ struct ModelChip: View {
             .padding(.vertical, 5)
             .padding(.horizontal, 11)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .fill(chipHovered ? theme.hoverC : theme.chipC)
             )
             .focusedValue(\.hasMintEditor, true)
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .strokeBorder(theme.chipBorderC)
             )
         }
@@ -885,12 +885,12 @@ struct ModelChip: View {
             .padding(.vertical, 9)
             .padding(.horizontal, 10)
             .background(
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .fill(selected
                         ? theme.activeBgC
                         : (hoveredID == choice.id ? theme.hoverC : .clear))
             )
-            .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { hoveredID = $0 ? choice.id : nil }
@@ -1011,7 +1011,7 @@ struct ModelChip: View {
         .padding(.vertical, 9)
         .padding(.horizontal, 10)
         .background(
-            RoundedRectangle(cornerRadius: 9, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .fill(theme.activeBgC)
         )
     }
@@ -1086,11 +1086,11 @@ private struct StepIconButton: View {
                 .foregroundStyle(theme.ink2C)
                 .frame(width: 22, height: 22)
                 .background(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(hovered ? theme.hoverC : theme.chipC)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .strokeBorder(theme.chipBorderC)
                 )
                 .contentShape(Rectangle())
@@ -1115,11 +1115,11 @@ struct GlassSwitch: View {
                 .fill(isOn ? theme.blueC.opacity(0.85) : theme.chipC)
                 .background(.ultraThinMaterial, in: Capsule())
                 .overlay(Capsule().strokeBorder(theme.chipBorderC))
-                .shadow(color: .black.opacity(0.14), radius: 1, y: 1)
+                .shadow(color: .black.opacity(MintElevation.flat.opacity), radius: MintElevation.flat.radius, y: MintElevation.flat.y)
             Circle()
                 .fill(theme.knobC)
                 .frame(width: 21, height: 21)
-                .shadow(color: .black.opacity(0.3), radius: 1.5, y: 1)
+                .shadow(color: .black.opacity(MintElevation.raised.opacity), radius: MintElevation.raised.radius, y: MintElevation.raised.y)
                 .offset(x: isOn ? 19 : 2)
         }
         .frame(width: 42, height: 25)
@@ -1234,7 +1234,7 @@ struct MarkdownCheatSheet: View {
                 .foregroundStyle(theme.inkC)
                 .padding(.vertical, 2)
                 .padding(.horizontal, 7)
-                .background(RoundedRectangle(cornerRadius: 5).fill(theme.chipC))
+                .background(RoundedRectangle(cornerRadius: MintRadius.xs).fill(theme.chipC))
             Spacer(minLength: 8)
             Text(item.label)
                 .font(MintFonts.uiFont(12))
@@ -1263,14 +1263,14 @@ struct ShortcutHintPill: View {
         .padding(.vertical, 9)
         .padding(.horizontal, 14)
         .background(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
                 .fill(theme.pillC)
                 .background(
                     .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
                 .strokeBorder(theme.pillBorderC)
         )
         .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
@@ -1288,10 +1288,10 @@ struct ShortcutHintPill: View {
                 .padding(.vertical, 2)
                 .padding(.horizontal, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 5).fill(theme.kbdC)
+                    RoundedRectangle(cornerRadius: MintRadius.xs).fill(theme.kbdC)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5).strokeBorder(theme.sepStrongC)
+                    RoundedRectangle(cornerRadius: MintRadius.xs).strokeBorder(theme.sepStrongC)
                 )
             Text(label)
                 .font(MintFonts.uiFont(12))
@@ -1567,9 +1567,9 @@ struct InitialModelPicker: View {
                     }
                     .padding(10)
                     .background(
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                        RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                             .fill(MintTheme.of(.light).chipC))
-                    .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
                 }
                 .buttonStyle(.plain)
             }

@@ -367,7 +367,7 @@ private struct CandidateReviewList: View {
                     }
                     .padding(8)
                     .background(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                             .fill(theme.novelBgC)
                     )
                 }
@@ -514,11 +514,11 @@ private struct CharacterCardRow: View {
         }
         .padding(8)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .fill(theme.chipC)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .strokeBorder(theme.chipBorderC, lineWidth: 1)
         )
     }
