@@ -62,7 +62,11 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public static let light = MintTheme(
         ink: NSColor(hex: 0x1C1C1E),
         ink2: NSColor(hex: 0x6B6B70),
-        ink3: NSColor(hex: 0x9A9A9F),
+        // 4.5:1 (흰 배경) — 작은 의미 텍스트의 WCAG AA 최소치 (#29).
+        // 과거 0x9A9A9F는 2.8:1로 캡션·힌트가 읽히지 않았다.
+        ink3: NSColor(hex: 0x76767B),
+        // ghost는 **장식 전용**(플레이스홀더·비의미 틴트) — 의미 텍스트에 쓰지
+        // 않는다는 것이 토큰 계약이다 (#29). 대비 하한은 적용하지 않는다.
         ghost: NSColor(hex: 0xB4B4B9),
         blue: NSColor(hex: 0x0A84FF),
         sep: NSColor(white: 0, alpha: 0.08),
@@ -95,7 +99,9 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public static let dark = MintTheme(
         ink: NSColor(hex: 0xF2F2F0),
         ink2: NSColor(hex: 0x9A9A9F),
-        ink3: NSColor(hex: 0x6E6E74),
+        // 4.5:1 (어두운 유리 합성 배경 ~0x1B1B1E 기준) — #29.
+        // 과거 0x6E6E74는 3.4:1.
+        ink3: NSColor(hex: 0x838389),
         // 본문(0xF2F2F0)보다는 확실히 흐리되, 어두운 유리 배경 위에서 읽히는 밝기.
         ghost: NSColor(hex: 0x8E8E96),
         blue: NSColor(hex: 0x0A84FF),
@@ -361,10 +367,70 @@ public final class PaletteSettings: ObservableObject {
     }
 
     @Published public var light: MintPalette {
-        didSet { save(light, key: Keys.light) }
+        didSet {
+            save(light, key: Keys.light)
+            evaluateContrast()
+        }
     }
     @Published public var dark: MintPalette {
-        didSet { save(dark, key: Keys.dark) }
+        didSet {
+            save(dark, key: Keys.dark)
+            evaluateContrast()
+        }
+    }
+
+    /// 저대비 경고 (#29) — 저장된 팔레트의 표면색 위에서 본문 잉크가 WCAG AA
+    /// (4.5:1)를 못 만들면 Settings에 문장으로 알린다. 자동 보정은 하지 않는다 —
+    /// 사용자가 고른 색을 몰래 바꾸는 것보다, 사실을 말고 고칠지 묻는 게
+    /// "기억은 사용자의 것"(CLAUDE.md §1-5)과 같은 태도다. nil이면 문제 없음.
+    @Published public private(set) var contrastWarning: String?
+
+    /// 표면 후보(슬롯 0·2 = pill/glass 계열) 대비 최악값 검사.
+    private func evaluateContrast() {
+        guard enabled else {
+            contrastWarning = nil
+            return
+        }
+        func worstContrast(_ palette: MintPalette, ink: UInt32) -> Double {
+            let surfaces = [palette.color(0), palette.color(2)]
+                .compactMap { $0.usingColorSpace(.sRGB) }
+            let inkLum = Self.relativeLuminance(ink)
+            return surfaces.map { surface in
+                // α 합성 근사 — 유리 위 흰/검 섞임을 절반 가정.
+                let comps = surface.cgColor.alpha > 0.9
+                    ? (surface.redComponent, surface.greenComponent, surface.blueComponent)
+                    : (
+                        surface.redComponent * 0.5 + 0.25,
+                        surface.greenComponent * 0.5 + 0.25,
+                        surface.blueComponent * 0.5 + 0.25
+                    )
+                func lin(_ v: CGFloat) -> Double {
+                    let c = Double(v)
+                    return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+                }
+                let l = 0.2126 * lin(comps.0) + 0.7152 * lin(comps.1) + 0.0722 * lin(comps.2)
+                return (max(l, inkLum) + 0.05) / (min(l, inkLum) + 0.05)
+            }.min() ?? 10
+        }
+        let lightWorst = worstContrast(light, ink: 0x1C1C1E)
+        let darkWorst = worstContrast(dark, ink: 0xF2F2F0)
+        if lightWorst < 4.5 || darkWorst < 4.5 {
+            contrastWarning = String(
+                format: "이 팔레트는 본문 글자와 배경 대비가 %.1f:1이에요 — 작은 글자가 읽기 어려울 수 있어요 (권장 4.5:1 이상).",
+                min(lightWorst, darkWorst))
+        } else {
+            contrastWarning = nil
+        }
+    }
+
+    private static func relativeLuminance(_ hex: UInt32) -> Double {
+        func channel(_ v: UInt32) -> Double {
+            let c = Double(v) / 255
+            return c <= 0.03928 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4)
+        }
+        return 0.2126 * channel((hex >> 16) & 0xFF)
+            + 0.7152 * channel((hex >> 8) & 0xFF)
+            + 0.0722 * channel(hex & 0xFF)
     }
 
     private enum Keys {
@@ -377,6 +443,7 @@ public final class PaletteSettings: ObservableObject {
         enabled = UserDefaults.standard.bool(forKey: Keys.enabled)
         light = Self.load(Keys.light) ?? .lightDefault
         dark = Self.load(Keys.dark) ?? .darkDefault
+        evaluateContrast()
     }
 
     public func palette(for scheme: ColorScheme) -> MintPalette {
