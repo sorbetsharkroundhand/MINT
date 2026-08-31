@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mint:
+    name: MINT / Debug Build & Test
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve dependencies
+        run: |
+          swift package resolve
+          git diff --exit-code -- Package.resolved
+
+      - name: Build MINT
+        run: swift build --product MINT
+
+      - name: Test MINTCore
+        run: swift test
+
+  bench:
+    name: MINTBench / Compile
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: swift --version
+
+      - name: Build MINTBench
+        run: swift build --product MINTBench
+
+  app:
+    name: App / Release Bundle & Smoke
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Allow package macros in CI
+        run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+
+      - name: Build MINT.app
+        run: scripts/build-mint-app.sh
+
+      - name: Validate app bundle
+        run: |
+          test -x build/MINT.app/Contents/MacOS/MINT
+          test -s build/MINT.app/Contents/MacOS/mlx.metallib
+          plutil -lint build/MINT.app/Contents/Info.plist
+          codesign --verify --deep --strict --verbose=2 build/MINT.app
+
+      - name: Launch smoke test
+        run: scripts/smoke-mint-app.sh

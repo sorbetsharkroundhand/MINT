@@ -15,7 +15,9 @@ cd "$(dirname "$0")/.."
 scripts/prepare-metallib.sh
 
 echo "▸ 릴리즈 빌드…"
-swift build -c release
+# 앱 번들에는 MINT 실행 파일만 필요하다. MINTBench는 CI에서 별도 product로
+# 컴파일해 앱 패키징 실패와 벤치 도구 실패가 서로 가려지지 않게 한다.
+swift build -c release --product MINT
 
 REL=".build/arm64-apple-macosx/release"
 APP="build/MINT.app"

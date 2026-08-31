@@ -1,0 +1,74 @@
+name: Release Readiness
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-readiness-${{ github.event.workflow_run.head_sha || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    name: macOS / Release Candidate
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout tested commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve locked dependencies
+        run: |
+          swift package resolve
+          git diff --exit-code -- Package.resolved
+
+      - name: Allow package macros in CI
+        run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
+
+      - name: Build release app bundle
+        run: scripts/build-mint-app.sh
+
+      - name: Validate release app bundle
+        run: |
+          test -x build/MINT.app/Contents/MacOS/MINT
+          test -s build/MINT.app/Contents/MacOS/mlx.metallib
+          plutil -lint build/MINT.app/Contents/Info.plist
+          codesign --verify --deep --strict --verbose=2 build/MINT.app
+
+      - name: Launch smoke test
+        run: scripts/smoke-mint-app.sh
+
+      - name: Archive release candidate
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent build/MINT.app build/MINT.app.zip
+          shasum -a 256 build/MINT.app.zip | tee build/MINT.app.zip.sha256
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@v4
+        with:
+          name: MINT-macOS
+          path: |
+            build/MINT.app.zip
+            build/MINT.app.zip.sha256
+          if-no-files-found: error
+          retention-days: 14
