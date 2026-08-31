@@ -17,7 +17,7 @@ concurrency:
 jobs:
   core:
     name: Core / Build & Test
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
 
     steps:
@@ -43,7 +43,7 @@ jobs:
 
   app:
     name: App / Bundle & Smoke
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
 
     steps:
