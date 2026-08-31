@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    name: Core / Build & Test
+    runs-on: macos-14
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve dependencies
+        run: |
+          swift package resolve
+          git diff --exit-code -- Package.resolved
+
+      - name: Build
+        run: swift build
+
+      - name: Test
+        run: swift test
+
+  app:
+    name: App / Bundle & Smoke
+    runs-on: macos-14
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Build MINT.app
+        run: scripts/build-mint-app.sh
+
+      - name: Validate app bundle
+        run: |
+          test -x build/MINT.app/Contents/MacOS/MINT
+          test -s build/MINT.app/Contents/MacOS/mlx.metallib
+          plutil -lint build/MINT.app/Contents/Info.plist
+
+      - name: Launch smoke test
+        run: scripts/smoke-mint-app.sh
