@@ -54,6 +54,14 @@ trap 'exit 1' HUP INT TERM
 mkdir -p "$SMOKE_HOME/Documents" "$SMOKE_HOME/Library/Logs/DiagnosticReports"
 ditto "$SOURCE_APP" "$APP"
 
+# macOS 15는 첫 실행 모델 선택 시트가 열려 있으면 정상 종료를 보류한다.
+# #100은 모델 다운로드 없는 번들 수명주기 검사다. 첫 실행 UI는 #118에서 검증한다.
+# 명령행 값은 String이므로 Bool로 읽는 설정에는 격리 홈의 plist fixture를 쓴다.
+BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")
+mkdir -p "$SMOKE_HOME/Library/Preferences"
+cp scripts/fixtures/smoke-preferences.plist "$SMOKE_HOME/Library/Preferences/$BUNDLE_ID.plist"
+plutil -lint "$SMOKE_HOME/Library/Preferences/$BUNDLE_ID.plist"
+
 # 시작 시점 표식 — 이후 새로 생긴 MINT 크래시 리포트가 있으면 실패로 본다.
 MARKER="$SMOKE_ROOT/started"
 touch "$MARKER"

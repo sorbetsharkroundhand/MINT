@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- 번들 수명주기는 모델 선택을 마친 오프라인 집필 상태에서 검사한다. -->
+    <key>mint.initialModelConfirmed</key>
+    <true/>
+    <key>completion.enabled</key>
+    <false/>
+</dict>
+</plist>
