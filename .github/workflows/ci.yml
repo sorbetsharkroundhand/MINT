@@ -86,3 +86,12 @@ jobs:
 
       - name: Launch smoke test
         run: scripts/smoke-mint-app.sh
+
+      - name: Upload smoke failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-failure-diagnostics
+          path: build/smoke-diagnostics/
+          if-no-files-found: ignore
+          retention-days: 7

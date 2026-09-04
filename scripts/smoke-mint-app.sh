@@ -33,6 +33,14 @@ cleanup() {
         PID=$(ps -axo pid=,comm= | awk -v bin="$BIN" '$2 == bin { print $1 }')
     fi
     if [ -n "$PID" ] && [ "$(ps -p "$PID" -o comm= 2>/dev/null)" = "$BIN" ]; then
+        # CI에서만 종료 실패의 스택·화면을 남긴다. 개인 Mac 화면은 수집하지 않는다.
+        if [ -z "$PASSED" ] && [ "${GITHUB_ACTIONS:-}" = true ]; then
+            DIAGNOSTICS="$PWD/build/smoke-diagnostics"
+            mkdir -p "$DIAGNOSTICS"
+            sample "$PID" 1 1 -file "$DIAGNOSTICS/MINT-sample.txt" || true
+            screencapture -x "$DIAGNOSTICS/screen.png" || true
+            ps -p "$PID" -o pid=,stat=,etime=,comm= > "$DIAGNOSTICS/process.txt" || true
+        fi
         kill -9 "$PID" 2>/dev/null || true
     fi
     if [ -n "$PASSED" ]; then
