@@ -48,7 +48,8 @@ final class MathObjectTests: XCTestCase {
         return view
     }
 
-    private func grouped(_ editor: BlockTextView, _ body: () -> Void) {
+    @MainActor
+    private func grouped(_ editor: BlockTextView, _ body: @MainActor () -> Void) {
         editor.undoManager?.beginUndoGrouping()
         body()
         editor.undoManager?.endUndoGrouping()

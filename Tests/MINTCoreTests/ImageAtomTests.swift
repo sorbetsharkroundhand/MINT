@@ -7,7 +7,6 @@ import XCTest
 /// 계약: 렌더된 이미지는 원자다 — 화살표 한 번에 앞/뒤로 건너뛰고, VoiceOver는
 /// 소스 대신 alt·너비·정렬을 듣고, ⌘←/⌘→·±·⌥↑↓·Backspace로 정렬·크기·이동·
 /// 삭제가 undo 가능하게 이뤄진다.
-@MainActor
 final class ImageAtomTests: XCTestCase {
 
     private var windows: [NSWindow] = []
@@ -40,6 +39,7 @@ final class ImageAtomTests: XCTestCase {
     }
 
     /// SerializationTests와 같은 조립 — 창을 넣어야 undoManager가 생긴다.
+    @MainActor
     private func makeEditor(text: String) -> BlockTextView {
         let storage = NSTextStorage()
         let layoutManager = MintLayoutManager()
@@ -75,6 +75,7 @@ final class ImageAtomTests: XCTestCase {
 
     /// 본문: "앞문단\n![사진](images/a.png){width=60}\n뒷문단"
     /// 이미지 문단은 {4, 30} — 경계는 4(앞)와 34(뒤).
+    @MainActor
     private func fixture() -> (text: String, image: NSRange) {
         let text = "앞문단\n![사진](images/a.png){width=60}\n뒷문단"
         let ns = text as NSString
@@ -229,4 +230,3 @@ final class ImageAtomTests: XCTestCase {
         XCTAssertEqual(editor.string, text)
     }
 }
-

@@ -7,7 +7,6 @@ import XCTest
 /// 계약: 기존 카드의 연속 필드 편집(이름·별칭·소개 타이핑)은 **디바운스 저장**이고,
 /// 새 카드 추가·잠금 토글 같은 이산적 구조 변경만 즉시 저장이다. 타이핑 한 글자마다
 /// 메인 액터에서 entries.json 전체를 쓰면 안 된다.
-@MainActor
 final class CharacterSavePolicyTests: XCTestCase {
 
     private var root: URL!
@@ -17,13 +16,17 @@ final class CharacterSavePolicyTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MINT-cardsave-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
+        let directory = root!
+        store = MainActor.assumeIsolated {
+            EntryStore(directory: directory, autosaveDelay: .seconds(3600))
+        }
     }
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: root)
     }
 
+    @MainActor
     func test기존카드연속편집은즉시저장을하지않는다() throws {
         let id = store.newEntry()
         let base = CharacterCard(name: "한", note: "")
@@ -48,6 +51,7 @@ final class CharacterSavePolicyTests: XCTestCase {
             store.entries.first { $0.id == id }?.characters?.first?.name, "한결수정")
     }
 
+    @MainActor
     func test소개수정은잠금규칙을유지한다() throws {
         let id = store.newEntry()
         let base = CharacterCard(name: "세라", note: "")
@@ -62,6 +66,7 @@ final class CharacterSavePolicyTests: XCTestCase {
         XCTAssertEqual(saved?.locked, true, "소개 직접 수정 → 잠금 규칙 보존")
     }
 
+    @MainActor
     func test이산구조변경은즉시저장을유지한다() throws {
         let id = store.newEntry()
         let before = store.immediateSaveCount

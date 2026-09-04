@@ -221,7 +221,7 @@ final class MathRoundTripTests: XCTestCase {
 
     // MARK: 그룹 판정 순수 헬퍼
 
-    func test그룹판정_열기없는_연속수식은_그룹이아니다() {
+    @MainActor func test그룹판정_열기없는_연속수식은_그룹이아니다() {
         let p = NSRange(location: 0, length: 3)
         let q = NSRange(location: 4, length: 3)
         let groups = BlockTextView.mathGroupRanges([
@@ -231,7 +231,7 @@ final class MathRoundTripTests: XCTestCase {
         XCTAssertEqual(groups, [])
     }
 
-    func test그룹판정_미종결_그룹은_수식이_끊길때까지() {
+    @MainActor func test그룹판정_미종결_그룹은_수식이_끊길때까지() {
         let a = NSRange(location: 0, length: 3)
         let b = NSRange(location: 4, length: 3)
         let c = NSRange(location: 8, length: 5)

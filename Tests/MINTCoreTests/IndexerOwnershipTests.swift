@@ -6,7 +6,6 @@ import XCTest
 ///
 /// 계약: 선점(noteChange·전체 다시 읽기)마다 세대가 올라가고, 늦게 끝난 이전
 /// 작업은 ① 핸들 정리(finishPass)도 ② 발행(canPublish)도 하지 못한다.
-@MainActor
 final class IndexerOwnershipTests: XCTestCase {
 
     private var root: URL!
@@ -17,11 +16,18 @@ final class IndexerOwnershipTests: XCTestCase {
         root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MINT-own-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        let settings = CompletionSettings()
-        settings.autocompleteEnabled = false  // 네트워크 유발 방지
-        indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        indexer.attach(store: store)
+        // 동기 XCTest 훅의 실행 순서를 유지하며 액터 소유 객체만 지역 값으로 넘긴다.
+        let directory = root!
+        let fixture = MainActor.assumeIsolated {
+            let store = EntryStore(directory: directory, autosaveDelay: .seconds(3600))
+            let settings = CompletionSettings()
+            settings.autocompleteEnabled = false  // 네트워크 유발 방지
+            let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
+            indexer.attach(store: store)
+            return (store, indexer)
+        }
+        store = fixture.0
+        indexer = fixture.1
     }
 
     override func tearDownWithError() throws {
@@ -29,6 +35,7 @@ final class IndexerOwnershipTests: XCTestCase {
     }
 
     @discardableResult
+    @MainActor
     private func makeNovel() -> UUID {
         let id = store.newEntry(kind: .novel)
         store.select(id)
@@ -37,6 +44,7 @@ final class IndexerOwnershipTests: XCTestCase {
 
     // MARK: - 세대 증가 (선점)
 
+    @MainActor
     func test선점마다세대가올라간다() {
         let id = store.newEntry(kind: .novel)
         let before = indexer.passGeneration
@@ -50,6 +58,7 @@ final class IndexerOwnershipTests: XCTestCase {
 
     // MARK: - 늦은 이전 작업의 핸들 정리 차단 (#82 게이트 1)
 
+    @MainActor
     func test늦은이전작업은핸들정리와상태해제를못한다() {
         let a = makeNovel()
         indexer.noteChange(entryID: a)
@@ -81,6 +90,7 @@ final class IndexerOwnershipTests: XCTestCase {
 
     // MARK: - 발행 가드 (토큰·문서 일치)
 
+    @MainActor
     func test발행가드는토큰과문서일치를요구한다() {
         let a = makeNovel()
         let bodyA = "# 1장\n내용"
@@ -101,6 +111,7 @@ final class IndexerOwnershipTests: XCTestCase {
         XCTAssertTrue(indexer.canPublish(token: tokenB, entryID: b) || indexer.passEntryID != b)
     }
 
+    @MainActor
     func test같은문서v1_v2편집은v1발행을막는다() {
         let id = makeNovel()
         let v1 = "# 1장\n초판"
@@ -120,6 +131,7 @@ final class IndexerOwnershipTests: XCTestCase {
 
     // MARK: - hydrate 소유권
 
+    @MainActor
     func testhydrate세대도요청마다올라간다() {
         let id = makeNovel()
         store.updateActiveBody("# 1장\n내용이 충분히 긴 본문")
