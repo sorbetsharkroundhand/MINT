@@ -1,6 +1,6 @@
-# MINT — 예측 글쓰기 엔진 아키텍처 & 구현 계획
+# MINT — 로컬 글쓰기 플랫폼 아키텍처 & 구현 계획
 
-> 한글 **장편 소설**을 위한 온디바이스 예측 글쓰기 엔진 (macOS 네이티브).
+> **Writing Platform, Fiction First.** 한글 장편 소설에 깊이 특화된 로컬 글쓰기 플랫폼.
 > 철학·불변 규칙은 [CLAUDE.md](CLAUDE.md) — 이 문서는 그것을 구현하는
 > 시스템 설계와 로드맵이다. 살아있는 문서: 설계가 바뀌면 같은 커밋에서 갱신한다.
 >
@@ -10,7 +10,8 @@
 
 ## 1. 비전 — 그리고 통념에 대한 비판
 
-MINT의 목표는 자동완성이 아니라 **기억하는 공저자**다. 사용자가 느껴야 하는 것:
+MINT는 일반 글쓰기와 소설을 함께 지원하는 로컬 글쓰기 플랫폼이다. 편집 품질이 먼저이며,
+AI 없이도 글을 쓸 수 있어야 한다. Fiction 특화의 목표는 **기억하는 공저자**다:
 
 - AI가 최근 문단을 "읽는" 게 아니라 이야기를 **기억한다**.
 - 제안이 인물의 성격·말투·관계·시간선·세계 상태·과거 사건을 보존한다.
@@ -37,11 +38,11 @@ MINT의 목표는 자동완성이 아니라 **기억하는 공저자**다. 사�
 |------|------|
 | 형태 | 독립형 macOS 네이티브 앱 (SwiftUI + 필요한 곳에 AppKit), Apple Silicon 필수 |
 | 핵심 UX | 인라인 고스트 텍스트. `Tab` 수락 / `→` 한 단어 / `Esc` 거부. 조용한 UI |
-| 최우선 도메인 | **소설** (`EntryKind.novel`). 저널·일반 문서는 Fast 모드로 지원 |
+| 제품 도메인 | **WritingProject** — `WritingMode.general / .fiction`. 소설은 깊은 특화이며 General도 기본 경로. 기존 UI의 `EntryKind`는 전환 완료 전까지 유지 |
 | AI | **완전 로컬**(MLX) 한국어 중심 소형 모델. 마스터 스위치로 끌 수 있음 |
 | 컨텍스트 | 최근 원문 창 + **백그라운드가 준비한 구조화 지식** (작품 메타·요약·인물 카드·사건) |
-| 기억 | 원문에서 파생된 재구축 가능한 사이드카 (§6). 사용자가 열람·수정 가능 |
-| 저장 | 로컬 JSON — 원문 `~/Documents/MINT/entries.json`, 지식 `knowledge/<entryID>.json` |
+| 기억 | 자동 파생 지식은 재구축 가능한 사이드카 (§6). 사용자 정본·수정은 별도 내구 데이터 |
+| 저장 | 현행 원문 `~/Documents/MINT/entries.json`, 지식 `knowledge/<entryID>.json`. 프로젝트 파일 저장 전환은 #102에서 원본 보존 후 검증 |
 | 예측 모드 | **Fast / Smart / Story** (§10) — 종류·바이블 유무로 자동 선택 + 수동 오버라이드 |
 
 ## 3. 기술 스택 & 제약
@@ -72,6 +73,10 @@ MINT의 목표는 자동완성이 아니라 **기억하는 공저자**다. 사�
   (이중 로드 금지 — `generateFolderName`이 선례).
 
 ## 4. 전체 아키텍처 — 세 평면
+
+0.2.0 상위 도메인은 `Project/`의 범용 값 타입으로 분리한다 (§5.1).
+아래 도표는 현행 편집·저장·예측 경로다. #101은 새 타입만 도입하며,
+앱 연결은 #102–#104에서 단계적으로 전환한다.
 
 ```mermaid
 flowchart TD
@@ -114,6 +119,25 @@ flowchart TD
 
 ## 5. 문서 모델
 
+### 5.1 범용 프로젝트 도메인 (0.2.0, #101)
+
+- `WritingProject`는 ID·제목·모드·순서 있는 문서 목록을 가진 메모리상의 집합이다.
+  `WritingMode.general / .fiction`으로 특화를 선택하며, Fiction 타입을 상위 API에 넣지 않는다.
+- `WritingDocument`는 ID·제목·본문·종류(`manuscript / note / reference`)를 가진다.
+  이 값들의 Codable 왕복은 메모리 모델 검증용이며, #102의 디스크 manifest 설계를 대신하지 않는다.
+- `WritingProjectID`와 `WritingDocumentID`는 UUID를 감싼 서로 다른 타입이다.
+  ID를 생성한 뒤 본문 편집·직렬화에도 유지한다. 파생 `DocumentOutline.Scene` 해시는 영구 ID가 아니다.
+- `LegacyEntryAdapter.document(from:)`는 기존 항목의 UUID·제목·본문을 그대로 옮기고
+  문서 종류를 `manuscript`로 둔다. 공백·줄바꿈·한글 정규화·Markdown을 고치지 않으며,
+  테스트는 문자열과 UTF-8 바이트를 모두 비교한다.
+- 어댑터는 디스크를 읽거나 쓰지 않는 문서 값 변환이다. 기존 폴더·정렬·날짜·인물 카드·
+  사용자 수정 등 전체 메타데이터를 옮기는 migration은 #102의 별도 책임이며,
+  현재 `EntryStore`와 `entries.json`은 계속 사용한다.
+- `Writing*.swift`는 Foundation만으로 타입 체크 가능해야 한다.
+  레거시 타입 의존은 `LegacyEntryAdapter` 경계에만 둔다.
+
+### 5.2 현행 편집·서사 분석 모델
+
 - **아웃라인 트리**: 마크다운 헤딩 `#`(부/장) `##`(장/절) `###`(씬)을 결정적으로
   파싱해 작품 구조로 쓴다 — 사용자의 장 구조가 곧 타임라인 골격이다 (§8).
   헤딩 없는 문서는 전체가 단일 씬 (저널이 자연히 이 경우). 단, **씬은 크기
@@ -126,7 +150,8 @@ flowchart TD
 - **작품 메타** (제목·장르·시점·문체 노트·로그라인): 사용자 저작 데이터이므로
   파생 캐시가 아니라 `JournalEntry`의 옵셔널 필드로 (레거시 호환 패턴은
   `titleIsCustom`이 선례). LLM은 초안만 제안, 확정은 사용자.
-- **1작품 = 1문서** (현행 유지). "폴더 = 작품(장별 문서)"은 열린 질문 (§16).
+- **현행 편집 경로는 1작품 = 1문서**. 새 `WritingProject`는 여러 문서를 담으며,
+  저장·내비게이터 연결은 #102–#104에서 전환한다 (§16).
 
 ## 6. 지식 저장소 — 계층 메모리의 실체
 
@@ -485,6 +510,12 @@ Event { pos, 참여 엔티티 [ID], 요약(≤80자), 상태 효과 [StateDelta 
 
 ## 14. 로드맵
 
+**0.2.0 — Writing Platform, Fiction First ([Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99))**:
+#100 CI 기준선 → #101 범용 프로젝트·문서 값 타입 및 레거시 어댑터 →
+#102 원본을 보존하는 프로젝트 저장·이관 → #103–#104 셸·작업 모드 연결.
+이후 Fiction Intelligence와 General Writing 검증은 Epic 하위 이슈 순서로 진행한다.
+#101은 디스크 migration·새 UI·Story Intelligence를 포함하지 않는다.
+
 **이력 (완료)**: M0–M1 스캐폴드·에디터·저장 → M2 추론 벤치 → M3 고스트 자동완성
 → 에디터 v3 (블록·리퀴드 글래스·다중 저널·모델 스위처) → 파일시스템 v1 (폴더 트리)
 → 서식 v1 (툴바·인라인 마크다운) → EPUB 내보내기. M4(다듬기)는 M5로 흡수.
@@ -570,8 +601,8 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 - [x] 인물 연대기 — 바이블 카드에 "연대기" 펼침: 사건+델타 담화 순서.
       append-only StateDelta의 배당 (§7 "공짜로 나온다"). **스토리 그래프**
       (관계망 시각화)는 후속.
-- [ ] 일반 문서 라이트 모드 — 미착수: 모든 저널에 백그라운드 LLM을 켤지의
-      게이트 설계(문서 크기·빈도)가 선행돼야 한다 (§16).
+- [ ] 일반 문서 지원 — 0.2.0에서 General Writing을 기본 경로로 검증한다 (#116).
+      백그라운드 LLM 게이트(문서 크기·빈도)는 별도 설계 대상이다 (§16).
 - [ ] 저전력·대작(10만+ 어절) 스케일 검증 — 실기기 측정 (키 입력 게이지·
       docs/editor-perf.md 4차 방법론으로 절차는 준비됨).
 
@@ -735,8 +766,9 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
    살고, 구 대형 씬 키는 pruning GC가 자연 청소한다. 타일링 무손실·상한 보장·
    경계 안정성·폴백 사슬을 테스트 12건으로 고정. ⚠️ 남은 비용: 개츠비급이면
    세그먼트 ~87개 × 요약+추출 = 유휴 LLM 174회 (일회성, 메모 후 증분).
-4. "폴더 = 작품(장별 문서)" 전환 — 초장편 UX엔 유리하나 아웃라인·Pos·KV 전략
-   전반에 파급. 1작품 1문서의 실사용 한계가 보일 때 재론.
+4. **방향 확정 (0.2.0 #101–#104)**: 범용 `WritingProject`가 여러 문서를 묶는다.
+   현행 폴더를 그대로 작품 ID로 간주하지 않는다. 원본 보존 이관과 아웃라인·Pos·KV의
+   프로젝트별 격리는 후속 저장·연결 단계에서 검증한다.
 5. 지식 사이드카 SQLite 전환 시점 (§6 전환 조건 도달 여부).
 6. 바이블 노출 수위 — 이해를 보여줄수록 신뢰가 오르나 소음도 는다. 기본 접힘 +
    요청 시 상세가 가설.
@@ -771,6 +803,8 @@ TTFC·실기기 E2E)은 남아 있다, 아래 완료 기준 참조.
 | `Sources/MINTCore/Editor/CompletionController.swift` | 게이트 · 디바운스 · 수락/거부 · 취소 |
 | `Sources/MINTCore/Inference/CompletionEngine.swift` | MLX 단일 모델 상주 · 취소 가능 생성 (actor) |
 | `Sources/MINTCore/Storage/EntryStore.swift` | 원문 저장 (entries.json) — 유일한 진실 |
+| `Sources/MINTCore/Project/WritingProject.swift` · `WritingDocument.swift` · `WritingMode.swift` | 범용 메모리 도메인 (§5.1); UUID ID 래퍼는 각각 별도 파일 |
+| `Sources/MINTCore/Project/LegacyEntryAdapter.swift` | 기존 원고의 ID·제목·본문을 보존하는 순수 값 변환 (§5.1) |
 | `Sources/MINTCore/Settings.swift` | `CompletionSettings` · 모델 프리셋 |
 | `Sources/MINTCore/Theme.swift` | 색·폰트 토큰 (라이트/다크) |
 | `Sources/MINTBench/main.swift` | 추론·품질 벤치 CLI (§13) |
