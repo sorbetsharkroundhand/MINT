@@ -8,7 +8,6 @@ import XCTest
 /// - 위치는 **주변 문맥 앵커**와 함께 저장되고, 본문이 밀려도 앵커로 재안착한다.
 /// - IME 조합(marked) 중 기록은 무시된다 — 확정되지 않은 조합 자리 금지.
 /// - 재실행 시뮬레이션(새 스토어 인스턴스)에서 같은 UserDefaults로 복원된다.
-@MainActor
 final class WritingPositionTests: XCTestCase {
 
     private var defaults: UserDefaults!
@@ -25,12 +24,14 @@ final class WritingPositionTests: XCTestCase {
         super.tearDown()
     }
 
+    @MainActor
     private func makeBody(paragraphs: Int = 200) -> String {
         (0..<paragraphs)
             .map { index in "\(index)번째 문단이다. 여기에 이야기가 이어진다. 다음 문장도 붙는다." }
             .joined(separator: "\n\n")
     }
 
+    @MainActor
     func test저장과복원_본문불변이면같은위치다() {
         let store = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
         store._testReset()
@@ -48,6 +49,7 @@ final class WritingPositionTests: XCTestCase {
         XCTAssertEqual(store.resolve(for: id, in: body), caret)
     }
 
+    @MainActor
     func test본문이밀리면앵커로재안착한다() {
         let store = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
         store._testReset()
@@ -77,6 +79,7 @@ final class WritingPositionTests: XCTestCase {
         XCTAssertTrue(context.contains("이야기가"), "재안착이 엉뚱한 자리를 가리켰다: \(context)")
     }
 
+    @MainActor
     func test조합중기록은무시된다() {
         let store = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
         store._testReset()
@@ -85,6 +88,7 @@ final class WritingPositionTests: XCTestCase {
         XCTAssertNil(store.position(for: id), "IME 조합 중 기록이 남았다")
     }
 
+    @MainActor
     func test재실행시뮬레이션_디스크라운드트립() throws {
         // 첫 세션 — 기록 + 즉시 반영.
         let first = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))

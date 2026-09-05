@@ -14,7 +14,10 @@ final class RenderCacheLRUTests: XCTestCase {
 
     override func setUp() {
         super.setUp()
-        MintImageStore._testResetCache(budgetBytes: 1_000_000)
+        // 구형 XCTest 훅은 비격리이므로 캐시 초기화의 메인 액터 계약을 확인한다.
+        MainActor.assumeIsolated {
+            MintImageStore._testResetCache(budgetBytes: 1_000_000)
+        }
     }
 
     private func makeTempRoot() -> URL {

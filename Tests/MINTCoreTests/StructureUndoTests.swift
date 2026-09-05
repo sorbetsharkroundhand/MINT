@@ -7,12 +7,11 @@ import XCTest
 /// 계약: 저널·폴더 삭제/이동/재정렬, 종류 전환, 바이블 메타(인물·분석 결과)
 /// 변경이 ⌘Z/⇧⌘Z로 복원되고, 삭제는 휴지통에 남아 나중에도 복구되며,
 /// asset은 유예 기간(AssetJanitor) 동안 절대 지워지지 않는다.
-@MainActor
 final class StructureUndoTests: XCTestCase {
 
-    @MainActor private var root: URL!
-    @MainActor private var store: EntryStore!
-    @MainActor private var windows: [NSWindow] = []
+    private var root: URL!
+    private var store: EntryStore!
+    private var windows: [NSWindow] = []
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -28,6 +27,7 @@ final class StructureUndoTests: XCTestCase {
     /// 창의 undo manager를 배선한다 — 베어 UndoManager()는 첫 등록 때 유령
     /// 외부 그룹을 만들어 그룹 경계가 무너진다(실앱은 창이 관리).
 
+    @MainActor
     private func makeStore() -> EntryStore {
         let store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
         let storage = NSTextStorage()
@@ -60,6 +60,7 @@ final class StructureUndoTests: XCTestCase {
 
     /// 헤드리스에선 이벤트 주기가 undo 그룹을 열어주지 않는다 — 연산별로
     /// 명시 묶어 앱의 "사용자 동작 1회 = undo 1단계"를 재현한다.
+    @MainActor
     private func grouped(_ body: () -> Void) {
         // 텍스트 시스템이 선(先)으로 열어 둔 그룹이 있을 수 있으므로, 연산 후
         // 레벨 0까지 전부 닫는다 — 이 연산만이 하나의 undo 단위가 된다.
@@ -72,6 +73,7 @@ final class StructureUndoTests: XCTestCase {
 
     // MARK: - 저널 삭제 · undo
 
+    @MainActor
     func test저널삭제는undo로본문째복원된다() throws {
         let store = makeStore()
         let id = store.newEntry()
@@ -94,6 +96,7 @@ final class StructureUndoTests: XCTestCase {
         XCTAssertEqual(store.trash.items[0].entries.first?.id, id)
     }
 
+    @MainActor
     func test폴더삭제는하위트리째undo된다() throws {
         let store = makeStore()
         let folder = store.newFolder()
@@ -115,6 +118,7 @@ final class StructureUndoTests: XCTestCase {
         XCTAssertEqual(item?.entries.first?.id, child)
     }
 
+    @MainActor
     func test이동과재정렬이undo_redo된다() throws {
         let store = makeStore()
         let folder = store.newFolder()
@@ -136,6 +140,7 @@ final class StructureUndoTests: XCTestCase {
 
     // MARK: - 바이블 메타 · 종류 전환
 
+    @MainActor
     func test인물삭제와종류전환은undo된다() throws {
         let store = makeStore()
         let id = store.newEntry(kind: .novel)
@@ -158,6 +163,7 @@ final class StructureUndoTests: XCTestCase {
 
     // MARK: - 휴지통 복원
 
+    @MainActor
     func test휴지통에서복구하면문서로돌아온다() throws {
         let store = makeStore()
         let id = store.newEntry()
@@ -177,6 +183,7 @@ final class StructureUndoTests: XCTestCase {
 
     // MARK: - GC 유예 (#9 완료 조건 3 — AssetJanitor와의 승계)
 
+    @MainActor
     func test삭제후유예기간에는asset이살아있다() throws {
         let imagesDir = root.appendingPathComponent("images")
         try FileManager.default.createDirectory(at: imagesDir, withIntermediateDirectories: true)

@@ -345,6 +345,7 @@ public final class EntryStore: ObservableObject {
             StructureChange(name: name, forward: after, backward: before), in: um)
     }
 
+    @MainActor
     private struct StructureChange {
         let name: String
         let forward: () -> Void
@@ -356,14 +357,18 @@ public final class EntryStore: ObservableObject {
     private func registerRevert(_ change: StructureChange, in um: UndoManager) {
         um.setActionName(change.name)
         um.registerUndo(withTarget: self) { store in
-            store.structureUndoManager = um  // 창 재배선 전에도 이어지게
-            change.backward()
-            store.registerRevert(
-                StructureChange(
-                    name: change.name,
-                    forward: change.backward,
-                    backward: change.forward),
-                in: um)
+            // 창의 undo는 메인에서 동기 실행된다. 구형 SDK의 Sendable 콜백에서도
+            // 격리를 확인하되 Task로 미루지 않아야 같은 undo 그룹에 redo가 등록된다.
+            MainActor.assumeIsolated {
+                store.structureUndoManager = um  // 창 재배선 전에도 이어지게
+                change.backward()
+                store.registerRevert(
+                    StructureChange(
+                        name: change.name,
+                        forward: change.backward,
+                        backward: change.forward),
+                    in: um)
+            }
         }
     }
 
@@ -466,12 +471,17 @@ public final class EntryStore: ObservableObject {
         let after = entries[currentIndex]
         um.setActionName(burst.name)
         um.registerUndo(withTarget: self) { store in
-            store.structureUndoManager = um
-            store.restoreEntries([before]); store.saveNow()
-            // redo 등록 — 현재 시점 값으로.
-            um.registerUndo(withTarget: store) { s2 in
-                s2.structureUndoManager = um
-                s2.restoreEntries([after]); s2.saveNow()
+            // 버스트 복원·저장·redo 등록도 undo 반환 전에 끝나야 한다.
+            MainActor.assumeIsolated {
+                store.structureUndoManager = um
+                store.restoreEntries([before]); store.saveNow()
+                // redo 등록 — 현재 시점 값으로.
+                um.registerUndo(withTarget: store) { s2 in
+                    MainActor.assumeIsolated {
+                        s2.structureUndoManager = um
+                        s2.restoreEntries([after]); s2.saveNow()
+                    }
+                }
             }
         }
     }
