@@ -1,0 +1,15 @@
+name: Smoke preferences diagnostic
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  preferences:
+    runs-on: macos-15
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Probe LaunchServices preferences
+        run: scripts/probe-smoke-preferences.sh
