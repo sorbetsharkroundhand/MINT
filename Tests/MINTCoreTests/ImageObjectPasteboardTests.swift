@@ -33,6 +33,11 @@ final class ImageObjectPasteboardTests: XCTestCase {
     override func tearDownWithError() throws {
         MainActor.assumeIsolated { MintImageStore.setDirectoryOverride(nil) }
         // window.close()는 정리 구간 세그폴트를 만든다 — 참조만 내려 ARC에 맡긴다.
+        let windowsToClean = windows
+        MainActor.assumeIsolated {
+            // 다음 비동기 테스트의 이벤트 루프에 자동 undo 그룹 종료를 남기지 않는다.
+            windowsToClean.forEach { $0.undoManager?.removeAllActions() }
+        }
         windows.removeAll()
         try? FileManager.default.removeItem(at: root)
     }

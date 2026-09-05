@@ -13,6 +13,11 @@ final class MathObjectTests: XCTestCase {
     private var undoManager: UndoManager!
 
     override func tearDownWithError() throws {
+        let windowsToClean = windows
+        MainActor.assumeIsolated {
+            // 다음 비동기 테스트의 이벤트 루프에 자동 undo 그룹 종료를 남기지 않는다.
+            windowsToClean.forEach { $0.undoManager?.removeAllActions() }
+        }
         windows.removeAll()
     }
 
