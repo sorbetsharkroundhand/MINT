@@ -27,6 +27,8 @@ APP="$SMOKE_ROOT/MINT.app"
 BIN="$APP/Contents/MacOS/MINT"
 PID=""
 PASSED=""
+SMOKE_BUNDLE_ID=""
+PREFERENCES_OWNED=""
 cleanup() {
     # 실패 정리는 이 실행 파일의 PID에만 한정한다. 강제 종료는 통과로 세지 않는다.
     if [ -z "$PID" ]; then
@@ -43,6 +45,9 @@ cleanup() {
         fi
         kill -9 "$PID" 2>/dev/null || true
     fi
+    if [ -n "$PREFERENCES_OWNED" ]; then
+        defaults delete "$SMOKE_BUNDLE_ID" >/dev/null 2>&1 || true
+    fi
     if [ -n "$PASSED" ]; then
         rm -rf "$SMOKE_ROOT"
     else
@@ -54,13 +59,19 @@ trap 'exit 1' HUP INT TERM
 mkdir -p "$SMOKE_HOME/Documents" "$SMOKE_HOME/Library/Logs/DiagnosticReports"
 ditto "$SOURCE_APP" "$APP"
 
-# macOS 15는 첫 실행 모델 선택 시트가 열려 있으면 정상 종료를 보류한다.
+# CFFIXED_USER_HOME은 문서를 격리하지만 UserDefaults의 데몬 저장소까지 옮기지 않는다.
+# 복사본에 고유 식별자를 주고 설정 API로 초기화해야 실제 사용자 설정을 읽거나 쓰지 않는다.
 # #100은 모델 다운로드 없는 번들 수명주기 검사다. 첫 실행 UI는 #118에서 검증한다.
-# 명령행 값은 String이므로 Bool로 읽는 설정에는 격리 홈의 plist fixture를 쓴다.
 BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")
-mkdir -p "$SMOKE_HOME/Library/Preferences"
-cp scripts/fixtures/smoke-preferences.plist "$SMOKE_HOME/Library/Preferences/$BUNDLE_ID.plist"
-plutil -lint "$SMOKE_HOME/Library/Preferences/$BUNDLE_ID.plist"
+SMOKE_BUNDLE_ID="$BUNDLE_ID.smoke.$(uuidgen)"
+if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then
+    echo "✗ 스모크 설정 식별자가 이미 존재한다" >&2
+    exit 1
+fi
+plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+codesign --force --deep -s - "$APP"
+PREFERENCES_OWNED=1
+defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
 
 # 시작 시점 표식 — 이후 새로 생긴 MINT 크래시 리포트가 있으면 실패로 본다.
 MARKER="$SMOKE_ROOT/started"
