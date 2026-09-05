@@ -1,6 +1,8 @@
 name: Smoke preferences diagnostic
 
-on: workflow_dispatch
+on:
+  workflow_dispatch:
+  pull_request:
 
 permissions:
   contents: read
