@@ -14,6 +14,7 @@ This is the compact canonical architecture/roadmap. Historical experiment logs b
 - ◐ #103 / PR #124 — document-centric shell baseline landed; window chrome, drag-collapse, user docking, visual verification remain.
 - ⏭ #104 — mode-aware Write/Map/Review vs Write/Outline/Review routing.
 - 🐞 #125 — wrapped Ghost geometry regression; release-blocking.
+- 📝 #126 — local Writing Quality core: correctness/style/vocabulary, Korean morphology first.
 - #18 — residual visible-range/media performance work.
 - #61 — legacy large-view refactor only where not superseded by #103/#113/#117.
 - #119 — final release gates, including zero MINT-owned compiler/concurrency warnings.
@@ -56,6 +57,7 @@ Seven conceptual memory views do **not** require seven independent stores. MINT 
 | Storage transition | verified new project before activation; legacy source untouched |
 | Prediction modes | Fast / Smart / Story |
 | Visual system | opaque Editorial Surface + selective Liquid Glass chrome/intelligence |
+| Writing Quality | local correctness/style/vocabulary diagnostics; Korean morphology first; multilingual provider boundary |
 
 ### Liquid Glass contract
 
@@ -112,6 +114,12 @@ Inference plane
   ContextAssembler
   CompletionEngine (single resident model)
   Ask MINT / Agent Judge
+
+Writing Quality (independent, local)
+  incremental diagnostics engine
+  system spell/grammar provider
+  Korean morphology provider (Kiwi candidate behind adapter)
+  WriterStyleProfile / learned words
 ```
 
 Three paths:
@@ -180,6 +188,37 @@ Current/target:
 - tool dock preference: `automatic / left / right / bottom / floating`;
 - temporary narrow-window fallback never overwrites the preference;
 - docking/collapse preserves editor first responder, IME, Ghost, cursor-line highlight.
+
+### 5.5 Writing Quality (#126)
+
+Writing Quality is a common platform capability for General and Fiction. It does **not** depend on Story Intelligence.
+
+Categories:
+- **Correctness** — spelling, spacing, grammar.
+- **Style** — repeated words/particles/endings/connectors, redundant causality, connective-chain depth, sentence starts/length/rhythm.
+- **Vocabulary** — vague/overused words and explicit word/phrase alternatives.
+
+Korean v1 must compare morphological **function/family**, not only surface strings. Kiwi is the leading morphology candidate because upstream exposes native Swift/macOS bindings, sentence splitting, token/POS positions, typo support, and user dictionaries. Shipping it requires a separate Swift 6/macOS packaging, resource-size, performance, and LGPL-compliance gate. The generic API must not expose Kiwi types.
+
+Scheduling:
+```
+edit → debounce/idle → dirty sentence/paragraph analysis → generation-scoped publish
+```
+
+Rules:
+- no whole-document work per keystroke;
+- no disk read or LLM call in the typing diagnostics hot path;
+- Ghost has higher priority;
+- edit/project switch cancels stale diagnostics;
+- vocabulary/rephrase model calls happen only after explicit user action;
+- `WriterStyleProfile` owns learned words, ignored rules, repetition/dialogue sensitivity, and intentional style patterns;
+- WriterStyleProfile is not #111 User Canon.
+
+Presentation ownership:
+- #117: only high-confidence correctness may use subtle inline marks;
+- #105: local style/rhythm/vocabulary in Living Margin;
+- #114: document/project-wide Writing Quality report;
+- avoid dense multi-color underline saturation.
 
 ---
 
@@ -382,6 +421,7 @@ Required metrics by change type:
 - 100k/300k memory/derive/retrieval/Map latency;
 - sidecar size;
 - warning precision / false-positive-sensitive continuity cases.
+- Writing Quality dirty-range analysis latency and false-positive fixtures.
 
 Performance thresholds come from measured baselines, not guessed constants.
 
@@ -397,6 +437,7 @@ Performance thresholds come from measured baselines, not guessed constants.
 - [ ] #104 workspace routing
 - [ ] #105 Living Margin
 - [ ] #125 Ghost wrap regression
+- [ ] #126 Writing Quality core / Korean morphology
 
 ### Story Intelligence
 - [ ] #106 hierarchical memory
@@ -445,6 +486,7 @@ Current blockers/risks:
 - #18 paragraph/block walk + media visible-range performance evidence.
 - #61 legacy view refactor overlap with new shell/Map/Editor Diet.
 - #125 TextKit Ghost wrap geometry.
+- #126 local writing diagnostics: morphology packaging/licensing, false-positive control, dirty-range performance.
 - #119 Swift warning-clean release gate, especially EPUB concurrent pipe drain.
 - Complete window chrome/docking semantics without IME/focus regressions.
 - Validate long-document background scheduling against foreground Ghost.
