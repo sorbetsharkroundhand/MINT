@@ -80,6 +80,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
+        textView.setAccessibilityIdentifier("mint.editor")
         // 편집 범위를 알아야 수식·이미지 마커 검사를 증분으로 할 수 있다
         // (전체 문자열 검색은 30만 자에서 16.9ms — docs/editor-perf.md).
         storage.delegate = textView

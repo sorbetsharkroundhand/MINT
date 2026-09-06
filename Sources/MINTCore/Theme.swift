@@ -6,6 +6,10 @@ import SwiftUI
 /// 값은 목업의 CSS 변수(themeVars)를 그대로 옮긴 것 — 라이트/다크 두 벌.
 /// 에디터(NSTextView)와 SwiftUI 크롬이 같은 팔레트를 공유한다.
 public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
+    /// 본문은 사용자 팔레트에서도 항상 불투명하게 유지한다 (PLAN §5).
+    public var editorSurface: NSColor { glassWin.withAlphaComponent(1) }
+    public var editorSurfaceC: Color { Color(nsColor: editorSurface) }
+
     public let ink: NSColor
     public let ink2: NSColor
     public let ink3: NSColor
