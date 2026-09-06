@@ -73,7 +73,10 @@ private struct SidebarSectionHint: View {
 /// 그 아래 섹션 탭(문서·바이블·타임라인) — 팝오버였던 바이블·타임라인을
 /// 상시 패널로 승격한다 (열람이 잦아졌다 — 팝오버는 열 때마다 닫힌다).
 /// 목록(문서 섹션): 폴더 트리(펼침/접힘) + 저널 행.
+enum SidebarPresentation { case legacy, navigator, context }
+
 struct SidebarView: View {
+    var presentation: SidebarPresentation = .legacy
     @ObservedObject var store: EntryStore
     /// AI 폴더 명명(requestFolderName)과 진행 표시(namingFolderIDs)에 쓴다.
     @ObservedObject var completion: CompletionController
@@ -110,11 +113,15 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            header
-            theme.sepC.frame(height: 1)
-            sectionStrip
-            theme.sepC.frame(height: 1)
-            switch section {
+            if presentation != .context {
+                header
+                theme.sepC.frame(height: 1)
+            }
+            if presentation != .navigator {
+                sectionStrip
+                theme.sepC.frame(height: 1)
+            }
+            switch presentation == .navigator ? .files : section {
             case .files: filesSection
             case .bible: bibleSection
             case .narrative: narrativeSection
@@ -146,12 +153,12 @@ struct SidebarView: View {
         .onChange(of: store.searchFocusRequests) { _, _ in
             // ⌘⇧F — 검색 필드로 포커스 (문서 섹션으로 전환해서).
             sectionRaw = SidebarSection.files.rawValue
-            searchFieldFocused = true
+            if presentation != .context { searchFieldFocused = true }
         }
         .onChange(of: store.renameRequests) { _, _ in
             // 메뉴 "저널 이름 바꾸기" — 현재 저널의 인라인 편집을 시작한다.
             sectionRaw = SidebarSection.files.rawValue
-            if let entry = store.activeEntry { startRename(entry) }
+            if presentation != .context, let entry = store.activeEntry { startRename(entry) }
         }
         .sheet(isPresented: $showingTrash) {
             TrashSheetView(store: store, trash: store.trash, theme: theme)
@@ -178,6 +185,7 @@ struct SidebarView: View {
     ) -> some View {
         Button {
             sectionRaw = target.rawValue
+            if target == .files && presentation == .context { store.requestEditorFocus() }
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 11.5, weight: .medium))
@@ -198,6 +206,7 @@ struct SidebarView: View {
         }
         .buttonStyle(.plain)
         .help(help)
+        .accessibilityLabel(help)
     }
 
     /// 바이블 섹션 — 팝오버와 같은 뷰를 임베드 모드로 (M6-8 패널 승격).
@@ -389,6 +398,9 @@ struct SidebarView: View {
         // 로고 없이 액션만 — 앱 이름은 메뉴바가 이미 말한다. 왼쪽 빈 자리를
         // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
         HStack(spacing: 2) {
+            Text("내 글")
+                .font(MintFonts.uiFont(12, .semibold))
+                .foregroundStyle(theme.ink2C)
             Spacer(minLength: 0)
             HeaderIconButton(theme: theme, help: "휴지통") {
                 showingTrash = true
@@ -761,6 +773,9 @@ struct SidebarView: View {
         // onTapGesture(count:2)+onTapGesture 조합은 단일 클릭이 더블클릭 판별
         // 타임아웃(수백 ms)을 기다린다 — 전환이 느려 보이는 주범. simultaneous로
         // 첫 탭에서 즉시 select하고, 두 번째 탭이 오면 그때 이름변경에 들어간다.
+        .accessibilityAction { store.select(entry.id) }
+        .focusable(editingID != entry.id)
+        .onKeyPress(.return) { store.select(entry.id); return .handled }
         .simultaneousGesture(TapGesture().onEnded { store.select(entry.id) })
         .simultaneousGesture(TapGesture(count: 2).onEnded { startRename(entry) })
         .onDrag {

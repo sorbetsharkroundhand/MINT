@@ -1,147 +1,176 @@
 #!/bin/sh
-# MINT.app UI 스모크 — 실제 창·키보드·메뉴 왕복 (이슈 #39).
-#
-# 검증 경로 (System Events / UI scripting):
-#   1) 메인 윈도우 존재
-#   2) 키보드 타이핑 → 에디터에 반영 (AX 값 읽기로 확인)
-#   3) 메뉴 명령(파일 ▸ 새 저널) 왕복
-#   4) AppleScript 정상 종료
-#
-# 데이터 격리 (중요): **CFFIXED_USER_HOME**으로 실행 파일을 직접 띄운다.
-# - NSHomeDirectory/FileManager는 $HOME env를 무시한다(passwd 기준) — HOME만
-#   바꾸는 격리는 실패했고(2026-08-25 실오류), CFFIXED_USER_HOME은 문서 디렉터리
-#   자체를 재지향한다(런타임 검증 완료).
-# - 이중 안전장치: 실행 전후로 **실제** ~/Documents/MINT/entries.json의 mtime을
-#   비교해, 격리가 깨졌다면 타이핑 전에 즉시 실패시킨다.
-#
-# 요구 사항: 실행 주체에 손쉬운 사용 권한. 미부여면 명확히 안내하고 실패한다.
-#
-# 사용법:  scripts/ui-smoke-mint-app.sh
-set -u
+# 실제 사용자 앱과 원고를 건드리지 않는 작업공간 UI 스모크 (#103).
+# 먼저 scripts/build-mint-app.sh 실행. 손쉬운 사용 권한이 필요하다.
+# 한글 IME·고스트 지연은 자동 입력으로 검증하지 않는다 (AGENTS §6).
+set -eu
 cd "$(dirname "$0")/.."
-
-APP="build/MINT.app"
-BIN="$APP/Contents/MacOS/MINT"
-
-[ -x "$BIN" ] || { echo "▸ 번들 없음 — 먼저 빌드합니다"; scripts/build-mint-app.sh >/dev/null 2>&1 || scripts/build-mint-app.sh; }
-
-pkill -x MINT 2>/dev/null && sleep 1   # 판정 오염 방지
-
-# 격리 세션용 가짜 HOME — 문서 디렉터리가 여기 아래 생긴다.
-ISOLATED_HOME=$(mktemp -d "$TMPDIR/MINT-ui-smoke.XXXXXX")
-mkdir -p "$ISOLATED_HOME/Documents"
-
-# 실제 원고 보호 검증용 — 실행 전 mtime 스냅샷.
+SOURCE_APP="$PWD/build/MINT.app"
+[ -x "$SOURCE_APP/Contents/MacOS/MINT" ] || { echo "✗ 먼저 앱 번들을 빌드하세요" >&2; exit 1; }
 REAL_ENTRIES="$HOME/Documents/MINT/entries.json"
-REAL_MTIME_BEFORE=""
-[ -f "$REAL_ENTRIES" ] && REAL_MTIME_BEFORE=$(stat -f %m "$REAL_ENTRIES")
-
-cleanup() {
-    pkill -x MINT 2>/dev/null
-    rm -rf "$ISOLATED_HOME"
+real_hash() {
+    if [ -e "$REAL_ENTRIES" ] || [ -L "$REAL_ENTRIES" ]; then
+        hash_result=$(shasum -a 256 "$REAL_ENTRIES") || return 1
+        printf '%s\n' "$hash_result" | awk '{print $1}'
+    else
+        echo absent
+    fi
 }
-trap cleanup EXIT
-
-echo "▸ 격리 세션으로 앱 실행 ($ISOLATED_HOME)…"
-CFFIXED_USER_HOME="$ISOLATED_HOME" HOME="$ISOLATED_HOME" "$BIN" &
-BIN_PID=$!
-
-PID=""
-for i in 1 2 3 4 5 6 7 8 9 10; do
-    sleep 1
-    PID=$(pgrep -x MINT | head -1)
-    [ -n "$PID" ] && break
-done
-[ -n "$PID" ] || { echo "✗ 프로세스가 뜨지 않았다" >&2; exit 1; }
-sleep 6   # 첫 창·스토어 부팅 여유
-echo "✓ 부팅 (pid $PID)"
-
+REAL_HASH=$(real_hash)
+SMOKE_ROOT=$(mktemp -d /tmp/mint-ui-smoke.XXXXXX)
+SMOKE_ROOT=$(cd "$SMOKE_ROOT" && pwd -P)
+SMOKE_HOME="$SMOKE_ROOT/home"
+APP="$SMOKE_ROOT/MINT.app"
+BIN="$APP/Contents/MacOS/MINT"
+PID=""; PASSED=""; PREFERENCES_OWNED=""; SMOKE_BUNDLE_ID=""
 fail() { echo "✗ $1" >&2; exit 1; }
+owned_pid() { [ -n "$PID" ] && [ "$(ps -p "$PID" -o comm= 2>/dev/null)" = "$BIN" ]; }
+find_pid() { ps -axo pid=,comm= | awk -v bin="$BIN" '$2 == bin {print $1}'; }
+check_original() { [ "$(real_hash)" = "$REAL_HASH" ] || fail "실제 원고 해시가 달라졌습니다. 격리 검증 실패"; }
+cleanup() {
+    status=$?
+    trap - 0
+    [ -n "$PID" ] || PID=$(find_pid)
+    if owned_pid; then kill -9 "$PID" 2>/dev/null || true; fi
+    if [ -n "$PREFERENCES_OWNED" ]; then defaults delete "$SMOKE_BUNDLE_ID" >/dev/null 2>&1 || true; fi
+    if [ "$(real_hash)" != "$REAL_HASH" ]; then
+        echo "✗ 실제 원고 해시가 달라졌습니다" >&2
+        status=1; PASSED=""
+    fi
+    if [ -n "$PASSED" ]; then rm -rf "$SMOKE_ROOT"; else echo "▸ 실패 자료 보존: $SMOKE_ROOT" >&2; fi
+    exit "$status"
+}
+trap cleanup 0
+trap 'exit 1' HUP INT TERM
+mkdir -p "$SMOKE_HOME/Documents/MINT"
+ditto "$SOURCE_APP" "$APP"
+BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")
+SMOKE_BUNDLE_ID="$BUNDLE_ID.ui-smoke.$(uuidgen)"
+if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then fail "격리 설정 식별자가 이미 존재합니다"; fi
+plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+codesign --force --deep -s - "$APP"
+PREFERENCES_OWNED=1
+defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
+[ "$(defaults read "$SMOKE_BUNDLE_ID" mint.initialModelConfirmed)" = 1 ] || fail "격리 초기 설정 실패"
+[ "$(defaults read "$SMOKE_BUNDLE_ID" completion.enabled)" = 0 ] || fail "모델 없는 집필 설정 실패"
 
-# ★ 격리 조기 단언 — 첫 실행 세션은 아직 저장 파일이 없을 수 있으므로,
-# "실제 원고가 이미 건드리지 않았는가"만 지금 확인하고 최종 증명은 종료 시 한다.
-if [ -n "$REAL_MTIME_BEFORE" ] && [ -f "$REAL_ENTRIES" ]; then
-    NOW_MTIME=$(stat -f %m "$REAL_ENTRIES")
-    [ "$REAL_MTIME_BEFORE" = "$NOW_MTIME" ] \
-        || fail "격리 실패 — 앱이 실제 홈을 쓰고 있다. 중단한다 (원고 보호)"
-fi
-echo "✓ 데이터 격리 확인 (실제 원고 무접촉)"
-
-# 권한 게이트 — 실패 시 원인을 정확히 말한다.
-osascript -e 'tell application "System Events" to get name of first process' >/dev/null 2>&1 \
-    || fail "손쉬운 사용 권한 없음 — 시스템 설정 ▸ 개인정보 보호 및 보안 ▸ 손쉬운 사용에서 실행 주체를 허용하세요"
-
-osascript -e 'tell application "System Events" to tell process "MINT" to exists window 1' >/dev/null 2>&1 \
-    || fail "메인 윈도우가 없다"
-echo "✓ 메인 윈도우 존재"
-
-# 키보드 입력 왕복 — 포커스는 첫 실행 기본(에디터). ASCII만 쓴다(한글은 IME 조합이
-# 개입해 자동화 신뢰 저하 — AGENTS §6 수동 스모크 영역).
-osascript <<'AS' >/dev/null 2>&1 || fail "키 입력 주입 실패"
-tell application "System Events"
-	tell process "MINT"
-		set frontmost to true
-		delay 0.5
-		keystroke "ui smoke 123"
-	end tell
-end tell
+# 고유 합성 원고가 실제 에디터에 나타나야 입력을 허용한다. 사용자 원고는 읽지 않는다.
+TOKEN="smoke$(uuidgen | tr -d '-')"
+cat > "$SMOKE_HOME/Documents/MINT/entries.json" <<JSON
+{"entries":[{"id":"11111111-1111-1111-1111-111111111111","title":"격리 소설","createdAt":"2026-01-01T00:00:00Z","body":"$TOKEN","kind":"novel","titleIsCustom":true},{"id":"22222222-2222-2222-2222-222222222222","title":"격리 저널","createdAt":"2026-01-02T00:00:00Z","body":"second$TOKEN","titleIsCustom":true}],"activeID":"11111111-1111-1111-1111-111111111111"}
+JSON
+cat > "$SMOKE_ROOT/ui.applescript" <<'AS'
+-- 고정된 뷰 계층 대신 접근성 식별자·레이블을 재귀 검색한다.
+on findElement(rootElement, attributeName, expectedValue, remainingDepth)
+    tell application "System Events"
+        try
+            if (value of attribute attributeName of rootElement) is expectedValue then return rootElement
+        end try
+        if remainingDepth ≤ 0 then return missing value
+        repeat with childElement in UI elements of rootElement
+            set matchedElement to my findElement(childElement, attributeName, expectedValue, remainingDepth - 1)
+            if matchedElement is not missing value then return matchedElement
+        end repeat
+    end tell
+    return missing value
+end findElement
+on run argv
+    set targetPID to (item 1 of argv) as integer
+    set operation to item 2 of argv
+    set expectedValue to item 3 of argv
+    tell application "System Events"
+        set targetProcess to first application process whose unix id is targetPID
+        if not (exists window 1 of targetProcess) then error "메인 창 없음"
+        set rootElement to window 1 of targetProcess
+        if operation is "press" then
+            set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
+            if targetElement is missing value then error "필요한 버튼 없음: " & expectedValue
+            click targetElement
+        else if operation is "navigator" then
+            if my findElement(rootElement, "AXIdentifier", "mint.navigator", 30) is missing value then error "탐색기 없음"
+        else if operation is "new" then
+            click menu item "새 저널" of menu "파일" of menu bar item "파일" of menu bar 1 of targetProcess
+        else
+            set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+            if editor is missing value then error "에디터 없음"
+            if operation is "type" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                delay 0.2
+                if not (frontmost of targetProcess) then error "격리 앱 포커스 없음"
+                if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 없음"
+                tell targetProcess to keystroke expectedValue
+                delay 0.5
+                if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
+            end if
+            if operation is "empty" then
+                if (value of editor as text) is not "" then error "새 저널이 비어 있지 않음"
+            else if (value of editor as text) does not contain expectedValue then
+                error "에디터 본문 검증 실패"
+            end if
+        end if
+    end tell
+end run
 AS
-sleep 1
-TYPED=$(osascript <<'AS' 2>/dev/null
-tell application "System Events"
-	tell process "MINT"
-		set found to false
-		repeat with el in (UI elements of scroll area 1 of group 1 of window 1)
-			repeat with t in (static texts of el)
-				try
-					if (value of t) contains "ui smoke 123" then
-						set found to true
-						exit repeat
-					end if
-				end try
-			end repeat
-			if found then exit repeat
-		end repeat
-		if found then return "FOUND"
-		return "MISSING"
-	end tell
-end tell
-AS
-)
-[ "$TYPED" = "FOUND" ] || fail "타이핑한 텍스트가 에디터 AX 값에 없다 (입력 왕복 실패)"
-echo "✓ 키보드 입력 → 에디터 반영"
-
-# 메뉴 명령 왕복.
-osascript <<'AS' >/dev/null 2>&1 || fail "메뉴 명령 실패"
-tell application "System Events"
-	tell process "MINT"
-		set frontmost to true
-		click menu item "새 저널" of menu "파일" of menu bar item "파일" of menu bar 1
-	end tell
-end tell
-AS
-sleep 1
-echo "✓ 메뉴 명령(새 저널) 완료"
-
-# 정상 종료 + 격리 세션 저장 확인 (원격 원칙: 종료 flush 계약).
-osascript -e 'tell application "System Events" to tell process "MINT" to keystroke "q" using command down' >/dev/null 2>&1
-for i in 1 2 3 4 5; do
-    sleep 1
-    kill -0 "$PID" 2>/dev/null || break
-done
-if kill -0 "$PID" 2>/dev/null; then
-    fail "정상 종료 실패"
-fi
-[ -f "$ISOLATED_HOME/Documents/MINT/entries.json" ] \
-    && echo "✓ 격리 세션 저장 생성 — flush 계약 OK" \
-    || echo "⚠ 격리 세션 entries.json 미생성 (편집 없는 신규 실행 경로)"
-
-# ★ 격리 최종 단언 — 실제 원고가 이 세션 동안 손대지 않았음을 mtime으로 증명.
-if [ -n "$REAL_MTIME_BEFORE" ] && [ -f "$REAL_ENTRIES" ]; then
-    REAL_MTIME_AFTER=$(stat -f %m "$REAL_ENTRIES")
-    [ "$REAL_MTIME_BEFORE" = "$REAL_MTIME_AFTER" ] \
-        || fail "실제 원고 파일의 mtime이 변했다 — 격리 붕괴. 즉시 확인 요망"
-    echo "✓ 사용자 원고 무변경 입증 (mtime 불변)"
-fi
-
-echo "✓ UI 스모크 통과"
+ui() {
+    owned_pid || fail "격리 실행 파일 PID 확인 실패"
+    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
+    case "$1" in press|new) sleep 0.3 ;; esac
+}
+launch() {
+    check_original
+    open -n --env "CFFIXED_USER_HOME=$SMOKE_HOME" "$APP"
+    PID=""
+    for i in $(seq 1 10); do
+        sleep 1
+        PID=$(find_pid)
+        [ -n "$PID" ] && break
+    done
+    owned_pid || fail "격리 앱 실행 실패"
+    sleep 3
+    check_original
+}
+terminate() {
+    owned_pid || fail "종료 대상 PID 확인 실패"
+    osascript -l JavaScript - "$PID" <<'JXA' >/dev/null
+ObjC.import('AppKit');
+function run(argv) {
+    const app = $.NSRunningApplication.runningApplicationWithProcessIdentifier(Number(argv[0]));
+    if (!app.terminate) throw new Error('정상 종료 요청 거절');
+}
+JXA
+    for i in $(seq 1 30); do
+        kill -0 "$PID" 2>/dev/null || { PID=""; return; }
+        sleep 0.5
+    done
+    fail "정상 종료 시간 초과"
+}
+launch
+ui verify "$TOKEN"
+ui navigator
+ui type "typed$TOKEN"
+echo "✓ 격리 원고 확인 · 에디터 입력 왕복"
+ui press "파일 목록 숨기기"
+ui press "파일 목록 보이기"
+ui navigator
+ui press "스토리 바이블"
+ui press "문서로 돌아가기"
+ui navigator
+ui press "저널 격리 저널"
+ui verify "second$TOKEN"
+ui press "소설 격리 소설"
+ui verify "typed$TOKEN"
+ui new
+sleep 0.5
+ui empty
+ui type "new$TOKEN"
+terminate
+[ -s "$SMOKE_HOME/Documents/MINT/entries.json" ] || fail "격리 원고 저장 없음"
+launch
+ui verify "new$TOKEN"
+ui press "소설 격리 소설"
+ui verify "typed$TOKEN"
+terminate
+check_original
+PASSED=1
+echo "✓ UI 스모크 통과 — 탐색기 · 문서 전환 · 새 저널 · 재실행 보존 · 실제 원고 해시 불변"
