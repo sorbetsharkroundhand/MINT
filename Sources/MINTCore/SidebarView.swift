@@ -678,12 +678,11 @@ struct SidebarView: View {
 
     // MARK: - 저널 행
 
+    // 표시·장식·상호작용을 나눠 CI Swift 컴파일러의 타입 추론 부담을 제한한다.
     @ViewBuilder
-    private func row(_ entry: JournalEntry, depth: Int) -> some View {
+    private func rowContent(_ entry: JournalEntry) -> some View {
         let active = entry.id == store.activeID
         let editing = editingID == entry.id
-        let hovered = hoveredID == entry.id
-        let dropTarget = dragModel.indicator == .into(entry.id)
 
         HStack(spacing: 11) {
             // 종류별 아이콘 — 일반은 문서, 소설은 책. 소설은 비활성에서도 보라
@@ -739,6 +738,14 @@ struct SidebarView: View {
                     .foregroundStyle(theme.ink3C)
             }
         }
+    }
+
+    private func rowSurface(_ entry: JournalEntry, depth: Int) -> some View {
+        let active = entry.id == store.activeID
+        let hovered = hoveredID == entry.id
+        let dropTarget = dragModel.indicator == .into(entry.id)
+
+        return rowContent(entry)
         .padding(.vertical, 9)
         .padding(.horizontal, 11)
         .padding(.leading, CGFloat(depth) * 14)
@@ -769,6 +776,12 @@ struct SidebarView: View {
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
+    }
+
+    private func row(_ entry: JournalEntry, depth: Int) -> some View {
+        let active = entry.id == store.activeID
+
+        return rowSurface(entry, depth: depth)
         .onHover { hoveredID = $0 ? entry.id : nil }
         // onTapGesture(count:2)+onTapGesture 조합은 단일 클릭이 더블클릭 판별
         // 타임아웃(수백 ms)을 기다린다 — 전환이 느려 보이는 주범. simultaneous로
