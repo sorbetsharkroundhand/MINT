@@ -4609,7 +4609,7 @@ final class BlockTextView: NSTextView {
         guard let snapshot = ghostSnapshotForAccessibility(), !hasMarkedText() else {
             return super.accessibilityValue()
         }
-        let base = super.accessibilityValue() as? String ?? ""
+        let base = super.accessibilityValue() ?? ""
         return base + "\n[AI 제안 #\(snapshot.generation) · Tab 수락 · Esc 거절] "
             + snapshot.text
     }

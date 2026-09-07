@@ -317,6 +317,15 @@ public final class EntryStore: ObservableObject {
     /// 같은 ⌘Z 흐름을 타게 하기 위해서다.
     public weak var structureUndoManager: UndoManager?
 
+    /// `UndoManager.registerUndo` uses a `@Sendable` handler in the current SDK while
+    /// `UndoManager` itself is AppKit main-thread state and not Sendable.  Capture this
+    /// weak, explicitly-audited box instead of the manager directly so undo stays
+    /// synchronous on MainActor without generating Swift concurrency warnings.
+    private final class WeakUndoManagerBox: @unchecked Sendable {
+        weak var value: UndoManager?
+        init(_ value: UndoManager) { self.value = value }
+    }
+
     /// 앱 휴지통 — ⌘Z 유예가 지난 실수의 내구 복제본. 삭제는 즉시 여기로
     /// 가고, 영구 삭제(비우기)만 확인 Alert를 묻는다.
     public private(set) var trash: TrashStore
@@ -356,11 +365,13 @@ public final class EntryStore: ObservableObject {
     /// 상호 등록 패턴. 연속 ⌘Z/⇧⌘Z가 끊기지 않는다.
     private func registerRevert(_ change: StructureChange, in um: UndoManager) {
         um.setActionName(change.name)
+        let manager = WeakUndoManagerBox(um)
         um.registerUndo(withTarget: self) { store in
-            // 창의 undo는 메인에서 동기 실행된다. 구형 SDK의 Sendable 콜백에서도
-            // 격리를 확인하되 Task로 미루지 않아야 같은 undo 그룹에 redo가 등록된다.
+            // Cocoa invokes this synchronously from the window's undo flow.  Do not hop
+            // through Task: redo must be registered in the same undo group.
             MainActor.assumeIsolated {
-                store.structureUndoManager = um  // 창 재배선 전에도 이어지게
+                guard let um = manager.value else { return }
+                store.structureUndoManager = um
                 change.backward()
                 store.registerRevert(
                     StructureChange(
@@ -470,14 +481,16 @@ public final class EntryStore: ObservableObject {
         let before = burst.before
         let after = entries[currentIndex]
         um.setActionName(burst.name)
+        let manager = WeakUndoManagerBox(um)
         um.registerUndo(withTarget: self) { store in
-            // 버스트 복원·저장·redo 등록도 undo 반환 전에 끝나야 한다.
+            // Burst restore/save/redo registration must complete before undo returns.
             MainActor.assumeIsolated {
+                guard let um = manager.value else { return }
                 store.structureUndoManager = um
                 store.restoreEntries([before]); store.saveNow()
-                // redo 등록 — 현재 시점 값으로.
                 um.registerUndo(withTarget: store) { s2 in
                     MainActor.assumeIsolated {
+                        guard let um = manager.value else { return }
                         s2.structureUndoManager = um
                         s2.restoreEntries([after]); s2.saveNow()
                     }
@@ -986,7 +999,7 @@ public final class EntryStore: ObservableObject {
         let insertAt = beforeID.flatMap { b in
             childFolders(of: parentID).firstIndex { $0.id == b }
         } ?? childFolders(of: parentID).count
-        var moved = folders[index]
+        let moved = folders[index]
         let orderUnchanged = moved.parentID == parentID
             && childFolders(of: parentID).firstIndex(where: { $0.id == id }) == insertAt
         guard !orderUnchanged else { return true }

@@ -662,6 +662,25 @@ public enum EpubExporter {
 
     // MARK: - zip
 
+    /// Thread-safe handoff for pipe data produced by a @Sendable drain closure.
+    /// Both stdout and stderr must continue draining concurrently (#33).
+    private final class PipeCapture: @unchecked Sendable {
+        private let lock = NSLock()
+        private var data = Data()
+
+        func store(_ value: Data) {
+            lock.lock()
+            data = value
+            lock.unlock()
+        }
+
+        func snapshot() -> Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return data
+        }
+    }
+
     private static func runZip(_ arguments: [String], in directory: URL) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/zip")
@@ -679,7 +698,7 @@ public enum EpubExporter {
         // 파이프를 **동시에 흡수**한다 — 장편(챕터 수천 개)의 zip 목록 출력이
         // 버퍼(64KB)를 채우면 zip은 쓰기가 막히고 waitUntilExit는 영원히 안 끝난다.
         // 과거 동기 readDataToEndOfFile 순서(대기→읽기)가 이 데드락을 품고 있었다 (#33).
-        var stderrData = Data()
+        let stderrCapture = PipeCapture()
         let drained = DispatchGroup()
         drained.enter()
         DispatchQueue.global().async {
@@ -688,14 +707,14 @@ public enum EpubExporter {
         }
         drained.enter()
         DispatchQueue.global().async {
-            stderrData = errPipe.fileHandleForReading.readDataToEndOfFile()
+            stderrCapture.store(errPipe.fileHandleForReading.readDataToEndOfFile())
             drained.leave()
         }
         process.waitUntilExit()
         drained.wait()
         guard process.terminationStatus == 0 else {
             let message = String(
-                data: stderrData, encoding: .utf8
+                data: stderrCapture.snapshot(), encoding: .utf8
             )?.trimmingCharacters(in: .whitespacesAndNewlines)
                 ?? "zip 종료 코드 \(process.terminationStatus)"
             throw ExportError.zipFailed(message)

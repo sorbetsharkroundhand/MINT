@@ -90,13 +90,11 @@ final class RenderCacheLRUTests: XCTestCase {
         MathRenderer._testResetCache(budgetBytes: 400_000)
         defer { MathRenderer._testResetCache() }
 
-        var firstImage: NSImage?
         for index in 0..<40 {
             let (image, error) = MathRenderer.render(
                 latex: "x_\(index) = \\frac{\(index)}{\(index + 1)} + \\sqrt{\(index)}",
                 color: .black, fontSize: 16)
             XCTAssertNil(error)
-            if index == 0 { firstImage = image }
         }
         // 첫 수식 재렌더 — 256개 클리프였다면 사라졌을 것이지만,
         // 64KB 예산이라 몇 개는 남는다. 여기선 규약 확인: 렌더가 계속 성공한다.
