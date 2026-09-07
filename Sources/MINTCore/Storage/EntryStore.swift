@@ -986,7 +986,7 @@ public final class EntryStore: ObservableObject {
         let insertAt = beforeID.flatMap { b in
             childFolders(of: parentID).firstIndex { $0.id == b }
         } ?? childFolders(of: parentID).count
-        var moved = folders[index]
+        let moved = folders[index]
         let orderUnchanged = moved.parentID == parentID
             && childFolders(of: parentID).firstIndex(where: { $0.id == id }) == insertAt
         guard !orderUnchanged else { return true }
