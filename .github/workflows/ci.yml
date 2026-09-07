@@ -41,18 +41,6 @@ jobs:
       - name: Test MINTCore
         run: swift test
 
-  bench:
-    name: MINTBench / Compile
-    runs-on: macos-15
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Toolchain info
-        run: swift --version
-
       - name: Build MINTBench
         run: swift build --product MINTBench
 
@@ -70,6 +58,17 @@ jobs:
           uname -m
           swift --version
           xcodebuild -version
+
+      - name: Compute metallib cache key
+        id: metallib-cache-key
+        run: |
+          echo "xcode=$(xcodebuild -version | shasum -a 256 | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Restore MLX metallib cache
+        uses: actions/cache@v6
+        with:
+          path: .build/metallib-cache
+          key: mlx-metallib-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.metallib-cache-key.outputs.xcode }}-${{ hashFiles('Package.resolved') }}
 
       - name: Allow package macros in CI
         run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
