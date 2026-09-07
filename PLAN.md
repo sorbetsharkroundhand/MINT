@@ -6,17 +6,17 @@
 
 This is the compact canonical architecture/roadmap. Historical experiment logs belong in issues/PRs/docs, not here. See `AGENTS.md` for invariants and the 0.2.0 spec/plans under `docs/superpowers/`.
 
-## Current 0.2.0 status — 2026-09-06
+## Current 0.2.0 status — 2026-09-08
 
 - ✅ #100 Gate 0 / PR #121 — green CI baseline.
 - ✅ #101 / PR #122 — generic WritingProject/WritingDocument domain.
 - ✅ #102 / PR #123 — ProjectStore + non-destructive legacy migration.
-- ◐ #103 / PR #124 — document-centric shell baseline landed; window chrome, drag-collapse, user docking, visual verification remain.
+- ◐ #103 — shell baseline + Navigator drag-collapse + persistent tool docking landed via PR #124/#130/#132; window chrome and final visual/IME/Ghost/Reduce Transparency verification remain.
 - ⏭ #104 — mode-aware Write/Map/Review vs Write/Outline/Review routing.
-- 🐞 #125 — wrapped Ghost geometry regression; release-blocking.
-- 📝 #126 — local Writing Quality core: correctness/style/vocabulary, Korean morphology first.
-- #18 — residual visible-range/media performance work.
-- #61 — legacy large-view refactor only where not superseded by #103/#113/#117.
+- ✅ #125 / PR #128 — wrapped Ghost geometry regression fixed on main.
+- ◐ #126 — Writing Quality core in PR #133; Korean provider/Kiwi validation follows.
+- #18 — narrowed to remaining O(document) paragraph discovery in media refresh + measured long-document evidence.
+- ✅ #61 retired after re-audit: useful PR1–5 retained; PR6–9 superseded by #103/#113/#117.
 - #119 — final release gates, including zero MINT-owned compiler/concurrency warnings.
 
 ---
@@ -459,7 +459,6 @@ Performance thresholds come from measured baselines, not guessed constants.
 ### Release
 - [ ] #18 residual media/render performance
 - [ ] #119 release readiness
-- [ ] #61 only remaining refactors still relevant after replacement surfaces
 
 Canonical 0.2.0 execution plans live in `docs/superpowers/plans/`.
 
@@ -484,11 +483,9 @@ No vector DB, agent chain, or giant-context strategy is mandatory for 0.2.0.
 
 Current blockers/risks:
 - #18 paragraph/block walk + media visible-range performance evidence.
-- #61 legacy view refactor overlap with new shell/Map/Editor Diet.
-- #125 TextKit Ghost wrap geometry.
 - #126 local writing diagnostics: morphology packaging/licensing, false-positive control, dirty-range performance.
 - #119 Swift warning-clean release gate, especially EPUB concurrent pipe drain.
-- Complete window chrome/docking semantics without IME/focus regressions.
+- Complete #103 window-chrome semantics and final shell visual/IME/Ghost verification.
 - Validate long-document background scheduling against foreground Ghost.
 
 Open product questions should be recorded in child issues with evidence rather than expanding this file.
