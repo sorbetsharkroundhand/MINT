@@ -3370,6 +3370,10 @@ final class BlockTextView: NSTextView {
         forceRender: Bool = false, limitToVisible: Bool = false
     ) {
         guard let layoutManager, let storage = textStorage else { return }
+        let requestedVisibleRange: NSRange? =
+            limitToVisible ? visibleTextRange() : nil
+        let boundedVisibleRefresh = limitToVisible && requestedVisibleRange != nil
+
         // 빠른 경로: 렌더 중인 블록도, 이미 렌더된 것도, 이미지 선택도 없고 소스에
         // 수식/이미지 마커("$$"·"![")와 raw 인라인 수식("$")조차 없으면 — 즉 대다수의
         // 평문 저널이면 — 문단 순회·임시속성 조작·전체 재그리기를 통째로 건너뛴다
@@ -3391,7 +3395,7 @@ final class BlockTextView: NSTextView {
         }
         // Cursor/edit refresh owns raw inline-math folding. Scrolling does not change
         // the caret, so do not pay the document-wide inline scan on a visible-only tick.
-        if !limitToVisible {
+        if !boundedVisibleRefresh {
             collapseRawInlineMath(awayFrom: selectedRange())
         }
         // 전 문서 제거 금지 (#18) — 직전 패스가 심은 곳만 문단 경계로 닦는다.
@@ -3418,7 +3422,7 @@ final class BlockTextView: NSTextView {
 
         // 1단계 — 문단 정보 수집. Scroll-only refresh scans only the viewport
         // window (plus any math group crossing its edge) instead of 0..<document.
-        let visibleRange: NSRange? = limitToVisible ? visibleTextRange() : nil
+        let visibleRange = requestedVisibleRange
         let scanRange = visibleRange.map(mediaRenderScanRange(for:))
             ?? NSRange(location: 0, length: ns.length)
         var paras: [(range: NSRange, block: MintBlock, open: Bool, close: Bool)] = []
@@ -3620,7 +3624,7 @@ final class BlockTextView: NSTextView {
         mathRenders = maths
         self.mathRenderErrors = collectedMathErrors
         imageRenders = images
-        if !limitToVisible {
+        if !boundedVisibleRefresh {
             // Structural edit/full refresh owns global group cleanup. A scroll-only scan
             // sees only a viewport subset and must not treat offscreen groups as deleted.
             for old in previousMathGroups {
