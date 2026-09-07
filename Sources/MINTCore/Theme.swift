@@ -533,6 +533,8 @@ public enum MintElevation {
     public static let raised = ShadowSpec(radius: 1.5, y: 1, opacity: 0.30)
     /// 토글 트랙 같은 얇은 면.
     public static let flat = ShadowSpec(radius: 1, y: 1, opacity: 0.14)
+    /// Floating tool / Ask MINT 같은 독립 창 레벨의 표면.
+    public static let floating = ShadowSpec(radius: 18, y: 8, opacity: 0.18)
 
     public struct ShadowSpec: Sendable {
         public let radius: CGFloat
