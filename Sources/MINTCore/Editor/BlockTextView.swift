@@ -3311,6 +3311,61 @@ final class BlockTextView: NSTextView {
         return charRange
     }
 
+    /// Paragraph scan window for scroll-driven media refresh.
+    ///
+    /// The normal visible range is already buffered by a few paragraphs. If an edge lands
+    /// inside a multi-line math group, expand only through that contiguous math group so
+    /// grouping stays correct without walking unrelated paragraphs in the document.
+    func mediaRenderScanRange(for visibleRange: NSRange) -> NSRange {
+        let ns = string as NSString
+        guard ns.length > 0 else { return NSRange(location: 0, length: 0) }
+
+        let startAnchor = min(max(0, visibleRange.location), ns.length - 1)
+        let endAnchor = min(
+            max(startAnchor, max(0, visibleRange.upperBound - 1)),
+            ns.length - 1)
+
+        var first = ns.paragraphRange(
+            for: NSRange(location: startAnchor, length: 0))
+        var last = ns.paragraphRange(
+            for: NSRange(location: endAnchor, length: 0))
+
+        func delimiter(_ para: NSRange) -> String {
+            guard let storage = textStorage, para.location < storage.length else {
+                return ""
+            }
+            return storage.attribute(
+                .mintMathDelim, at: para.location, effectiveRange: nil) as? String ?? ""
+        }
+
+        if blockInfo(in: first).block == .math {
+            while first.location > 0, delimiter(first) != "open" {
+                let previous = ns.paragraphRange(
+                    for: NSRange(location: first.location - 1, length: 0))
+                guard previous.location < first.location,
+                    blockInfo(in: previous).block == .math
+                else { break }
+                first = previous
+            }
+        }
+
+        if blockInfo(in: last).block == .math {
+            while last.upperBound < ns.length, delimiter(last) != "close" {
+                let next = ns.paragraphRange(
+                    for: NSRange(location: last.upperBound, length: 0))
+                guard next.location >= last.upperBound,
+                    next.location < ns.length,
+                    blockInfo(in: next).block == .math
+                else { break }
+                last = next
+            }
+        }
+
+        return NSRange(
+            location: first.location,
+            length: max(0, last.upperBound - first.location))
+    }
+
     func refreshRenderedBlocks(
         forceRender: Bool = false, limitToVisible: Bool = false
     ) {
@@ -3334,8 +3389,11 @@ final class BlockTextView: NSTextView {
                 return
             }
         }
-        // 커서가 떠난 문단의 raw `$…$`를 원자로 접는다 (이슈 #20).
-        collapseRawInlineMath(awayFrom: selectedRange())
+        // Cursor/edit refresh owns raw inline-math folding. Scrolling does not change
+        // the caret, so do not pay the document-wide inline scan on a visible-only tick.
+        if !limitToVisible {
+            collapseRawInlineMath(awayFrom: selectedRange())
+        }
         // 전 문서 제거 금지 (#18) — 직전 패스가 심은 곳만 문단 경계로 닦는다.
         // (편집으로 위치가 밀린 지점은 편집 자체가 temp attribute를 떨어뜨린다.)
         for old in previousClearRanges {
@@ -3358,10 +3416,15 @@ final class BlockTextView: NSTextView {
         // 수식·이미지가 문서 마지막 문단일 때 소스가 계속 보이는 문제 방지.
         let focused = window?.firstResponder === self
 
-        // 1단계 — 문단 정보 수집. 그룹 판정은 순수 헬퍼(mathGroupRanges)가 맡는다.
+        // 1단계 — 문단 정보 수집. Scroll-only refresh scans only the viewport
+        // window (plus any math group crossing its edge) instead of 0..<document.
+        let visibleRange: NSRange? = limitToVisible ? visibleTextRange() : nil
+        let scanRange = visibleRange.map(mediaRenderScanRange(for:))
+            ?? NSRange(location: 0, length: ns.length)
         var paras: [(range: NSRange, block: MintBlock, open: Bool, close: Bool)] = []
-        var location = 0
-        while location < ns.length {
+        var location = scanRange.location
+        let scanEnd = min(scanRange.upperBound, ns.length)
+        while location < scanEnd {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
             location = para.upperBound
             var delim = ""
@@ -3373,11 +3436,6 @@ final class BlockTextView: NSTextView {
                 (para, blockInfo(in: para).block, delim == "open", delim == "close"))
         }
         let groups = Self.mathGroupRanges(paras)
-        // 스크롤 한정 (#18 2단계) — 화면 밖 블록은 이번 틱의 수집·렌더를 건너뛴다.
-        // 편집 중 문단은 예외 없이 포함되지 않아도 된다: 편집 경로는 limitToVisible
-        // false로 전체 패스를 탄다. nil이면(헤드리스·레이아웃 전) 제한 없음.
-        let visibleRange: NSRange? =
-            limitToVisible ? visibleTextRange() : nil
         func isVisible(_ para: NSRange, in groups: [NSRange]) -> Bool {
             guard let visibleRange else { return true }
             if NSIntersectionRange(visibleRange, para).length > 0 { return true }
@@ -3436,14 +3494,10 @@ final class BlockTextView: NSTextView {
             for member in members { updateGroupLineHeight(share, in: member.range) }
         }
 
-        // 3단계 — 단독 완결 수식·이미지 (기존 경로).
-        location = 0
-        while location < ns.length {
-            let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
-            defer { location = para.upperBound }
-            guard let info = paras.first(where: { $0.range.location == para.location }) else {
-                continue
-            }
+        // 3단계 — 단독 완결 수식·이미지.
+        // `paras` is already the exact scan window; do not restart at document 0.
+        for info in paras {
+            let para = info.range
             let block = info.block
             if block == .math,
                 groups.contains(where: { NSLocationInRange(para.location, $0) })
@@ -3566,24 +3620,27 @@ final class BlockTextView: NSTextView {
         mathRenders = maths
         self.mathRenderErrors = collectedMathErrors
         imageRenders = images
-        // 이전 그룹에서 벗어난 문단의 줄 높이 복원 — 열기 줄 삭제 같은 구조 편집으로
-        // 산문이 된 줄이 거대한 줄 높이를 물려받아 본문이 뜨는 잔상을 막는다 (이슈 #22).
-        for old in previousMathGroups {
-            var scanLoc = old.location
-            while scanLoc < min(old.upperBound, ns.length) {
-                let para = ns.paragraphRange(for: NSRange(location: scanLoc, length: 0))
-                scanLoc = para.upperBound
-                let inCurrentGroup = groups.contains {
-                    NSIntersectionRange($0, para).length > 0
+        if !limitToVisible {
+            // Structural edit/full refresh owns global group cleanup. A scroll-only scan
+            // sees only a viewport subset and must not treat offscreen groups as deleted.
+            for old in previousMathGroups {
+                var scanLoc = old.location
+                while scanLoc < min(old.upperBound, ns.length) {
+                    let para = ns.paragraphRange(
+                        for: NSRange(location: scanLoc, length: 0))
+                    scanLoc = para.upperBound
+                    let inCurrentGroup = groups.contains {
+                        NSIntersectionRange($0, para).length > 0
+                    }
+                    if !inCurrentGroup { updateGroupLineHeight(nil, in: para) }
                 }
-                if !inCurrentGroup { updateGroupLineHeight(nil, in: para) }
             }
+            previousMathGroups = groups
+
+            // Marker remeasurement is document-wide by definition. Keep it on full
+            // edit/load/recovery paths, never on a scroll-only refresh.
+            syncMarkerFlag()
         }
-        previousMathGroups = groups
-        // 여기까지 왔다는 건 이미 O(문서)를 지불했다는 뜻 — 스캔 한 번을 더 해
-        // 마커 캐시를 실측으로 되돌린다. 마커를 지운 뒤 빠른 경로로 복귀하는 길이자,
-        // 델리게이트가 보수적으로 true를 켠 오탐을 정리하는 자리다.
-        syncMarkerFlag()
         repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
         // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다 — 글자당 조판
         // 대신 150ms 디바운스 (#53): 연속 타이핑 중엔 마지막 소스만 렌더한다.

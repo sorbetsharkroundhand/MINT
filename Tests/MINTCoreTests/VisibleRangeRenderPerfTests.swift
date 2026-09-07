@@ -40,6 +40,20 @@ final class VisibleRangeRenderPerfTests: XCTestCase {
         return (textView, scrollView)
     }
 
+    func testVisibleRenderScanRangeStaysBoundedToViewport() throws {
+        let large = makeScrolledEditor(mathBlocks: 240)
+        large.scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
+        large.scrollView.reflectScrolledClipView(large.scrollView.contentView)
+
+        let visible = try XCTUnwrap(large.textView.visibleTextRange())
+        let scan = large.textView.mediaRenderScanRange(for: visible)
+        let total = (large.textView.string as NSString).length
+
+        XCTAssertLessThan(scan.length, total / 2)
+        XCTAssertLessThanOrEqual(scan.location, visible.location)
+        XCTAssertGreaterThanOrEqual(scan.upperBound, visible.upperBound)
+    }
+
     /// 전체 패스 비용 — 문단 수에 선형.
     func test전체패스는문단수에비례해늘어난다() {
         let small = makeScrolledEditor(mathBlocks: 60)
