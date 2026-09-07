@@ -55,7 +55,6 @@ final class ContextAssemblerSelectionTests: XCTestCase {
             진실이 드러났다. 남편은 고개를 떨궜다.
             """
         let outline = DocumentOutline.parse(body)
-        let h2 = outline.scenes[1].contentHash
         let 남편 = CharacterCard(name: "남편")
         // 같은 인물이 참여한 사건 2개 — 인물 흐름 파생의 최소 조건(2개↑).
         let events = [
