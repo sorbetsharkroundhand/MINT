@@ -17,6 +17,9 @@ struct SidebarResizeDivider: NSViewRepresentable {
     @Binding var width: CGFloat
     let minWidth: CGFloat
     let maxWidth: CGFloat
+    let collapseThreshold: CGFloat
+    let collapseReleaseThreshold: CGFloat
+    let onCollapse: () -> Void
     let theme: MintTheme
 
     func makeNSView(context: Context) -> DividerHandleView {
@@ -32,6 +35,9 @@ struct SidebarResizeDivider: NSViewRepresentable {
     private func configure(_ view: DividerHandleView) {
         view.minWidth = minWidth
         view.maxWidth = maxWidth
+        view.collapseThreshold = collapseThreshold
+        view.collapseReleaseThreshold = collapseReleaseThreshold
+        view.onCollapse = onCollapse
         // idle 선은 그리지 않는다 — 사이드바가 이미 우측에 1px sep을 그려
         // 경계에 얇은 선이 있다. near/dragging에서만 굵은 선을 덧그린다.
         view.idleLineColor = .clear
@@ -51,6 +57,9 @@ final class DividerHandleView: NSView {
     var currentWidth: (() -> CGFloat)?
     var minWidth: CGFloat = 200
     var maxWidth: CGFloat = 360
+    var collapseThreshold: CGFloat = 150
+    var collapseReleaseThreshold: CGFloat = 176
+    var onCollapse: (() -> Void)?
 
     // NSAccessibility 프로토콜 위트니스 중 상위에 선언이 있는 것(isAccessibility·
     // Role·Label)만 override이고, 값·증감(NSAccessibilityValue/Incrementor
@@ -67,6 +76,11 @@ final class DividerHandleView: NSView {
         adjust(by: 20)
     }
     func accessibilityDecrement() {
+        if (currentWidth?() ?? minWidth) <= minWidth + 0.5, let onCollapse {
+            onCollapse()
+            NSAccessibility.post(element: self, notification: .valueChanged)
+            return
+        }
         adjust(by: -20)
     }
 
@@ -95,6 +109,7 @@ final class DividerHandleView: NSView {
     private var trackingArea: NSTrackingArea?
     private var dragStartMouseX: CGFloat = 0
     private var dragStartWidth: CGFloat = 0
+    private var collapseArmed = false
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()
@@ -141,6 +156,7 @@ final class DividerHandleView: NSView {
         state = .dragging
         dragStartMouseX = event.locationInWindow.x
         dragStartWidth = currentWidth?() ?? bounds.width
+        collapseArmed = false
         NSCursor.resizeLeftRight.set()
     }
 
@@ -148,12 +164,27 @@ final class DividerHandleView: NSView {
         guard state == .dragging else { return }
         // 드래그가 존을 벗어나도 mouseUp까지 이벤트가 이 뷰로 계속 라우팅된다.
         let dx = event.locationInWindow.x - dragStartMouseX
-        let newWidth = max(minWidth, min(maxWidth, dragStartWidth + dx))
+        let projectedWidth = dragStartWidth + dx
+        if collapseArmed {
+            collapseArmed = projectedWidth < collapseReleaseThreshold
+        } else {
+            collapseArmed = projectedWidth <= collapseThreshold
+        }
+        let newWidth = max(minWidth, min(maxWidth, projectedWidth))
         NSCursor.resizeLeftRight.set()
         onWidthChange?(newWidth)
     }
 
     override func mouseUp(with event: NSEvent) {
+        if collapseArmed {
+            // Dragging through the collapse threshold is a visibility gesture, not a
+            // request to overwrite the user's preferred expanded width. Restore the
+            // drag-start width before hiding so the next reopen returns to that width.
+            let restored = max(minWidth, min(maxWidth, dragStartWidth))
+            onWidthChange?(restored)
+            collapseArmed = false
+            onCollapse?()
+        }
         let local = convert(event.locationInWindow, from: nil)
         if bounds.contains(local) {
             state = .near

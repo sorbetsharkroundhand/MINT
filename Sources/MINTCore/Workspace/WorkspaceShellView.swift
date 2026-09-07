@@ -2,11 +2,33 @@ import SwiftUI
 
 /// 저장된 폭을 창 크기에 맞춰 투영한다. 접거나 창을 줄여도 사용자 폭은 잃지 않는다.
 struct WorkspaceLayoutState {
+    static let navigatorMinWidth: CGFloat = 200
+    static let navigatorMaxWidth: CGFloat = 360
+    static let editorMinWidth: CGFloat = 560
+    static let navigatorCollapseThreshold: CGFloat = 150
+    static let navigatorCollapseReleaseThreshold: CGFloat = 176
+
     var navigatorWidth: Double = 250
 
     func navigatorWidth(in availableWidth: CGFloat) -> CGFloat {
         let preferred = navigatorWidth.isFinite ? CGFloat(navigatorWidth) : 250
-        return min(max(preferred, 200), min(360, max(200, availableWidth - 560)))
+        return min(
+            max(preferred, Self.navigatorMinWidth),
+            min(
+                Self.navigatorMaxWidth,
+                max(Self.navigatorMinWidth, availableWidth - Self.editorMinWidth)))
+    }
+
+    /// Hysteresis for drag-to-collapse: arm only after a deliberate pull well past the
+    /// minimum width, then require a larger reverse movement before disarming.
+    static func navigatorCollapseArmed(
+        projectedWidth: CGFloat,
+        wasArmed: Bool
+    ) -> Bool {
+        if wasArmed {
+            return projectedWidth < navigatorCollapseReleaseThreshold
+        }
+        return projectedWidth <= navigatorCollapseThreshold
     }
 }
 
@@ -14,6 +36,7 @@ struct WorkspaceLayoutState {
 struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
     @Binding var navigatorWidth: Double
     let navigatorVisible: Bool
+    let onNavigatorCollapse: () -> Void
     let contextVisible: Bool
     let theme: MintTheme
     @ViewBuilder var navigator: () -> Navigator
@@ -33,7 +56,7 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
                 }
                 VStack(spacing: 0) {
                     editor()
-                        .frame(minWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+                        .frame(minWidth: WorkspaceLayoutState.editorMinWidth, maxWidth: .infinity, maxHeight: .infinity)
                         .background(theme.editorSurfaceC)
                     if contextVisible && !contextOnRight {
                         theme.sepC.frame(height: 1)
@@ -53,7 +76,16 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
                 if navigatorVisible {
                     SidebarResizeDivider(
                         width: Binding(get: { width }, set: { navigatorWidth = Double($0) }),
-                        minWidth: 200, maxWidth: min(360, max(200, geometry.size.width - 560)),
+                        minWidth: WorkspaceLayoutState.navigatorMinWidth,
+                        maxWidth: min(
+                            WorkspaceLayoutState.navigatorMaxWidth,
+                            max(
+                                WorkspaceLayoutState.navigatorMinWidth,
+                                geometry.size.width - WorkspaceLayoutState.editorMinWidth)),
+                        collapseThreshold: WorkspaceLayoutState.navigatorCollapseThreshold,
+                        collapseReleaseThreshold:
+                            WorkspaceLayoutState.navigatorCollapseReleaseThreshold,
+                        onCollapse: onNavigatorCollapse,
                         theme: theme
                     )
                     .frame(width: 24)
@@ -95,8 +127,14 @@ struct WorkspaceSurface: View {
         let theme = palette.theme(for: colorScheme)
         store.structureUndoManager = windowUndoManager
         return WorkspaceShellView(
-            navigatorWidth: $sidebarWidth, navigatorVisible: sidebarVisible,
-            contextVisible: section != SidebarSection.files.rawValue, theme: theme
+            navigatorWidth: $sidebarWidth,
+            navigatorVisible: sidebarVisible,
+            onNavigatorCollapse: {
+                sidebarVisible = false
+                store.requestEditorFocus()
+            },
+            contextVisible: section != SidebarSection.files.rawValue,
+            theme: theme
         ) {
             ProjectNavigatorView(store: store, completion: completion, theme: theme)
         } editor: {
