@@ -165,10 +165,16 @@ struct SidebarView: View {
         }
     }
 
-    /// 섹션 탭 — VSCode 활동 바의 수평 축소판. 아이콘 셋: 문서·바이블·타임라인.
+    /// Section strip for legacy/context tool surfaces.
+    ///
+    /// In the new workspace the Project Navigator exclusively owns document navigation.
+    /// The context/tool presentation therefore omits the legacy Files tab instead of
+    /// exposing a duplicate "return to document" action (#117).
     private var sectionStrip: some View {
         HStack(spacing: 4) {
-            sectionTab(.files, icon: "doc.text", help: "문서")
+            if presentation != .context {
+                sectionTab(.files, icon: "doc.text", help: "문서")
+            }
             sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
             sectionTab(
                 .narrative, icon: "arrow.triangle.branch",
@@ -185,7 +191,6 @@ struct SidebarView: View {
     ) -> some View {
         Button {
             sectionRaw = target.rawValue
-            if target == .files && presentation == .context { store.requestEditorFocus() }
         } label: {
             Image(systemName: icon)
                 .font(.system(size: 11.5, weight: .medium))
