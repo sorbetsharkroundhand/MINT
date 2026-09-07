@@ -91,7 +91,7 @@ final class RenderCacheLRUTests: XCTestCase {
         defer { MathRenderer._testResetCache() }
 
         for index in 0..<40 {
-            let (image, error) = MathRenderer.render(
+            let (_, error) = MathRenderer.render(
                 latex: "x_\(index) = \\frac{\(index)}{\(index + 1)} + \\sqrt{\(index)}",
                 color: .black, fontSize: 16)
             XCTAssertNil(error)
