@@ -4536,17 +4536,43 @@ final class BlockTextView: NSTextView {
             options: [.usesLineFragmentOrigin])
         let lineHeight = ceil(font.ascender - font.descender + font.leading)
         bounding.size.height = min(bounding.height, CGFloat(Self.ghostMaxLines) * lineHeight)
-        let belowY = y - lineHeight * 1.1  // 같은 좌표계 — 커서 줄 아래.
+        // NSTextView/TextKit view coordinates are flipped (Y grows downward).  The old
+        // code subtracted a line height from the current glyph top, which moved wrapped
+        // Ghost text upward.  Anchor the overlay to the actual current TextKit line
+        // fragment and start at its maxY: that is the next visual line boundary and it
+        // naturally includes heading/paragraph spacing and extra-line-fragment geometry.
+        let wrappedY = Self.ghostWrappedOriginY(
+            currentLineFragment: caretLineFragmentRectInView(),
+            caretRect: caretRect,
+            fallbackLineHeight: lineHeight)
         attributed.draw(
             with: NSRect(
-                x: textContainerOrigin.x + 2, y: belowY,
+                x: textContainerOrigin.x + 2, y: wrappedY,
                 width: wrappedWidth, height: bounding.height),
             options: [.usesLineFragmentOrigin])
     }
 
-    /// 고스트가 커서 오른쪽에 그대로 들어가는가 — 순수 판정 (#24 테스트 대상).
+    /// Whether the Ghost suggestion still fits to the right of the caret.
     nonisolated static func ghostFitsInline(textWidth: CGFloat, availableWidth: CGFloat) -> Bool {
         textWidth <= availableWidth && availableWidth > 0
+    }
+
+    /// Wrapped Ghost starts at the next visual line boundary in flipped view coordinates.
+    ///
+    /// The preferred input is an actual TextKit line fragment already converted into
+    /// view coordinates.  The caret fallback keeps empty/unlaid-out editor states safe.
+    nonisolated static func ghostWrappedOriginY(
+        currentLineFragment: NSRect?,
+        caretRect: NSRect,
+        fallbackLineHeight: CGFloat
+    ) -> CGFloat {
+        if let currentLineFragment, currentLineFragment.height > 0 {
+            return currentLineFragment.maxY
+        }
+        if caretRect.height > 0 {
+            return caretRect.maxY
+        }
+        return caretRect.minY + max(0, fallbackLineHeight)
     }
     /// 줄바꿈 상한 줄 수 — 화면을 흔들지 않는 절제 (#24).
     nonisolated static let ghostMaxLines = 3
@@ -4708,6 +4734,31 @@ final class BlockTextView: NSTextView {
         guard screenRect.height > 0 else { return nil }
         let windowRect = window.convertFromScreen(screenRect)
         return convert(windowRect, from: nil)
+    }
+
+    /// Current caret line fragment converted from TextKit container coordinates
+    /// into this NSTextView's flipped view coordinates.
+    private func caretLineFragmentRectInView() -> NSRect? {
+        guard let layoutManager, let textContainer else { return nil }
+        let ns = string as NSString
+        guard ns.length > 0 else { return nil }
+        let caret = min(selectedRange().location, ns.length)
+        layoutManager.ensureLayout(for: textContainer)
+
+        let charIndex = min(caret, ns.length - 1)
+        let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
+        var fragment = layoutManager.lineFragmentRect(
+            forGlyphAt: glyphIndex, effectiveRange: nil)
+
+        // At document-end newline the insertion point is in TextKit's extra fragment,
+        // not the previous glyph line.  Use that real visual fragment as the anchor.
+        if caret == ns.length, ns.hasSuffix("\n") {
+            let extra = layoutManager.extraLineFragmentRect
+            guard extra.height > 0 else { return nil }
+            fragment = extra
+        }
+        guard fragment.height > 0 else { return nil }
+        return fragment.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
     }
 
     /// 커서 라인의 텍스트 베이스라인 y (뷰 좌표).
