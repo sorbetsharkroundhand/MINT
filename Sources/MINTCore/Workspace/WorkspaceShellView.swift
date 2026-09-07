@@ -248,6 +248,7 @@ struct WorkspaceSurface: View {
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
     @AppStorage("mint.toolDockPosition")
     private var toolDockRaw = ToolDockPosition.automatic.rawValue
+    @State private var trafficLightMaxX: CGFloat?
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
@@ -310,7 +311,11 @@ struct WorkspaceSurface: View {
                             theme: theme, indexer: indexer)
             }
         }
-        .ignoresSafeArea()
+        .environment(
+            \.mintWindowChromeLeadingInset,
+            WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
+        .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
+        .ignoresSafeArea(.container, edges: .top)
         .onAppear { section = SidebarSection.files.rawValue }
     }
 }
