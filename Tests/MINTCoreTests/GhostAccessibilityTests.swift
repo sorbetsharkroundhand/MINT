@@ -73,7 +73,7 @@ final class GhostAccessibilityTests: XCTestCase {
             attributes: [.font: NSFont.systemFont(ofSize: 16)])
         let layout = NSLayoutManager()
         let container = NSTextContainer(
-            containerSize: NSSize(width: 90, height: .greatestFiniteMagnitude))
+            containerSize: NSSize(width: 90, height: CGFloat.greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
         storage.addLayoutManager(layout)
         layout.addTextContainer(container)
