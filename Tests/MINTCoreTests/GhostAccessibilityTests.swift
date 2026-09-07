@@ -67,4 +67,57 @@ final class GhostAccessibilityTests: XCTestCase {
         // draw/accessibilityValue 양쪽에 동일하게 존재한다(실제 조합 상태는
         // 입력 컨텍스트 필요 — E2E 영역).
     }
+    func testWrappedGhostOriginUsesNextTextKitVisualLine() {
+        let storage = NSTextStorage(
+            string: "alpha beta gamma delta epsilon",
+            attributes: [.font: NSFont.systemFont(ofSize: 16)])
+        let layout = NSLayoutManager()
+        let container = NSTextContainer(
+            containerSize: NSSize(width: 90, height: CGFloat.greatestFiniteMagnitude))
+        container.lineFragmentPadding = 0
+        storage.addLayoutManager(layout)
+        layout.addTextContainer(container)
+        layout.ensureLayout(for: container)
+
+        let glyph = layout.glyphIndexForCharacter(at: 0)
+        let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        XCTAssertGreaterThan(fragment.height, 0)
+
+        let originY: CGFloat = 44
+        let fragmentInView = fragment.offsetBy(dx: 56, dy: originY)
+        let caret = NSRect(
+            x: fragmentInView.maxX - 1,
+            y: fragmentInView.minY,
+            width: 1,
+            height: fragmentInView.height)
+
+        let wrappedY = BlockTextView.ghostWrappedOriginY(
+            currentLineFragment: fragmentInView,
+            caretRect: caret,
+            fallbackLineHeight: 20)
+
+        XCTAssertEqual(wrappedY, fragmentInView.maxY, accuracy: 0.001)
+        XCTAssertGreaterThan(wrappedY, fragmentInView.minY)
+    }
+
+    func testWrappedGhostOriginFallbackNeverMovesUpward() {
+        let caret = NSRect(x: 300, y: 120, width: 1, height: 22)
+        XCTAssertEqual(
+            BlockTextView.ghostWrappedOriginY(
+                currentLineFragment: nil,
+                caretRect: caret,
+                fallbackLineHeight: 20),
+            caret.maxY,
+            accuracy: 0.001)
+
+        let zeroHeightCaret = NSRect(x: 300, y: 120, width: 1, height: 0)
+        XCTAssertEqual(
+            BlockTextView.ghostWrappedOriginY(
+                currentLineFragment: nil,
+                caretRect: zeroHeightCaret,
+                fallbackLineHeight: 20),
+            140,
+            accuracy: 0.001)
+    }
+
 }
