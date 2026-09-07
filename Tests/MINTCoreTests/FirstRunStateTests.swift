@@ -44,9 +44,8 @@ final class FirstRunStateTests: XCTestCase {
         XCTAssertEqual(active.documents[0].id, result.documentID)
         XCTAssertEqual(active.documents[0].body, "")
         XCTAssertEqual(session.workspaceMode, .write)
-        XCTAssertEqual(
-            try await FirstRunStateResolver.resolve(using: store),
-            .ready(result.projectID))
+        let stateAfterCreation = try await FirstRunStateResolver.resolve(using: store)
+        XCTAssertEqual(stateAfterCreation, .ready(result.projectID))
     }
 
     func testExistingActiveProjectSkipsFirstRunAfterRelaunch() async throws {
@@ -64,8 +63,7 @@ final class FirstRunStateTests: XCTestCase {
         try await relaunchedSession.loadActiveProject()
 
         XCTAssertEqual(relaunchedSession.activeProject?.id, result.projectID)
-        XCTAssertEqual(
-            try await FirstRunStateResolver.resolve(using: store),
-            .ready(result.projectID))
+        let stateAfterRelaunch = try await FirstRunStateResolver.resolve(using: store)
+        XCTAssertEqual(stateAfterRelaunch, .ready(result.projectID))
     }
 }
