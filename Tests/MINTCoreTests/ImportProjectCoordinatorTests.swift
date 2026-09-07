@@ -48,9 +48,8 @@ final class ImportProjectCoordinatorTests: XCTestCase {
         XCTAssertEqual(session.activeProject?.mode, .fiction)
         XCTAssertEqual(session.activeProject?.documents.first?.body,
             "한글\r\n가\n![그림](images/a.png)\n")
-        XCTAssertEqual(
-            try await FirstRunStateResolver.resolve(using: store),
-            .ready(result.projectID))
+        let importedState = try await FirstRunStateResolver.resolve(using: store)
+        XCTAssertEqual(importedState, .ready(result.projectID))
     }
 
     func testFailedImportLeavesCurrentSessionAndSourceUntouched() async throws {
@@ -79,6 +78,7 @@ final class ImportProjectCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(session.activeProject?.id, created.projectID)
         XCTAssertEqual(try Data(contentsOf: broken), original)
-        XCTAssertEqual(try await store.activeProject()?.id, created.projectID)
+        let activeAfterFailure = try await store.activeProject()
+        XCTAssertEqual(activeAfterFailure?.id, created.projectID)
     }
 }
