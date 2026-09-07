@@ -27,6 +27,51 @@ final class WorkspaceLayoutTests: XCTestCase {
                 projectedWidth: 176, wasArmed: true))
     }
 
+    func testToolDockAutomaticAndSideFallbackPreservePreferenceSemantics() {
+        let navWidth: CGFloat = 250
+
+        XCTAssertEqual(
+            WorkspaceLayoutState.effectiveToolDock(
+                preferred: .automatic,
+                availableWidth: 1180,
+                navigatorVisible: true,
+                navigatorWidth: navWidth),
+            .right)
+
+        XCTAssertEqual(
+            WorkspaceLayoutState.effectiveToolDock(
+                preferred: .automatic,
+                availableWidth: 900,
+                navigatorVisible: true,
+                navigatorWidth: navWidth),
+            .bottom)
+
+        // A narrow-window fallback is computed only; the caller's persisted .left
+        // preference is not mutated and will become effective again when width returns.
+        XCTAssertEqual(
+            WorkspaceLayoutState.effectiveToolDock(
+                preferred: .left,
+                availableWidth: 900,
+                navigatorVisible: true,
+                navigatorWidth: navWidth),
+            .bottom)
+        XCTAssertEqual(
+            WorkspaceLayoutState.effectiveToolDock(
+                preferred: .left,
+                availableWidth: 1200,
+                navigatorVisible: true,
+                navigatorWidth: navWidth),
+            .left)
+
+        XCTAssertEqual(
+            WorkspaceLayoutState.effectiveToolDock(
+                preferred: .floating,
+                availableWidth: 860,
+                navigatorVisible: true,
+                navigatorWidth: navWidth),
+            .floating)
+    }
+
     func testEditorialSurfaceIsOpaqueInBothAppearancesAndCustomPalettes() {
         for theme in [MintTheme.light, .dark, MintTheme.light.tinted(with: .lightDefault, dark: false),
                       MintTheme.dark.tinted(with: .darkDefault, dark: true)] {
