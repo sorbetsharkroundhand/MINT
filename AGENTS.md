@@ -7,6 +7,26 @@ Read:
 - `docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md` for the 0.2.0 product contract.
 - Child issue for the exact implementation/acceptance contract.
 
+## Issue freshness protocol
+
+GitHub issue bodies are the freshness authority for active 0.2.0 work. A local checkout or previously cached plan may be older than the issue contract.
+
+Before planning/coding an issue, run the equivalent of:
+
+```bash
+git fetch origin
+gh issue view 99 --repo sorbetsharkroundhand/MINT --json number,title,body,state,url,updatedAt
+gh issue list --repo sorbetsharkroundhand/MINT --state open --limit 100 --json number,title,updatedAt,url
+gh issue view <TARGET> --repo sorbetsharkroundhand/MINT --json number,title,body,state,url,updatedAt
+gh pr view 120 --repo sorbetsharkroundhand/MINT --json number,state,isDraft,headRefName,headRefOid,updatedAt,url
+```
+
+Then:
+- compare the target issue with local `PLAN.md` / `docs/superpowers/`;
+- treat a newer GitHub issue contract as authoritative for scope/acceptance;
+- if they materially conflict, report the delta before coding rather than guessing;
+- never assume a remembered issue list is current.
+
 ## Build / run
 
 - Type/build check: `swift build`
@@ -47,9 +67,11 @@ Read:
 - Fiction-only domain: `Sources/MINTCore/Fiction/`
 - Editor engine: `Sources/MINTCore/Editor/`
 - Ask MINT: `Sources/MINTCore/Agent/`
+- Writing Quality: `Sources/MINTCore/WritingQuality/`
 - Do not add Knowledge responsibilities to `BlockTextView` or `EntryStore`.
 - Derived `DocumentOutline.Scene` hashes are not persistent manuscript IDs.
 - Existing `SourceAnchor` is a re-anchoring utility; cross-layer evidence uses `EvidenceAnchor`.
+- Writing Quality diagnostics are independent from Fiction Story Intelligence; style preferences belong to `WriterStyleProfile`, not User Canon.
 
 ## Concurrency / background work
 
