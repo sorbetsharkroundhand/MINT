@@ -256,6 +256,7 @@ struct EditorPane: View {
 /// 삽입은 한 번 정하면 잘 바뀌지 않거나 단축키/메뉴로 이미 닿을 수 있어 설정(⌘,)과
 /// 메뉴로 옮겼다 (CLAUDE.md §3 "고스트는 조용히"의 연장 — 화면의 소음을 줄인다).
 struct EditorToolbar: View {
+    @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
@@ -361,10 +362,14 @@ struct EditorToolbar: View {
             ModelChip(completion: completion, settings: settings, theme: theme)
             settingsButton
         }
-        // 사이드바를 접으면 툴바가 창 맨 왼쪽까지 차서 신호등(닫기·최소화·최대화)과
-        // 겹친다 — 접힘 상태에선 신호등을 비켜 갈 만큼 왼쪽 여백을 준다.
-        .padding(.leading, sidebarVisible ? 22 : 84)
-        .padding(.trailing, 22)
+        // When Navigator is hidden, use the measured macOS traffic-light safe region.
+        // With Navigator visible, regular design padding is enough.
+        .padding(
+            .leading,
+            sidebarVisible
+                ? WindowChromeGeometry.toolbarHorizontalPadding
+                : windowChromeLeadingInset)
+        .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
         .frame(minHeight: 52)
         .background(theme.toolbarC)
     }

@@ -76,6 +76,7 @@ private struct SidebarSectionHint: View {
 enum SidebarPresentation { case legacy, navigator, context }
 
 struct SidebarView: View {
+    @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
     var presentation: SidebarPresentation = .legacy
     @ObservedObject var store: EntryStore
     /// AI 폴더 명명(requestFolderName)과 진행 표시(namingFolderIDs)에 쓴다.
@@ -434,7 +435,7 @@ struct SidebarView: View {
         }
         // 신호등 줄(타이틀바 안전영역) 바로 아래 — 우측 툴바와 같은 높이 기준.
         // 고정 대신 **최소** 높이 — Dynamic Type 큰 글자에서 아이콘이 눌리지 않게 (#31).
-        .padding(.leading, 18)
+        .padding(.leading, windowChromeLeadingInset)
         .padding(.trailing, 12)
         .frame(minHeight: 52)
     }
