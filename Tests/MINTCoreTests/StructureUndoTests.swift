@@ -11,7 +11,7 @@ final class StructureUndoTests: XCTestCase {
 
     private var root: URL!
     private var store: EntryStore!
-    private var windows: [NSWindow] = []
+    private var undoManager: UndoManager!
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -20,55 +20,54 @@ final class StructureUndoTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        windows.removeAll()
+        // XCTest teardown is nonisolated under Swift 6, so do not touch the
+        // MainActor-isolated EntryStore here. Releasing the test-owned manager/store
+        // is sufficient; EntryStore holds the manager weakly.
+        store = nil
+        undoManager = nil
         try? FileManager.default.removeItem(at: root)
     }
 
-    /// 창의 undo manager를 배선한다 — 베어 UndoManager()는 첫 등록 때 유령
-    /// 외부 그룹을 만들어 그룹 경계가 무너진다(실앱은 창이 관리).
-
+    /// EntryStore의 구조 undo 계약만 검증하는 deterministic manager.
+    /// 실제 NSWindow의 groupsByEvent/run-loop lifecycle은 앱/UI smoke의 책임이다.
+    /// 단위 테스트에서 window-owned manager를 쓰면 async XCTest가 run loop를 돌 때
+    /// AppKit의 지연 endUndoGrouping이 다른 테스트로 새어 나갈 수 있다.
     @MainActor
     private func makeStore() -> EntryStore {
         let store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        let storage = NSTextStorage()
-        let layoutManager = MintLayoutManager()
-        storage.addLayoutManager(layoutManager)
-        let container = NSTextContainer(
-            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude))
-        container.widthTracksTextView = true
-        layoutManager.addTextContainer(container)
-        let view = BlockTextView(
-            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: container)
-        view.allowsUndo = true
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 900),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
-        window.contentView?.addSubview(view)
-        window.makeFirstResponder(view)
-        windows.append(window)
-        guard let um = view.undoManager else {
-            fatalError("창 기반 undo manager 없음")
-        }
-        store.structureUndoManager = um
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        store.structureUndoManager = manager
         self.store = store
-        self.undoManager = um
+        self.undoManager = manager
         return store
     }
-
-    private var undoManager: UndoManager!
 
     /// 헤드리스에선 이벤트 주기가 undo 그룹을 열어주지 않는다 — 연산별로
     /// 명시 묶어 앱의 "사용자 동작 1회 = undo 1단계"를 재현한다.
     @MainActor
     private func grouped(_ body: () -> Void) {
-        // 텍스트 시스템이 선(先)으로 열어 둔 그룹이 있을 수 있으므로, 연산 후
-        // 레벨 0까지 전부 닫는다 — 이 연산만이 하나의 undo 단위가 된다.
+        let startingLevel = undoManager.groupingLevel
         undoManager.beginUndoGrouping()
         body()
-        while undoManager.groupingLevel > 0 {
+        // Close only groups created by this helper/body. Never consume an outer group
+        // that another owner expects to close later.
+        while undoManager.groupingLevel > startingLevel {
             undoManager.endUndoGrouping()
         }
+    }
+
+    @MainActor
+    func testGroupedStructureOperationBalancesManager() {
+        let store = makeStore()
+        let id = store.newEntry()
+
+        grouped {
+            store.delete(id)
+        }
+
+        XCTAssertEqual(undoManager.groupingLevel, 0)
+        XCTAssertTrue(undoManager.canUndo)
     }
 
     // MARK: - 저널 삭제 · undo
@@ -80,7 +79,7 @@ final class StructureUndoTests: XCTestCase {
         store.updateActiveBody("1장\n\n주인공이 말했다.")
         store.flush()
 
-        store.delete(id)
+        grouped { store.delete(id) }
         XCTAssertFalse(store.entries.contains { $0.id == id })
 
         undoManager.undo()
@@ -104,7 +103,7 @@ final class StructureUndoTests: XCTestCase {
         XCTAssertNotNil(store.entries.first { $0.id == child })
         store.flush()
 
-        store.deleteFolder(folder)
+        grouped { store.deleteFolder(folder) }
         XCTAssertFalse(store.folders.contains { $0.id == folder })
         XCTAssertFalse(store.entries.contains { $0.id == child })
 
@@ -127,7 +126,7 @@ final class StructureUndoTests: XCTestCase {
         let b = store.newEntry(in: folder)
 
         // 폴더 → 루트 이동
-        store.move(b, toFolder: nil)
+        grouped { store.move(b, toFolder: nil) }
         XCTAssertEqual(store.entries.first { $0.id == b }?.folderID, nil)
 
         undoManager.undo()
@@ -169,7 +168,7 @@ final class StructureUndoTests: XCTestCase {
         let id = store.newEntry()
         store.updateActiveBody("영원히 잃지 않을 원고")
 
-        store.delete(id)
+        grouped { store.delete(id) }
         XCTAssertNil(store.entries.first { $0.id == id })
         guard let itemID = store.trash.items.first?.id else {
             return XCTFail("휴지통 항목 없음")
@@ -196,7 +195,7 @@ final class StructureUndoTests: XCTestCase {
         store.updateActiveBody("![표지](images/cover.png)")
         AssetJanitor.record("images/cover.png")
 
-        store.delete(id)  // 문단 삭제 — asset은 장부 후보일 뿐
+        grouped { store.delete(id) }  // 문단 삭제 — asset은 장부 후보일 뿐
 
         // 유예 기간 안의 청소는 아무것도 지우지 않는다 (redo 가능 기간).
         let removedNow = AssetJanitor.sweepAll(bodies: store.entries.map(\.body))
