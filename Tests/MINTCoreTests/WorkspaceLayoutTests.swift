@@ -27,6 +27,24 @@ final class WorkspaceLayoutTests: XCTestCase {
                 projectedWidth: 176, wasArmed: true))
     }
 
+    func testNavigatorWidthRubberBandsBelowMinimumDuringCollapseDrag() {
+        let atMinimum = WorkspaceLayoutState(navigatorWidth: 200)
+            .navigatorWidth(in: 1180)
+        let midway = WorkspaceLayoutState(navigatorWidth: 175)
+            .navigatorWidth(in: 1180)
+        let atThreshold = WorkspaceLayoutState(navigatorWidth: 150)
+            .navigatorWidth(in: 1180)
+        let beyondThreshold = WorkspaceLayoutState(navigatorWidth: 100)
+            .navigatorWidth(in: 1180)
+
+        XCTAssertLessThan(midway, atMinimum)
+        XCTAssertGreaterThan(midway, 175)
+        XCTAssertLessThan(atThreshold, midway)
+        XCTAssertGreaterThan(atThreshold, 150)
+        XCTAssertLessThan(beyondThreshold, atThreshold)
+        XCTAssertGreaterThan(beyondThreshold, 100)
+    }
+
     func testToolDockAutomaticAndSideFallbackPreservePreferenceSemantics() {
         let navWidth: CGFloat = 250
 
