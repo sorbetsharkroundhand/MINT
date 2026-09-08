@@ -8,16 +8,18 @@ This is the compact canonical architecture/roadmap. Historical experiment logs b
 
 ## Current 0.2.0 status — 2026-09-08
 
+Release membership should be tracked by the GitHub milestone **MINT 0.2.0**; #99 is the product contract, dependency map, and main-merge ledger.
+
 - ✅ #100 Gate 0 / PR #121 — green CI baseline.
 - ✅ #101 / PR #122 — generic WritingProject/WritingDocument domain.
 - ✅ #102 / PR #123 — ProjectStore + non-destructive legacy migration.
-- ◐ #103 — shell baseline + Navigator drag-collapse + persistent tool docking landed via PR #124/#130/#132; window chrome and final visual/IME/Ghost/Reduce Transparency verification remain.
-- ⏭ #104 — mode-aware Write/Map/Review vs Write/Outline/Review routing.
+- ◐ #103 — shell baseline + Navigator drag-collapse + persistent tool docking + titlebar geometry landed via PR #124/#130/#132/#138; final real-macOS visual/IME/Ghost/Reduce Transparency verification remains.
+- ✅ #104 — mode-aware Write/Map/Review vs Write/Outline/Review routing: project/session foundation PR #135 + live shell/focus/persistence/UI-smoke completion PR #142.
 - ✅ #125 / PR #128 — wrapped Ghost geometry regression fixed on main.
-- ◐ #126 — Writing Quality core in PR #133; Korean provider/Kiwi validation follows.
-- #18 — narrowed to remaining O(document) paragraph discovery in media refresh + measured long-document evidence.
+- ◐ #126 — provider-independent cancellable Writing Quality core merged via PR #133; Korean morphology provider/rules + packaging/licensing/perf follow.
+- ◐ #18 — visible media scan bounded via PR #139; dirty-edit paragraph/block index + 300k/100-media evidence remain.
 - ✅ #61 retired after re-audit: useful PR1–5 retained; PR6–9 superseded by #103/#113/#117.
-- #119 — final release gates, including zero MINT-owned compiler/concurrency warnings.
+- ◐ #119 — final release gate; warning/CI infrastructure landed via PR #129/#137/#140/#141, but RC long-document/product/E2E matrix remains open.
 
 ---
 
@@ -434,10 +436,10 @@ Performance thresholds come from measured baselines, not guessed constants.
 - [x] #101 generic project domain
 - [x] #102 project storage/migration
 - [ ] #103 shell finish
-- [ ] #104 workspace routing
+- [x] #104 workspace routing — PR #135 + #142
 - [ ] #105 Living Margin
-- [ ] #125 Ghost wrap regression
-- [ ] #126 Writing Quality core / Korean morphology
+- [x] #125 Ghost wrap regression — PR #128
+- [ ] #126 Writing Quality core / Korean morphology — core merged via PR #133; provider work remains
 
 ### Story Intelligence
 - [ ] #106 hierarchical memory
@@ -457,8 +459,8 @@ Performance thresholds come from measured baselines, not guessed constants.
 - [ ] #118 onboarding/import
 
 ### Release
-- [ ] #18 residual media/render performance
-- [ ] #119 release readiness
+- [ ] #18 residual media/render performance — visible path bounded via PR #139; dirty-edit index/evidence remain
+- [ ] #119 release readiness — PR #129/#137/#140/#141 establish warning/CI baseline; final RC matrix remains
 
 Canonical 0.2.0 execution plans live in `docs/superpowers/plans/`.
 
@@ -484,8 +486,8 @@ No vector DB, agent chain, or giant-context strategy is mandatory for 0.2.0.
 Current blockers/risks:
 - #18 paragraph/block walk + media visible-range performance evidence.
 - #126 local writing diagnostics: morphology packaging/licensing, false-positive control, dirty-range performance.
-- #119 Swift warning-clean release gate, especially EPUB concurrent pipe drain.
-- Complete #103 window-chrome semantics and final shell visual/IME/Ghost verification.
+- #119 final RC release matrix and warning-zero recheck; current warning/CI infrastructure is green via PR #129/#137/#140/#141.
+- Complete #103 final shell visual/IME/Ghost/Reduce Transparency verification; structural window chrome landed via PR #138.
 - Validate long-document background scheduling against foreground Ghost.
 
 Open product questions should be recorded in child issues with evidence rather than expanding this file.
