@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// 기존 트리의 검색·이동·이름 변경을 재사용하며 문서 탐색을 항상 유지한다.
-/// #104의 프로젝트 세션 연결 전에는 안전한 기존 EntryStore를 데이터 원본으로 쓴다.
+/// Reuses the existing search, move, and rename tree so document navigation stays available.
+/// The #104 session drives shell routing; #118 owns the project-first document handoff.
 struct ProjectNavigatorView: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController

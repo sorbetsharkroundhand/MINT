@@ -55,6 +55,21 @@ defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
 
 # 고유 합성 원고가 실제 에디터에 나타나야 입력을 허용한다. 사용자 원고는 읽지 않는다.
 TOKEN="smoke$(uuidgen | tr -d '-')"
+PROJECT_ID="33333333-3333-3333-3333-333333333333"
+PROJECT_DOCUMENT_ID="44444444-4444-4444-4444-444444444444"
+PROJECT_BODY="project$TOKEN"
+PROJECT_HASH=$(printf '%s' "$PROJECT_BODY" | shasum -a 256 | awk '{print $1}')
+PROJECT_ROOT="$SMOKE_HOME/Documents/MINT/Projects"
+PROJECT_DIRECTORY="$PROJECT_ROOT/$PROJECT_ID"
+PROJECT_DOCUMENT_PATH="Documents/$PROJECT_DOCUMENT_ID/$PROJECT_HASH.md"
+mkdir -p "$PROJECT_DIRECTORY/Documents/$PROJECT_DOCUMENT_ID"
+printf '%s' "$PROJECT_BODY" > "$PROJECT_DIRECTORY/$PROJECT_DOCUMENT_PATH"
+cat > "$PROJECT_DIRECTORY/project.json" <<JSON
+{"schemaVersion":1,"id":{"rawValue":"$PROJECT_ID"},"title":"격리 프로젝트","mode":"fiction","documents":[{"id":{"rawValue":"$PROJECT_DOCUMENT_ID"},"title":"격리 원고","kind":"manuscript","relativePath":"$PROJECT_DOCUMENT_PATH","contentHash":"$PROJECT_HASH"}],"assets":[]}
+JSON
+cat > "$PROJECT_ROOT/active-project.json" <<JSON
+{"rawValue":"$PROJECT_ID"}
+JSON
 cat > "$SMOKE_HOME/Documents/MINT/entries.json" <<JSON
 {"entries":[{"id":"11111111-1111-1111-1111-111111111111","title":"격리 소설","createdAt":"2026-01-01T00:00:00Z","body":"$TOKEN","kind":"novel","titleIsCustom":true},{"id":"22222222-2222-2222-2222-222222222222","title":"격리 저널","createdAt":"2026-01-02T00:00:00Z","body":"second$TOKEN","titleIsCustom":true}],"activeID":"11111111-1111-1111-1111-111111111111"}
 JSON
@@ -73,6 +88,19 @@ on findElement(rootElement, attributeName, expectedValue, remainingDepth)
     end tell
     return missing value
 end findElement
+on findElementContaining(rootElement, attributeName, expectedValue, remainingDepth)
+    tell application "System Events"
+        try
+            if (value of attribute attributeName of rootElement as text) contains expectedValue then return rootElement
+        end try
+        if remainingDepth ≤ 0 then return missing value
+        repeat with childElement in UI elements of rootElement
+            set matchedElement to my findElementContaining(childElement, attributeName, expectedValue, remainingDepth - 1)
+            if matchedElement is not missing value then return matchedElement
+        end repeat
+    end tell
+    return missing value
+end findElementContaining
 on run argv
     set targetPID to (item 1 of argv) as integer
     set operation to item 2 of argv
@@ -82,12 +110,18 @@ on run argv
         if not (exists window 1 of targetProcess) then error "메인 창 없음"
         set rootElement to window 1 of targetProcess
         if operation is "press" then
-            set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
+            set targetElement to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElementContaining(rootElement, "AXHelp", expectedValue, 30)
             if targetElement is missing value then error "필요한 버튼 없음: " & expectedValue
             click targetElement
         else if operation is "navigator" then
             if my findElement(rootElement, "AXIdentifier", "mint.navigator", 30) is missing value then error "탐색기 없음"
+        else if operation is "focused" then
+            set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+            if editor is missing value then error "에디터 없음"
+            if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 유실"
         else if operation is "new" then
             click menu item "새 저널" of menu "파일" of menu bar item "파일" of menu bar 1 of targetProcess
         else
@@ -101,6 +135,11 @@ on run argv
                 if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 없음"
                 tell targetProcess to keystroke expectedValue
                 delay 0.5
+                -- The first edit updates the new journal title and sidebar, so SwiftUI may
+                -- replace the accessibility tree. Reacquire the editor instead of using a stale reference.
+                set rootElement to window 1 of targetProcess
+                set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+                if editor is missing value then error "입력 후 에디터 없음"
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             end if
             if operation is "empty" then
@@ -150,15 +189,22 @@ ui verify "$TOKEN"
 ui navigator
 ui type "typed$TOKEN"
 echo "✓ 격리 원고 확인 · 에디터 입력 왕복"
+ui press "지도"
+ui focused
+[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = map ] || fail "지도 모드 저장 실패"
+ui press "쓰기"
+ui focused
+[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = write ] || fail "쓰기 모드 저장 실패"
+echo "✓ 프로젝트 모드 전환 · 에디터 포커스 복원"
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
 ui press "스토리 바이블"
 ui press "문서로 돌아가기"
 ui navigator
-ui press "저널 격리 저널"
+ui press "mint.entry.22222222-2222-2222-2222-222222222222"
 ui verify "second$TOKEN"
-ui press "소설 격리 소설"
+ui press "mint.entry.11111111-1111-1111-1111-111111111111"
 ui verify "typed$TOKEN"
 ui new
 sleep 0.5
@@ -168,7 +214,7 @@ terminate
 [ -s "$SMOKE_HOME/Documents/MINT/entries.json" ] || fail "격리 원고 저장 없음"
 launch
 ui verify "new$TOKEN"
-ui press "소설 격리 소설"
+ui press "mint.entry.11111111-1111-1111-1111-111111111111"
 ui verify "typed$TOKEN"
 terminate
 check_original

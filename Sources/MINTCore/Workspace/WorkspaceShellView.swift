@@ -235,10 +235,12 @@ struct WorkspaceToolSurface: View {
     }
 }
 
-/// 기존 문서 세션을 새 셸에 연결한다. 영속 프로젝트 세션 전환은 #104에서 담당한다.
+/// Connects the persistent project-routing session while preserving the current editor surface.
+/// Project-first document ownership remains the #118 runtime handoff.
 struct WorkspaceSurface: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
+    let projectSession: ProjectSession
     var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.undoManager) private var windowUndoManager
@@ -266,8 +268,13 @@ struct WorkspaceSurface: View {
         ) {
             ProjectNavigatorView(store: store, completion: completion, theme: theme)
         } editor: {
-            EditorPane(store: store, completion: completion, settings: completion.settings,
-                       theme: theme, indexer: indexer)
+            EditorPane(
+                store: store,
+                completion: completion,
+                settings: completion.settings,
+                projectSession: projectSession,
+                theme: theme,
+                indexer: indexer)
         } context: {
             VStack(spacing: 0) {
                 HStack {
