@@ -11,7 +11,7 @@ final class StructureUndoTests: XCTestCase {
 
     private var root: URL!
     private var store: EntryStore!
-    private var windows: [NSWindow] = []
+    private var undoManager: UndoManager!
 
     override func setUpWithError() throws {
         root = FileManager.default.temporaryDirectory
@@ -24,39 +24,18 @@ final class StructureUndoTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
-    /// 창의 undo manager를 배선한다 — 베어 UndoManager()는 첫 등록 때 유령
-    /// 외부 그룹을 만들어 그룹 경계가 무너진다(실앱은 창이 관리).
-
+    /// EntryStore의 구조 undo 계약만 검증하는 deterministic manager.
+    /// 실제 NSWindow의 groupsByEvent/run-loop lifecycle은 앱/UI smoke의 책임이다.
     @MainActor
     private func makeStore() -> EntryStore {
         let store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        let storage = NSTextStorage()
-        let layoutManager = MintLayoutManager()
-        storage.addLayoutManager(layoutManager)
-        let container = NSTextContainer(
-            containerSize: NSSize(width: 700, height: CGFloat.greatestFiniteMagnitude))
-        container.widthTracksTextView = true
-        layoutManager.addTextContainer(container)
-        let view = BlockTextView(
-            frame: NSRect(x: 0, y: 0, width: 700, height: 900), textContainer: container)
-        view.allowsUndo = true
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 720, height: 900),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        window.contentView = NSView(frame: window.contentRect(forFrameRect: window.frame))
-        window.contentView?.addSubview(view)
-        window.makeFirstResponder(view)
-        windows.append(window)
-        guard let um = view.undoManager else {
-            fatalError("창 기반 undo manager 없음")
-        }
-        store.structureUndoManager = um
+        let manager = UndoManager()
+        manager.groupsByEvent = false
+        store.structureUndoManager = manager
         self.store = store
-        self.undoManager = um
+        self.undoManager = manager
         return store
     }
-
-    private var undoManager: UndoManager!
 
     /// 헤드리스에서도 AppKit의 event group은 실앱처럼 살아 있다. 이 helper는
     /// 자신이 연 nested group만 닫고 바깥 event group의 소유권은 건드리지 않는다.
@@ -71,19 +50,16 @@ final class StructureUndoTests: XCTestCase {
     }
 
     @MainActor
-    func testGroupedStructureOperationSurvivesLaterRunLoopTurn() async {
+    func testGroupedStructureOperationBalancesManager() {
         let store = makeStore()
         let id = store.newEntry()
 
         grouped {
             store.delete(id)
         }
-        XCTAssertEqual(undoManager.groupingLevel, 0)
-
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(10))
 
         XCTAssertEqual(undoManager.groupingLevel, 0)
+        XCTAssertTrue(undoManager.canUndo)
     }
 
     // MARK: - 저널 삭제 · undo
