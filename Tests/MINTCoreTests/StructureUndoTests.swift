@@ -20,12 +20,17 @@ final class StructureUndoTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        windows.removeAll()
+        store?.structureUndoManager = nil
+        undoManager?.removeAllActions()
+        store = nil
+        undoManager = nil
         try? FileManager.default.removeItem(at: root)
     }
 
     /// EntryStore의 구조 undo 계약만 검증하는 deterministic manager.
     /// 실제 NSWindow의 groupsByEvent/run-loop lifecycle은 앱/UI smoke의 책임이다.
+    /// 단위 테스트에서 window-owned manager를 쓰면 async XCTest가 run loop를 돌 때
+    /// AppKit의 지연 endUndoGrouping이 다른 테스트로 새어 나갈 수 있다.
     @MainActor
     private func makeStore() -> EntryStore {
         let store = EntryStore(directory: root, autosaveDelay: .seconds(3600))
@@ -37,13 +42,15 @@ final class StructureUndoTests: XCTestCase {
         return store
     }
 
-    /// 헤드리스에서도 AppKit의 event group은 실앱처럼 살아 있다. 이 helper는
-    /// 자신이 연 nested group만 닫고 바깥 event group의 소유권은 건드리지 않는다.
+    /// 헤드리스에선 이벤트 주기가 undo 그룹을 열어주지 않는다 — 연산별로
+    /// 명시 묶어 앱의 "사용자 동작 1회 = undo 1단계"를 재현한다.
     @MainActor
     private func grouped(_ body: () -> Void) {
         let startingLevel = undoManager.groupingLevel
         undoManager.beginUndoGrouping()
         body()
+        // Close only groups created by this helper/body. Never consume an outer group
+        // that another owner expects to close later.
         while undoManager.groupingLevel > startingLevel {
             undoManager.endUndoGrouping()
         }
