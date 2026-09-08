@@ -20,8 +20,9 @@ final class StructureUndoTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        store?.structureUndoManager = nil
-        undoManager?.removeAllActions()
+        // XCTest teardown is nonisolated under Swift 6, so do not touch the
+        // MainActor-isolated EntryStore here. Releasing the test-owned manager/store
+        // is sufficient; EntryStore holds the manager weakly.
         store = nil
         undoManager = nil
         try? FileManager.default.removeItem(at: root)
