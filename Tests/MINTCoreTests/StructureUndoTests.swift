@@ -71,18 +71,19 @@ final class StructureUndoTests: XCTestCase {
     }
 
     @MainActor
-    func testExplicitGroupingDoesNotConsumeOuterEventGroup() {
+    func testGroupedStructureOperationSurvivesLaterRunLoopTurn() async {
         let store = makeStore()
-        _ = store.newEntry()
-
-        let outerLevel = undoManager.groupingLevel
-        XCTAssertGreaterThanOrEqual(outerLevel, 1)
+        let id = store.newEntry()
 
         grouped {
-            store.setKind(.novel, for: store.activeID)
+            store.delete(id)
         }
+        XCTAssertEqual(undoManager.groupingLevel, 0)
 
-        XCTAssertEqual(undoManager.groupingLevel, outerLevel)
+        await Task.yield()
+        try? await Task.sleep(for: .milliseconds(10))
+
+        XCTAssertEqual(undoManager.groupingLevel, 0)
     }
 
     // MARK: - 저널 삭제 · undo
@@ -94,7 +95,7 @@ final class StructureUndoTests: XCTestCase {
         store.updateActiveBody("1장\n\n주인공이 말했다.")
         store.flush()
 
-        store.delete(id)
+        grouped { store.delete(id) }
         XCTAssertFalse(store.entries.contains { $0.id == id })
 
         undoManager.undo()
@@ -118,7 +119,7 @@ final class StructureUndoTests: XCTestCase {
         XCTAssertNotNil(store.entries.first { $0.id == child })
         store.flush()
 
-        store.deleteFolder(folder)
+        grouped { store.deleteFolder(folder) }
         XCTAssertFalse(store.folders.contains { $0.id == folder })
         XCTAssertFalse(store.entries.contains { $0.id == child })
 
@@ -141,7 +142,7 @@ final class StructureUndoTests: XCTestCase {
         let b = store.newEntry(in: folder)
 
         // 폴더 → 루트 이동
-        store.move(b, toFolder: nil)
+        grouped { store.move(b, toFolder: nil) }
         XCTAssertEqual(store.entries.first { $0.id == b }?.folderID, nil)
 
         undoManager.undo()
@@ -183,7 +184,7 @@ final class StructureUndoTests: XCTestCase {
         let id = store.newEntry()
         store.updateActiveBody("영원히 잃지 않을 원고")
 
-        store.delete(id)
+        grouped { store.delete(id) }
         XCTAssertNil(store.entries.first { $0.id == id })
         guard let itemID = store.trash.items.first?.id else {
             return XCTFail("휴지통 항목 없음")
@@ -210,7 +211,7 @@ final class StructureUndoTests: XCTestCase {
         store.updateActiveBody("![표지](images/cover.png)")
         AssetJanitor.record("images/cover.png")
 
-        store.delete(id)  // 문단 삭제 — asset은 장부 후보일 뿐
+        grouped { store.delete(id) }  // 문단 삭제 — asset은 장부 후보일 뿐
 
         // 유예 기간 안의 청소는 아무것도 지우지 않는다 (redo 가능 기간).
         let removedNow = AssetJanitor.sweepAll(bodies: store.entries.map(\.body))
