@@ -811,6 +811,7 @@ struct SidebarView: View {
                 requestNaming: { completion.requestFolderName(for: $0, in: store) }))
         // VO 축 (#23): 문서 행 = 버튼(선택), 트리 작업 = 사용자 지정 액션.
         .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("mint.entry.\(entry.id.uuidString)")
         .accessibilityLabel(Text("\(entry.resolvedKind == .novel ? "소설" : "저널") \(entry.title)"))
         .accessibilityValue(Text(active ? "열려 있음 · \(store.dayLabel(for: entry))" : store.dayLabel(for: entry)))
         .accessibilityAddTraits(.isButton)

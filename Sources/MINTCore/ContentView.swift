@@ -10,6 +10,7 @@ public struct ContentView: View {
     // 생기던 문제를 없애기 위해 소유권을 위로 올렸다.
     @ObservedObject private var store: EntryStore
     @ObservedObject private var completion: CompletionController
+    private let projectSession: ProjectSession
     /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
     private let indexer: BackgroundIndexer?
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
@@ -23,16 +24,22 @@ public struct ContentView: View {
     public init(
         store: EntryStore,
         completion: CompletionController,
-        indexer: BackgroundIndexer? = nil
+        indexer: BackgroundIndexer? = nil,
+        projectSession: ProjectSession
     ) {
         self.store = store
         self.completion = completion
         self.indexer = indexer
+        self.projectSession = projectSession
         self.settings = completion.settings
     }
 
     public var body: some View {
-        WorkspaceSurface(store: store, completion: completion, indexer: indexer)
+        WorkspaceSurface(
+            store: store,
+            completion: completion,
+            projectSession: projectSession,
+            indexer: indexer)
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
             .confirmationDialog(
@@ -113,6 +120,10 @@ public struct ContentView: View {
                     indexer.noteChange(entryID: store.activeID)
                 }
             }
+            .task {
+                guard projectSession.activeProject == nil else { return }
+                try? await projectSession.loadActiveProject()
+            }
     }
 
     private var preferredScheme: ColorScheme? {
@@ -189,6 +200,7 @@ struct EditorPane: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
+    let projectSession: ProjectSession
     let theme: MintTheme
     var indexer: BackgroundIndexer?
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
@@ -199,8 +211,8 @@ struct EditorPane: View {
         VStack(spacing: 0) {
             if !chromeHidden {
                 EditorToolbar(
-                    store: store, completion: completion, settings: settings, theme: theme,
-                    indexer: indexer)
+                    store: store, completion: completion, settings: settings,
+                    projectSession: projectSession, theme: theme, indexer: indexer)
                 theme.sepC.frame(height: 1)
             }
             editor
@@ -260,6 +272,7 @@ struct EditorToolbar: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
+    @ObservedObject var projectSession: ProjectSession
     let theme: MintTheme
     var indexer: BackgroundIndexer?
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
@@ -280,6 +293,17 @@ struct EditorToolbar: View {
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
                 .truncationMode(.middle)
+            if let projectMode = projectSession.activeProject?.mode {
+                Picker("작업 공간", selection: workspaceModeBinding) {
+                    ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
+                        Text(option.label).tag(option.mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .accessibilityIdentifier("mint.workspace-mode")
+                .accessibilityLabel("작업 공간")
+            }
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
             if store.activeEntry?.resolvedKind == .novel {
@@ -372,6 +396,17 @@ struct EditorToolbar: View {
         .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
         .frame(minHeight: 52)
         .background(theme.toolbarC)
+    }
+
+    private var workspaceModeBinding: Binding<WorkspaceMode> {
+        Binding(
+            get: { projectSession.workspaceMode },
+            set: { mode in
+                WorkspaceModeSelection.select(
+                    mode,
+                    session: projectSession,
+                    editorStore: store)
+            })
     }
 
     /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
@@ -857,7 +892,13 @@ struct LongParagraphNotice: View {
 }
 
 #Preview {
-    ContentView(store: EntryStore(), completion: CompletionController())
+    ContentView(
+        store: EntryStore(),
+        completion: CompletionController(),
+        projectSession: ProjectSession(
+            store: ProjectStore(
+                root: FileManager.default.temporaryDirectory
+                    .appendingPathComponent("MINT-Preview-Projects", isDirectory: true))))
         .frame(width: 1180, height: 760)
 }
 

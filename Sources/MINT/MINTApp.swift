@@ -17,10 +17,24 @@ struct MINTApp: App {
     static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
     @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
+    private static let projectStore: ProjectStore = {
+        let documents = FileManager.default
+            .urls(for: .documentDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.homeDirectoryForCurrentUser
+        return ProjectStore(
+            root: documents
+                .appendingPathComponent("MINT", isDirectory: true)
+                .appendingPathComponent("Projects", isDirectory: true))
+    }()
+    @StateObject private var projectSession = ProjectSession(store: MINTApp.projectStore)
 
     var body: some Scene {
         Window("MINT", id: "main") {
-            ContentView(store: store, completion: completion, indexer: indexer)
+            ContentView(
+                store: store,
+                completion: completion,
+                indexer: indexer,
+                projectSession: projectSession)
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)
