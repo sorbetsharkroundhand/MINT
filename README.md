@@ -1,291 +1,393 @@
-# MINT — 온디바이스 예측 글쓰기 엔진
+# MINT
 
-**한글 장편 소설을 위한, 완전 로컬로 동작하는 예측 글쓰기 macOS 앱.**
+> **A local writing environment that understands the context of what you write without taking control away from the writer.**
 
-글을 쓰다 잠깐 멈추면 로컬 AI가 이어질 단어·구절을 **회색 고스트 텍스트**로
-제안하고, 마음에 들면 `Tab` 한 번으로 받아씁니다. 목표는 단순 자동완성이
-아니라 **이야기를 기억하는 공저자**입니다 — 작품의 제목·장르·인물을 알고,
-원고를 백그라운드에서 계속 읽어 씬·사건·인물 상태·플롯 구조를 이해하며,
-그 이해 위에서 제안합니다 (로드맵은 [PLAN.md](PLAN.md), 철학·불변 규칙은
-[CLAUDE.md](CLAUDE.md)).
+**MINT는 글을 대신 써 주는 AI가 아니라, 작가가 쓰고 있는 글과 세계를 이해하면서도 주도권은 끝까지 작가에게 남겨 두는 로컬 글쓰기 환경입니다.**
 
-핵심은 **프라이버시**입니다. 모든 AI 추론이 여러분의 Mac 안(Apple MLX)에서만
-일어나며, 원고는 어떤 서버로도 전송되지 않습니다. 일기·메모 같은 일반 글쓰기도
-같은 엔진의 가벼운 모드로 지원합니다.
+MINT 0.2.0의 방향은 **Writing Platform, Fiction First**입니다.
+
+소설은 MINT가 가장 깊게 파고드는 첫 번째 전문 영역이지만, MINT 자체가 소설 전용 앱인 것은 아닙니다.  
+하나의 프로젝트 기반 글쓰기 플랫폼 위에서 Fiction에는 더 깊은 이야기 지능을, General Writing에는 더 가벼운 구조·검토 도구를 제공합니다.
+
+모든 AI 추론은 **Apple Silicon Mac 안에서 로컬로 실행**됩니다. 원고를 서버로 보내지 않고, 원격 추론이나 텔레메트리를 제품 전제로 두지 않습니다.
 
 ---
 
-## 무엇을 할 수 있나
+## Why MINT
 
-- **글쓰기**: Notion식 블록 에디터 — 제목(#·##·###), 인용·코드 블록, 인라인
-  서식(굵게·기울임·코드·색·크기), 수식 블록(`$$…$$`, LaTeX 렌더 — 여러 줄
-  행렬/cases 지원), 인라인 수식(`$E=mc^2$`), 이미지
-  (붙여넣기·드래그·⇧⌘I, 크기·정렬·이동).
-- **자동완성**: 문장 끝에서 잠깐(기본 0.35초) 멈추면 제안 등장.
-  `Tab` 전체 수락 · `→` 한 단어씩 수락 · `Esc` 거부. 한글 조합 중에는 절대
-  뜨지 않습니다.
-- **소설 모드**: "새 소설"로 만든 문서는 백그라운드 이해가 켜집니다 —
-  **스토리 바이블**(장르·인물 카드 + 자동 이해 열람), **서사**(플롯 그래프·
-  타임라인), **AI 컨텍스트 인스펙터**(예측이 실제로 참고한 정보 열람·고정·제외)
-  탭이 사이드바에 생깁니다. 소설은 일반 문서보다 넓은 컨텍스트(기본 4,000자)를
-  읽습니다.
-- **공저자 보조**: 죽은 인물 발화·존대 붕괴 같은 일관성 경고, 설정 충돌 후보
-  검토, 복선 추적, 대화 자동 감지 + 「이 대화를 기록할까요?」 인라인 제안.
-- **정리**: 다중 저널·중첩 폴더(드래그 앤 드롭 정렬·병합, AI 폴더 명명),
-  전역 검색(⌘⇧F), 작성일 변경(사이드바에서 저널 오른쪽 클릭).
-- **내보내기**: Markdown · **EPUB 3**(소설, 설정의 저자 이름이 메타데이터로 실림) ·
-  인쇄(PDF 저장 포함).
-- **모델 선택**: 툴바의 모델 스위처에서 **Basil**(MoE 30B·활성 3B, ~16.9GB, 기본) /
-  **MINT**(27B 밀집·2bit, ~8.5GB) / **Peppermint**(35B·A3B MoE, ~20GB) 전환.
-  셋은 크기 사다리가 아니라 성격이 다른 모델이라 허브 이름을 씁니다. 벤치 실측
-  (docs/model-lineup-bench.md)으로 Basil만 지연 예산·KV 재사용을 충족해 기본이
-  되었고, MINT는 한국어 제안 오염·느린 웜 시작이 확인되어 기본에서 해제됐습니다.
-- 저장은 전부 로컬: `~/Documents/MINT/entries.json`(본문 마크다운 + 사용자
-  결정), `~/Documents/MINT/knowledge/`(AI 이해 캐시), `~/Documents/MINT/images/`.
+대부분의 AI 글쓰기 도구는 채팅창에서 문장을 생성하거나, 사용자가 쓰기도 전에 적극적으로 개입합니다.
 
-## 모델 크레딧
+MINT가 원하는 경험은 다릅니다.
 
-- **Basil** — GLM-4.7-Flash (mlx-community 4bit 변환)
-- **A.X-4.0-Light** — SKT A.X 4.0 Light (Apache-2.0) · meetLog MLX 4bit 변환
-- **Peppermint** — Qwen3.6-35B-A3B · **MINT** — Ternary-Bonsai-27B
+- **Editor first** — AI가 없어도 좋은 글쓰기 앱이어야 합니다.
+- **Quiet AI** — 확신이 없으면 조용히 있는 편을 택합니다.
+- **Local only** — 원고와 추론은 사용자의 Mac 안에 머뭅니다.
+- **User Canon wins** — 사용자가 정한 설정과 판단은 자동 추론보다 항상 우선합니다.
+- **Evidence first** — 중요한 경고는 “AI가 그렇게 생각한다”가 아니라 실제 원고 근거로 돌아갈 수 있어야 합니다.
+- **Rebuildable intelligence** — AI가 이해한 지식은 다시 만들 수 있는 캐시이고, 원고와 사용자 결정은 오래 보존되는 데이터입니다.
+- **Writing flow over AI spectacle** — AI를 보여 주기 위한 UI보다 글의 흐름을 덜 끊는 UI를 우선합니다.
 
-## 기술 스택
+MINT의 목표는 거대한 채팅 패널을 문서 옆에 붙이는 것이 아니라, **필요한 순간에만 나타나는 living intelligence**를 만드는 것입니다.
 
-### 언어·플랫폼
+---
 
-| 항목 | 내용 |
-|------|------|
-| 언어 | **Swift 6** (strict concurrency — actor 격리·`Sendable` 경계) |
-| 플랫폼 | **macOS 14+**, **Apple Silicon 전용** (MLX가 Apple GPU 기반) |
-| 빌드 | **SwiftPM** (Xcode 프로젝트 파일 없음 — `Package.swift`가 전부) |
-| UI | **SwiftUI** (앱 셸·사이드바·바이블·서사·설정) + **AppKit** (`NSTextView` 기반 커스텀 블록 에디터 — IME·서식·이미지 오버레이·자체 캐럿) |
-| 그래픽 | SwiftUI **Canvas** (서사 그래프 레인·곡선 렌더), CoreText (수식) |
+## The writing experience
 
-### 의존성 (Package.swift)
+### Fiction
 
-| 패키지 | 용도 |
-|--------|------|
-| [mlx-swift](https://github.com/ml-explore/mlx-swift) | Apple MLX 코어 — `MLXArray` 직접 사용 (이어쓰기 프롬프트는 챗 템플릿 없이 수동 토크나이즈로 `LMInput` 구성) |
-| [mlx-swift-lm](https://github.com/ml-explore/mlx-swift-lm) | 온디바이스 LLM 추론 (`MLXLLM`·`MLXLMCommon`·`MLXHuggingFace`) — 모델 로드·토큰 스트리밍·KV 캐시 |
-| [swift-huggingface](https://github.com/huggingface/swift-huggingface) | Hugging Face 허브에서 모델 가중치 다운로드 |
-| [swift-transformers](https://github.com/huggingface/swift-transformers) | 토크나이저 (`AutoTokenizer`) |
-| [SwiftMath](https://github.com/mgriebling/SwiftMath) | 수식 블록 LaTeX 렌더 (iosMath의 Swift 포트, CoreText 네이티브) |
-
-### 모듈 구조
-
-```
-Sources/
-  MINT/        @main 진입점만 담은 얇은 실행 셸
-  MINTCore/    화면·로직 전부 (라이브러리 타깃 — SwiftUI 프리뷰 동작)
-    Editor/      NSTextView 블록 에디터·고스트 완성 컨트롤러·인라인 서식·
-                 이미지 오버레이·문단 분할·수락률 로깅
-    Inference/   CompletionEngine(MLX 단일 상주 모델·예측 우선 선점)·
-                 ContextAssembler(지식 → 프롬프트 조립)·PromptCache(KV 재사용)·
-                 ModelDownloadManager
-    Knowledge/   백그라운드 이해 파이프라인 (아래 "서사" 절) — 씬 분할·요약
-                 피라미드·사건 로그·인물 감지·대화 귀속·구간 분석·사건 그래프·
-                 플롯 스레드·일관성 검사·지식 사이드카
-    Storage/     EntryStore(entries.json — 원문·사용자 결정)·ImageStore
-    Export/      EPUB 3 내보내기
-  MINTBench/   품질·지연 벤치 CLI (앱 없이 모델·파라미터 측정)
-Tests/
-  MINTCoreTests/  결정적 로직 회귀 테스트 (XCTest, 모델·Metal 미사용)
+```text
+Write | Map | Review
 ```
 
-### 저장 형식
+**Write**는 원고를 쓰는 기본 공간입니다.
 
-- **원문이 유일한 진실** — `entries.json`에 본문(마크다운)과 **사용자 결정**
-  (인물 카드, 서사 오버라이드, 기록된 대화)만 저장합니다.
-- AI가 이해한 모든 것(요약·사건·구간·플롯)은 `knowledge/<문서ID>.json`
-  **사이드카 = 파생 캐시**입니다. 스키마가 바뀌면 버전을 올리고 통째로 버린 뒤
-  백그라운드에서 재구축합니다 — 마이그레이션 코드를 쌓지 않고, 사용자 결정은
-  사이드카 밖에 있어 항상 안전합니다.
+- 집중을 방해하지 않는 네이티브 macOS 에디터
+- 한글 IME를 존중하는 Ghost Completion
+- 프로젝트 맥락을 이용한 로컬 자동완성
+- 필요한 순간에만 나타나는 Living Margin
+- 프로젝트 전체를 질문하는 Ask MINT
 
-## 스토리 바이블 — 무엇을, 어떤 의도로
+**Map**은 작품을 “파일 목록”이 아니라 **이야기 구조**로 바라보는 공간입니다.
 
-사이드바의 바이블 탭(툴바 "소설" 배지)에서 엽니다. 구현 원칙은 CLAUDE.md
-§1-5 **"기억은 사용자의 것 — AI가 문서에서 이해한 모든 것은 사용자가 볼 수
-있고 고칠 수 있어야 하며, 사용자 수정이 항상 자동 추출을 이긴다"** 입니다.
+목표 범위는 다음을 포함합니다.
 
-- **장르·인물 카드 (직접 편집)** — 이름·별칭·소개·말투 메모. 여기 적은 내용이
-  소설 예측 프롬프트의 A 헤더에 그대로 실립니다. *의도*: 컨텍스트 창 밖으로
-  밀려난 인물 설정도 제안이 지키게 하는 가장 확실한 통로는 사용자가 직접
-  관리하는 짧은 카드다 (카드가 짧을수록 토큰당 품질이 좋다). 최근 본문에
-  등장하는 인물이 우선 주입됩니다(최대 3명).
-- **인물 자동 감지 깔때기** — 결정적 신호(유정 격조사·발화 귀속·호명)를 겹겹이
-  요구합니다. 신호가 겹친 HIGH 후보만 자동 등록하되 자동 등록 표식과 1클릭
-  삭제를 보장하고, MEDIUM 이하와 별칭 병합(김재형/재형/재형이)은 **항상 사용자
-  확인**을 거칩니다. *의도*: 나쁜 자동 등록 하나가 신뢰를 깎는다 — 품질 >
-  적극성. LLM이 아니라 정규식·통계로 되는 일에 토큰을 쓰지 않는다.
-- **자동 이해 열람** — 카드마다 백그라운드가 이해한 것을 펼쳐 보여줍니다:
-  상태(위치·감정·관계·목표·생사), 최근 사건, 말투 프로필(존대 성향 + 실제 대사
-  예문), **인물 연대기**(그 인물이 겪은 사건·상태 변화의 담화 순서), 앎(안다/
-  의심/오해/숨김), 방향 있는 관계 변화, 참여 대화 목록. 각 항목은 근거 인용
-  클릭으로 본문 위치로 이동합니다. *의도*: **사용자가 보는 것과 예측이 아는
-  것이 같은 질의(같은 소스)여야 한다** — 별도의 "보여주기용" 데이터를 만들면
-  둘이 어긋나는 순간 신뢰가 깨진다.
-- **잠금(locked)** — 소개를 직접 고치면 자동 잠금되어 백그라운드 프로파일링이
-  덮어쓰지 못합니다. *의도*: 사용자 수정 > 자동 추출의 기계적 보장.
-- **수동 이해 트리거 「지금 읽기」** — 기본 클릭은 바뀐 씬만 증분 분석, 메뉴에서
-  전체 다시 읽기. *의도*: 완전 자동(유휴 감지)만 두면 "지금 당장 이해를 갱신해
-  달라"는 의사를 표현할 곳이 없다.
+- Scene / Event
+- Characters
+- Relationships
+- Timeline
+- Story Threads
+- World / Object State
+- Research / Ideas
+- 원고 근거로 돌아갈 수 있는 Story Map
 
-## 서사 (Narrative Graph) — 무엇을, 어떤 의도로
+Map은 작가의 원고를 대체하는 데이터베이스가 아닙니다.  
+AI가 만든 구조는 원고를 이해하기 위한 projection이며, 사용자가 확인한 설정과 판단이 최종 기준입니다.
 
-사이드바의 서사 탭. 백그라운드 이해 파이프라인이 만든 지식을 **하나의 통합
-화면**에서 열람·수정합니다. 이해 타임라인과 서사 그래프로 나뉘어 있던 두 탭을
-"같은 파이프라인의 다른 Projection"으로 보고 하나로 합쳤습니다.
+**Review**는 문장을 대신 고치는 화면이 아니라 **검토할 가치가 있는 것만 모아 주는 공간**을 지향합니다.
 
-### 백그라운드 이해 파이프라인 (Knowledge/)
+- 문장 품질과 반복
+- 설정·인물·시간·관계의 연속성
+- 복선과 열린 스레드
+- 원문 evidence
+- `Intentional` / `Dismiss` / 사용자 수정
 
-예측 시점에는 아무것도 다시 만들지 않습니다 — 상주 앱의 이점을 살려
-백그라운드가 이해를 준비하고, 예측은 준비된 지식의 랭킹·조립만 합니다.
-모든 백그라운드 작업은 ① 취소 협조 ② 열·저전력 게이트 ③ 콘텐츠 해시
-메모이제이션(같은 입력 재처리 금지)의 3요건을 지킵니다.
+중요한 경고일수록 반드시 원고의 실제 근거를 따라갈 수 있어야 합니다.
 
-1. **씬 분할** (`DocumentOutline`, 결정적) — 헤딩·장면 구분자로 원고를 씬으로
-   나누고 씬마다 콘텐츠 해시를 붙입니다. 해시가 앵커라서 씬 삽입에도 지식이
-   밀리지 않고, 원문이 바뀐(더티) 씬만 다시 읽습니다.
-2. **요약 피라미드** (LLM) — 씬 요약(제목·유형·시점·장소 포함) → 장 요약 →
-   작품 요약. 더티 경로만 상향 전파.
-3. **사건 로그** (LLM, append-only) — 씬별 사건(요약·중요도 1–5·참여 인물·
-   근거 인용)과 **상태 델타**(위치·감정·관계·목표·생사). 상태는 덮어쓰지 않고
-   쌓으며, "커서 위치 시점의 상태"는 질의가 접어서 만듭니다.
-4. **심화 추출** (LLM) — 인물의 앎/의심/오해/숨김, 방향 있는 관계 변화, 설정
-   사실, 복선 후보. 설정 사실끼리는 충돌 후보 검사를 돌립니다.
-5. **구간 분석** (`NarrativeSegment`) — 씬 안의 현재→회상→회상 속 회상→복귀
-   구조를 층 10종(회상·짧은기억·구술·꿈·기록·재서술·언급·예상 등)·깊이·
-   출처·신뢰로 추출합니다. 결정적 표지 감지가 LLM 호출을 게이트하고(표지 없는
-   씬은 호출 안 함), 경계 인용을 씬 원문과 대조해 환각 경계는 구간째 버리며,
-   복귀를 못 찾으면 "불확실"을 유지합니다 — 임의 확정 금지.
-6. **사건 그래프** (LLM 1회 호출) — 인과(원인/영향/폭로/설명/모순/복선), 동일
-   사건 판정(회상 재서술은 사건을 복제하지 않고 **정본 사건 + 관점**으로 묶음
-   — 모순되는 관점을 어느 쪽도 진실로 확정하지 않고 나란히 보존), 시간 간선.
-   시간은 부분 순서 위상 정렬로 해석하고 모순(사이클)은 Conflict로 표시합니다
-   — 정보가 부족하면 담화 순서 유지, 임의 연표 금지.
-7. **플롯 스레드 추론** (`PlotThread`, LLM 1회 호출) — 사건들을 "하나의
-   지속적인 문제·목표·갈등을 추적하는 플롯 라인"으로 군집화합니다. 프롬프트
-   제1규칙: **같은 인물이 나온다는 이유로 묶지 마라. 회상은 플롯 구분 근거가
-   아니다.** 스레드 ID는 여는 사건에서 파생·저장되고, 재분석 결과는 멤버 과반
-   겹침으로 이전 스레드에 이어져(reconcile) 문서가 자라도 identity·색·레인이
-   유지됩니다. 생명주기(열림/진행/휴면/해결)는 담화 위치에서 결정적으로
-   파생합니다.
+### General Writing
 
-### 그래프 UI (`NarrativeView`)
+```text
+Write | Outline | Review
+```
 
-git graph의 시각 언어를 소설의 서사 구조에 옮겼습니다. 핵심 결정:
-**branch = 플롯 스레드**입니다. 인물도, POV도, 씬도, 회상도 아닙니다.
+General Writing은 Fiction 타입에 의존하지 않는 독립적인 글쓰기 경험입니다.
 
-- **왼쪽 레인 = 플롯** — 본줄기는 슬롯 0 고정, 서브플롯은 실제 시작 사건에서
-  갈라져 나오고(branch-out), 다른 플롯과 만나는 사건에서 합류하며(junction
-  링), 해결 사건에서 merge로 끝납니다. 휴면 플롯은 레인을 닫지 않고 점선
-  꼬리로 이어집니다 — 몇 장 뒤에 돌아와도 같은 레인입니다. *의도*: 그래프의
-  topology 자체가 작품의 서사 지문이어야 한다. 직선 소설은 직선으로, 군상극은
-  병렬 레인으로 — 어떤 소설이든 비슷한 레인이 나오면 실패다. 그래서
-  **레이아웃은 branch를 만들지 않습니다** — 분석 결과를 결정적으로 배치만
-  합니다 (같은 데이터 = 같은 그림).
-- **오른쪽 = 사건 제목** — 기본 화면의 1급 단위는 정본 사건이고, 씬은 가는
-  section marker, 회상·꿈·삽입 서사는 레인과 다른 문법의 **bracket**으로만
-  표시합니다 (Narrative Traversal ≠ PlotThread — 서술이 이동했다고 새 플롯이
-  생기지 않습니다). *의도*: 시각 우선순위는 사건 > topology > 씬 > 특수 서술 >
-  메타데이터. 델타·신뢰·관점 상세는 사건을 선택했을 때만 상세 패널에 나옵니다
-  (Progressive Disclosure — hover는 그 사건의 플롯 강조, 플롯 칩 선택은 레인
-  강조).
-- **흐름 / 시간순 두 Projection** — 같은 정본 사건·같은 플롯 identity를,
-  흐름은 본문 등장 순서(담화)로, 시간순은 시간 간선 해석 결과(작중 실제 발생
-  순서 — 회상 속 사건도 원래 시간 위치)로 배열만 바꿔 투영합니다. 별도의 사건
-  데이터를 만들지 않습니다. *의도*: "무슨 이야기가 진행되는가(플롯)"와 "작가가
-  어떤 순서로 보여주는가(서술)"와 "실제로 언제 일어났는가(시간)"는 독립된 세
-  축이다.
-- **사건 상세 패널** — 플롯 멤버십(역할 변경·제외·다른 플롯에 추가), 참여
-  인물, 시간(본문 순번·시간 순위·모순 표시), 장면/구간, 다중 관점(출처·신뢰
-  포함), 인과 관련 사건(클릭 탐색 + 시간 관계 편집), 근거 원문 이동, 중요도
-  편집을 한곳에서.
-- **검토 필요 영역** (접이) — 일관성 경고, 설정 충돌 후보(충돌 맞음/의도된
-  설정/무시 판정), 시간 관계 모순(그 자리에서 수정), 복선(확정/무시/회수).
-  *의도*: 판정은 전부 사용자의 몫이고(자동 수정 절대 금지), 검토거리가 메인
-  사건 흐름을 방해해선 안 된다.
-- **모든 것이 수정 가능** — 씬 제목·유형, 구간 층·경계·시점·신뢰, 사건 중요도,
-  플롯 이름·상태·멤버십, 시간 관계. 수정은 `entries.json`의 오버라이드로
-  저장되어 **재분석이 구조적으로 덮어쓸 수 없습니다**. 원문 수정으로 근거를
-  잃은 오버라이드는 조용히 지우지 않고 "근거를 잃은 수정"으로 표시합니다.
-- **원문 이동의 재앵커 사다리** — 근거 인용 클릭 시 exact 검색 → 앞 12자 →
-  어절 지문 과반 매칭 순으로 위치를 되찾습니다. 전부 실패하면 이동을
-  포기합니다 — 엉뚱한 위치로 조용히 잇는 것보다 실패가 낫습니다.
+- 문서 중심 Navigator
+- Outline
+- Writing Quality
+- Research / Reference / Ideas
+- Ghost Completion
+- Ask MINT
+- Search / Export
 
-### 예측과의 연결
+Fiction이 깊은 이야기 지능을 가진다고 해서, 일반 글쓰기가 “기능이 빠진 소설 모드”가 되어서는 안 됩니다.
 
-이해는 열람용으로 끝나지 않습니다. `ContextAssembler`가 커서 위치의 서사
-좌표(어느 플롯·어느 층·회상 깊이)를 판정해 프롬프트를 조립합니다 —
-**커서 위치 이후의 지식은 주입하지 않고**(3장을 고치는 중에 9장의 결말이 새면
-안 된다), 회상을 쓰는 중에는 작중 시간 기준으로 "그 시점의 인물이 알던 것"만
-싣습니다. 예측이 실제로 참고한 항목은 AI 컨텍스트 인스펙터에서 열람하고
-고정(Pin)·제외(Exclude)할 수 있습니다 — 인스펙터가 보는 것 = 조립이 하는 것.
+---
 
-## 요구사항
+## One project, one context
 
-- **Apple Silicon Mac** (M1 이상) — AI 추론이 Apple Silicon GPU 기반이라 필수.
-- **macOS 14+**, **Xcode 16+** (Swift 6).
-- 첫 실행 시 AI 모델(**Basil**, ~16.9GB)을 선택 화면에서 고르면 내려받습니다. 툴바 스위처나
-  설정(⌘,)에서 Basil·Peppermint로 바꿀 수 있습니다(용량 증가).
-  디스크·회선이 부담이면 설정에서 더 가벼운 모델 id를 직접 넣을 수 있습니다
-  (예: `mlx-community/Qwen2.5-3B-Instruct-4bit`, ~1.9GB).
+MINT 0.2.0의 루트 도메인은 `WritingProject`입니다.
 
-## 실행 방법
+```text
+MINT
+└─ WritingProject
+   ├─ mode: Fiction | General
+   ├─ Documents
+   ├─ Notes
+   ├─ Assets
+   ├─ User Canon
+   └─ Intelligence
+```
 
-아직 배포용 `.app`은 없습니다. 소스에서 빌드해 실행합니다.
+공유 플랫폼 위에 모드별 지능을 얹습니다.
 
-**Xcode에서:**
+```text
+Writing Platform
+├─ Project Navigator
+├─ Editor
+├─ Search / Export
+├─ Ask MINT
+├─ Ghost Completion
+└─ Local AI Runtime
+
+Writing Intelligence
+├─ Context Retrieval
+├─ Living Margin
+└─ Review
+
+Fiction Intelligence
+├─ Scene / Event / Character
+├─ Timeline / Relationship / Object State
+├─ Story Threads
+├─ Hierarchical Story Memory
+├─ Continuity
+└─ Story Map
+```
+
+이 구조 덕분에 MINT는 “소설 기능을 일반 문서에도 억지로 끼워 넣는 앱”이 아니라, 같은 글쓰기 기반 위에 필요한 도메인 지능만 선택적으로 올릴 수 있습니다.
+
+---
+
+## Intelligence should stay beside the writer, not above them
+
+### Ghost Completion
+
+MINT의 자동완성은 사용자가 문장을 작성하는 동안 전경을 빼앗지 않습니다.
+
+글을 잠깐 멈췄을 때 회색 Ghost로 제안하고:
+
+- `Tab` — 전체 수락
+- `→` — 일부 수락
+- `Esc` — 거부
+
+를 사용합니다.
+
+예측은 가장 높은 실행 우선순위를 가지며, 백그라운드 이해 작업은 즉시 양보해야 합니다.
+
+### Living Margin
+
+AI가 모든 문장에 밑줄을 긋고 팝업을 띄우는 방향을 피합니다.
+
+Living Margin은 현재 글과 관련된 중요한 정보가 있을 때만 조용히 나타나는 공간입니다.
+
+예:
+
+- “이 인물은 이전 장면에서 이 사실을 아직 모릅니다.”
+- “이 플롯 스레드는 오랫동안 다시 등장하지 않았습니다.”
+- “최근 문단에서 비슷한 종결 표현이 반복됩니다.”
+
+확신이 낮으면 아무것도 보여 주지 않는 것이 올바른 결과일 수 있습니다.
+
+### Ask MINT
+
+Ask MINT는 영구적인 챗봇 사이드바가 아니라 **프로젝트 문맥에 잠깐 접근하는 도구**를 지향합니다.
+
+`⌘K`에서 현재 프로젝트 전체를 대상으로 질문하고, 결과가 원고의 사실을 주장한다면 가능한 한 실제 문서 근거로 돌아갈 수 있어야 합니다.
+
+---
+
+## Story memory
+
+소설을 이해할 때 하나의 거대한 요약문에 모든 것을 넣지 않습니다.
+
+```text
+Work
+└─ Part / Arc
+   └─ Chapter
+      └─ Scene
+         └─ Atomic Story Knowledge
+```
+
+Atomic knowledge의 예:
+
+- Event
+- Fact
+- Character State
+- Character Knowledge
+- Relationship State
+- Object State
+- Story Thread
+
+요약은 **진실의 원천이 아니라 retrieval router**입니다.
+
+사용자에게 보여 주는 중요한 판단은 최종적으로 원고의 실제 evidence까지 내려갈 수 있어야 합니다.
+
+Fiction의 시간도 한 축으로 단순화하지 않습니다.
+
+- **discourse position** — 원고에 등장한 순서
+- **story time** — 작품 세계에서 실제로 일어난 순서
+
+시간을 알 수 없다면 모른다고 유지합니다. AI가 빈칸을 상상해서 강한 모순 경고를 만들어서는 안 됩니다.
+
+---
+
+## Your manuscript is yours
+
+MINT의 데이터 우선순위는 다음과 같습니다.
+
+```text
+User Canon
+> explicit manuscript text
+> deterministic inference
+> agent inference
+> summary
+```
+
+사용자가 직접 고친 인물 설정, 관계, 사건 판단, 의도된 모순 같은 결정은 재분석이 덮어쓰지 못해야 합니다.
+
+반대로 AI가 만든 요약·추출·검색 인덱스는 다시 만들 수 있어야 합니다.
+
+0.2.0의 프로젝트 저장 목표:
+
+```text
+~/Documents/MINT/Projects/<project-id>/
+├─ project.json
+├─ Documents/
+├─ Notes/
+├─ Assets/
+└─ Intelligence/
+```
+
+기존 `entries.json`에서 프로젝트 구조로 이동할 때도 **원본을 제자리에서 변형하지 않는 비파괴 migration**을 원칙으로 합니다.
+
+---
+
+## Current state — MINT 0.2.0
+
+0.2.0은 현재 개발 중입니다. README는 목표와 현재 구현을 구분합니다.
+
+### Landed on `main`
+
+- ✅ generic `WritingProject` / `WritingDocument` domain
+- ✅ `ProjectStore` + non-destructive legacy migration foundation
+- ✅ project-scoped `ProjectSession`
+- ✅ Fiction `Write / Map / Review` vs General `Write / Outline / Review` routing
+- ✅ per-project workspace mode persistence
+- ✅ document-centric workspace shell baseline
+- ✅ Navigator drag-collapse / persistent tool docking / titlebar geometry
+- ✅ Ghost Completion wrapped-line geometry regression coverage
+- ✅ project-first onboarding core
+- ✅ cancellable provider-independent Writing Quality core
+- ✅ native editor, Ghost Completion, search/export and existing Fiction intelligence foundations
+
+### Still in progress
+
+- 🚧 First-run UI + project-first runtime handoff
+- 🚧 Living Margin
+- 🚧 hierarchical story memory
+- 🚧 atomic / temporal Story Knowledge
+- 🚧 structure-first retrieval
+- 🚧 evidence-bounded continuity judge
+- 🚧 durable User Canon integration
+- 🚧 Ask MINT
+- 🚧 Story Map
+- 🚧 Review presentation
+- 🚧 Story Context → Ghost
+- 🚧 General Writing end-to-end proof
+- 🚧 Korean morphology provider / writing-quality rules
+- 🚧 final release-readiness and large-document performance evidence
+
+> **Important:** the current primary editor flow still contains the legacy `EntryStore` compatibility path while #118 completes the project-first runtime handoff.  
+> Therefore some 0.2.0 workspace UI can be present in code but not yet appear in the normal legacy document flow. Replacement surfaces land before legacy primary UI is retired.
+
+The release contract and live dependency map are tracked in [Epic #99 — MINT 0.2.0: Writing Platform, Fiction First](https://github.com/sorbetsharkroundhand/MINT/issues/99).
+
+---
+
+## Technology
+
+| Area | Stack |
+| --- | --- |
+| Language | Swift 6 |
+| Platform | macOS 14+, Apple Silicon |
+| UI | SwiftUI + AppKit / TextKit |
+| Local inference | Apple MLX |
+| Package manager | Swift Package Manager |
+| Model runtime | mlx-swift, mlx-swift-lm |
+| Tokenization / Hub | swift-transformers, swift-huggingface |
+| Math rendering | SwiftMath |
+| Tests | XCTest + app/UI smoke |
+
+MINT deliberately keeps the editor and domain model independent from any single model provider or Fiction-specific type where that coupling is not required.
+
+---
+
+## Run from source
+
+### Requirements
+
+- Apple Silicon Mac
+- macOS 14+
+- Xcode 16+
+- Swift 6 toolchain
+
+### Development run
+
+SwiftPM can build the Swift executable, but MLX also needs its Metal shader library.
 
 ```bash
-git clone <이 저장소 주소>
+git clone https://github.com/sorbetsharkroundhand/MINT.git
 cd MINT
-open Package.swift          # Xcode가 Swift 패키지로 엶
-```
 
-1. 상단에서 **MINT** 스킴 선택 후 **⌘R**. 첫 빌드는 MLX 컴파일로 수 분 걸립니다.
-2. 중간에 **매크로 신뢰(Trust & Enable)** 확인이 뜨면 허용하세요.
-
-**터미널에서 (`swift run`):**
-
-```bash
-scripts/prepare-metallib.sh   # 최초 1회 (mlx-swift 업데이트 시 자동 재빌드)
+scripts/prepare-metallib.sh
 swift run MINT
 ```
 
-SwiftPM CLI는 MLX Metal 셰이더를 못 만들어 준비 스크립트가 필요합니다 —
-자세한 사정은 [CLAUDE.md](CLAUDE.md) §0.
+`prepare-metallib.sh` can reuse its cache and rebuilds the metallib when the pinned `mlx-swift` revision changes.
 
-설정(⌘,)에서 모델, 프롬프트 방식, 디바운스, 제안 길이, 온도·top-p,
-KV 캐시 재사용, 소설 컨텍스트 크기를 조절할 수 있습니다.
+### Build a local `.app`
 
-## 개발자용: 품질·지연 벤치 (MINTBench)
-
-앱을 띄우지 않고 모델·파라미터별 지연과 제안 품질을 측정하는 CLI입니다.
-품질·지연에 대한 주장은 감이 아니라 이 수치로 뒷받침합니다 (CLAUDE.md §2-7).
+For a path closer to the app lifecycle tested in CI:
 
 ```bash
-swift run -c release MINTBench                # 단발 프롬프트 — 스타일·지연 비교
-swift run -c release MINTBench --help         # 전체 옵션
-
-# 리플레이 벤치: 실제 원고를 문장 경계에서 잘라 제안 vs 실제 이어진 원문 비교.
-# 컷마다 콜드/웜 2회 실행해 KV 프리필 재사용 효과(TTFC)까지 확인합니다.
-swift run -c release MINTBench --replay 원고.txt --title "작품명" --genre 판타지
+scripts/build-mint-app.sh
+open build/MINT.app
 ```
 
-측정 기록: [docs/m2-inference.md](docs/m2-inference.md) ·
-파이프라인 분석: [docs/autocomplete-context.md](docs/autocomplete-context.md)
+The build script prepares `mlx.metallib`, builds the release executable, creates `build/MINT.app`, and applies an ad-hoc signature for local execution.
 
-## 프로젝트 진행 상태
+### Verification
 
-| 단계 | 내용 | 상태 |
-|------|------|------|
-| M0–M3 | 스캐폴드 · 에디터 · 추론 검증 · 고스트 자동완성 | ✅ 완료 |
-| 에디터 v3 | 블록 에디터 · 리퀴드 글래스 · 다중 저널 · 모델 스위처 | ✅ 완료 |
-| 파일시스템·서식 v1 | 중첩 폴더 · DnD · 서식 툴바 · 인라인 마크다운 | ✅ 완료 |
-| M5 "기억의 골격" | 소설 헤더 주입 · 스토리 바이블 v0 · KV 캐시 · 리플레이 벤치 | ✅ 완료 |
-| M6 "살아있는 바이블" | 백그라운드 이해 · 씬 분할 · 사건 로그 · 인물 감지 깔때기 | ✅ 완료 |
-| M7 "공저자 1차" | 일관성 경고 · 수락률 로깅 · 인물 연대기 · 타임라인 점프 | ✅ 완료 |
-| M8 Narrative Intelligence/Graph | 구간·정본 사건·관점·인과·시간 부분 순서 · 대화 기록 · 컨텍스트 인스펙터 | ✅ 완료 |
-| M9 "Branch = PlotThread" | 플롯 스레드 추론 · 통합 서사 화면 (플롯 레인 그래프 · 흐름/시간순) | ✅ 코드 완료 |
-| 후속 | 플롯 군집 품질의 실코퍼스 검증 · 대작 스케일 실기기 측정 · 일반 문서 라이트 모드 | 📋 계획 (PLAN §14·§16) |
+```bash
+swift test
+swift build
+swift build --product MINTBench
+
+scripts/build-mint-app.sh
+scripts/smoke-mint-app.sh
+scripts/ui-smoke-mint-app.sh
+```
+
+---
+
+## Repository map
+
+```text
+Sources/
+├─ MINT/              thin @main application shell
+├─ MINTCore/
+│  ├─ Project/        WritingProject, ProjectStore, ProjectSession
+│  ├─ Workspace/      shell, routing, navigator/workspace presentation
+│  ├─ Editor/         TextKit editor and Ghost Completion
+│  ├─ Inference/      MLX runtime, completion, context assembly
+│  ├─ Knowledge/      story understanding / retrieval foundations
+│  ├─ Fiction/        Fiction-specific domain intelligence
+│  ├─ Storage/
+│  └─ Export/
+└─ MINTBench/         quality / latency benchmark CLI
+
+Tests/
+└─ MINTCoreTests/
+```
+
+Canonical architecture and implementation planning live in:
+
+- [PLAN.md](PLAN.md)
+- [MINT 0.2.0 Design Specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md)
+- [Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99)
+
+---
+
+## The direction
+
+MINT가 잘 만들어졌을 때 사용자는 “AI 기능을 쓰고 있다”고 계속 의식하지 않아야 합니다.
+
+그저 글을 쓰고,
+
+- MINT는 작품을 뒤에서 읽고,
+- 중요한 맥락을 기억하고,
+- 필요할 때만 조용히 알려 주고,
+- 물어보면 프로젝트 전체에서 근거를 찾아오고,
+- 사용자가 내린 결정을 기억하며,
+- 절대로 작가보다 작품을 더 잘 안다고 행동하지 않습니다.
+
+**The writer owns the story. MINT helps them keep hold of it.**
