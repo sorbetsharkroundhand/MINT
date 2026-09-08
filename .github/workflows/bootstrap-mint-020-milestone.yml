@@ -1,0 +1,62 @@
+name: Bootstrap MINT 0.2.0 milestone
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/bootstrap-mint-020-milestone.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create milestone and assign release issues
+        id: milestone
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          title='MINT 0.2.0'
+          description='Writing Platform, Fiction First — 0.2.0 release'
+
+          milestone_number="$(
+            gh api --paginate "repos/$REPO/milestones?state=all&per_page=100"               --jq ".[] | select(.title == \"$title\") | .number" | head -n 1
+          )"
+
+          if [[ -z "$milestone_number" ]]; then
+            milestone_number="$(
+              gh api --method POST "repos/$REPO/milestones"                 -f title="$title"                 -f state='open'                 -f description="$description"                 --jq '.number'
+            )"
+            echo "Created milestone #$milestone_number: $title"
+          else
+            gh api --method PATCH "repos/$REPO/milestones/$milestone_number"               -f state='open'               -f description="$description" >/dev/null
+            echo "Reusing milestone #$milestone_number: $title"
+          fi
+
+          issues=(
+            18
+            99 100 101 102 103 104 105 106 107 108 109 110
+            111 112 113 114 115 116 117 118 119
+            125 126
+          )
+
+          for issue in "${issues[@]}"; do
+            gh api --method PATCH "repos/$REPO/issues/$issue"               -F milestone="$milestone_number" >/dev/null
+            echo "Assigned #$issue"
+          done
+
+          assigned="$(
+            gh api --paginate "repos/$REPO/issues?state=all&milestone=$milestone_number&per_page=100"               --jq '[.[] | select(.pull_request == null)] | length'               | awk '{sum += $1} END {print sum+0}'
+          )"
+
+          echo "milestone_number=$milestone_number" >> "$GITHUB_OUTPUT"
+          echo "assigned_count=$assigned" >> "$GITHUB_OUTPUT"
+          echo "Milestone #$milestone_number now has $assigned tracked issues."
