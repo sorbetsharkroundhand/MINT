@@ -58,17 +58,31 @@ final class StructureUndoTests: XCTestCase {
 
     private var undoManager: UndoManager!
 
-    /// 헤드리스에선 이벤트 주기가 undo 그룹을 열어주지 않는다 — 연산별로
-    /// 명시 묶어 앱의 "사용자 동작 1회 = undo 1단계"를 재현한다.
+    /// 헤드리스에서도 AppKit의 event group은 실앱처럼 살아 있다. 이 helper는
+    /// 자신이 연 nested group만 닫고 바깥 event group의 소유권은 건드리지 않는다.
     @MainActor
     private func grouped(_ body: () -> Void) {
-        // 텍스트 시스템이 선(先)으로 열어 둔 그룹이 있을 수 있으므로, 연산 후
-        // 레벨 0까지 전부 닫는다 — 이 연산만이 하나의 undo 단위가 된다.
+        let startingLevel = undoManager.groupingLevel
         undoManager.beginUndoGrouping()
         body()
-        while undoManager.groupingLevel > 0 {
+        while undoManager.groupingLevel > startingLevel {
             undoManager.endUndoGrouping()
         }
+    }
+
+    @MainActor
+    func testExplicitGroupingDoesNotConsumeOuterEventGroup() {
+        let store = makeStore()
+        _ = store.newEntry()
+
+        let outerLevel = undoManager.groupingLevel
+        XCTAssertGreaterThanOrEqual(outerLevel, 1)
+
+        grouped {
+            store.setKind(.novel, for: store.activeID)
+        }
+
+        XCTAssertEqual(undoManager.groupingLevel, outerLevel)
     }
 
     // MARK: - 저널 삭제 · undo
