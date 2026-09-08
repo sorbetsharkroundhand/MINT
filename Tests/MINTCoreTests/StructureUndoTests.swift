@@ -50,10 +50,9 @@ final class StructureUndoTests: XCTestCase {
         guard let um = view.undoManager else {
             fatalError("창 기반 undo manager 없음")
         }
-        // Headless tests must not use NSUndoManager's run-loop-managed event groups.
-        // Closing such an automatic group manually makes AppKit try to close it again on
-        // a later run-loop turn, producing an unrelated NSInternalInconsistencyException.
-        um.groupsByEvent = false
+        // Keep the window undo manager's real groupsByEvent behavior. Tests must not
+        // disable it: EntryStore relies on AppKit opening an event group for ordinary
+        // registerUndo calls, just as the production window does.
         store.structureUndoManager = um
         self.store = store
         self.undoManager = um
@@ -77,19 +76,20 @@ final class StructureUndoTests: XCTestCase {
     }
 
     @MainActor
-    func testHeadlessUndoGroupingSurvivesLaterRunLoopTurn() async {
+    func testExplicitGroupingDoesNotConsumeOuterEventGroup() {
         let store = makeStore()
+        _ = store.newEntry()
+
+        let outerLevel = undoManager.groupingLevel
+        XCTAssertGreaterThanOrEqual(outerLevel, 1)
+
         grouped {
-            _ = store.newEntry()
+            store.setKind(.novel, for: store.activeID)
         }
-        XCTAssertEqual(undoManager.groupingLevel, 0)
 
-        // This is where the old harness could receive AppKit's delayed automatic
-        // endUndoGrouping and throw after the StructureUndo suite had already passed.
-        await Task.yield()
-        try? await Task.sleep(for: .milliseconds(10))
-
-        XCTAssertEqual(undoManager.groupingLevel, 0)
+        // grouped() owns only its nested group. The outer AppKit event group remains
+        // intact for the run loop to close, preventing the delayed unmatched-end crash.
+        XCTAssertEqual(undoManager.groupingLevel, outerLevel)
     }
 
     // MARK: - 저널 삭제 · undo
