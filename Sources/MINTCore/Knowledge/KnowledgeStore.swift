@@ -30,6 +30,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// branch 단위가 인물이 아니라 플롯이 됐다 (PLAN §6.6).
     /// v7: 설정 충돌·복선 기능을 제거했다 — `insights`에서 사실·복선 필드,
     /// 사이드카의 `factConflicts`가 빠졌다. v6 파일은 폐기·재구축.
+    /// v8: stable project/document scope를 저장해 프로젝트 sidecar 혼입을 막는다.
     public static let currentSchemaVersion = 8
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
