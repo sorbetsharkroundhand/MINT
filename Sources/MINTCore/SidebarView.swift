@@ -12,6 +12,7 @@ enum SidebarSection: String {
     /// (PLAN §6.6). raw값 "timeline" 유지 — 기존 사용자의 저장된 섹션이 살아남는다.
     case narrative = "timeline"
     case context  // AI 컨텍스트 인스펙터 (v4, 요구사항 §17)
+    case margin  // shared General/Fiction intelligence presentation (#105)
 }
 
 /// 일관성 경고 존재 표시 점 (M7) — indexer를 관찰해 경고가 생기는 즉시 뜬다.
@@ -127,6 +128,8 @@ struct SidebarView: View {
             case .bible: bibleSection
             case .narrative: narrativeSection
             case .context: contextSection
+            case .margin:
+                SidebarSectionHint(theme: theme, text: "글 도구에서 리빙 마진을 열어 주세요.")
             }
         }
         .background(theme.sidebarTintC)
@@ -181,6 +184,7 @@ struct SidebarView: View {
                 .narrative, icon: "arrow.triangle.branch",
                 help: "서사 — 씬·사건·흐름·시간")
             sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
+            sectionTab(.margin, icon: "text.alignright", help: "리빙 마진 — 맥락과 문장 제안")
             Spacer()
         }
         .padding(.horizontal, 10)
