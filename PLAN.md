@@ -435,9 +435,9 @@ Performance thresholds come from measured baselines, not guessed constants.
 - [x] #100 CI baseline
 - [x] #101 generic project domain
 - [x] #102 project storage/migration
-- [ ] #103 shell finish
+- [x] #103 shell finish — PR #146
 - [x] #104 workspace routing — PR #135 + #142
-- [ ] #105 Living Margin
+- [x] #105 Living Margin — PR #147
 - [x] #125 Ghost wrap regression — PR #128
 - [ ] #126 Writing Quality core / Korean morphology — core merged via PR #133; provider work remains
 

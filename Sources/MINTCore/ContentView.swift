@@ -95,7 +95,9 @@ public struct ContentView: View {
                 // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
                 // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
                 if let indexer {
-                    indexer.attach(store: store)
+                    indexer.attach(store: store) { [weak projectSession] entryID in
+                        projectSession?.storyMemoryScope(for: entryID)
+                    }
                     store.documentDidChange = { [weak indexer, weak completion] id in
                         indexer?.noteChange(entryID: id)
                         // 문서 전환을 예측 쪽에도 알린다 — 이전 작품의 고스트·
@@ -115,7 +117,9 @@ public struct ContentView: View {
                     }
                     completion.knowledgeProvider = { [weak indexer, weak store] in
                         guard let snapshot = indexer?.snapshot,
-                            snapshot.entryID == store?.activeID
+                            snapshot.entryID == store?.activeID,
+                            snapshot.storyMemory?.scope
+                                == projectSession.storyMemoryScope(for: snapshot.entryID)
                         else { return nil }
                         return snapshot
                     }
@@ -125,8 +129,15 @@ public struct ContentView: View {
                 }
             }
             .task {
-                guard projectSession.activeProject == nil else { return }
+                guard !projectSession.hasLoadedActiveProject else { return }
                 try? await projectSession.loadActiveProject()
+                indexer?.noteScopeChange(entryID: store.activeID)
+            }
+            .onChange(of: projectSession.activeProject?.id) { _, _ in
+                indexer?.noteScopeChange(entryID: store.activeID)
+            }
+            .onChange(of: projectSession.selectedDocumentID) { _, _ in
+                indexer?.noteScopeChange(entryID: store.activeID)
             }
     }
 
