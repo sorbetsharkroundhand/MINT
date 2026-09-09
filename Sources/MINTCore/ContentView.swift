@@ -10,6 +10,7 @@ public struct ContentView: View {
     // 생기던 문제를 없애기 위해 소유권을 위로 올렸다.
     @ObservedObject private var store: EntryStore
     @ObservedObject private var completion: CompletionController
+    @ObservedObject private var livingMargin: LivingMarginModel
     private let projectSession: ProjectSession
     /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
     private let indexer: BackgroundIndexer?
@@ -24,11 +25,13 @@ public struct ContentView: View {
     public init(
         store: EntryStore,
         completion: CompletionController,
+        livingMargin: LivingMarginModel,
         indexer: BackgroundIndexer? = nil,
         projectSession: ProjectSession
     ) {
         self.store = store
         self.completion = completion
+        self.livingMargin = livingMargin
         self.indexer = indexer
         self.projectSession = projectSession
         self.settings = completion.settings
@@ -38,6 +41,7 @@ public struct ContentView: View {
         WorkspaceSurface(
             store: store,
             completion: completion,
+            livingMargin: livingMargin,
             projectSession: projectSession,
             indexer: indexer)
             .frame(minWidth: 860, minHeight: 540)
@@ -372,6 +376,9 @@ struct EditorToolbar: View {
             }
             Spacer()
             Menu {
+                Button("리빙 마진") {
+                    WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
+                }
                 Button("스토리 바이블") { sidebarSection = SidebarSection.bible.rawValue }
                 Button("서사") { sidebarSection = SidebarSection.narrative.rawValue }
                 Button("AI 컨텍스트") { sidebarSection = SidebarSection.context.rawValue }
@@ -895,6 +902,7 @@ struct LongParagraphNotice: View {
     ContentView(
         store: EntryStore(),
         completion: CompletionController(),
+        livingMargin: LivingMarginModel(),
         projectSession: ProjectSession(
             store: ProjectStore(
                 root: FileManager.default.temporaryDirectory

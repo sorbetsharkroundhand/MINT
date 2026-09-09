@@ -240,6 +240,7 @@ struct WorkspaceToolSurface: View {
 struct WorkspaceSurface: View {
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
+    @ObservedObject var livingMargin: LivingMarginModel
     let projectSession: ProjectSession
     var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
@@ -278,7 +279,12 @@ struct WorkspaceSurface: View {
         } context: {
             VStack(spacing: 0) {
                 HStack {
-                    Text("글 도구").font(MintFonts.uiFont(12, .semibold))
+                    Text(
+                        section == SidebarSection.margin.rawValue
+                            ? "리빙 마진"
+                            : "글 도구"
+                    )
+                    .font(MintFonts.uiFont(12, .semibold))
                     Spacer()
                     Menu {
                         ForEach(ToolDockPosition.allCases, id: \.self) { position in
@@ -303,8 +309,7 @@ struct WorkspaceSurface: View {
                     .accessibilityLabel("글 도구 위치")
                     .help("글 도구 위치")
                     Button {
-                        section = SidebarSection.files.rawValue
-                        store.requestEditorFocus()
+                        WorkspaceToolSelection.hide(currentSection: &section)
                     } label: {
                         Image(systemName: "xmark").font(MintFonts.uiFont(12))
                     }
@@ -314,8 +319,23 @@ struct WorkspaceSurface: View {
                 }
                 .foregroundStyle(theme.ink2C)
                 .padding(14)
-                SidebarView(presentation: .context, store: store, completion: completion,
-                            theme: theme, indexer: indexer)
+                if section == SidebarSection.margin.rawValue {
+                    LivingMarginView(
+                        model: livingMargin,
+                        mode: activeWritingMode,
+                        theme: theme,
+                        onJumpToEvidence: { anchor in
+                            _ = LivingMarginWorkspaceBridge.jump(to: anchor, in: store)
+                        },
+                        onAction: nil)
+                } else {
+                    SidebarView(
+                        presentation: .context,
+                        store: store,
+                        completion: completion,
+                        theme: theme,
+                        indexer: indexer)
+                }
             }
         }
         .environment(
@@ -324,5 +344,38 @@ struct WorkspaceSurface: View {
         .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
         .ignoresSafeArea(.container, edges: .top)
         .onAppear { section = SidebarSection.files.rawValue }
+    }
+
+    private var activeWritingMode: WritingMode {
+        if let mode = projectSession.activeProject?.mode { return mode }
+        return store.activeEntry?.resolvedKind == .novel ? .fiction : .general
+    }
+}
+
+/// Living Margin show/hide is deliberately limited to presentation state. It does not
+/// emit editor focus or scroll requests, so the existing first responder remains intact.
+enum WorkspaceToolSelection {
+    static func showLivingMargin(currentSection: inout String) {
+        currentSection = SidebarSection.margin.rawValue
+    }
+
+    static func hide(currentSection: inout String) {
+        currentSection = SidebarSection.files.rawValue
+    }
+}
+
+/// Temporary bridge while the editor is still backed by legacy entries (#118). Migration
+/// preserves each entry UUID as its WritingDocumentID, so evidence remains identity-safe.
+@MainActor
+enum LivingMarginWorkspaceBridge {
+    @discardableResult
+    static func jump(to anchor: EvidenceAnchor, in store: EntryStore) -> Bool {
+        guard let entry = store.entries.first(where: { $0.id == anchor.documentID.rawValue }),
+            let query = anchor.resolvedQuery(in: entry.body)
+        else { return false }
+
+        store.requestSearchJump(entry.id, query: query)
+        store.requestEditorFocus()
+        return true
     }
 }

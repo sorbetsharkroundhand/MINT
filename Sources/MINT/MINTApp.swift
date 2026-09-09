@@ -16,6 +16,7 @@ struct MINTApp: App {
     // 종료 훅(AppDelegate)에서도 접근하므로 internal.
     static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
+    @StateObject private var livingMargin = LivingMarginModel()
     @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
     private static let projectStore: ProjectStore = {
         let documents = FileManager.default
@@ -33,6 +34,7 @@ struct MINTApp: App {
             ContentView(
                 store: store,
                 completion: completion,
+                livingMargin: livingMargin,
                 indexer: indexer,
                 projectSession: projectSession)
         }
