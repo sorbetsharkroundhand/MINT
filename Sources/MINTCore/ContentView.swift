@@ -269,6 +269,7 @@ struct EditorPane: View {
 /// 메뉴로 옮겼다 (CLAUDE.md §3 "고스트는 조용히"의 연장 — 화면의 소음을 줄인다).
 struct EditorToolbar: View {
     @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
@@ -412,7 +413,9 @@ struct EditorToolbar: View {
     /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
     private var sidebarToggle: some View {
         Button {
-            sidebarVisible.toggle()
+            withAnimation(reduceMotion ? nil : WorkspaceMotion.navigator) {
+                sidebarVisible.toggle()
+            }
         } label: {
             Image(systemName: "sidebar.left")
                 .font(.system(size: 13, weight: .medium))

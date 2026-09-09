@@ -28,7 +28,12 @@ enum ToolDockPosition: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// 저장된 폭을 창 크기에 맞춰 투영한다. 접거나 창을 줄여도 사용자 폭은 잃지 않는다.
+enum WorkspaceMotion {
+    static let navigator = Animation.spring(response: 0.3, dampingFraction: 0.9)
+}
+
+/// 저장된 폭 또는 드래그 중인 투영 폭을 창 크기에 맞춘다. 최소 폭 아래에서는
+/// 점진적인 저항을 주어 포인터가 움직이는데 패널만 멈추는 하드 스톱을 피한다.
 struct WorkspaceLayoutState {
     static let navigatorMinWidth: CGFloat = 200
     static let navigatorMaxWidth: CGFloat = 360
@@ -40,8 +45,20 @@ struct WorkspaceLayoutState {
 
     func navigatorWidth(in availableWidth: CGFloat) -> CGFloat {
         let preferred = navigatorWidth.isFinite ? CGFloat(navigatorWidth) : 250
+        let projected: CGFloat
+        if preferred >= 0, preferred < Self.navigatorMinWidth {
+            let overshoot = Self.navigatorMinWidth - preferred
+            let dimension = Self.navigatorMinWidth
+            let resistance: CGFloat = 0.55
+            let resistedOvershoot =
+                overshoot * dimension * resistance
+                / (dimension + resistance * overshoot)
+            projected = Self.navigatorMinWidth - resistedOvershoot
+        } else {
+            projected = max(preferred, Self.navigatorMinWidth)
+        }
         return min(
-            max(preferred, Self.navigatorMinWidth),
+            projected,
             min(
                 Self.navigatorMaxWidth,
                 max(Self.navigatorMinWidth, availableWidth - Self.editorMinWidth)))
@@ -98,10 +115,13 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
     @ViewBuilder var navigator: () -> Navigator
     @ViewBuilder var editor: () -> Editor
     @ViewBuilder var context: () -> Context
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var navigatorDragProjectedWidth: CGFloat?
 
     var body: some View {
         GeometryReader { geometry in
-            let width = WorkspaceLayoutState(navigatorWidth: navigatorWidth)
+            let width = WorkspaceLayoutState(
+                navigatorWidth: Double(navigatorDragProjectedWidth ?? CGFloat(navigatorWidth)))
                 .navigatorWidth(in: geometry.size.width)
             let effectiveDock = WorkspaceLayoutState.effectiveToolDock(
                 preferred: toolDockPosition,
@@ -113,7 +133,10 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
                 if navigatorVisible {
                     navigator()
                         .frame(width: width)
+                        .opacity(navigatorDragOpacity)
+                        .clipped()
                         .background(WorkspaceChromeSurface(theme: theme))
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
 
                 if contextVisible && effectiveDock == .left {
@@ -162,7 +185,15 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
                         collapseThreshold: WorkspaceLayoutState.navigatorCollapseThreshold,
                         collapseReleaseThreshold:
                             WorkspaceLayoutState.navigatorCollapseReleaseThreshold,
-                        onCollapse: onNavigatorCollapse,
+                        onCollapse: {
+                            settleNavigatorDrag(collapse: true)
+                        },
+                        onDragPreview: { projectedWidth in
+                            navigatorDragProjectedWidth = projectedWidth
+                        },
+                        onDragSettled: {
+                            settleNavigatorDrag(collapse: false)
+                        },
                         theme: theme
                     )
                     .frame(width: 24)
@@ -197,6 +228,28 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
 
         }
         .background(theme.editorSurfaceC)
+    }
+
+    private var navigatorDragOpacity: Double {
+        guard let projectedWidth = navigatorDragProjectedWidth else { return 1 }
+        let collapseRange =
+            WorkspaceLayoutState.navigatorMinWidth
+            - WorkspaceLayoutState.navigatorCollapseThreshold
+        let progress = min(
+            1,
+            max(
+                0,
+                (WorkspaceLayoutState.navigatorMinWidth - projectedWidth) / collapseRange))
+        return 1 - Double(progress) * 0.2
+    }
+
+    private func settleNavigatorDrag(collapse: Bool) {
+        withAnimation(reduceMotion ? nil : WorkspaceMotion.navigator) {
+            navigatorDragProjectedWidth = nil
+            if collapse {
+                onNavigatorCollapse()
+            }
+        }
     }
 }
 

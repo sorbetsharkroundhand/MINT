@@ -20,6 +20,8 @@ struct SidebarResizeDivider: NSViewRepresentable {
     let collapseThreshold: CGFloat
     let collapseReleaseThreshold: CGFloat
     let onCollapse: () -> Void
+    let onDragPreview: (CGFloat?) -> Void
+    let onDragSettled: () -> Void
     let theme: MintTheme
 
     func makeNSView(context: Context) -> DividerHandleView {
@@ -38,6 +40,8 @@ struct SidebarResizeDivider: NSViewRepresentable {
         view.collapseThreshold = collapseThreshold
         view.collapseReleaseThreshold = collapseReleaseThreshold
         view.onCollapse = onCollapse
+        view.onDragPreview = onDragPreview
+        view.onDragSettled = onDragSettled
         // idle 선은 그리지 않는다 — 사이드바가 이미 우측에 1px sep을 그려
         // 경계에 얇은 선이 있다. near/dragging에서만 굵은 선을 덧그린다.
         view.idleLineColor = .clear
@@ -60,6 +64,8 @@ final class DividerHandleView: NSView {
     var collapseThreshold: CGFloat = 150
     var collapseReleaseThreshold: CGFloat = 176
     var onCollapse: (() -> Void)?
+    var onDragPreview: ((CGFloat?) -> Void)?
+    var onDragSettled: (() -> Void)?
 
     // NSAccessibility 프로토콜 위트니스 중 상위에 선언이 있는 것(isAccessibility·
     // Role·Label)만 override이고, 값·증감(NSAccessibilityValue/Incrementor
@@ -170,9 +176,13 @@ final class DividerHandleView: NSView {
         } else {
             collapseArmed = projectedWidth <= collapseThreshold
         }
-        let newWidth = max(minWidth, min(maxWidth, projectedWidth))
         NSCursor.resizeLeftRight.set()
-        onWidthChange?(newWidth)
+        if projectedWidth < minWidth {
+            onDragPreview?(max(0, projectedWidth))
+        } else {
+            onDragPreview?(nil)
+            onWidthChange?(min(maxWidth, projectedWidth))
+        }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -184,6 +194,8 @@ final class DividerHandleView: NSView {
             onWidthChange?(restored)
             collapseArmed = false
             onCollapse?()
+        } else {
+            onDragSettled?()
         }
         let local = convert(event.locationInWindow, from: nil)
         if bounds.contains(local) {
@@ -217,4 +229,3 @@ final class DividerHandleView: NSView {
         ).fill()
     }
 }
-
