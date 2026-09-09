@@ -11,7 +11,7 @@ import Foundation
 ///
 /// **백그라운드 3요건** (CLAUDE.md §4):
 /// - 선점: 키 입력(`noteChange`)마다 진행 중 패스를 즉시 취소한다. 생성 스트림은
-///   다음 청크에서 협조 종료하고, 씬 단위 체크포인트라 다음 유휴에 이어서 한다.
+///   다음 청크에서 협조 종료하고, 미발행 candidate는 버린 뒤 다음 유휴에 다시 돈다.
 /// - 게이트: 열 상태 `.serious` 이상이면 모든 패스 보류, 저전력 모드면 깊은
 ///   패스만 보류 (PLAN §9 시민의식).
 /// - 메모: 요약 키는 씬 콘텐츠 해시 — 같은 입력은 절대 재요약하지 않는다.
@@ -474,7 +474,7 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// 사용자 요청 패스 취소 (#35) — 진행 중 생성을 접고 상태를 정리한다.
-    /// 체크포인트 덕에 여기까지 읽은 것은 남는다 (씬 단위 save).
+    /// 아직 발행하지 않은 candidate는 버리고 공식 snapshot은 그대로 둔다.
     public func cancelManualPass() {
         guard manualPassToken != nil else { return }
         manualPassToken = nil
@@ -703,7 +703,7 @@ public final class BackgroundIndexer: ObservableObject {
                     guard self.manualPassToken == token else { return }
                     self.manualPhase = .blocked(reason: reason)
                 }
-            } checkpoint: { candidate, liveHashes in
+            } commit: { candidate, liveHashes in
                 guard await MainActor.run(body: { owned() }) else { return false }
                 do {
                     try await persistence.save(
@@ -862,8 +862,8 @@ public final class BackgroundIndexer: ObservableObject {
         /// 게이트(열·저전력)로 보류될 때 사유 보고 (#35).
         onBlocked: (@Sendable (String) -> Void)? = nil,
         /// The only sidecar publication boundary. It revalidates pass ownership before
-        /// and after each write, so cancelled or switched work cannot keep publishing.
-        checkpoint: @Sendable @escaping (KnowledgeSidecar, Set<String>?) async -> Bool
+        /// and after the write, so cancelled or switched work cannot keep publishing.
+        commit: @Sendable @escaping (KnowledgeSidecar, Set<String>?) async -> Bool
     ) async {
         guard gateAllows(deep: deep) else { return }
 
@@ -949,14 +949,6 @@ public final class BackgroundIndexer: ObservableObject {
                 updatedAt: .now)
             dirtyDone += 1
             reportProgress()
-            // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
-            guard await checkpoint(sidecar, nil) else { return }
-            publish(
-                makeSnapshot(
-                    entryID: entryID, scope: scope, outline: outline, sidecar: sidecar,
-                    utterances: utterances, overrides: overrides, body: body,
-                    characters: characters,
-                    recordedConversations: recordedConversations))
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -983,7 +975,6 @@ public final class BackgroundIndexer: ObservableObject {
                 sidecar.events[scene.contentHash] = extracted
                 dirtyDone += 1
                 reportProgress()
-                guard await checkpoint(sidecar, nil) else { return }
             }
         }
 
@@ -1008,13 +999,6 @@ public final class BackgroundIndexer: ObservableObject {
                 sidecar.insights[scene.contentHash] = insights
                 dirtyDone += 1
                 reportProgress()
-                guard await checkpoint(sidecar, nil) else { return }
-                publish(
-                    makeSnapshot(
-                        entryID: entryID, scope: scope, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
-                        characters: characters,
-                        recordedConversations: recordedConversations))
             }
         }
 
@@ -1039,7 +1023,6 @@ public final class BackgroundIndexer: ObservableObject {
                     || TemporalShiftDetector.hasCandidate(in: sceneText)
                 guard hasShiftHint else {
                     sidecar.segments[scene.contentHash] = SceneSegmentation()  // 메모: 단일 서사
-                    guard await checkpoint(sidecar, nil) else { return }
                     continue
                 }
                 let segments = await analyzeSegments(
@@ -1048,13 +1031,6 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let segments else { continue }  // 실패 — 다음 패스가 재시도
                 sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
-                guard await checkpoint(sidecar, nil) else { return }
-                publish(
-                    makeSnapshot(
-                        entryID: entryID, scope: scope, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
-                        characters: characters,
-                        recordedConversations: recordedConversations))
             }
         }
 
@@ -1080,11 +1056,8 @@ public final class BackgroundIndexer: ObservableObject {
                 orderedEvents.append(contentsOf: sidecar.events[scene.contentHash] ?? [])
             }
             let analysisEvents = uniqueEventsForAnalysis(orderedEvents)
-            if clearAnalysesBelowThreshold(
+            _ = clearAnalysesBelowThreshold(
                 sidecar: &sidecar, uniqueEventCount: analysisEvents.count)
-            {
-                guard await checkpoint(sidecar, nil) else { return }
-            }
             let memoHash = combinedHash(analysisEvents.map(\.stableKey))
             if analysisEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
                 let analysis = await analyzeEventGraph(
@@ -1097,7 +1070,6 @@ public final class BackgroundIndexer: ObservableObject {
                         identities: analysis.identities,
                         chronoEdges: analysis.chronoEdges,
                         memoHash: memoHash)
-                    guard await checkpoint(sidecar, nil) else { return }
                 }
             }
         }
@@ -1125,7 +1097,6 @@ public final class BackgroundIndexer: ObservableObject {
                             new: threads,
                             previous: sidecar.plotThreads?.threads ?? []),
                         memoHash: memoHash)
-                    guard await checkpoint(sidecar, nil) else { return }
                 }
             }
         }
@@ -1151,7 +1122,6 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let meta else { continue }
                 sidecar.conversationMeta[key] = meta
-                guard await checkpoint(sidecar, nil) else { return }
             }
             // 기록이 삭제된 보완 데이터 정리.
             let liveIDs = Set(recordedConversations.map { $0.id.uuidString })
@@ -1162,7 +1132,7 @@ public final class BackgroundIndexer: ObservableObject {
 
         guard !Task.isCancelled else { return }
         let saveStart = CFAbsoluteTimeGetCurrent()
-        guard await checkpoint(sidecar, Set(outline.scenes.map(\.contentHash))) else { return }
+        guard await commit(sidecar, Set(outline.scenes.map(\.contentHash))) else { return }
         let saveMs = (CFAbsoluteTimeGetCurrent() - saveStart) * 1000
         let deriveStart = CFAbsoluteTimeGetCurrent()
         let snapshot = makeSnapshot(
