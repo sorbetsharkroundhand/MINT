@@ -111,4 +111,28 @@ final class ProjectSessionTests: XCTestCase {
         let active = try await store.activeProject()
         XCTAssertEqual(active, project)
     }
+
+    func testMemoryScopeIsUnknownUntilActiveProjectLookupCompletes() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let session = ProjectSession(store: store, defaults: defaults)
+        let legacyDocumentID = WritingDocumentID()
+
+        XCTAssertNil(session.storyMemoryScope(for: legacyDocumentID.rawValue))
+
+        try await session.loadActiveProject()
+        XCTAssertEqual(
+            session.storyMemoryScope(for: legacyDocumentID.rawValue),
+            .legacy(documentID: legacyDocumentID))
+
+        let project = fictionProject()
+        try await session.saveAndActivate(project)
+        XCTAssertEqual(
+            session.storyMemoryScope(for: project.documents[0].id.rawValue),
+            .project(projectID: project.id, documentID: project.documents[0].id))
+        XCTAssertNil(session.storyMemoryScope(for: legacyDocumentID.rawValue))
+    }
 }

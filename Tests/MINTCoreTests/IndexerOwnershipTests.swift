@@ -129,6 +129,80 @@ final class IndexerOwnershipTests: XCTestCase {
         XCTAssertTrue(indexer.canPublish(token: token2, entryID: id))
     }
 
+    @MainActor
+    func test발행신원은프로젝트_문서_세대_본문버전을모두요구한다() {
+        let id = makeNovel()
+        let scopeA = StoryMemoryScope.project(
+            projectID: WritingProjectID(), documentID: WritingDocumentID(rawValue: id))
+        let scopeB = StoryMemoryScope.project(
+            projectID: WritingProjectID(), documentID: WritingDocumentID(rawValue: id))
+        let identity = indexer._testBeginPassForOwnership(scope: scopeA, body: "first version")
+
+        XCTAssertTrue(indexer.canPublish(identity, currentScope: scopeA))
+        XCTAssertFalse(indexer.canPublish(identity, currentScope: scopeB))
+        XCTAssertFalse(
+            indexer.canPublish(
+                .init(
+                    scope: scopeA, generation: identity.generation + 1,
+                    documentVersion: identity.documentVersion),
+                currentScope: scopeA))
+        XCTAssertFalse(
+            indexer.canPublish(
+                .init(
+                    scope: scopeA, generation: identity.generation,
+                    documentVersion: "different-version"),
+                currentScope: scopeA))
+    }
+
+    @MainActor
+    func test프로젝트전환후늦은결과는sidecar를쓰지않는다() async {
+        let id = makeNovel()
+        let scopeA = StoryMemoryScope.project(
+            projectID: WritingProjectID(), documentID: WritingDocumentID(rawValue: id))
+        let scopeB = StoryMemoryScope.project(
+            projectID: WritingProjectID(), documentID: WritingDocumentID(rawValue: id))
+        let persistence = RecordingSidecarPersistence()
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        var currentScope = scopeA
+        let scopedIndexer = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        scopedIndexer.attach(store: store) { _ in currentScope }
+        let identity = scopedIndexer._testBeginPassForOwnership(scope: scopeA, body: "draft")
+
+        currentScope = scopeB
+        scopedIndexer.noteScopeChange(entryID: id)
+        let committed = await scopedIndexer._testCommitSidecar(
+            KnowledgeSidecar(scope: scopeA), identity: identity)
+        let saveCount = await persistence.saveCount
+
+        XCTAssertFalse(committed)
+        XCTAssertEqual(saveCount, 0)
+    }
+
+    @MainActor
+    func test취소후늦은결과는sidecar를쓰지않는다() async {
+        let id = makeNovel()
+        let scope = StoryMemoryScope.legacy(
+            documentID: WritingDocumentID(rawValue: id))
+        let persistence = RecordingSidecarPersistence()
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let scopedIndexer = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        scopedIndexer.attach(store: store) { _ in scope }
+        let identity = scopedIndexer._testBeginPassForOwnership(scope: scope, body: "draft")
+        scopedIndexer._testSetManualPhase(.queued, token: identity.generation)
+
+        scopedIndexer.cancelManualPass()
+        let committed = await scopedIndexer._testCommitSidecar(
+            KnowledgeSidecar(scope: scope), identity: identity)
+        let saveCount = await persistence.saveCount
+
+        XCTAssertFalse(committed)
+        XCTAssertEqual(saveCount, 0)
+    }
+
     // MARK: - hydrate 소유권
 
     @MainActor
@@ -139,4 +213,32 @@ final class IndexerOwnershipTests: XCTestCase {
         indexer.rehydrate(entryID: id)
         XCTAssertEqual(indexer.hydrateGeneration, before + 1)
     }
+}
+
+private actor RecordingSidecarPersistence: KnowledgeSidecarPersisting {
+    private(set) var saveCount = 0
+
+    func load(scope: StoryMemoryScope) async -> KnowledgeSidecar {
+        KnowledgeSidecar(scope: scope)
+    }
+
+    func save(
+        _ sidecar: KnowledgeSidecar,
+        pruningTo liveHashes: Set<String>?,
+        scope: StoryMemoryScope
+    ) async throws {
+        saveCount += 1
+    }
+
+    func replaceWithFresh(
+        scope: StoryMemoryScope,
+        generation: Int
+    ) async throws -> KnowledgeSidecar {
+        var sidecar = KnowledgeSidecar(scope: scope)
+        sidecar.generation = generation
+        saveCount += 1
+        return sidecar
+    }
+
+    func pruneLegacyOrphans(keeping documentIDs: Set<WritingDocumentID>) async {}
 }

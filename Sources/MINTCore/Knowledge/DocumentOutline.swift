@@ -30,6 +30,11 @@ public struct DocumentOutline: Equatable, Sendable {
         public let utf16Range: Range<Int>
         /// 씬 원문 SHA-256 앞 16자 — "같은 입력 재처리 금지"의 키 (CLAUDE.md §4).
         public let contentHash: String
+        /// Typed content revision used for memoization and invalidation. This value is
+        /// deliberately not a persistent scene or manuscript identity.
+        public var contentVersion: SceneContentVersion {
+            SceneContentVersion(rawValue: contentHash)
+        }
         /// 같은 헤딩 본문이 상한 초과로 쪼개졌을 때의 순번 (0부터).
         /// 분할되지 않은 씬은 0. UI 라벨("제1장 (3/14)")용 — Pos는 여전히
         /// scenes 배열 인덱스다 (분할이 Pos 의미를 바꾸지 않는다).

@@ -11,7 +11,7 @@ import Foundation
 ///
 /// **백그라운드 3요건** (CLAUDE.md §4):
 /// - 선점: 키 입력(`noteChange`)마다 진행 중 패스를 즉시 취소한다. 생성 스트림은
-///   다음 청크에서 협조 종료하고, 씬 단위 체크포인트라 다음 유휴에 이어서 한다.
+///   다음 청크에서 협조 종료하고, 미발행 candidate는 버린 뒤 다음 유휴에 다시 돈다.
 /// - 게이트: 열 상태 `.serious` 이상이면 모든 패스 보류, 저전력 모드면 깊은
 ///   패스만 보류 (PLAN §9 시민의식).
 /// - 메모: 요약 키는 씬 콘텐츠 해시 — 같은 입력은 절대 재요약하지 않는다.
@@ -125,11 +125,14 @@ public final class BackgroundIndexer: ObservableObject {
 
     private let engine: CompletionEngine
     private let settings: CompletionSettings
+    private let sidecarPersistence: any KnowledgeSidecarPersisting
     private weak var store: EntryStore?
+    private var scopeProvider: ((UUID) -> StoryMemoryScope?)?
 
     private var fastTimer: Task<Void, Never>?
     private var deepTimer: Task<Void, Never>?
     private var passTask: Task<Void, Never>?
+    private var resetTask: Task<Void, Never>?
     /// 패스 소유권 토큰 — 선점(새 noteChange·requestPass·전체 다시 읽기)마다
     /// 올라간다. 늦게 끝난 이전 작업은 자기 토큰이 현재와 같을 때만 상태를
     /// 건드린다 (이슈 #82).
@@ -137,6 +140,13 @@ public final class BackgroundIndexer: ObservableObject {
     /// 현재 패스가 읽고 있는 문서·본문 지문 — 발행 가드의 entryID/hash 절반.
     public private(set) var passEntryID: UUID?
     public private(set) var passBodyHash: String?
+    public private(set) var passScope: StoryMemoryScope?
+
+    struct PassIdentity: Equatable, Sendable {
+        let scope: StoryMemoryScope
+        let generation: Int
+        let documentVersion: String
+    }
 
     /// 본문 지문 — 실행마다 달라지는 HashValue 대신 안정 해시 (이슈 #82).
     nonisolated static func contentFingerprint(_ body: String) -> String {
@@ -155,10 +165,22 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 테스트 전용 — startPass의 소유권 장부(세대·문서·지문)만 재현해 토큰을 돌려준다.
     func _testBeginPassForOwnership(entryID: UUID, body: String) -> Int {
+        let scope = StoryMemoryScope.legacy(
+            documentID: WritingDocumentID(rawValue: entryID))
+        return _testBeginPassForOwnership(scope: scope, body: body).generation
+    }
+
+    func _testBeginPassForOwnership(
+        scope: StoryMemoryScope,
+        body: String
+    ) -> PassIdentity {
         passGeneration += 1
-        passEntryID = entryID
+        passScope = scope
+        passEntryID = scope.documentID.rawValue
         passBodyHash = Self.contentFingerprint(body)
-        return passGeneration
+        return PassIdentity(
+            scope: scope, generation: passGeneration,
+            documentVersion: Self.contentFingerprint(body))
     }
 
     /// 테스트 전용 — 사용자 패스 단계를 소유권과 함께 심는다 (#35).
@@ -182,6 +204,24 @@ public final class BackgroundIndexer: ObservableObject {
         passGeneration == token && passEntryID == entryID
     }
 
+    func canPublish(
+        _ identity: PassIdentity,
+        currentScope: StoryMemoryScope? = nil
+    ) -> Bool {
+        let resolvedScope = currentScope ?? scopeProvider?(identity.scope.documentID.rawValue)
+        return passGeneration == identity.generation
+            && passScope == identity.scope
+            && passBodyHash == identity.documentVersion
+            && resolvedScope == identity.scope
+    }
+
+    private func owns(_ identity: PassIdentity) -> Bool {
+        guard canPublish(identity),
+            let entry = store?.entries.first(where: { $0.id == identity.scope.documentID.rawValue })
+        else { return false }
+        return Self.contentFingerprint(entry.body) == identity.documentVersion
+    }
+
     /// 테스트 전용 — 패스 출력 적용 경로(동일 값 가드 포함)를 엔진 없이 재현한다 (#48).
     func _testApplyPassOutputs(
         snapshot: KnowledgeSnapshot?, warnings: [ConsistencyWarning],
@@ -201,10 +241,12 @@ public final class BackgroundIndexer: ObservableObject {
 
     public init(
         engine: CompletionEngine,
-        settings: CompletionSettings = .shared
+        settings: CompletionSettings = .shared,
+        sidecarPersistence: (any KnowledgeSidecarPersisting)? = nil
     ) {
         self.engine = engine
         self.settings = settings
+        self.sidecarPersistence = sidecarPersistence ?? KnowledgeSidecarRepository()
         Self.current = self
         // 앱 비활성 = 장기 유휴와 같은 신호 — 곧바로 깊은 패스 (PLAN §9).
         // 앱 수명 싱글턴이라 옵저버를 해제하지 않는다 (weak self라 누수 없음).
@@ -217,8 +259,14 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// ContentView가 1회 배선 — 패스 시점에 활성 문서를 pull하기 위한 약참조.
-    public func attach(store: EntryStore) {
+    public func attach(
+        store: EntryStore,
+        scopeProvider: ((UUID) -> StoryMemoryScope?)? = nil
+    ) {
         self.store = store
+        self.scopeProvider = scopeProvider ?? { entryID in
+            .legacy(documentID: WritingDocumentID(rawValue: entryID))
+        }
     }
 
     /// 앱 종료 직전 호출 — 유휴 타이머와 진행 패스를 접어, 엔진의 드레인이
@@ -233,6 +281,8 @@ public final class BackgroundIndexer: ObservableObject {
         hydrateTask = nil
         passTask?.cancel()
         passTask = nil
+        resetTask?.cancel()
+        resetTask = nil
         setIsIndexing(false)
     }
 
@@ -246,8 +296,11 @@ public final class BackgroundIndexer: ObservableObject {
         passGeneration += 1
         passEntryID = nil
         passBodyHash = nil
+        passScope = nil
         passTask?.cancel()
         passTask = nil
+        resetTask?.cancel()
+        resetTask = nil
         setIsIndexing(false)
 
         // 저장된 지식의 웜 로드 — 앱 시작·문서 전환 직후 사이드카를 읽어 즉시
@@ -275,6 +328,42 @@ public final class BackgroundIndexer: ObservableObject {
         }
     }
 
+    /// Project/document selection changes invalidate ownership even when the editor text
+    /// did not emit a change notification.
+    public func noteScopeChange(entryID: UUID) {
+        passGeneration += 1
+        passEntryID = nil
+        passBodyHash = nil
+        passScope = nil
+        hydrateGeneration += 1
+        passTask?.cancel()
+        passTask = nil
+        resetTask?.cancel()
+        resetTask = nil
+        hydrateTask?.cancel()
+        hydrateTask = nil
+        fastTimer?.cancel()
+        deepTimer?.cancel()
+        setIsIndexing(false)
+        snapshot = nil
+        setWarnings([])
+        hydrateIfNeeded(entryID: entryID)
+    }
+
+    @discardableResult
+    func _testCommitSidecar(
+        _ sidecar: KnowledgeSidecar,
+        identity: PassIdentity
+    ) async -> Bool {
+        guard canPublish(identity) else { return false }
+        do {
+            try await sidecarPersistence.save(sidecar, pruningTo: nil, scope: identity.scope)
+        } catch {
+            return false
+        }
+        return canPublish(identity)
+    }
+
     // MARK: - 웜 로드 (저장된 지식 → 스냅샷, LLM 없음)
 
     private var hydrateTask: Task<Void, Never>?
@@ -287,11 +376,13 @@ public final class BackgroundIndexer: ObservableObject {
     /// `force`: 사용자 수정(오버라이드) 변경 시 — 이미 스냅샷이 있어도 다시
     /// 조립해 수정이 즉시 보이게 한다 (LLM 없음, 결정적 재조립).
     private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
-        guard force || snapshot?.entryID != entryID else { return }  // 이미 있음 — O(1) 탈출
+        guard let scope = scopeProvider?(entryID) else { return }
+        guard force || snapshot?.storyMemory?.scope != scope else { return }
         guard let entry = store?.activeEntry, entry.id == entryID,
             entry.resolvedKind == .novel
         else { return }
         let body = entry.body
+        let documentVersion = Self.contentFingerprint(body)
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let characters = entry.characters ?? []
         let overrides = entry.narrativeOverrides ?? []
@@ -301,16 +392,17 @@ public final class BackgroundIndexer: ObservableObject {
         let token = hydrateGeneration
         hydrateTask?.cancel()
         // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
+        let persistence = sidecarPersistence
         hydrateTask = Task.detached(priority: .utility) { [weak self] in
             let outline = DocumentOutline.parse(body)
             guard !outline.scenes.isEmpty, !Task.isCancelled else { return }
             let loadStart = CFAbsoluteTimeGetCurrent()
-            let sidecar = KnowledgeSidecar.load(entryID: entryID)
+            let sidecar = await persistence.load(scope: scope)
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
             let utterances = DialogueAttribution.utterances(in: body, cards: characters)
             let deriveStart = CFAbsoluteTimeGetCurrent()
             let snapshot = Self.makeSnapshot(
-                entryID: entryID, outline: outline, sidecar: sidecar,
+                entryID: entryID, scope: scope, outline: outline, sidecar: sidecar,
                 utterances: utterances, overrides: overrides, body: body,
                 characters: characters, recordedConversations: recorded)
             let deriveMs = (CFAbsoluteTimeGetCurrent() - deriveStart) * 1000
@@ -324,8 +416,12 @@ public final class BackgroundIndexer: ObservableObject {
                 // 늦은 이전 hydrate는 현재 문서에만, 자기 토큰이 유효할 때만 (#82).
                 guard self.hydrateGeneration == token else { return }
                 guard self.store?.activeEntry?.id == entryID else { return }
+                guard self.scopeProvider?(entryID) == scope else { return }
+                guard let currentBody = self.store?.activeEntry?.body,
+                    Self.contentFingerprint(currentBody) == documentVersion
+                else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
-                guard force || self.snapshot?.entryID != entryID else { return }
+                guard force || self.snapshot?.storyMemory?.scope != scope else { return }
                 self.snapshot = snapshot
                 self.snapshotGeneration += 1
                 self.setWarnings(warnings)
@@ -367,20 +463,26 @@ public final class BackgroundIndexer: ObservableObject {
     /// 즉시 끝난다. 이미 분석된 문서를 강제로 다시 읽으려면 `requestFullPass`.
     public func requestPass() {
         // 자동 패스가 이미 돌고 있으면 그걸로 충분하다 — 중복 금지.
-        guard passTask == nil else { return }
+        guard passTask == nil, resetTask == nil else { return }
         beginManualPhase()
         startPass(deep: true, userInitiated: true)
-        manualPassToken = passGeneration  // startPass가 방금 올린 토큰 (#35)
+        if passTask != nil {
+            manualPassToken = passGeneration  // startPass가 방금 올린 토큰 (#35)
+        } else {
+            manualPhase = .idle
+        }
     }
 
     /// 사용자 요청 패스 취소 (#35) — 진행 중 생성을 접고 상태를 정리한다.
-    /// 체크포인트 덕에 여기까지 읽은 것은 남는다 (씬 단위 save).
+    /// 아직 발행하지 않은 candidate는 버리고 공식 snapshot은 그대로 둔다.
     public func cancelManualPass() {
         guard manualPassToken != nil else { return }
         manualPassToken = nil
         passGeneration += 1
         passTask?.cancel()
         passTask = nil
+        resetTask?.cancel()
+        resetTask = nil
         setIsIndexing(false)
         setTransientPhase(.cancelled)
     }
@@ -439,18 +541,45 @@ public final class BackgroundIndexer: ObservableObject {
     /// 파생 캐시뿐이다 (CLAUDE.md §5-5: 실패해도 원문이 안전).
     public func requestFullPass() {
         guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
+        guard let scope = scopeProvider?(entry.id) else { return }
         beginManualPhase()
         // 진행 중 패스 선점 — 낡은 사이드카에 체크포인트를 덧쓰지 않게 먼저 멈춘다.
         passGeneration += 1
         passTask?.cancel()
         passTask = nil
+        resetTask?.cancel()
+        resetTask = nil
         setIsIndexing(false)
+        let resetToken = passGeneration
+        manualPassToken = resetToken
         let entryID = entry.id
-        var fresh = KnowledgeSidecar(entryID: entryID)
-        fresh.generation = KnowledgeSidecar.load(entryID: entryID).generation + 1
-        fresh.save()
-        startPass(deep: true, userInitiated: true)
-        manualPassToken = passGeneration  // startPass가 방금 올린 토큰 (#35)
+        let documentVersion = Self.contentFingerprint(entry.body)
+        resetTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let previous = await self.sidecarPersistence.load(scope: scope)
+            guard !Task.isCancelled else { return }
+            guard self.passGeneration == resetToken,
+                self.scopeProvider?(entryID) == scope,
+                self.store?.activeEntry?.id == entryID,
+                self.store?.activeEntry.map({ Self.contentFingerprint($0.body) }) == documentVersion
+            else { return }
+            do {
+                _ = try await self.sidecarPersistence.replaceWithFresh(
+                    scope: scope, generation: previous.generation + 1)
+            } catch {
+                self.resetTask = nil
+                self.setTransientPhase(.stalled(message: "파생 지식을 초기화하지 못했어요"))
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard self.passGeneration == resetToken,
+                self.scopeProvider?(entryID) == scope,
+                self.store?.activeEntry?.id == entryID
+            else { return }
+            self.resetTask = nil
+            self.startPass(deep: true, userInitiated: true)
+            self.manualPassToken = self.passGeneration
+        }
     }
 
     private func startPass(deep: Bool, userInitiated: Bool = false) {
@@ -460,6 +589,9 @@ public final class BackgroundIndexer: ObservableObject {
         // 단 사용자 명시 요청(requestPass)은 예외 — 누른 것이 곧 동의다.
         guard settings.autocompleteEnabled || userInitiated else { return }
         guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
+        guard let scope = scopeProvider?(entry.id), scope.documentID.rawValue == entry.id else {
+            return
+        }
         let body = entry.body
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -489,13 +621,16 @@ public final class BackgroundIndexer: ObservableObject {
         let bodyHash = Self.contentFingerprint(body)
         passEntryID = entryID
         passBodyHash = bodyHash
+        passScope = scope
+        let identity = PassIdentity(
+            scope: scope, generation: token, documentVersion: bodyHash)
+        let persistence = sidecarPersistence
         // 파싱·디스크 IO·프롬프트 준비를 메인에서 떼어낸다 — 생성 자체는 엔진
         // actor에서 돌므로, 여기서 중요한 건 30만 자 파싱이 메인을 막지 않는 것.
         // self는 앱 수명 객체라 패스 동안의 강참조가 수명을 늘리지 않는다.
         passTask = Task.detached(priority: .utility) { [engine, self] in
             let owned = { @MainActor () -> Bool in
-                self.canPublish(token: token, entryID: entryID)
-                    && self.passBodyHash == bodyHash && !Task.isCancelled
+                self.owns(identity) && !Task.isCancelled
             }
             // 인물 감지 — 결정적·LLM 없음이라 게이트·예산 밖에서 먼저 (PLAN §7).
             let outline = DocumentOutline.parse(body)
@@ -531,8 +666,9 @@ public final class BackgroundIndexer: ObservableObject {
                 self.store?.entries.first(where: { $0.id == entryID })?.characters ?? characters
             }
             await Self.runPass(
-                deep: deep, entryID: entryID, body: body,
+                deep: deep, scope: scope, entryID: entryID, body: body,
                 parameters: parameters, engine: engine,
+                persistence: persistence,
                 liveEntryIDs: liveEntryIDs, characters: liveCharacters,
                 overrides: overrides, recordedConversations: recorded,
                 caretUTF16: caret
@@ -544,18 +680,14 @@ public final class BackgroundIndexer: ObservableObject {
                 Task { @MainActor in
                     // 이 새 Task는 부모 취소를 물려받지 않는다 — 소유권 가드가 대신
                     // 걸러낸다 (토큰·문서 일치, #82).
-                    guard self.canPublish(token: token, entryID: entryID),
-                        self.passBodyHash == bodyHash
-                    else { return }
+                    guard self.owns(identity) else { return }
                     self.snapshot = snapshot
                     self.snapshotGeneration += 1
                     self.setWarnings(warnings)
                 }
             } publishMetrics: { metrics in
                 Task { @MainActor in
-                    guard self.canPublish(token: token, entryID: entryID),
-                        self.passBodyHash == bodyHash
-                    else { return }
+                    guard self.owns(identity) else { return }
                     if self.metrics != metrics { self.metrics = metrics }
                 }
             } progress: { done, total in
@@ -571,6 +703,15 @@ public final class BackgroundIndexer: ObservableObject {
                     guard self.manualPassToken == token else { return }
                     self.manualPhase = .blocked(reason: reason)
                 }
+            } commit: { candidate, liveHashes in
+                guard await MainActor.run(body: { owned() }) else { return false }
+                do {
+                    try await persistence.save(
+                        candidate, pruningTo: liveHashes, scope: scope)
+                } catch {
+                    return false
+                }
+                return await MainActor.run(body: { owned() })
             }
             await MainActor.run {
                 self.finishManualPhase(token: token)
@@ -703,10 +844,12 @@ public final class BackgroundIndexer: ObservableObject {
     /// 한 번의 이해 패스 — 값 입력만 받아 detached에서 돈다.
     nonisolated private static func runPass(
         deep: Bool,
+        scope: StoryMemoryScope,
         entryID: UUID,
         body: String,
         parameters: CompletionParameters,
         engine: CompletionEngine,
+        persistence: any KnowledgeSidecarPersisting,
         liveEntryIDs: Set<UUID>,
         characters: [CharacterCard],
         overrides: [NarrativeOverride],
@@ -717,7 +860,10 @@ public final class BackgroundIndexer: ObservableObject {
         /// 씬 단위 결정적 진행 (처리한 수, 전체 더티 수) — "지금 읽기" 표시용 (#35).
         progress: (@Sendable (Int, Int) -> Void)? = nil,
         /// 게이트(열·저전력)로 보류될 때 사유 보고 (#35).
-        onBlocked: (@Sendable (String) -> Void)? = nil
+        onBlocked: (@Sendable (String) -> Void)? = nil,
+        /// The only sidecar publication boundary. It revalidates pass ownership before
+        /// and after the write, so cancelled or switched work cannot keep publishing.
+        commit: @Sendable @escaping (KnowledgeSidecar, Set<String>?) async -> Bool
     ) async {
         guard gateAllows(deep: deep) else { return }
 
@@ -734,7 +880,8 @@ public final class BackgroundIndexer: ObservableObject {
         } else {
             orderedScenes = outline.scenes
         }
-        var sidecar = KnowledgeSidecar.load(entryID: entryID)
+        var sidecar = await persistence.load(scope: scope)
+        guard sidecar.scope == scope else { return }
         let text = body as NSString
 
         // 결정적 진행률의 분모 — 더티 항목 수 (요약·사건·앎·구간 중 하나라도 없는 씬).
@@ -802,14 +949,6 @@ public final class BackgroundIndexer: ObservableObject {
                 updatedAt: .now)
             dirtyDone += 1
             reportProgress()
-            // 씬 단위 체크포인트 — 선점당해도 여기까지의 이해는 살아남는다.
-            sidecar.save()
-            publish(
-                makeSnapshot(
-                    entryID: entryID, outline: outline, sidecar: sidecar,
-                    utterances: utterances, overrides: overrides, body: body,
-                    characters: characters,
-                    recordedConversations: recordedConversations))
         }
 
         // ② 사건 추출 (깊은 패스 전용, PLAN §6.3) — 요약이 끝난 씬만.
@@ -836,7 +975,6 @@ public final class BackgroundIndexer: ObservableObject {
                 sidecar.events[scene.contentHash] = extracted
                 dirtyDone += 1
                 reportProgress()
-                sidecar.save()  // 씬 단위 체크포인트 — 선점당해도 여기까지는 남는다
             }
         }
 
@@ -861,13 +999,6 @@ public final class BackgroundIndexer: ObservableObject {
                 sidecar.insights[scene.contentHash] = insights
                 dirtyDone += 1
                 reportProgress()
-                sidecar.save()
-                publish(
-                    makeSnapshot(
-                        entryID: entryID, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
-                        characters: characters,
-                        recordedConversations: recordedConversations))
             }
         }
 
@@ -892,7 +1023,6 @@ public final class BackgroundIndexer: ObservableObject {
                     || TemporalShiftDetector.hasCandidate(in: sceneText)
                 guard hasShiftHint else {
                     sidecar.segments[scene.contentHash] = SceneSegmentation()  // 메모: 단일 서사
-                    sidecar.save()
                     continue
                 }
                 let segments = await analyzeSegments(
@@ -901,13 +1031,6 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let segments else { continue }  // 실패 — 다음 패스가 재시도
                 sidecar.segments[scene.contentHash] = SceneSegmentation(segments: segments)
-                sidecar.save()
-                publish(
-                    makeSnapshot(
-                        entryID: entryID, outline: outline, sidecar: sidecar,
-                        utterances: utterances, overrides: overrides, body: body,
-                        characters: characters,
-                        recordedConversations: recordedConversations))
             }
         }
 
@@ -918,7 +1041,10 @@ public final class BackgroundIndexer: ObservableObject {
                 parameters: parameters, engine: engine)
             guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
             // 어떤 저널도 참조하지 않는 사이드카 정리 (삭제된 작품의 파생물).
-            pruneOrphans(keeping: liveEntryIDs)
+            if case .legacy = scope {
+                await persistence.pruneLegacyOrphans(
+                    keeping: Set(liveEntryIDs.map(WritingDocumentID.init(rawValue:))))
+            }
         }
 
         // ④ 사건 그래프 분석 (깊은 패스 전용, v5 — 요구사항 §3·§6·§12·§29).
@@ -930,11 +1056,8 @@ public final class BackgroundIndexer: ObservableObject {
                 orderedEvents.append(contentsOf: sidecar.events[scene.contentHash] ?? [])
             }
             let analysisEvents = uniqueEventsForAnalysis(orderedEvents)
-            if clearAnalysesBelowThreshold(
+            _ = clearAnalysesBelowThreshold(
                 sidecar: &sidecar, uniqueEventCount: analysisEvents.count)
-            {
-                sidecar.save()
-            }
             let memoHash = combinedHash(analysisEvents.map(\.stableKey))
             if analysisEvents.count >= 2, sidecar.eventGraph?.memoHash != memoHash {
                 let analysis = await analyzeEventGraph(
@@ -947,7 +1070,6 @@ public final class BackgroundIndexer: ObservableObject {
                         identities: analysis.identities,
                         chronoEdges: analysis.chronoEdges,
                         memoHash: memoHash)
-                    sidecar.save()
                 }
             }
         }
@@ -975,7 +1097,6 @@ public final class BackgroundIndexer: ObservableObject {
                             new: threads,
                             previous: sidecar.plotThreads?.threads ?? []),
                         memoHash: memoHash)
-                    sidecar.save()
                 }
             }
         }
@@ -1001,7 +1122,6 @@ public final class BackgroundIndexer: ObservableObject {
                 guard !Task.isCancelled else { return }  // 취소 뒤 체크포인트 금지 (#82)
                 guard let meta else { continue }
                 sidecar.conversationMeta[key] = meta
-                sidecar.save()
             }
             // 기록이 삭제된 보완 데이터 정리.
             let liveIDs = Set(recordedConversations.map { $0.id.uuidString })
@@ -1012,11 +1132,11 @@ public final class BackgroundIndexer: ObservableObject {
 
         guard !Task.isCancelled else { return }
         let saveStart = CFAbsoluteTimeGetCurrent()
-        sidecar.save(pruningTo: Set(outline.scenes.map(\.contentHash)))
+        guard await commit(sidecar, Set(outline.scenes.map(\.contentHash))) else { return }
         let saveMs = (CFAbsoluteTimeGetCurrent() - saveStart) * 1000
         let deriveStart = CFAbsoluteTimeGetCurrent()
         let snapshot = makeSnapshot(
-            entryID: entryID, outline: outline, sidecar: sidecar,
+            entryID: entryID, scope: scope, outline: outline, sidecar: sidecar,
             utterances: utterances, overrides: overrides, body: body,
             characters: characters,
             recordedConversations: recordedConversations)
@@ -1037,16 +1157,8 @@ public final class BackgroundIndexer: ObservableObject {
         parameters: CompletionParameters,
         engine: CompletionEngine
     ) async {
-        // 장 = 연속된 씬들의 레벨 1–2 헤딩 경로 그룹.
-        var chapters: [(path: [String], scenes: [DocumentOutline.Scene])] = []
-        for scene in outline.scenes {
-            let key = Array(scene.headingPath.prefix(2))
-            if let last = chapters.indices.last, chapters[last].path == key {
-                chapters[last].scenes.append(scene)
-            } else {
-                chapters.append((key, [scene]))
-            }
-        }
+        let changes = HierarchicalMemory.changes(previous: sidecar, outline: outline)
+        let chapters = HierarchicalMemory.chapterGroups(in: outline)
 
         // 이번 패스에서 확보한 롤업 — 경로별 기록 후 아래에서 문서 순서로 조립한다.
         var madeByPath: [[String]: KnowledgeSidecar.ChapterSummary] = [:]
@@ -1059,10 +1171,11 @@ public final class BackgroundIndexer: ObservableObject {
             guard childSummaries.count == chapter.scenes.count,
                 chapter.scenes.count >= 2
             else { continue }
-            let childrenHash = combinedHash(chapter.scenes.map(\.contentHash))
-            if let existing = sidecar.chapterSummaries.first(where: {
-                $0.headingPath == chapter.path && $0.childrenHash == childrenHash
-            }) {
+            if !changes.dirtyChapters.contains(chapter.nodeID),
+                let existing = sidecar.chapterSummaries.first(where: {
+                    $0.headingPath == chapter.path && $0.childrenHash == chapter.childrenHash
+                })
+            {
                 madeByPath[chapter.path] = existing  // 메모 적중 — 재요약 금지
                 continue
             }
@@ -1071,7 +1184,7 @@ public final class BackgroundIndexer: ObservableObject {
             guard let summary else { continue }
             madeByPath[chapter.path] =
                 .init(
-                    headingPath: chapter.path, childrenHash: childrenHash,
+                    headingPath: chapter.path, childrenHash: chapter.childrenHash,
                     summary: summary, updatedAt: .now)
         }
         // 문서 순서 조립 — 갱신된 장은 새 값, 아니면 기존 롤업을 물려받는다.
@@ -1090,8 +1203,8 @@ public final class BackgroundIndexer: ObservableObject {
             ? sidecar.chapterSummaries.map(\.summary)
             : outline.scenes.compactMap { sidecar.sceneSummaries[$0.contentHash]?.summary }
         guard sources.count >= 2 else { return }
-        let childrenHash = combinedHash(outline.scenes.map(\.contentHash))
-        if sidecar.workSummary?.childrenHash == childrenHash { return }  // 메모 적중
+        guard changes.workIsDirty else { return }
+        let childrenHash = HierarchicalMemory.workChildrenHash(for: outline)
         let summary = await rollup(
             sources, level: .work, engine: engine, parameters: parameters)
         guard let summary else { return }
@@ -1505,8 +1618,9 @@ public final class BackgroundIndexer: ObservableObject {
         return nil
     }
 
-    nonisolated private static func makeSnapshot(
-        entryID: UUID, outline: DocumentOutline, sidecar: KnowledgeSidecar,
+    nonisolated static func makeSnapshot(
+        entryID: UUID, scope: StoryMemoryScope? = nil,
+        outline: DocumentOutline, sidecar: KnowledgeSidecar,
         utterances: [Utterance], overrides: [NarrativeOverride] = [],
         body: String = "", characters: [CharacterCard] = [],
         recordedConversations: [RecordedConversation] = []
@@ -1524,18 +1638,28 @@ public final class BackgroundIndexer: ObservableObject {
         // 범위를 다시 잡는다. 층·시점 등 나머지 오버라이드는 스냅샷 조립이 얹는다.
         let boundedSegments = SegmentParser.applyingBoundaryOverrides(
             sidecar.segments, overrides: rekeyed, outline: outline, body: body)
+        let memoryScope = scope ?? .legacy(
+            documentID: WritingDocumentID(rawValue: entryID))
+        let storyMemory = StoryMemorySnapshot.make(
+            scope: memoryScope, outline: outline, sidecar: sidecar, body: body)
+        let freshSceneSummaries = Dictionary(
+            uniqueKeysWithValues: storyMemory.sceneSummaries.map {
+                ($0.key.rawValue, $0.value)
+            })
+        let freshChapterSummaries = Dictionary(
+            uniqueKeysWithValues: storyMemory.chapterSummaries.values.map {
+                ($0.headingPath.joined(separator: " > "), $0.summary)
+            })
         return KnowledgeSnapshot(
             entryID: entryID,
             outline: outline,
-            summariesByHash: sidecar.sceneSummaries.mapValues(\.summary),
-            chapterSummariesByPath: Dictionary(
-                uniqueKeysWithValues: sidecar.chapterSummaries.map {
-                    ($0.headingPath.joined(separator: " > "), $0.summary)
-                }),
-            workSummary: sidecar.workSummary?.summary,
+            summariesByHash: freshSceneSummaries.mapValues(\.summary),
+            chapterSummariesByPath: freshChapterSummaries,
+            workSummary: storyMemory.workSummary?.summary,
+            storyMemory: storyMemory,
             events: sidecar.events,
             utterances: utterances,
-            sceneSummaries: sidecar.sceneSummaries,
+            sceneSummaries: freshSceneSummaries,
             insights: sidecar.insights,
             segments: boundedSegments,
             eventGraph: sidecar.eventGraph,
@@ -1558,22 +1682,6 @@ public final class BackgroundIndexer: ObservableObject {
     /// 잘림의 저장 단계 원인이었다 (SentenceClamp 참조).
     nonisolated private static func clamp(_ text: String, to limit: Int) -> String {
         SentenceClamp.clamp(text, to: limit)
-    }
-
-    /// 삭제된 저널의 사이드카 정리 — 깊은 패스 끝에서만 (디렉터리 스캔은 싸지만
-    /// 매 패스마다 할 일은 아니다).
-    nonisolated private static func pruneOrphans(keeping liveEntryIDs: Set<UUID>) {
-        let directory = KnowledgeSidecar.directory()
-        guard
-            let files = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: nil)
-        else { return }
-        for file in files where file.pathExtension == "json" {
-            let stem = file.deletingPathExtension().lastPathComponent
-            if let id = UUID(uuidString: stem), !liveEntryIDs.contains(id) {
-                try? FileManager.default.removeItem(at: file)
-            }
-        }
     }
 
     // MARK: - 프롬프트 (요약 피라미드, PLAN §6.1)

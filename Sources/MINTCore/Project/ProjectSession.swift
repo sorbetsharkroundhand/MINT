@@ -11,6 +11,8 @@ public final class ProjectSession: ObservableObject {
     @Published public private(set) var activeProject: WritingProject?
     @Published public private(set) var selectedDocumentID: WritingDocumentID?
     @Published public private(set) var workspaceMode: WorkspaceMode = .write
+    /// `false` means persistence scope is still unknown; callers must not assume legacy.
+    @Published public private(set) var hasLoadedActiveProject = false
 
     private let store: ProjectStore
     private let defaults: UserDefaults
@@ -31,10 +33,19 @@ public final class ProjectSession: ObservableObject {
         return activeProject.documents.first { $0.id == selectedDocumentID }
     }
 
+    /// Derived memory stays unscoped until active-project lookup has completed. Once
+    /// known, a nil active project represents an explicit legacy session.
+    public func storyMemoryScope(for entryID: UUID) -> StoryMemoryScope? {
+        guard hasLoadedActiveProject else { return nil }
+        return StoryMemoryScopeResolver.resolve(
+            activeProject: activeProject, entryID: entryID)
+    }
+
     /// Load the verified active project without creating or migrating anything.
     public func loadActiveProject() async throws {
         let project = try await store.activeProject()
         adopt(project)
+        hasLoadedActiveProject = true
     }
 
     /// Switch only after ProjectStore has verified and activated the target.
@@ -42,6 +53,7 @@ public final class ProjectSession: ObservableObject {
         try await store.activate(id: id)
         let project = try await store.load(id: id)
         adopt(project)
+        hasLoadedActiveProject = true
     }
 
     /// Used by onboarding/import after a project has been explicitly created by the user.
@@ -51,6 +63,7 @@ public final class ProjectSession: ObservableObject {
         try await store.activate(id: project.id)
         let verified = try await store.load(id: project.id)
         adopt(verified)
+        hasLoadedActiveProject = true
     }
 
     public func selectDocument(_ id: WritingDocumentID?) {

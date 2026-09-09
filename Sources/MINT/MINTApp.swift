@@ -17,7 +17,6 @@ struct MINTApp: App {
     static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
     @StateObject private var livingMargin = LivingMarginModel()
-    @StateObject private var indexer = BackgroundIndexer(engine: MINTApp.sharedEngine)
     private static let projectStore: ProjectStore = {
         let documents = FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)
@@ -27,6 +26,11 @@ struct MINTApp: App {
                 .appendingPathComponent("MINT", isDirectory: true)
                 .appendingPathComponent("Projects", isDirectory: true))
     }()
+    private static let knowledgeSidecars = KnowledgeSidecarRepository(
+        projectStore: MINTApp.projectStore)
+    @StateObject private var indexer = BackgroundIndexer(
+        engine: MINTApp.sharedEngine,
+        sidecarPersistence: MINTApp.knowledgeSidecars)
     @StateObject private var projectSession = ProjectSession(store: MINTApp.projectStore)
 
     var body: some Scene {

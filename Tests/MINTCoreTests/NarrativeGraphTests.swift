@@ -812,7 +812,7 @@ final class NarrativeGraphTests: XCTestCase {
         let decoded = try decoder.decode(
             KnowledgeSidecar.self, from: encoder.encode(sidecar))
         XCTAssertEqual(decoded, sidecar)
-        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 7)
+        XCTAssertEqual(KnowledgeSidecar.currentSchemaVersion, 8)
     }
 
     // MARK: - 의미 경계 분할 (요구사항 §32)
