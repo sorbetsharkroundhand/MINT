@@ -54,6 +54,45 @@ public actor ProjectStore {
         }
     }
 
+    /// Reads rebuildable document intelligence without adding it to the durable manifest.
+    public func readIntelligence(
+        projectID: WritingProjectID,
+        documentID: WritingDocumentID
+    ) throws -> Data? {
+        try withStoreLock {
+            try validateDocument(documentID, in: projectID)
+            let url = try projectURL(projectID, intelligencePath(documentID))
+            guard files.fileExists(at: url) else { return nil }
+            return try files.read(url)
+        }
+    }
+
+    /// Atomically writes rebuildable intelligence. Manuscript and UserData are untouched.
+    public func writeIntelligence(
+        _ data: Data,
+        projectID: WritingProjectID,
+        documentID: WritingDocumentID
+    ) throws {
+        try withStoreLock {
+            try validateDocument(documentID, in: projectID)
+            let directory = try projectURL(projectID, "Intelligence")
+            try files.createDirectory(at: directory)
+            try files.writeAtomically(data, to: projectURL(projectID, intelligencePath(documentID)))
+        }
+    }
+
+    public func removeIntelligence(
+        projectID: WritingProjectID,
+        documentID: WritingDocumentID
+    ) throws {
+        try withStoreLock {
+            try validateDocument(documentID, in: projectID)
+            let url = try projectURL(projectID, intelligencePath(documentID))
+            guard files.fileExists(at: url) else { return }
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
     func withStoreLock<T>(_ operation: () throws -> T) throws -> T {
         try Task.checkCancellation()
         try ProjectPaths.rejectSymlink(root)
@@ -135,6 +174,17 @@ public actor ProjectStore {
 
     func documentPath(id: WritingDocumentID, kind: WritingDocument.Kind, hash: String) -> String {
         "\(kind == .note ? "Notes" : "Documents")/\(id.rawValue.uuidString)/\(hash).md"
+    }
+
+    func intelligencePath(_ documentID: WritingDocumentID) -> String {
+        "Intelligence/\(documentID.rawValue.uuidString).knowledge.json"
+    }
+
+    private func validateDocument(_ documentID: WritingDocumentID, in projectID: WritingProjectID) throws {
+        let manifest = try readManifest(id: projectID)
+        guard manifest.documents.contains(where: { $0.id == documentID }) else {
+            throw ProjectStoreError.invalidManifest
+        }
     }
 
     func writeImmutable(_ data: Data, path: String, id: WritingProjectID) throws {

@@ -30,7 +30,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// branch 단위가 인물이 아니라 플롯이 됐다 (PLAN §6.6).
     /// v7: 설정 충돌·복선 기능을 제거했다 — `insights`에서 사실·복선 필드,
     /// 사이드카의 `factConflicts`가 빠졌다. v6 파일은 폐기·재구축.
-    public static let currentSchemaVersion = 7
+    public static let currentSchemaVersion = 8
 
     /// 씬 요약 노드 (PLAN §6.1) — 앵커는 씬 원문의 콘텐츠 해시.
     /// 해시가 같으면 재요약 금지 (백그라운드 3요건의 메모이제이션, CLAUDE.md §4).
@@ -90,7 +90,9 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     public var schemaVersion: Int
     /// 지식 세대 — 전체 재구축(캐시 비우기)마다 증가. 디버깅·벤치 대조용.
     public var generation: Int
-    public var entryID: UUID
+    public var scope: StoryMemoryScope
+    /// Compatibility bridge for legacy consumers while #118 moves editor ownership to projects.
+    public var entryID: UUID { scope.documentID.rawValue }
     /// 씬 해시 → 요약. 현재 아웃라인에 없는 해시도 다음 저장까지는 남겨 둔다 —
     /// 타이핑 중 해시가 요동칠 때(문장 하나 지웠다 복원) 재요약을 아낀다.
     public var sceneSummaries: [String: SceneSummary]
@@ -114,10 +116,10 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 기록된 대화 보완 (v5, 요구사항 §19) — 키 = RecordedConversation.id.
     public var conversationMeta: [String: ConversationMeta]
 
-    public init(entryID: UUID) {
+    public init(scope: StoryMemoryScope) {
         self.schemaVersion = Self.currentSchemaVersion
         self.generation = 0
-        self.entryID = entryID
+        self.scope = scope
         self.sceneSummaries = [:]
         self.chapterSummaries = []
         self.workSummary = nil
@@ -127,6 +129,10 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         self.eventGraph = nil
         self.plotThreads = nil
         self.conversationMeta = [:]
+    }
+
+    public init(entryID: UUID) {
+        self.init(scope: .legacy(documentID: WritingDocumentID(rawValue: entryID)))
     }
 
     // MARK: - 디스크 IO (인덱서 전용)
@@ -149,26 +155,31 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 로드 — 파일이 없거나, 못 읽거나, **스키마 버전이 다르면** 빈 사이드카.
     /// 파생 캐시라 버리는 것이 곧 복구다 (CLAUDE.md §5-5).
     public static func load(entryID: UUID) -> KnowledgeSidecar {
+        let scope = StoryMemoryScope.legacy(documentID: WritingDocumentID(rawValue: entryID))
         let url = fileURL(for: entryID)
         guard let data = try? Data(contentsOf: url) else {
-            return KnowledgeSidecar(entryID: entryID)
+            return KnowledgeSidecar(scope: scope)
         }
+        return decoded(data, for: scope)
+    }
+
+    /// 버전 불일치 파일에서 세대 카운터만 건져 재구축 이력을 잇는다.
+    struct GenerationPeek: Codable { var generation: Int }
+
+    static func decoded(_ data: Data, for scope: StoryMemoryScope) -> KnowledgeSidecar {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let sidecar = try? decoder.decode(KnowledgeSidecar.self, from: data),
-            sidecar.schemaVersion == currentSchemaVersion
+            sidecar.schemaVersion == currentSchemaVersion,
+            sidecar.scope == scope
         else {
-            var fresh = KnowledgeSidecar(entryID: entryID)
-            // 구버전을 버리고 재구축 — 세대를 올려 "다시 만든 지식"임을 남긴다.
+            var fresh = KnowledgeSidecar(scope: scope)
             fresh.generation =
                 ((try? decoder.decode(GenerationPeek.self, from: data))?.generation ?? 0) + 1
             return fresh
         }
         return sidecar
     }
-
-    /// 버전 불일치 파일에서 세대 카운터만 건져 재구축 이력을 잇는다.
-    private struct GenerationPeek: Codable { var generation: Int }
 
     /// 저장 (원자적 쓰기). 현재 아웃라인에 없는 씬 요약·사건은 여기서 정리한다 —
     /// 저장 시점이 곧 가비지 컬렉션이라 별도 청소 경로가 없다.
@@ -177,6 +188,11 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 바뀌어 그 씬의 사건이 고아가 되고, 여기서 사라진 뒤 다음 깊은 패스가
     /// 새 해시로 재추출한다. 무효화 전용 코드가 따로 없는 이유다.
     public func save(pruningTo liveHashes: Set<String>? = nil) {
+        guard case .legacy = scope, let data = try? encoded(pruningTo: liveHashes) else { return }
+        try? data.write(to: Self.fileURL(for: entryID), options: .atomic)
+    }
+
+    func encoded(pruningTo liveHashes: Set<String>? = nil) throws -> Data {
         var snapshot = self
         if let liveHashes {
             snapshot.sceneSummaries = snapshot.sceneSummaries.filter {
@@ -189,8 +205,7 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(snapshot) else { return }
-        try? data.write(to: Self.fileURL(for: entryID), options: .atomic)
+        return try encoder.encode(snapshot)
     }
 
     /// 저널 삭제 시 사이드카도 지운다 (원문이 사라지면 파생물도 무의미).

@@ -2,6 +2,35 @@ import XCTest
 @testable import MINTCore
 
 final class ProjectStoreTests: XCTestCase {
+    func testDerivedIntelligenceUsesStableProjectAndDocumentIDs() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let documentID = WritingDocumentID()
+        let projectA = WritingProject(
+            id: WritingProjectID(), title: "Renamable A", mode: .fiction,
+            documents: [.init(id: documentID, title: "Same title", body: "A", kind: .manuscript)])
+        let projectB = WritingProject(
+            id: WritingProjectID(), title: "Renamable B", mode: .fiction,
+            documents: [.init(id: documentID, title: "Same title", body: "B", kind: .manuscript)])
+        let store = ProjectStore(root: root)
+        try await store.save(projectA)
+        try await store.save(projectB)
+
+        try await store.writeIntelligence(
+            Data("project-a".utf8), projectID: projectA.id, documentID: documentID)
+        try await store.writeIntelligence(
+            Data("project-b".utf8), projectID: projectB.id, documentID: documentID)
+
+        let dataA = try await store.readIntelligence(projectID: projectA.id, documentID: documentID)
+        let dataB = try await store.readIntelligence(projectID: projectB.id, documentID: documentID)
+        XCTAssertEqual(dataA, Data("project-a".utf8))
+        XCTAssertEqual(dataB, Data("project-b".utf8))
+        let relative = "\(projectA.id.rawValue.uuidString)/Intelligence/\(documentID.rawValue.uuidString).knowledge.json"
+        XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(relative).path))
+        XCTAssertFalse(relative.contains(projectA.title))
+        XCTAssertFalse(relative.contains(projectA.documents[0].title))
+    }
+
     func testRoundTripKeepsBodiesOutsideManifestAndSurvivesCacheDeletion() async throws {
         let root = try temporaryProjectRoot()
         defer { try? FileManager.default.removeItem(at: root) }
