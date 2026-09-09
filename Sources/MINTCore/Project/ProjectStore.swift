@@ -74,9 +74,11 @@ public actor ProjectStore {
         documentID: WritingDocumentID
     ) throws {
         try withStoreLock {
+            try Task.checkCancellation()
             try validateDocument(documentID, in: projectID)
             let directory = try projectURL(projectID, "Intelligence")
             try files.createDirectory(at: directory)
+            try Task.checkCancellation()
             try files.writeAtomically(data, to: projectURL(projectID, intelligencePath(documentID)))
         }
     }

@@ -19,6 +19,22 @@ public enum StoryMemoryScope: Hashable, Codable, Sendable {
     }
 }
 
+/// Resolves persistence scope without crossing the project/legacy boundary. An active
+/// project that does not own the document returns `nil`; it never falls back to legacy.
+public enum StoryMemoryScopeResolver {
+    public static func resolve(
+        activeProject: WritingProject?,
+        entryID: UUID
+    ) -> StoryMemoryScope? {
+        let documentID = WritingDocumentID(rawValue: entryID)
+        guard let activeProject else { return .legacy(documentID: documentID) }
+        guard activeProject.documents.contains(where: { $0.id == documentID }) else {
+            return nil
+        }
+        return .project(projectID: activeProject.id, documentID: documentID)
+    }
+}
+
 /// A digest of one version of scene content. It is never a persistent scene identity.
 public struct SceneContentVersion: RawRepresentable, Hashable, Codable, Sendable {
     public let rawValue: String
@@ -146,6 +162,16 @@ public struct StoryMemorySnapshot: Equatable, Sendable {
         sidecar: KnowledgeSidecar,
         body: String
     ) -> Self {
+        guard sidecar.scope == scope else {
+            return Self(
+                scope: scope,
+                outline: outline,
+                sceneSummaries: [:],
+                chapterSummaries: [:],
+                workSummary: nil,
+                evidenceByScene: [:],
+                sceneVersionsByNode: [:])
+        }
         var freshScenes: [SceneContentVersion: KnowledgeSidecar.SceneSummary] = [:]
         var evidenceByScene: [SceneContentVersion: EvidenceAnchor] = [:]
         let text = body as NSString

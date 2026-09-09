@@ -229,6 +229,9 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// 헤딩 경로("1부 > 3장" 조인 키) → 장 요약문.
     public let chapterSummariesByPath: [String: String]
     public let workSummary: String?
+    /// Fresh, scope-bound hierarchy used for retrieval routing and evidence drill-down.
+    /// Event/state arrays remain on this snapshot and are not duplicated here.
+    public let storyMemory: StoryMemorySnapshot?
     /// 담화 순서(Pos = 씬 배열 인덱스)로 정렬된 사건들 (PLAN §6.3).
     /// 아웃라인에 없는 해시(톰스톤)는 여기서 이미 빠져 있다.
     public let events: [StoryEvent]
@@ -304,6 +307,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         summariesByHash: [String: String],
         chapterSummariesByPath: [String: String] = [:],
         workSummary: String? = nil,
+        storyMemory: StoryMemorySnapshot? = nil,
         events: [String: [StoryEvent]] = [:],
         utterances: [Utterance] = [],
         sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
@@ -322,6 +326,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.summariesByHash = summariesByHash
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
+        self.storyMemory = storyMemory
         self.utterances = utterances
         self.overrides = overrides
         self.staleOverrides = staleOverrides
