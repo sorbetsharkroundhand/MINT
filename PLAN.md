@@ -442,7 +442,7 @@ Performance thresholds come from measured baselines, not guessed constants.
 - [ ] #126 Writing Quality core / Korean morphology — core merged via PR #133; provider work remains
 
 ### Story Intelligence
-- [ ] #106 hierarchical memory
+- [x] #106 hierarchical memory
 - [ ] #107 atomic/temporal knowledge
 - [ ] #108 structure-first retrieval
 - [ ] #109 deterministic continuity
