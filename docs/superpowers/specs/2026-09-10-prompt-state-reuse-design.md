@@ -10,13 +10,21 @@
 
 Evolve MINT's Ghost Completion cache layer from a single LCP-and-trim optimization into a small, capability-aware **prompt-state reuse architecture**.
 
-The runtime must preserve the existing pure-attention warm path while allowing hybrid/recurrent models to reuse exact append-only prompt state without requiring arbitrary rewind. The design must remain local, deterministic, fail-closed, and small enough for the 0.2.0 release.
+The 0.2.0 production slice is deliberately narrow:
 
-The product-level reason is simple: model selection should be driven primarily by writing quality, not by whether a model's cache topology happens to fit the current `PromptCacheBox` implementation.
+1. evaluate the stable `mlx-swift-lm 3.31.4` dependency;
+2. separate prompt reconciliation into `appendSuffix`, `rewindToCommonPrefix`, and `rebuild`;
+3. allow exact append-only reuse without requiring arbitrary trim;
+4. preserve the current pure-attention LCP/trim fast path;
+5. expose enough telemetry and trajectory tests to prove correctness and latency.
+
+Canonical/decode state forking, recurrent checkpoints, cache banks, and anchor/replay are **not required production work in #149**. They may be measured or documented as follow-up directions after the core policy lands.
+
+The product-level reason is simple: model selection should be driven primarily by writing quality, not by whether a model's cache topology happens to fit today's `PromptCacheBox` implementation.
 
 ## Current State
 
-MINT currently has a strong continuation-specific cache path:
+MINT already has a strong continuation-specific cache path:
 
 - `ContextAssembler` keeps stable project/context information before recent manuscript text.
 - The editor keeps the recent-text window start stable on a 512 UTF-16 grid to preserve prompt locality while typing.
@@ -27,7 +35,7 @@ MINT currently has a strong continuation-specific cache path:
 - Only the requested suffix is then prefilled.
 - Any unsafe state falls back to a fresh cache.
 
-This is an effective design for trimmable pure-attention caches and must remain the fast path for models such as the current Basil baseline.
+This is effective for trimmable pure-attention caches and must remain the fast path for models such as the current Basil baseline.
 
 ## Problem
 
@@ -40,35 +48,35 @@ cached:    ABC
 requested: ABCDEF
 ```
 
-MINT currently still requires the entire cache to be trimmable, even though no backward operation is needed. A recurrent or hybrid state can often advance from the exact represented prefix to `ABCDEF`; it simply cannot recover an arbitrary earlier state such as `AB` after later state has been committed.
+MINT still requires the entire cache to be trimmable, even though no backward operation is needed. A recurrent or hybrid state can often advance from an exact represented prefix to `ABCDEF`; it simply cannot recover an arbitrary earlier state such as `AB` after later state has been committed.
 
-Therefore the current statement "hybrid/recurrent caches cannot be reused" is too broad. The accurate statement is:
+The accurate limitation is therefore:
 
-> MINT's current arbitrary-LCP-rewind path cannot reuse a non-trimmable recurrent cache after divergence, but exact append-only continuation can be reused without rewind.
+> MINT's current arbitrary-LCP-rewind path cannot reuse a non-trimmable recurrent cache after divergence, but exact append-only continuation does not intrinsically require rewind.
 
-This distinction is especially important for modern Gated Delta / Mamba-style hybrid models.
+This distinction matters for modern Gated Delta / Mamba-style hybrid models.
 
 ## Ecosystem Findings
 
-The design is informed by current inference-engine practice without copying server-scale machinery into the app.
+The design follows current inference-engine principles without copying server-scale machinery into MINT.
 
 ### mlx-swift-lm
 
-Current mainline separates prompt reconciliation into explicit decisions such as append suffix, rewind to a common prefix, and rebuild. Strict-prefix extension is considered separately from trimmability. Newer cache infrastructure also tracks model-wide cache progress and introduces recurrent/speculative checkpoint concepts.
+Current mainline separates prompt reconciliation into explicit append, rewind-to-common-prefix, and rebuild decisions. Strict-prefix extension is considered separately from trimmability. Newer mainline infrastructure also tracks model-wide cache progress and explores recurrent/speculative checkpoints.
 
-MINT currently resolves `mlx-swift-lm 3.31.3`. Stable `3.31.4` contains relevant Qwen3.5 recurrent-cache, Gated Delta correctness, and prompt-prefill improvements, while the larger policy/staged-round work remains mainline and should not be treated as a stable dependency contract yet.
+MINT currently resolves `mlx-swift-lm 3.31.3`. Stable `3.31.4` contains relevant Qwen3.5 recurrent-cache, Gated Delta correctness, and prompt-prefill improvements. The larger mainline cache-policy/staged-round work is not yet treated as MINT's stable dependency contract.
 
 ### vLLM
 
-Hybrid/Mamba prefix caching is treated as a state-management problem rather than ordinary arbitrary KV rewind. Aligned state checkpoints and replay are used where the recurrent representation cannot be reconstructed by deleting arbitrary trailing tokens.
+Hybrid/Mamba prefix caching is treated as a state-management problem rather than ordinary arbitrary KV rewind. Aligned state checkpoints and replay are used where a recurrent representation cannot be reconstructed by deleting arbitrary trailing tokens.
 
 ### SGLang
 
-Attention KV and auxiliary recurrent state are represented by distinct cache components. Recurrent state may be restored or copied independently of attention KV. The useful idea for MINT is state ownership/copy-on-write, not Radix-tree serving infrastructure.
+Attention KV and auxiliary recurrent state are represented by distinct cache components. Recurrent state may be copied or restored independently. The useful idea for MINT is state ownership/copy-on-write, not Radix-tree serving infrastructure.
 
 ### llama.cpp / ExLlamaV2 / mlx-lm
 
-These systems likewise expose sequence branching, cache copies, page/prefix matching, or explicit prompt-cache objects rather than treating decode output and reusable prompt state as one indivisible object.
+These systems expose sequence branching, cache copies, page/prefix matching, or explicit prompt-cache objects rather than treating decode output and reusable prompt state as one indivisible object.
 
 ## Considered Approaches
 
@@ -76,31 +84,31 @@ These systems likewise expose sequence branching, cache copies, page/prefix matc
 
 **Pros:** minimal implementation risk; proven Basil performance.
 
-**Cons:** rejects otherwise strong writing models because of runtime limitations; full-prefills common append-only edits on hybrid models; makes model identity leak into architecture decisions.
+**Cons:** rejects otherwise strong writing models because of runtime limitations; full-prefills common append-only edits on hybrid models; makes runtime constraints dominate model quality.
 
-**Decision:** reject as the long-term 0.2.0 direction.
+**Decision:** reject as the 0.2.0 direction.
 
 ### B. Replace MINT with a Radix/Paged prefix-cache system
 
-**Pros:** general prefix matching and reuse similar to high-throughput servers.
+**Pros:** generalized prefix matching and reuse similar to high-throughput servers.
 
-**Cons:** solves multi-request server scheduling that MINT does not have; increases memory ownership, eviction, block management, and correctness complexity dramatically.
+**Cons:** solves multi-request scheduling MINT does not have; adds block allocation, eviction, ownership, and correctness complexity far beyond the editor hot path.
 
-**Decision:** reject for 0.2.0 and likely unnecessary for a single-user editor hot path.
+**Decision:** reject.
 
-### C. Introduce a small capability-aware Prompt State Manager
+### C. Introduce a small capability-aware prompt-reuse policy
 
-Use three reconciliation decisions — append, rewind, rebuild — and preserve a precise token ledger for the state that is considered authoritative. Add speculative prompt/decode separation only where benchmark evidence justifies it.
+Keep one active prompt state, make prompt reconciliation explicit, and use exact token/state evidence to choose append, rewind, or rebuild.
 
-**Pros:** directly solves MINT's actual editing trajectory; preserves current Basil path; supports hybrid append reuse; remains testable and small; aligns with upstream direction.
+**Pros:** directly solves MINT's real typing trajectory; preserves Basil; enables hybrid append reuse where safe; small enough for one reviewable 0.2.0 slice; pure decision logic is easy to unit test.
 
-**Cons:** requires careful lifecycle/cancellation correctness and benchmark proof for any state copy/fork path.
+**Cons:** does not optimize arbitrary middle edits on non-rewindable recurrent state in this issue.
 
-**Decision:** recommended and selected.
+**Decision:** selected.
 
-## Architecture
+## 0.2.0 Architecture
 
-The target boundary is conceptually:
+The required architecture is:
 
 ```text
 ContextAssembler
@@ -109,38 +117,38 @@ ContextAssembler
  full prompt tokens
       │
       ▼
-PromptReusePolicy  ───────────────┐
-      │                           │
-      ├─ appendSuffix             │
-      ├─ rewindToCommonPrefix     │
-      └─ rebuild                  │
-      │                           │
-      ▼                           │
-PromptStateManager                │
-      │                           │
-      ├─ representedTokens        │
-      ├─ model identity           │
-      ├─ realized cache/state     │
-      ├─ logical progress         │
-      └─ telemetry                │
+PromptReusePolicy
       │
-      ├──── authoritative prompt state
+      ├─ appendSuffix
+      ├─ rewindToCommonPrefix
+      └─ rebuild
       │
-      └──── optional working/forked decode state
-                         │
-                         ▼
-                  Ghost Completion
+      ▼
+PromptStateManager / evolved PromptCacheBox
+      │
+      ├─ representedTokens
+      ├─ model identity
+      ├─ realized cache
+      └─ decision telemetry
+      │
+      ▼
+CompletionEngine
+      │
+      ▼
+Ghost Completion
 ```
 
-`PromptReusePolicy` must be pure and independent of MLX so its complete decision table can be tested without loading a model.
+The implementation may evolve `PromptCacheBox` in place or rename it if the new boundary is materially clearer. A rename alone is not a goal.
 
-`PromptStateManager` owns mutable MLX state and applies the policy result safely.
+`PromptReusePolicy` must be pure and independent of MLX so its decision table can be tested without loading a model.
+
+The mutable owner applies the policy to MLX state and remains fail-closed.
 
 ## Reuse Policy
 
 Policy order is intentional.
 
-### 1. Append suffix
+### 1. `appendSuffix`
 
 If the requested token stream strictly extends the exact represented token stream:
 
@@ -155,94 +163,74 @@ select:
 appendSuffix(start: 3)
 ```
 
-This path must not require arbitrary cache trimmability. It is allowed only when the token ledger and realized state are known to be aligned and no other model/input state makes partial continuation unsafe.
+This path does **not** require arbitrary cache trimmability. It is allowed only when:
 
-### 2. Rewind to common prefix
+- the model identity matches;
+- the represented-token ledger is exact for the reusable state;
+- the cache/state has not been invalidated by an error or incompatible operation;
+- the input shape/state permits suffix prefill safely.
 
-If the prompt diverges, compute the LCP and use the existing trim behavior only when every relevant cache/state component can perform the required rewind exactly.
+The concrete 3.31.4 API may limit which hybrid topologies MINT can prove safe. When proof is unavailable, the decision must fall back to rebuild rather than using model-name assumptions.
+
+### 2. `rewindToCommonPrefix`
+
+If the prompt diverges, compute the LCP and preserve the existing trim behavior only when the whole relevant cache topology can perform the required rewind exactly.
 
 ```text
 represented = ABCDEF
 requested   = ABCXYZ
-                  ^ divergence
 
 rewind -> ABC
 prefill -> XYZ
 ```
 
-No model-name allowlist may stand in for a capability check.
+This remains the Basil/pure-attention fast path.
 
-### 3. Rebuild
+### 3. `rebuild`
 
 Any unproven or mismatched case selects fresh prefill:
 
-- zero useful prefix,
-- non-rewindable divergence,
-- state/token-ledger mismatch,
-- model switch,
-- incompatible cache topology/configuration,
-- partial rewind result,
-- corrupted/cancelled state whose exact represented prompt cannot be proven.
+- zero useful prefix;
+- non-rewindable divergence;
+- state/token-ledger mismatch;
+- model switch;
+- incompatible cache topology/configuration;
+- partial rewind result;
+- failure/cancellation state whose represented prompt cannot be proven exact.
 
-Correctness always wins over cache reuse.
+Correctness always wins over reuse.
 
-## State Ownership
+## Prompt-State Invariant
 
-The durable runtime invariant is:
+The conceptual invariant remains:
 
 ```text
 User-authored prompt state = authoritative
 Ghost-generated state      = speculative
 ```
 
-The current cache is mutated by both prompt prefill and Ghost decoding and later repaired by trimming. This remains valid for the existing pure-attention path and does not need to be removed merely for architectural purity.
+#149 does **not** require changing the current generated-tail cleanup mechanism if the existing trim path remains correct for that topology. The issue first fixes reconciliation policy, not every internal ownership mechanism.
 
-For hybrid/non-rewindable state, however, a production optimization may maintain a canonical prompt state and run Ghost decode against a copy, snapshot, or staged working state:
-
-```text
-canonical prompt state
-        │
-        ├─ user suffix -> advance canonical
-        │
-        └─ fork/snapshot -> decode working state -> Ghost
-```
-
-This is **not automatically enabled**. The implementation must first measure copy/snapshot cost, peak unified memory, and fresh-prefill cost on representative hardware/models. If copying is too expensive, append-only reuse may still be valuable while Ghost decode uses another safe strategy.
+A future optimization may separate canonical prompt state from a copied/staged decode state, but only after memory/copy cost and correctness are measured. That follow-up must not block the required 0.2.0 slice.
 
 ## Dependency Strategy
 
-### Required evaluation
+Evaluate `mlx-swift-lm 3.31.4` from the current `3.31.3` baseline before changing MINT's reuse semantics.
 
-Evaluate `mlx-swift-lm 3.31.4` from the current `3.31.3` baseline before changing MINT's cache semantics.
+Accept the upgrade only if:
 
-The upgrade is accepted only if:
+- `swift test` and release build remain green;
+- current baseline models still load and generate correctly;
+- Basil's existing warm reuse does not materially regress;
+- no new lifecycle or memory regression appears in the existing benchmark/smoke path.
 
-- the project builds and tests cleanly,
-- current baseline models still load and generate correctly,
-- existing Basil warm reuse does not materially regress,
-- no new memory/lifecycle regression is observed.
+Do not pin MINT 0.2.0 directly to upstream `main` solely to consume unreleased cache-policy or staged-round internals. MINT can adopt the stable design principle locally and migrate to released upstream APIs later.
 
-### Explicit non-decision
+## Required Observability
 
-Do not pin MINT 0.2.0 to `mlx-swift-lm` main solely to consume unreleased `PromptCacheReusePolicy`, `KVCachePlan`, or staged-round internals. MINT may mirror their design principles through a small local abstraction and migrate toward stable upstream APIs later.
+MINTBench must be able to explain why a request was warm or cold.
 
-## Historical Prewarm Audit
-
-MINT documentation describes an A+B idle prefix-prewarm flow after background indexing, and Git history shows that such an implementation existed, but the current main source no longer contains the corresponding `prewarmPrefix` / `prewarm` path.
-
-#149 must resolve this source/document drift explicitly:
-
-1. determine whether idle prewarm still matches the 0.2.0 architecture;
-2. if useful, restore it through the new prompt-state boundary with exact-state checks;
-3. otherwise remove/update stale documentation and record why it is intentionally absent.
-
-A release must not claim a prewarm behavior that does not exist in source.
-
-## Observability
-
-Every benchmarkable reuse decision should expose enough evidence to explain latency rather than merely report it.
-
-Minimum fields:
+Required evidence:
 
 ```text
 cacheStrategy      append / rewind / rebuild
@@ -250,100 +238,104 @@ cacheMissReason    reason for rebuild or lost reuse
 promptTokens       full prompt size
 reusedTokens       skipped prefill
 prefilledTokens    newly evaluated prompt tokens
-prefillMs          prompt evaluation time
-copyMs             snapshot/fork time when present
 TTFC               first visible Ghost chunk
-peakMemory         where measurable
 ```
 
-The exact public/internal type names may differ, but equivalent evidence must be available to MINTBench.
+Add `prefillMs` if the current generation API exposes a reliable measurement without invasive instrumentation. Copy/snapshot timing is a follow-up field because production copy/fork is not required by #149.
 
-## Benchmark Matrix
+## Required Benchmark Trajectories
 
-MINTBench must cover trajectories that resemble real editing, not only two identical cold/warm invocations:
+Extend MINTBench beyond identical cold/warm invocations with deterministic editing trajectories:
 
-1. append typing;
+1. strict append typing;
 2. repeated append typing;
-3. one-character backspace;
-4. larger backspace;
-5. middle edit;
-6. rapid cancellation;
-7. Ghost reject;
-8. Ghost accept followed by another completion;
-9. crossing the current 512 recent-context boundary;
-10. Story Knowledge snapshot refresh;
-11. document switch and return;
-12. model switch.
+3. backspace/divergence;
+4. middle edit;
+5. rapid cancellation;
+6. crossing the current 512 recent-context boundary;
+7. Story Knowledge/context-prefix refresh when the corresponding fixture can be constructed deterministically;
+8. model switch.
 
-At minimum compare the current Basil baseline and one representative hybrid model at realistic prompt sizes. Qwen3.8-class models should be evaluated when supported by the selected stable MLX dependency, but #149 must not hard-code its contract to one model family.
+Document switch/return and Ghost accept/reject may be covered by controller/lifecycle tests if they are awkward to express in the CLI harness; they do not justify building a multi-document cache pool in #149.
 
-## Correctness Tests
+At minimum compare the existing Basil baseline with one representative hybrid model that is supported by the selected stable dependency. The issue contract must not depend on a specific Qwen model being loadable.
+
+## Testing
 
 ### Pure policy tests
 
 Without MLX/model loading, prove:
 
 - strict extension selects append;
-- identical/no-suffix prompts choose a defined safe path;
+- identical/no-suffix input chooses a defined safe path;
 - divergence selects rewind only when allowed;
 - non-rewindable divergence rebuilds;
 - zero-prefix mismatch rebuilds;
 - model/state mismatch rebuilds;
 - policy never depends on model ID.
 
-### Cache/state tests
+### Mutable-state tests
 
-Using deterministic fixtures or minimal supported model probes, prove:
+Prove:
 
-- cached append output/logits agree with fresh-prefill behavior within the expected deterministic tolerance;
-- rewind output agrees with fresh prefill for supported cache topologies;
-- partial/heterogeneous rewind cannot be committed;
-- cancellation cannot cause generated Ghost tokens to become represented authoritative prompt tokens;
-- any forked working state cannot mutate the canonical state after rejection/cancellation.
+- append does not first invoke an unnecessary trim requirement;
+- supported rewind trims exactly the requested amount;
+- incomplete rewind is never accepted;
+- failed/cancelled state cannot be recorded as a reusable exact prompt when that exactness is unproven;
+- model switch invalidates reuse as today.
 
-### Regression tests
+### Regression evidence
 
-Preserve existing model lifetime, shutdown, prompt-cache cancellation, Hangul/keyboard, and MINTBench behavior unless the new design explicitly replaces the tested contract.
+Preserve existing model lifetime, shutdown, prompt-cache cancellation, editor IME/keyboard, and current Basil benchmark behavior unless this issue explicitly supersedes a tested contract.
 
-## Optional 0.2.0 Anchor
+Where practical, a deterministic cached path should be compared against fresh prefill as a correctness oracle. Real-model oracle work that cannot be made deterministic belongs in benchmark evidence rather than brittle unit tests.
 
-If benchmarks show that non-rewindable middle edits remain an important latency cliff, #149 may add a **single stable anchor + one active state** design.
+## Historical Prewarm Drift
 
-This must remain bounded:
+Git history and current documentation disagree about the A+B idle prewarm path: historical code implemented it, while current main no longer exposes the described `prewarmPrefix` / `prewarm` flow.
 
-```text
-stable anchor -> replay suffix -> active state
-```
+#149 must perform a bounded audit because prewarm semantics depend directly on what state is considered reusable. The required outcome is documentation truthfulness:
 
-The anchor should align with an already-stable prompt/context boundary and must be validated against the actual full prompt token sequence; string or independently tokenized block boundaries are not assumed to be token-concatenation safe.
-
-Do not build a general multi-document cache bank in 0.2.0.
+- if restoring prewarm is trivial and compatible with the new exact-state contract, it may land here;
+- if restoration is non-trivial, open/identify a follow-up and update the stale documentation in #149 rather than expanding this issue into a second subsystem.
 
 ## Failure Handling
 
-All cache optimization is fail-closed.
+All optimization is fail-closed.
 
-- If exact represented tokens cannot be proven, rebuild.
-- If a required rewind reports incomplete progress, discard the candidate state and rebuild.
-- If a state copy/snapshot cannot be proven independent, do not use it as canonical/working separation.
-- If model dependency changes alter cache semantics, preserve correctness first and report lost reuse through telemetry.
+- Unknown exact state -> rebuild.
+- Unsupported rewind -> rebuild.
+- Incomplete trim -> discard candidate state and rebuild.
+- Model change -> invalidate.
+- Dependency behavior change -> preserve correctness and expose lost reuse in telemetry.
 - Busy/overlapping operations must never share unsynchronized mutable cache state.
 
-## Rollout
+## Implementation Boundary
 
-Implementation should land in reviewable slices rather than one large refactor:
+#149 should remain one reviewable production slice:
 
-1. dependency/baseline proof;
-2. pure policy + telemetry;
-3. append-only capability path while preserving legacy rewind;
-4. trajectory benchmarks/correctness oracle;
-5. hybrid fork/checkpoint spike and production decision;
-6. optional bounded anchor only if benchmark evidence requires it;
-7. documentation and #119 release-gate evidence.
+```text
+3.31.4 evaluation
+    ↓
+PromptReusePolicy
+    ↓
+append / rewind / rebuild application
+    ↓
+strategy + miss-reason telemetry
+    ↓
+trajectory tests / benchmark evidence
+    ↓
+docs + #119 evidence
+```
 
-A failed experimental fork/checkpoint optimization is an acceptable result if the measurements are retained and the safe append/rewind/rebuild architecture remains.
+### Follow-up only unless required to prove the core
 
-## Non-Goals for 0.2.0
+- canonical prompt cache + decode-state fork;
+- recurrent checkpoint/restore;
+- 512-aligned prompt-state anchor/replay;
+- cache-copy timing/peak-memory experiments beyond what is needed to decide a later issue.
+
+## Non-Goals for 0.2.0 #149
 
 - Radix tree or generalized prefix-trie serving cache;
 - Paged KV allocator;
@@ -353,17 +345,18 @@ A failed experimental fork/checkpoint optimization is an acceptable result if th
 - arbitrary recurrent rewind;
 - large checkpoint banks;
 - model-ID-specific cache behavior;
-- speculative decoding as a product feature unless independently justified.
+- speculative decoding as a product feature;
+- production prompt/decode fork without a separately reviewed benchmark-backed contract.
 
 ## Acceptance Criteria
 
-- Strict token-prefix extension can reuse exact cached prompt state without requiring arbitrary trim when the realized state is otherwise safe.
+- `mlx-swift-lm 3.31.4` is either adopted with baseline evidence or explicitly rejected with a concrete compatibility/regression reason.
+- Strict token-prefix extension can reuse exact cached prompt state without requiring arbitrary trim when the stable dependency exposes enough state to prove the path safe.
 - Divergent prompts reuse LCP only when exact rewind is supported; otherwise they rebuild.
 - The existing Basil pure-attention warm path has no material latency/reuse regression.
-- At least one hybrid-model benchmark records append-reuse behavior versus fresh prefill, or records a concrete dependency/support blocker without weakening correctness.
-- MINTBench explains each run with reuse strategy and miss reason.
-- Deterministic cached/fresh correctness checks cover supported trajectories.
-- Cancellation, Ghost rejection, document changes, and model changes cannot publish or carry stale speculative state.
-- Historical prewarm source/document drift is resolved.
+- At least one supported hybrid-model benchmark records append-reuse behavior versus fresh prefill, or records the exact stable-API blocker that prevents safe reuse without weakening correctness.
+- MINTBench reports reuse strategy and miss reason alongside prompt/reuse evidence.
+- Policy and mutable-state tests cover append, rewind, rebuild, invalidation, cancellation/failure, and partial-rewind refusal.
+- Historical prewarm source/document drift is made truthful without expanding #149 into a separate prewarm subsystem.
 - `swift test` and release build pass.
-- #119 can consume the benchmark/correctness evidence as a release-readiness gate.
+- #119 can consume the resulting correctness/latency evidence as an RC gate.
