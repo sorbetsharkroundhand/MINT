@@ -1,108 +1,43 @@
-# MINT — Agent Constitution
+# MINT — Agent Guide
 
-MINT is a **local AI writing platform, Fiction First** for macOS (SwiftUI + AppKit + MLX). General Writing is a first-class path; Fiction is the deepest specialization.
+Local macOS writing app, Fiction First; General writing and AI-disabled editing remain supported.
 
-Read:
-- `PLAN.md` for architecture/current roadmap.
-- `docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md` for the 0.2.0 product contract.
-- Child issue for the exact implementation/acceptance contract.
+## Read only what the task needs
+- This file contains shared invariants. Do not reread it if already present in context.
+- Before planning/coding an issue, refresh the checkout and read that issue's current body plus relevant recent comments/linked active PR. Follow actual blockers, not every related issue.
+- Read [release epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) when deciding scope/dependencies; [gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) for RC work.
+- Use `PLAN.md` as an optional code/document index. Search paths/symbols, then read relevant sections.
+- Historical specs, plans, benchmarks and README vision are not current implementation contracts. Read them only to answer a concrete question.
+- Do not routinely fetch all open issues, unrelated PRs, or every plan/skill. Follow applicable higher-priority skill requirements; repository guidance cannot disable them.
+- If sources conflict, report the specific conflict before coding. Current issue contracts take precedence over historical repo plans; user instructions remain authoritative.
 
-## Issue freshness protocol
+## Product and data invariants
+- Editor first; no model/network setup required to write. Local inference only, no telemetry.
+- Generic project/storage code must not depend on Fiction types.
+- Manuscript and user decisions are durable; derived Intelligence is rebuildable.
+- Never migrate legacy `entries.json` in place. Verify a new project before activation; failure preserves the previous valid state.
+- Reject path traversal/symlink escape. Cache cleanup must not delete user data.
+- Important claims require supporting original evidence; uncertain inference stays quiet.
+- Cursor-bounded completion excludes future knowledge. Explicit whole-project inspection has its own scope.
+- Keep scene hashes distinct from persistent manuscript IDs; use `EvidenceAnchor` across layers and `SourceAnchor` for re-anchoring.
+- Style preferences belong to `WriterStyleProfile`, not User Canon.
 
-GitHub issue bodies are the freshness authority for active 0.2.0 work. A local checkout or previously cached plan may be older than the issue contract.
+## Editor and execution invariants
+- Preserve Hangul IME; never generate Ghost during marked text.
+- Preserve Ghost Tab accept / right-arrow partial / Esc reject, cursor-line highlight, undo, autosave/recovery and Markdown/EPUB/media/math round-trip.
+- Tool transitions preserve editor focus/selection unless explicitly invoked otherwise.
+- No disk scan, retrieval LLM call or rebuild in prediction hot paths.
+- Background tasks are cancellable, project/generation scoped, stale-safe, hash-memoized where applicable, thermal/low-power aware, and yield immediately to foreground Ghost.
+- Incremental work is normal; full rebuild is load/recovery/global-restyle.
+- Keep Knowledge logic out of `BlockTextView` and `EntryStore`.
+- Opaque manuscript, restrained material in chrome/transient tools; no stacked glass.
 
-Before planning/coding an issue, run the equivalent of:
-
-```bash
-git fetch origin
-gh issue view 99 --repo sorbetsharkroundhand/MINT --json number,title,body,state,url,updatedAt
-gh issue list --repo sorbetsharkroundhand/MINT --state open --limit 100 --json number,title,updatedAt,url
-gh issue view <TARGET> --repo sorbetsharkroundhand/MINT --json number,title,body,state,url,updatedAt
-gh pr view 120 --repo sorbetsharkroundhand/MINT --json number,state,isDraft,headRefName,headRefOid,updatedAt,url
-```
-
-Then:
-- compare the target issue with local `PLAN.md` / `docs/superpowers/`;
-- treat a newer GitHub issue contract as authoritative for scope/acceptance;
-- if they materially conflict, report the delta before coding rather than guessing;
-- never assume a remembered issue list is current.
-
-## Build / run
-
-- Type/build check: `swift build`
-- Tests: `swift test`
-- Bench compile: `swift build --product MINTBench`
-- App bundle: `scripts/build-mint-app.sh`
-- Smoke: `scripts/smoke-mint-app.sh`
-- UI smoke: `scripts/ui-smoke-mint-app.sh`
-- Runtime MLX may require `scripts/prepare-metallib.sh`; plain SwiftPM output can lack the required metallib.
-- UI smoke isolation uses **`CFFIXED_USER_HOME`**. `$HOME` alone is not sufficient.
-
-## Product invariants
-
-1. **Writing Platform, Fiction First.** `WritingProject` is generic; Fiction-specific types stay below the platform layer.
-2. **Editor first.** AI is optional. Keep the core editor good without a model.
-3. **Local only.** No remote inference or telemetry.
-4. **User data wins.** Manuscript + User Canon are durable. AI-derived Intelligence is rebuildable.
-5. **Evidence first.** Important warnings must resolve to original manuscript evidence.
-6. **Quiet AI.** Prefer silence over low-confidence interruption.
-7. **Foreground prediction wins.** Background indexing/judging yields or cancels immediately.
-8. **Incremental by default.** Full rebuild is recovery, not the normal path.
-9. **No future leakage.** Cursor-bounded context excludes later story knowledge.
-10. **Selective Liquid Glass.** Editor body is opaque; glass is semantic chrome/transient intelligence, never a nested default container style.
-
-## Editor invariants
-
-- Preserve Hangul IME composition. Never trigger Ghost while marked text is active.
-- Preserve Ghost `Tab` accept / `→` partial accept / `Esc` reject.
-- Preserve cursor-line highlight.
-- Preserve undo, autosave/recovery, Markdown/EPUB/media/math round-trip.
-- Prediction hot path performs no disk scan, retrieval LLM call, or background rebuild.
-- Do not let shell/docking/panel transitions steal editor first responder unless explicitly invoked.
-
-## Architecture boundaries
-
-- Generic project/storage: `Sources/MINTCore/Project/`
-- Story knowledge/retrieval/continuity: `Sources/MINTCore/Knowledge/`
-- Fiction-only domain: `Sources/MINTCore/Fiction/`
-- Editor engine: `Sources/MINTCore/Editor/`
-- Ask MINT: `Sources/MINTCore/Agent/`
-- Writing Quality: `Sources/MINTCore/WritingQuality/`
-- Do not add Knowledge responsibilities to `BlockTextView` or `EntryStore`.
-- Derived `DocumentOutline.Scene` hashes are not persistent manuscript IDs.
-- Existing `SourceAnchor` is a re-anchoring utility; cross-layer evidence uses `EvidenceAnchor`.
-- Writing Quality diagnostics are independent from Fiction Story Intelligence; style preferences belong to `WriterStyleProfile`, not User Canon.
-
-## Concurrency / background work
-
-Every background task must:
-- cooperate with cancellation;
-- be project/generation scoped;
-- avoid stale publication;
-- obey thermal/low-power gates where relevant;
-- memoize by content hash where applicable;
-- stay below foreground Ghost priority.
-
-## Storage safety
-
-- Never modify legacy `entries.json` in place during 0.2.0 migration.
-- Verify a new project before activation.
-- Failure must leave the previous valid manuscript/project usable.
-- Block path traversal/symlink escape.
-- Derived `Intelligence/` may be deleted/rebuilt without losing user data.
-
-## Git / delivery
-
-- Keep `main` buildable.
-- Prefer one child issue = one reviewable PR.
-- New behavior: failing test → minimal fix → regression coverage → refactor.
-- Do not mark an issue complete before main merge + CI/E2E evidence.
-- Replacement surface must land before removing legacy primary UI.
-- Before modifying a stale branch, compare it with current `main`; do not overwrite unrelated work.
-
-## Documentation language / token budget
-
-- **Repo docs, plans, issue titles/bodies, PR descriptions, and implementation comments default to English.**
-- User-facing UI copy may remain Korean/localized where product design requires it.
-- Korean may appear in fixtures only when the test specifically validates Korean/IME/Unicode behavior.
-- Keep canonical docs concise; move historical logs to PRs/issues rather than repeating them in `PLAN.md`.
+## Verification and delivery
+- Compile: `swift build`; tests: `swift test`; bench compile: `swift build --product MINTBench`.
+- Runtime: `scripts/prepare-metallib.sh` when needed; bundle: `scripts/build-mint-app.sh`; smoke: `scripts/smoke-mint-app.sh`; UI: `scripts/ui-smoke-mint-app.sh`.
+- Isolate UI tests with `CFFIXED_USER_HOME`, not HOME alone; never use real manuscripts.
+- Keep main buildable; compare stale branches before editing; prefer one bounded issue/PR.
+- New behavior needs failing regression coverage before implementation. Never weaken CI.
+- Preserve access to user data before retiring UI. Close issues only after main merge and required CI/E2E evidence.
+- Ad-hoc bundle smoke is not Store distribution proof; follow #150/#119.
+- English for repo docs, issues, PRs and implementation comments; localized UI/Korean-specific fixtures may use Korean.
