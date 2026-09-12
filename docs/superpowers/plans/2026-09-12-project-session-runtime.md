@@ -745,7 +745,8 @@ func testEnteringLegacyFlushesProjectBeforeConstructingEntryStore() async throws
     let durable = try await projectStore.activeProject()
     XCTAssertEqual(durable?.documents[0].body, "durable before legacy")
     XCTAssertEqual(controller.mode, .legacy)
-    XCTAssertNil(controller.projectRuntime)
+    XCTAssertEqual(session.phase, .suspended)
+    XCTAssertNil(session.activeProject)
     XCTAssertNotNil(controller.legacyStore)
 }
 ```
