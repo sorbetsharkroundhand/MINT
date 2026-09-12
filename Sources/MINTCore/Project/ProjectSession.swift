@@ -27,6 +27,7 @@ public final class ProjectSession: ObservableObject {
     private var generation: UInt64 = 0
     private var dirtyGeneration: UInt64?
     private var saveTask: Task<Void, Never>?
+    private var isTransitioning = false
 
     public init(
         store: ProjectStore,
@@ -81,7 +82,8 @@ public final class ProjectSession: ObservableObject {
 
     /// Switch only after ProjectStore has verified and activated the target.
     public func activateProject(id: WritingProjectID) async throws {
-        willTransition?()
+        try beginTransition()
+        defer { finishTransition() }
         cancelAutosave()
         do {
             try await flush()
@@ -105,7 +107,8 @@ public final class ProjectSession: ObservableObject {
     /// Used by onboarding/import after a project has been explicitly created by the user.
     /// Save + verification complete before active UI state changes.
     public func saveAndActivate(_ project: WritingProject) async throws {
-        willTransition?()
+        try beginTransition()
+        defer { finishTransition() }
         cancelAutosave()
         do {
             try await flush()
@@ -127,6 +130,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func selectDocument(_ id: WritingDocumentID?) {
+        guard !isTransitioning else { return }
         guard let project = activeProject else {
             selectedDocumentID = nil
             runtimeIdentity = nil
@@ -149,6 +153,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func selectWorkspaceMode(_ requested: WorkspaceMode) {
+        guard !isTransitioning else { return }
         guard let project = activeProject else {
             workspaceMode = .write
             return
@@ -159,6 +164,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func updateSelectedDocumentBody(_ body: String) {
+        guard !isTransitioning else { return }
         guard var project = activeProject,
             let selectedDocumentID,
             let index = project.documents.firstIndex(where: { $0.id == selectedDocumentID }),
@@ -172,6 +178,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func renameSelectedDocument(to title: String) {
+        guard !isTransitioning else { return }
         guard var project = activeProject,
             let selectedDocumentID,
             let index = project.documents.firstIndex(where: { $0.id == selectedDocumentID }),
@@ -189,6 +196,7 @@ public final class ProjectSession: ObservableObject {
         title: String = "Untitled",
         kind: WritingDocument.Kind = .manuscript
     ) -> WritingDocumentID? {
+        guard !isTransitioning else { return nil }
         guard var project = activeProject else { return nil }
         let document = WritingDocument(
             id: WritingDocumentID(),
@@ -205,6 +213,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func trashSelectedDocument() {
+        guard !isTransitioning else { return }
         guard var project = activeProject,
             let removedID = selectedDocumentID,
             let removed = project.documents.first(where: { $0.id == removedID }),
@@ -233,6 +242,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func restoreDocument(_ id: WritingDocumentID) {
+        guard !isTransitioning else { return }
         guard var project = activeProject,
             project.trashedDocumentIDs.contains(id),
             project.documents.contains(where: { $0.id == id })
@@ -270,6 +280,18 @@ public final class ProjectSession: ObservableObject {
                 return
             }
         }
+    }
+
+    /// Transition participants may synchronously commit marked text before the gate closes.
+    /// Once closed, stale UI callbacks cannot mutate either side of the ownership handoff.
+    private func beginTransition() throws {
+        guard !isTransitioning else { throw ProjectSessionError.transitionInProgress }
+        willTransition?()
+        isTransitioning = true
+    }
+
+    private func finishTransition() {
+        isTransitioning = false
     }
 
     private func adopt(_ project: WritingProject?) {

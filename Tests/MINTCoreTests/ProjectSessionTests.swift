@@ -160,6 +160,10 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertEqual(session.savePhase, .failed)
         XCTAssertEqual(durable?.id, original.id)
         XCTAssertEqual(durable?.documents[0].body, "A")
+
+        session.updateSelectedDocumentBody("retry after failed transition")
+        XCTAssertEqual(session.selectedDocument?.body, "retry after failed transition")
+        XCTAssertEqual(session.savePhase, .dirty)
     }
 
     /// Protected break: trashing must hide the selected document without removing its
@@ -352,6 +356,181 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertEqual(session.activeProject?.id, other.id)
         let reopenedOriginal = try await store.load(id: original.id)
         XCTAssertEqual(reopenedOriginal.documents[0].body, "committed marked text")
+    }
+
+    /// Protected break: late editor callbacks arriving after the outgoing flush must not
+    /// mutate the old owner or advance identity while activation is awaiting its commit.
+    func testMutationsDuringBlockedActivationCannotAlterTransitionBoundary() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = fictionProject()
+        let destination = generalProject()
+        let reliableStore = ProjectStore(root: root)
+        try await reliableStore.save(original)
+        try await reliableStore.save(destination)
+        try await reliableStore.activate(id: original.id)
+        let files = BlockingActiveMarkerProjectFiles()
+        let sessionStore = ProjectStore(root: root, fileSystem: files)
+        let session = ProjectSession(
+            store: sessionStore,
+            defaults: defaults,
+            autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        session.selectWorkspaceMode(.map)
+        let outgoingSnapshot = try XCTUnwrap(session.activeProject)
+        let outgoingIdentity = try XCTUnwrap(session.runtimeIdentity)
+
+        let transition = Task { try await session.activateProject(id: destination.id) }
+        let didBlock = await Task.detached { files.waitUntilBlocked(timeout: 2) }.value
+        guard didBlock else {
+            files.releaseWrite()
+            _ = try await transition.value
+            return XCTFail("Activation did not reach the active-marker gate")
+        }
+
+        session.updateSelectedDocumentBody("late body")
+        session.renameSelectedDocument(to: "Late title")
+        let lateDocumentID = session.createDocument(title: "Late document", kind: .note)
+        session.trashSelectedDocument()
+        session.selectDocument(original.documents[1].id)
+        session.selectWorkspaceMode(.review)
+        session.restoreDocument(original.documents[0].id)
+        let boundaryStayedFrozen = session.activeProject == outgoingSnapshot
+            && session.runtimeIdentity == outgoingIdentity
+            && session.workspaceMode == .map
+            && lateDocumentID == nil
+
+        files.releaseWrite()
+        try await transition.value
+
+        XCTAssertTrue(boundaryStayedFrozen)
+        XCTAssertEqual(session.activeProject, destination)
+        XCTAssertEqual(session.phase, .ready)
+        let durableActive = try await reliableStore.activeProject()
+        let durableOriginal = try await reliableStore.load(id: original.id)
+        XCTAssertEqual(durableActive, destination)
+        XCTAssertEqual(durableOriginal, outgoingSnapshot)
+
+        session.updateSelectedDocumentBody("editable after transition")
+        XCTAssertEqual(session.selectedDocument?.body, "editable after transition")
+        XCTAssertEqual(session.savePhase, .dirty)
+    }
+
+    /// Protected break: save-and-activate has the same post-flush ownership boundary as
+    /// ordinary activation and must not discard a late mutation while committing its marker.
+    func testMutationDuringBlockedSaveAndActivateCannotAlterTransitionBoundary() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = fictionProject()
+        let candidate = generalProject()
+        let reliableStore = ProjectStore(root: root)
+        try await reliableStore.save(original)
+        try await reliableStore.activate(id: original.id)
+        let files = BlockingActiveMarkerProjectFiles()
+        let session = ProjectSession(
+            store: ProjectStore(root: root, fileSystem: files),
+            defaults: defaults,
+            autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        let outgoingSnapshot = try XCTUnwrap(session.activeProject)
+        let outgoingIdentity = try XCTUnwrap(session.runtimeIdentity)
+
+        let transition = Task { try await session.saveAndActivate(candidate) }
+        let didBlock = await Task.detached { files.waitUntilBlocked(timeout: 2) }.value
+        guard didBlock else {
+            files.releaseWrite()
+            _ = try await transition.value
+            return XCTFail("Save-and-activate did not reach the active-marker gate")
+        }
+
+        session.updateSelectedDocumentBody("late body")
+        let boundaryStayedFrozen = session.activeProject == outgoingSnapshot
+            && session.runtimeIdentity == outgoingIdentity
+
+        files.releaseWrite()
+        try await transition.value
+
+        XCTAssertTrue(boundaryStayedFrozen)
+        XCTAssertEqual(session.activeProject, candidate)
+        let durableOriginal = try await reliableStore.load(id: original.id)
+        let durableActive = try await reliableStore.activeProject()
+        XCTAssertEqual(durableOriginal, outgoingSnapshot)
+        XCTAssertEqual(durableActive, candidate)
+    }
+
+    /// Protected break: a second activation entering the first transition's await window
+    /// must be rejected before either durable or in-memory ownership can split.
+    func testOverlappingActivationsAreRejectedBeforeFirstCommit() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let original = fictionProject()
+        let firstDestination = generalProject()
+        var secondDestination = fictionProject()
+        secondDestination.title = "Second destination"
+        let reliableStore = ProjectStore(root: root)
+        for project in [original, firstDestination, secondDestination] {
+            try await reliableStore.save(project)
+        }
+        try await reliableStore.activate(id: original.id)
+        let files = BlockingActiveMarkerProjectFiles()
+        let session = ProjectSession(
+            store: ProjectStore(root: root, fileSystem: files),
+            defaults: defaults,
+            autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        var transitionCallbackCount = 0
+        session.willTransition = { transitionCallbackCount += 1 }
+
+        let firstTransition = Task {
+            try await session.activateProject(id: firstDestination.id)
+        }
+        let didBlock = await Task.detached { files.waitUntilBlocked(timeout: 2) }.value
+        guard didBlock else {
+            files.releaseWrite()
+            _ = try await firstTransition.value
+            return XCTFail("Activation did not reach the active-marker gate")
+        }
+        let phaseBeforeOverlap = session.phase
+        let errorBeforeOverlap = session.lastErrorMessage
+
+        var secondOutcome: TransitionAttemptOutcome?
+        let secondTransition = Task {
+            do {
+                try await session.activateProject(id: secondDestination.id)
+                secondOutcome = .succeeded
+            } catch let error as ProjectSessionError {
+                secondOutcome = .sessionFailure(error)
+            } catch {
+                secondOutcome = .otherFailure
+            }
+        }
+        let deadline = ContinuousClock.now.advanced(by: .milliseconds(250))
+        while secondOutcome == nil, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
+        let outcomeBeforeFirstCommit = secondOutcome
+        let phaseAfterOverlap = session.phase
+        let errorAfterOverlap = session.lastErrorMessage
+        let callbackCountBeforeFirstCommit = transitionCallbackCount
+
+        files.releaseWrite()
+        try await firstTransition.value
+        await secondTransition.value
+
+        XCTAssertEqual(outcomeBeforeFirstCommit, .sessionFailure(.transitionInProgress))
+        XCTAssertEqual(phaseAfterOverlap, phaseBeforeOverlap)
+        XCTAssertEqual(errorAfterOverlap, errorBeforeOverlap)
+        XCTAssertEqual(callbackCountBeforeFirstCommit, 1)
+        XCTAssertEqual(session.activeProject, firstDestination)
+        XCTAssertEqual(session.phase, .ready)
+        let durableActive = try await reliableStore.activeProject()
+        XCTAssertEqual(durableActive, firstDestination)
     }
 
     /// Protected break: clearing dirty state after an older snapshot saves while a newer
@@ -557,6 +736,54 @@ private final class BlockingManifestProjectFiles: ProjectFileSystem, @unchecked 
     func writeAtomically(_ data: Data, to url: URL) throws {
         condition.lock()
         let blockThisWrite = shouldBlock && url.lastPathComponent == "project.json"
+        if blockThisWrite {
+            shouldBlock = false
+            isBlocked = true
+            condition.broadcast()
+            while !isReleased { condition.wait() }
+        }
+        condition.unlock()
+        try real.writeAtomically(data, to: url)
+    }
+
+    func waitUntilBlocked(timeout: TimeInterval) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        while !isBlocked {
+            guard condition.wait(until: deadline) else { return isBlocked }
+        }
+        return true
+    }
+
+    func releaseWrite() {
+        condition.lock()
+        isReleased = true
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
+private enum TransitionAttemptOutcome: Equatable {
+    case succeeded
+    case sessionFailure(ProjectSessionError)
+    case otherFailure
+}
+
+private final class BlockingActiveMarkerProjectFiles: ProjectFileSystem, @unchecked Sendable {
+    private let real = LocalProjectFileSystem()
+    private let condition = NSCondition()
+    private var shouldBlock = true
+    private var isBlocked = false
+    private var isReleased = false
+
+    func createDirectory(at url: URL) throws { try real.createDirectory(at: url) }
+    func read(_ url: URL) throws -> Data { try real.read(url) }
+    func fileExists(at url: URL) -> Bool { real.fileExists(at: url) }
+
+    func writeAtomically(_ data: Data, to url: URL) throws {
+        condition.lock()
+        let blockThisWrite = shouldBlock && url.lastPathComponent == "active-project.json"
         if blockThisWrite {
             shouldBlock = false
             isBlocked = true

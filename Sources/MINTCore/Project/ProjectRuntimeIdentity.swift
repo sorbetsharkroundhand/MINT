@@ -37,6 +37,17 @@ public enum ProjectSavePhase: Equatable, Sendable {
     case failed
 }
 
+public enum ProjectSessionError: Error, Equatable, LocalizedError, Sendable {
+    case transitionInProgress
+
+    public var errorDescription: String? {
+        switch self {
+        case .transitionInProgress:
+            "다른 프로젝트 전환이 진행 중입니다."
+        }
+    }
+}
+
 public struct RecentProjectSummary: Equatable, Sendable, Identifiable {
     public let id: WritingProjectID
     public let title: String
