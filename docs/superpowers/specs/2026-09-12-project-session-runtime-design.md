@@ -46,7 +46,7 @@ Legacy Workspace -> EntryStore -> entries.json
 
 ## Runtime State and Identity
 
-Add a project runtime identity that contains:
+Add a stable document key that contains project ID plus document ID. Add a runtime identity that contains that key plus a monotonically increasing generation:
 
 - `projectID: WritingProjectID`
 - `documentID: WritingDocumentID`
@@ -54,11 +54,14 @@ Add a project runtime identity that contains:
 
 Project and document IDs must always be considered together. Imported libraries can contain identical document UUIDs, so a raw document UUID is not a runtime identity.
 
+The editor and cursor/undo state use the stable project/document key; body edits must not look like document switches. Completion, indexing, persistence, and other asynchronous work use the full runtime identity so an older generation cannot publish after later edits or an A -> B -> A transition.
+
 `ProjectSession` publishes a bootstrap phase:
 
 - `loading`
 - `needsProject`
 - `ready`
+- `suspended`
 - `failed(ProjectSessionFailure)`
 
 The session owns the active `WritingProject`, selected document, workspace mode, dirty generation, save phase, debounced save task, persisted per-project selection, and recent project identifiers. External code mutates documents only through session methods.
@@ -113,7 +116,7 @@ Import failure or cancellation keeps the previous project usable and preserves t
 
 ## Editor Boundary
 
-`MintBlockEditor` consumes a project runtime identity and a binding backed by `ProjectSession`. EntryStore-specific search types become neutral editor values.
+`MintBlockEditor` consumes the stable project/document key and a binding backed by `ProjectSession`. EntryStore-specific search types become neutral editor values. Asynchronous editor callbacks additionally capture the full runtime identity when generation-sensitive publication is required.
 
 Before leaving a document, the editor commits marked text and records its position. When runtime identity changes it:
 
