@@ -9,10 +9,18 @@ import Foundation
 public final class ImportProjectCoordinator {
     private let store: ProjectStore
     private let session: ProjectSession
+    private let cancellationCheckpoint: () async throws -> Void
 
-    public init(store: ProjectStore, session: ProjectSession) {
+    public init(
+        store: ProjectStore,
+        session: ProjectSession,
+        cancellationCheckpoint: @escaping () async throws -> Void = {
+            try Task.checkCancellation()
+        }
+    ) {
         self.store = store
         self.session = session
+        self.cancellationCheckpoint = cancellationCheckpoint
     }
 
     @discardableResult
@@ -21,19 +29,12 @@ public final class ImportProjectCoordinator {
         mode: WritingMode,
         title: String
     ) async throws -> LegacyMigrationResult {
-        try Task.checkCancellation()
-        let result = try await store.migrateLegacy(
+        let result = try await store.prepareLegacyMigration(
             from: sourceURL,
             mode: mode,
             title: title)
-        try Task.checkCancellation()
-
-        // Migration already activated a verified target. Reflect it in UI session only
-        // after the migration returned success.
-        try await session.loadActiveProject()
-        guard session.activeProject?.id == result.projectID else {
-            throw ProjectStoreError.invalidManifest
-        }
+        try await cancellationCheckpoint()
+        try await session.activateProject(id: result.projectID)
         return result
     }
 }
