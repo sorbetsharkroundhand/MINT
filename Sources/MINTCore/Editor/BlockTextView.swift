@@ -299,12 +299,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         var lastSyncedText = ""
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
         var lastFocusRequest = 0
-        /// Search counters are session-local, so the stable editor identity is part of dedupe.
-        private struct ConsumedSearchJump: Equatable {
-            let identity: EditorDocumentIdentity
-            let sequence: Int
-        }
-        private var lastConsumedSearchJump: ConsumedSearchJump?
+        /// Search counters are session-local, so each stable editor identity keeps its own
+        /// consumed sequence across A -> B -> A transitions.
+        private var lastConsumedSearchJumpByDocument: [EditorDocumentIdentity: Int] = [:]
         /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
         var selectionByDocument: [EditorDocumentIdentity: NSRange] = [:]
         /// 현재 로드된 안정적 문서 identity — 전환 감지·커서 저장/복원 키.
@@ -322,18 +319,15 @@ public struct MintBlockEditor: NSViewRepresentable {
             _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
         ) {
             guard let jump, jump.documentID == identity.documentID else { return }
-            lastConsumedSearchJump = ConsumedSearchJump(
-                identity: identity, sequence: jump.sequence)
+            lastConsumedSearchJumpByDocument[identity] = jump.sequence
         }
 
         func consumeSearchJump(
             _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
         ) -> EditorSearchJump? {
             guard let jump, jump.documentID == identity.documentID else { return nil }
-            let consumption = ConsumedSearchJump(
-                identity: identity, sequence: jump.sequence)
-            guard consumption != lastConsumedSearchJump else { return nil }
-            lastConsumedSearchJump = consumption
+            guard lastConsumedSearchJumpByDocument[identity] != jump.sequence else { return nil }
+            lastConsumedSearchJumpByDocument[identity] = jump.sequence
             return jump
         }
 

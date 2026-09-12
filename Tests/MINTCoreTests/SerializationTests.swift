@@ -401,36 +401,51 @@ final class SerializationTests: XCTestCase {
         XCTAssertNil(view.ghostSnapshotForAccessibility())
     }
 
-    /// Search request counters are local to a project session. A new stable project identity
-    /// must therefore consume its own sequence even when an imported document UUID collides.
-    @MainActor func testSameSequenceSearchJumpIsConsumedAcrossProjectIdentityChange() {
+    /// Search request counters are local to a project session. Returning A after consuming B
+    /// must not replay A's unchanged request over the selection restored for A.
+    @MainActor func testSearchJumpConsumptionSurvivesABAReturn() {
         let view = makeEditor()
-        view.load(markdown: "first target second target")
+        view.load(markdown: "first target second target third target")
         let documentID = WritingDocumentID()
-        let firstIdentity = EditorDocumentIdentity.project(
+        let identityA = EditorDocumentIdentity.project(
             ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
-        let secondIdentity = EditorDocumentIdentity.project(
+        let identityB = EditorDocumentIdentity.project(
             ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
         var body = view.serialize()
         let editor = MintBlockEditor(
             text: Binding(get: { body }, set: { body = $0 }),
-            documentIdentity: firstIdentity)
+            documentIdentity: identityA)
         let coordinator = editor.makeCoordinator()
-        let firstJump = EditorSearchJump(
+        let jumpA1 = EditorSearchJump(
             documentID: documentID, query: "first", sequence: 1)
-        let secondJump = EditorSearchJump(
+        let jumpB1 = EditorSearchJump(
             documentID: documentID, query: "second", sequence: 1)
+        let jumpA2 = EditorSearchJump(
+            documentID: documentID, query: "third", sequence: 2)
 
-        coordinator.markSearchJumpConsumed(firstJump, for: firstIdentity)
-        XCTAssertNil(coordinator.consumeSearchJump(firstJump, for: firstIdentity))
-        let consumed = coordinator.consumeSearchJump(secondJump, for: secondIdentity)
-        if let consumed {
-            view.revealMatch(of: consumed.query)
+        coordinator.markSearchJumpConsumed(jumpA1, for: identityA)
+        XCTAssertNil(coordinator.consumeSearchJump(jumpA1, for: identityA))
+        if let consumedB1 = coordinator.consumeSearchJump(jumpB1, for: identityB) {
+            view.revealMatch(of: consumedB1.query)
         }
-
         XCTAssertEqual(
             (view.string as NSString).substring(with: view.selectedRange()), "second")
-        XCTAssertNil(coordinator.consumeSearchJump(secondJump, for: secondIdentity))
+
+        let restoredASelection = NSRange(location: 7, length: 0)
+        coordinator.selectionByDocument[identityA] = restoredASelection
+        view.setSelectedRange(coordinator.selectionByDocument[identityA]!)
+        if let staleA1 = coordinator.consumeSearchJump(jumpA1, for: identityA) {
+            view.revealMatch(of: staleA1.query)
+        }
+        XCTAssertEqual(view.selectedRange(), restoredASelection)
+
+        guard let consumedA2 = coordinator.consumeSearchJump(jumpA2, for: identityA) else {
+            return XCTFail("A/2 must remain a new search request")
+        }
+        view.revealMatch(of: consumedA2.query)
+        XCTAssertEqual(
+            (view.string as NSString).substring(with: view.selectedRange()), "third")
+        XCTAssertNil(coordinator.consumeSearchJump(jumpA2, for: identityA))
     }
 
     /// Project-scoped position persistence stores a full selection, not only its leading caret.
