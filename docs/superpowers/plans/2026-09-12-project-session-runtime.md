@@ -370,7 +370,25 @@ Expected: all position tests pass.
 
 - [ ] **Step 5: Write failing editor identity-boundary tests**
 
-Add tests that construct one `BlockTextView`, load A, seed undo/ghost state, change to B with the same document UUID but a different project ID, and assert that old undo and Ghost cannot change B. Keep the existing IME serialization tests as the marked-text contract.
+```swift
+@MainActor
+func testProjectIdentityChangeClearsUndoAndGhost() throws {
+    let textView = makeBlockTextViewForTesting()
+    textView.load(markdown: "A")
+    textView.ghostText = "old suggestion"
+    textView.undoManager?.registerUndo(withTarget: textView) { target in
+        target.string = "A from old undo"
+    }
+
+    textView.prepareForDocumentTransition(markdown: "B")
+
+    XCTAssertEqual(textView.string, "B")
+    XCTAssertNil(textView.ghostSnapshotForAccessibility())
+    XCTAssertFalse(textView.undoManager?.canUndo == true)
+}
+```
+
+Use the same TextKit construction already used by serialization tests for `makeBlockTextViewForTesting`. Keep the existing IME serialization tests as the marked-text contract; the production change that must fail this test is retaining old undo or Ghost state when the stable project/document key changes.
 
 - [ ] **Step 6: Run and confirm RED**
 
@@ -707,6 +725,7 @@ git commit -m "feat(project): scope assets and exports to projects"
 **Files:**
 - Create: `Sources/MINTCore/Legacy/LegacyWorkspaceController.swift`
 - Create: `Sources/MINTCore/Legacy/LegacyWorkspaceView.swift`
+- Modify: `Sources/MINTCore/Project/ProjectSession.swift`
 - Modify: `Sources/MINTCore/ContentView.swift`
 - Modify: `Sources/MINT/MINTApp.swift`
 - Create: `Tests/MINTCoreTests/LegacyWorkspaceControllerTests.swift`
