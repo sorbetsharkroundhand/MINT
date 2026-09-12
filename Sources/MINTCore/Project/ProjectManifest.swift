@@ -82,7 +82,9 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         try container.encode(title, forKey: .title)
         try container.encode(mode, forKey: .mode)
         try container.encode(documents, forKey: .documents)
-        try container.encode(trashedDocumentIDs, forKey: .trashedDocumentIDs)
+        try container.encode(
+            trashedDocumentIDs.sorted { $0.rawValue.uuidString < $1.rawValue.uuidString },
+            forKey: .trashedDocumentIDs)
         try container.encode(assets, forKey: .assets)
         try container.encodeIfPresent(legacySource, forKey: .legacySource)
     }

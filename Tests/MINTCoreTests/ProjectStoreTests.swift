@@ -29,6 +29,51 @@ final class ProjectStoreTests: XCTestCase {
         XCTAssertEqual(loaded, project)
     }
 
+    func testManifestEncodesTrashIDsCanonicallyForStableNoOpSaves() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let uuidStrings = [
+            "00000000-0000-0000-0000-000000000008",
+            "00000000-0000-0000-0000-000000000003",
+            "00000000-0000-0000-0000-000000000006",
+            "00000000-0000-0000-0000-000000000001",
+            "00000000-0000-0000-0000-000000000007",
+            "00000000-0000-0000-0000-000000000002",
+            "00000000-0000-0000-0000-000000000005",
+            "00000000-0000-0000-0000-000000000004"
+        ]
+        let ids = uuidStrings.map { WritingDocumentID(rawValue: UUID(uuidString: $0)!) }
+        let project = WritingProject(
+            id: WritingProjectID(),
+            title: "Stable",
+            mode: .general,
+            documents: ids.map {
+                WritingDocument(id: $0, title: "Draft", body: "body", kind: .manuscript)
+            },
+            trashedDocumentIDs: Set(ids))
+
+        try await store.save(project)
+
+        let projectFolder = root.appendingPathComponent(project.id.rawValue.uuidString)
+        let manifestURL = projectFolder.appendingPathComponent("project.json")
+        let firstManifest = try Data(contentsOf: manifestURL)
+        let json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: firstManifest) as? [String: Any])
+        let encodedTrash = try XCTUnwrap(json["trashedDocumentIDs"] as? [[String: String]])
+        XCTAssertEqual(
+            encodedTrash.compactMap { $0["rawValue"] },
+            uuidStrings.sorted())
+
+        var sameProject = project
+        sameProject.trashedDocumentIDs = Set(ids.reversed())
+        try await ProjectStore(root: root).save(sameProject)
+
+        XCTAssertEqual(try Data(contentsOf: manifestURL), firstManifest)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: projectFolder.appendingPathComponent("previous-project.json").path))
+    }
+
     func testManifestMissingTrashFieldLoadsWithEmptyTrash() async throws {
         let root = try temporaryProjectRoot()
         defer { try? FileManager.default.removeItem(at: root) }
