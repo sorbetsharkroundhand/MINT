@@ -2,6 +2,87 @@ import XCTest
 @testable import MINTCore
 
 final class ProjectStoreTests: XCTestCase {
+    func testActivateAndLoadReturnsExactlyTheDurableActiveProject() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+
+        let activated = try await store.activateAndLoad(id: project.id)
+        let durable = try await store.activeProject()
+
+        XCTAssertEqual(activated, project)
+        XCTAssertEqual(durable, project)
+    }
+
+    func testSaveAndLoadPreservesTrashedDocumentIDs() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.trashedDocumentIDs = [project.documents[1].id]
+
+        try await store.save(project)
+
+        let loaded = try await store.load(id: project.id)
+        XCTAssertEqual(loaded, project)
+    }
+
+    func testManifestMissingTrashFieldLoadsWithEmptyTrash() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+        let manifestURL = root.appendingPathComponent(
+            "\(project.id.rawValue.uuidString)/project.json")
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+        json.removeValue(forKey: "trashedDocumentIDs")
+        try JSONSerialization.data(withJSONObject: json).write(to: manifestURL)
+
+        let loaded = try await store.load(id: project.id)
+
+        XCTAssertEqual(loaded, project)
+        XCTAssertEqual(loaded.trashedDocumentIDs, [])
+    }
+
+    func testSaveRejectsTrashIDMissingFromDocuments() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.trashedDocumentIDs = [WritingDocumentID()]
+
+        do {
+            try await store.save(project)
+            XCTFail("Saved a trash ID that does not belong to the project")
+        } catch ProjectStoreError.invalidManifest {
+        }
+    }
+
+    func testLoadRejectsTrashIDMissingFromManifestDocuments() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+        let manifestURL = root.appendingPathComponent(
+            "\(project.id.rawValue.uuidString)/project.json")
+        var json = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL)) as? [String: Any])
+        json["trashedDocumentIDs"] = [try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(WritingDocumentID()))]
+        try JSONSerialization.data(withJSONObject: json).write(to: manifestURL)
+
+        do {
+            _ = try await store.load(id: project.id)
+            XCTFail("Loaded a trash ID that does not belong to the manifest")
+        } catch ProjectStoreError.invalidManifest {
+        }
+    }
+
     func testDerivedIntelligenceUsesStableProjectAndDocumentIDs() async throws {
         let root = try temporaryProjectRoot()
         defer { try? FileManager.default.removeItem(at: root) }
