@@ -41,14 +41,36 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let lineSpacing: CGFloat
     /// 본문 기본 글자 크기(pt) — 설정에서 조절(⌘+/⌘−).
     private let baseFontSize: CGFloat
-    /// 현재 편집 중인 저널 id — 전환 시 커서 위치를 저장/복원하는 키 (M6).
-    private let entryID: UUID
+    /// 현재 편집 중인 안정적인 문서 identity — runtime generation은 포함하지 않는다.
+    private let documentIdentity: EditorDocumentIdentity
     /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
     /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
     private let focusRequest: Int
     /// 전역 검색 결과 클릭 — seq가 바뀌면 본문 매치 위치로 스크롤·선택 표시 (요구 2).
-    private let searchJump: EntryStore.SearchJump?
+    private let searchJump: EditorSearchJump?
 
+    public init(
+        text: Binding<String>,
+        controller: CompletionController? = nil,
+        theme: MintTheme = .light,
+        lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
+        baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
+        documentIdentity: EditorDocumentIdentity,
+        focusRequest: Int = 0,
+        searchJump: EditorSearchJump? = nil
+    ) {
+        self._text = text
+        self.controller = controller
+        self.theme = theme
+        self.lineSpacing = lineSpacing
+        self.baseFontSize = baseFontSize
+        self.documentIdentity = documentIdentity
+        self.focusRequest = focusRequest
+        self.searchJump = searchJump
+    }
+
+    /// Explicit legacy-workspace bridge. Project workspace composition uses the neutral primary
+    /// initializer above, while EntryStore remains available only at its compatibility boundary.
     public init(
         text: Binding<String>,
         controller: CompletionController? = nil,
@@ -59,14 +81,18 @@ public struct MintBlockEditor: NSViewRepresentable {
         focusRequest: Int = 0,
         searchJump: EntryStore.SearchJump? = nil
     ) {
-        self._text = text
-        self.controller = controller
-        self.theme = theme
-        self.lineSpacing = lineSpacing
-        self.baseFontSize = baseFontSize
-        self.entryID = entryID
-        self.focusRequest = focusRequest
-        self.searchJump = searchJump
+        self.init(
+            text: text,
+            controller: controller,
+            theme: theme,
+            lineSpacing: lineSpacing,
+            baseFontSize: baseFontSize,
+            documentIdentity: .legacy(entryID),
+            focusRequest: focusRequest,
+            searchJump: searchJump.map {
+                EditorSearchJump(
+                    documentID: $0.entryID, query: $0.query, sequence: $0.seq)
+            })
     }
 
     public func makeNSView(context: Context) -> NSScrollView {
@@ -120,10 +146,10 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.baseFontSize = baseFontSize
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
-        context.coordinator.loadedEntryID = entryID
+        context.coordinator.loadedDocumentIdentity = documentIdentity
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
         context.coordinator.lastFocusRequest = focusRequest
-        context.coordinator.lastSearchJumpSeq = searchJump?.seq ?? 0
+        context.coordinator.lastSearchJumpSequence = searchJump?.sequence ?? 0
 
         let scrollView = WritingScrollView()
         scrollView.documentView = textView
@@ -151,8 +177,13 @@ public struct MintBlockEditor: NSViewRepresentable {
     }
 
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
-        context.coordinator.parent = self
         guard let textView = scrollView.documentView as? BlockTextView else { return }
+        let documentChanged = documentIdentity != context.coordinator.loadedDocumentIdentity
+        if documentChanged {
+            context.coordinator.isDocumentTransitioning = true
+        } else {
+            context.coordinator.parent = self
+        }
 
         // 팔레트는 ink를 바꾸지 않을 수 있다 — 테마 **전체** 동등성으로 판정해야
         // 선택색·현재 줄·코드 배경이 이전 팔레트에 남지 않는다 (이슈 #34, #54 Equatable).
@@ -173,58 +204,82 @@ public struct MintBlockEditor: NSViewRepresentable {
         }
         // 저널이 바뀌면(전환) 직전 저널의 커서 위치를 저장해 둔다 — 아직 옛 내용을
         // 보여주는 지금 selectedRange가 옛 커서다 (M6).
-        let entryChanged = entryID != context.coordinator.loadedEntryID
-        if entryChanged, let prev = context.coordinator.loadedEntryID {
-            context.coordinator.caretByEntry[prev] = textView.selectedRange().location
+        if documentChanged, let previous = context.coordinator.loadedDocumentIdentity {
+            if textView.hasMarkedText() { textView.unmarkText() }
+            context.coordinator.selectionByDocument[previous] = textView.selectedRange()
             // 재실행 후 복원용 영속 기록 (#36) — IME 조합 중은 스냅샷이 nil을
             // 돌려 저장하지 않는다 (완료 조건 4).
             if let snapshot = textView.writingPositionSnapshot() {
-                WritingPositionStore.shared.record(
-                    entryID: prev, location: snapshot.location,
-                    before: snapshot.before, after: snapshot.after,
-                    marked: snapshot.marked)
+                context.coordinator.recordPosition(
+                    snapshot, body: textView.string, for: previous,
+                    in: WritingPositionStore.shared)
             }
         }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
         // serialize() 재비교가 아니라 "마지막 동기화 텍스트"와 비교한다 —
         // 직렬화 왕복의 미세한 비대칭이 렌더 → reload → publish → 렌더의
         // 무한 루프(비치볼)로 번지는 것을 차단 (r1 버그).
-        if text != context.coordinator.lastSyncedText {
+        if documentChanged {
+            controller?.noteDocumentSwitch(to: documentIdentity.documentID.rawValue)
+            controller?.dismissConversationSuggestion(remember: false)
+            _ = textView.prepareForDocumentTransition(
+                from: context.coordinator.loadedDocumentIdentity,
+                to: documentIdentity,
+                markdown: text)
+            context.coordinator.lastSyncedText = text
+            // 다시 찾은 저널이면 마지막으로 있던 위치로 커서·스크롤을 복원한다.
+            // (처음 여는 저널은 저장값이 없어 load의 맨 위 규칙을 그대로 둔다.)
+            // 세션 메모리에 없으면 **재실행 전 저장값**으로 재안착 복원 (#36) —
+            // 장편 원고를 다시 열면 상단이 아니라 마지막 집필 자리에서 시작한다.
+            if let saved = context.coordinator.selectionByDocument[documentIdentity] {
+                textView.restoreSelection(to: saved)
+            } else if let persisted = context.coordinator.restorePosition(
+                for: documentIdentity, body: textView.string,
+                in: WritingPositionStore.shared)
+            {
+                textView.restoreWritingPosition(persisted)
+            }
+        } else if text != context.coordinator.lastSyncedText {
+            // Same stable identity: synchronize external body state without severing native undo.
             textView.load(markdown: text)
             context.coordinator.lastSyncedText = text
             textView.ghostText = nil
             controller?.dismissSuggestion()
             textView.showConversationPrompt(nil)
             controller?.dismissConversationSuggestion(remember: false)
-            // 다시 찾은 저널이면 마지막으로 있던 위치로 커서·스크롤을 복원한다.
-            // (처음 여는 저널은 저장값이 없어 load의 맨 위 규칙을 그대로 둔다.)
-            // 세션 메모리에 없으면 **재실행 전 저장값**으로 재안착 복원 (#36) —
-            // 장편 원고를 다시 열면 상단이 아니라 마지막 집필 자리에서 시작한다.
-            if entryChanged, let saved = context.coordinator.caretByEntry[entryID] {
-                textView.restoreCaret(to: saved)
-            } else if entryChanged,
-                let persisted = WritingPositionStore.shared.position(for: entryID),
-                textView.restoreWritingPosition(persisted, entryID: entryID)
-            {
-                // 복원 성공 — 추가 작업 없음.
-            }
+            controller?.refreshLongParagraphDetection()
+        }
+        if documentChanged {
+            context.coordinator.loadedDocumentIdentity = documentIdentity
+            context.coordinator.parent = self
+            context.coordinator.attach(to: textView)
+            context.coordinator.isDocumentTransitioning = false
             // 긴 문단 감지는 문서 로드 때 1회 — 키 입력 경로에 O(문서)를 안 넣는다.
             controller?.refreshLongParagraphDetection()
         }
-        if entryChanged { context.coordinator.loadedEntryID = entryID }
         // 새 저널 등 포커스 요청 — reload 뒤에 first responder로 만든다.
         if focusRequest != context.coordinator.lastFocusRequest {
             context.coordinator.lastFocusRequest = focusRequest
-            DispatchQueue.main.async { [weak textView] in
-                guard let textView, let window = textView.window else { return }
+            let requestedIdentity = documentIdentity
+            let requestedEpoch = context.coordinator.callbackEpoch
+            DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
+                guard coordinator?.ownsCallback(requestedIdentity, epoch: requestedEpoch) == true,
+                    let textView, let window = textView.window
+                else { return }
                 window.makeFirstResponder(textView)
             }
         }
         // 검색 결과 클릭 — reload·레이아웃이 끝난 다음 틱에 매치 위치로 이동·표시.
-        if let jump = searchJump, jump.seq != context.coordinator.lastSearchJumpSeq,
-            jump.entryID == entryID {
-            context.coordinator.lastSearchJumpSeq = jump.seq
-            DispatchQueue.main.async { [weak textView] in
+        if let jump = searchJump,
+            jump.sequence != context.coordinator.lastSearchJumpSequence,
+            jump.documentID == documentIdentity.documentID
+        {
+            context.coordinator.lastSearchJumpSequence = jump.sequence
+            let requestedIdentity = documentIdentity
+            let requestedEpoch = context.coordinator.callbackEpoch
+            DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
+                guard coordinator?.ownsCallback(requestedIdentity, epoch: requestedEpoch) == true
+                else { return }
                 textView?.revealMatch(of: jump.query)
             }
         }
@@ -247,44 +302,65 @@ public struct MintBlockEditor: NSViewRepresentable {
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
         var lastFocusRequest = 0
         /// 마지막으로 처리한 검색 이동 요청 seq — 값이 바뀔 때만 이동한다.
-        var lastSearchJumpSeq = 0
+        var lastSearchJumpSequence = 0
         /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
-        var caretByEntry: [UUID: Int] = [:]
-        /// 마지막으로 위치를 기록한 문서 — 전환·종료 시 스냅샷을 뜯기 위한 키 (#36).
-        var lastActiveEntryID: UUID?
-        /// 현재 로드된 저널 id — 전환 감지·커서 저장/복원 키.
-        var loadedEntryID: UUID?
+        var selectionByDocument: [EditorDocumentIdentity: NSRange] = [:]
+        /// 현재 로드된 안정적 문서 identity — 전환 감지·커서 저장/복원 키.
+        var loadedDocumentIdentity: EditorDocumentIdentity?
+        /// Programmatic TextKit replacement must not publish into either manuscript binding.
+        var isDocumentTransitioning = false
+        /// Monotonic callback ownership prevents stale A callbacks after an A -> B -> A cycle.
+        var callbackEpoch: UInt64 = 0
 
         init(_ parent: MintBlockEditor) {
             self.parent = parent
         }
 
         func attach(to textView: BlockTextView) {
-            parent.controller?.suggestionDidChange = { [weak textView] suggestion in
+            callbackEpoch &+= 1
+            let attachedEpoch = callbackEpoch
+            let attachedIdentity = parent.documentIdentity
+            parent.controller?.suggestionDidChange = { [weak self, weak textView] suggestion in
+                guard self?.ownsCallback(attachedIdentity, epoch: attachedEpoch) == true
+                else { return }
                 textView?.ghostText = suggestion
             }
             // 대화 기록 제안 (요구사항 §20) — 감지가 스토리지 프리픽스에서 돌아
             // 범위가 곧 이 뷰의 좌표다. 은은한 하이라이트 + 끝자락 pill.
-            parent.controller?.conversationSuggestionDidChange = { [weak textView] block in
+            parent.controller?.conversationSuggestionDidChange = { [weak self, weak textView] block in
+                guard self?.ownsCallback(attachedIdentity, epoch: attachedEpoch) == true
+                else { return }
                 textView?.showConversationPrompt(
                     block.map { NSRange(location: $0.utf16Range.lowerBound,
                                         length: $0.utf16Range.count) })
             }
             // 긴 문단 감지·나누기 다리 (docs/editor-paragraph-split.md).
-            parent.controller?.detectLongParagraphs = { [weak textView] in
-                guard let textView else { return .none }
+            parent.controller?.detectLongParagraphs = { [weak self, weak textView] in
+                guard self?.ownsCallback(attachedIdentity, epoch: attachedEpoch) == true,
+                    let textView
+                else { return .none }
                 let (count, maxLen) = textView.oversizedProseParagraphs()
                 return .init(
                     count: count, maxLength: maxLen,
                     typicalLength: textView.typicalProseParagraphLength())
             }
-            parent.controller?.splitLongParagraphs = { [weak textView] in
-                textView?.splitOversizedProseParagraphs() ?? 0
+            parent.controller?.splitLongParagraphs = { [weak self, weak textView] in
+                guard self?.ownsCallback(attachedIdentity, epoch: attachedEpoch) == true
+                else { return 0 }
+                return textView?.splitOversizedProseParagraphs() ?? 0
             }
         }
 
+        func ownsCallback(
+            _ identity: EditorDocumentIdentity, epoch: UInt64
+        ) -> Bool {
+            loadedDocumentIdentity == identity && callbackEpoch == epoch
+        }
+
         public func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? BlockTextView else { return }
+            guard !isDocumentTransitioning,
+                let textView = notification.object as? BlockTextView
+            else { return }
             // 입력 지연 계측 (로컬 진단) — 핸들러 구간과, 이 런루프 턴에 쌓인
             // 후속 작업(SwiftUI 갱신·레이아웃)까지의 총 구간을 나눠 잰다.
             // 랙 보고를 숫자로 만들기 위한 장비 — 측정 없이 튜닝 없음 (CLAUDE.md §2-7).
@@ -295,11 +371,10 @@ public struct MintBlockEditor: NSViewRepresentable {
             // 집필 위치 영속 기록 (#36) — 메모리 갱신 + 디바운스 디스크. 조합 중은
             // record가 무시한다. 전환 없이 ⌘Q해도 마지막 자리가 남는 이유다.
             if let snapshot = textView.writingPositionSnapshot() {
-                let id = loadedEntryID ?? parent.entryID
-                WritingPositionStore.shared.record(
-                    entryID: id, location: snapshot.location,
-                    before: snapshot.before, after: snapshot.after,
-                    marked: snapshot.marked)
+                recordPosition(
+                    snapshot, body: textView.string,
+                    for: loadedDocumentIdentity ?? parent.documentIdentity,
+                    in: WritingPositionStore.shared)
             }
             forwardEditEvent(textView)
             let handlerMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
@@ -310,8 +385,56 @@ public struct MintBlockEditor: NSViewRepresentable {
             }
         }
 
+        func recordPosition(
+            _ snapshot: (
+                location: Int, selectionLength: Int, before: String, after: String, marked: Bool
+            ),
+            body: String,
+            for identity: EditorDocumentIdentity,
+            in store: WritingPositionStore
+        ) {
+            switch identity {
+            case .project(let key):
+                store.record(
+                    location: snapshot.location,
+                    selectionLength: snapshot.selectionLength,
+                    body: body,
+                    for: key,
+                    marked: snapshot.marked)
+            case .legacy(let id):
+                store.record(
+                    entryID: id,
+                    location: snapshot.location,
+                    before: snapshot.before,
+                    after: snapshot.after,
+                    marked: snapshot.marked)
+            }
+        }
+
+        func restorePosition(
+            for identity: EditorDocumentIdentity,
+            body: String,
+            in store: WritingPositionStore
+        ) -> WritingPositionStore.Position? {
+            switch identity {
+            case .project(let key):
+                return store.restore(in: body, for: key)
+            case .legacy(let id):
+                guard let position = store.position(for: id),
+                    let location = store.resolve(for: id, in: body)
+                else { return nil }
+                return WritingPositionStore.Position(
+                    location: location,
+                    selectionLength: position.selectionLength,
+                    before: position.before,
+                    after: position.after)
+            }
+        }
+
         public func textViewDidChangeSelection(_ notification: Notification) {
-            guard let textView = notification.object as? BlockTextView else { return }
+            guard !isDocumentTransitioning,
+                let textView = notification.object as? BlockTextView
+            else { return }
             textView.syncTypingAttributes()
             // 커서가 선택된 이미지 밖으로 나가면 객체 선택을 푼다 (렌더 유지 조건 갱신 전에).
             textView.syncImageSelection()
@@ -838,6 +961,34 @@ final class BlockTextView: NSTextView {
 
     // MARK: 마크다운 ↔ 블록 변환
 
+    /// Replaces the manuscript at a stable document boundary. This is intentionally separate
+    /// from ordinary binding synchronization: only a real document identity change may discard
+    /// native undo and transient editor state.
+    @discardableResult
+    func prepareForDocumentTransition(
+        from previous: EditorDocumentIdentity?,
+        to next: EditorDocumentIdentity,
+        markdown: String
+    ) -> Bool {
+        guard previous != next else { return false }
+        prepareForDocumentTransition(markdown: markdown)
+        return true
+    }
+
+    func prepareForDocumentTransition(markdown: String) {
+        if hasMarkedText() {
+            // Commit Hangul composition before replacing TextKit storage. Persisting the outgoing
+            // position remains the coordinator's responsibility and never records marked state.
+            unmarkText()
+        }
+        ghostText = nil
+        showConversationPrompt(nil)
+        hideImageToolbar()
+        hideSelectionToolbar()
+        load(markdown: markdown)
+        undoManager?.removeAllActions()
+    }
+
     /// 마크다운을 파싱해 storage를 블록 문서로 채운다 (buildDOM).
     func load(markdown: String) {
         guard let storage = textStorage else { return }
@@ -999,17 +1150,22 @@ final class BlockTextView: NSTextView {
         refreshActiveLineHighlight()
     }
 
-    /// 현재 집필 위치 스냅샷 — 문서별 복원 저장용 (#36).
-    /// IME 조합(marked) 중이면 nil — 확정되지 않은 조합 자리는 저장 금지 (#36).
-    func writingPositionSnapshot() -> (location: Int, before: String, after: String, marked: Bool)? {
+    /// 현재 집필 위치 스냅샷 — 문서별 복원 저장용 (#36). `marked`를 함께 반환해
+    /// 스토어가 확정되지 않은 IME 조합 위치를 기록하지 않도록 한다.
+    func writingPositionSnapshot() -> (
+        location: Int, selectionLength: Int, before: String, after: String, marked: Bool
+    )? {
         let ns = string as NSString
         let location = max(0, min(selectedRange().location, ns.length))
+        let selectionLength = max(0, min(selectedRange().length, ns.length - location))
+        let selectionEnd = location + selectionLength
         let beforeStart = max(0, location - 24)
-        let afterEnd = min(ns.length, location + 24)
+        let afterEnd = min(ns.length, selectionEnd + 24)
         return (
             location,
+            selectionLength,
             ns.substring(with: NSRange(location: beforeStart, length: location - beforeStart)),
-            ns.substring(with: NSRange(location: location, length: afterEnd - location)),
+            ns.substring(with: NSRange(location: selectionEnd, length: afterEnd - selectionEnd)),
             hasMarkedText()
         )
     }
@@ -1018,15 +1174,34 @@ final class BlockTextView: NSTextView {
     func restoreWritingPosition(_ position: WritingPositionStore.Position, entryID: UUID) -> Bool {
         guard let resolved = WritingPositionStore.shared.resolve(for: entryID, in: string)
         else { return false }
-        restoreCaret(to: resolved)
+        restoreWritingPosition(
+            .init(
+                location: resolved,
+                selectionLength: position.selectionLength,
+                before: position.before,
+                after: position.after))
         return true
+    }
+
+    func restoreWritingPosition(_ position: WritingPositionStore.Position) {
+        let length = (string as NSString).length
+        let location = max(0, min(position.location, length))
+        let selectionLength = max(0, min(position.selectionLength, length - location))
+        setSelectedRange(NSRange(location: location, length: selectionLength))
+        syncTypingAttributes()
+        scrollRangeToVisible(selectedRange())
     }
 
     /// 저장해 둔 커서 위치로 되돌리고 그 자리로 스크롤한다 (저널 재방문, M6).
     func restoreCaret(to location: Int) {
-        let length = (string as NSString).length
-        let clamped = max(0, min(location, length))
-        setSelectedRange(NSRange(location: clamped, length: 0))
+        restoreSelection(to: NSRange(location: location, length: 0))
+    }
+
+    func restoreSelection(to range: NSRange) {
+        let textLength = (string as NSString).length
+        let location = max(0, min(range.location, textLength))
+        let selectionLength = max(0, min(range.length, textLength - location))
+        setSelectedRange(NSRange(location: location, length: selectionLength))
         syncTypingAttributes()
         scrollRangeToVisible(selectedRange())
     }
