@@ -149,7 +149,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         context.coordinator.loadedDocumentIdentity = documentIdentity
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
         context.coordinator.lastFocusRequest = focusRequest
-        context.coordinator.lastSearchJumpSequence = searchJump?.sequence ?? 0
+        context.coordinator.markSearchJumpConsumed(searchJump, for: documentIdentity)
 
         let scrollView = WritingScrollView()
         scrollView.documentView = textView
@@ -270,11 +270,9 @@ public struct MintBlockEditor: NSViewRepresentable {
             }
         }
         // 검색 결과 클릭 — reload·레이아웃이 끝난 다음 틱에 매치 위치로 이동·표시.
-        if let jump = searchJump,
-            jump.sequence != context.coordinator.lastSearchJumpSequence,
-            jump.documentID == documentIdentity.documentID
+        if let jump = context.coordinator.consumeSearchJump(
+            searchJump, for: documentIdentity)
         {
-            context.coordinator.lastSearchJumpSequence = jump.sequence
             let requestedIdentity = documentIdentity
             let requestedEpoch = context.coordinator.callbackEpoch
             DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
@@ -301,8 +299,12 @@ public struct MintBlockEditor: NSViewRepresentable {
         var lastSyncedText = ""
         /// 마지막으로 처리한 포커스 요청 값 — 값이 바뀔 때만 포커스를 옮긴다.
         var lastFocusRequest = 0
-        /// 마지막으로 처리한 검색 이동 요청 seq — 값이 바뀔 때만 이동한다.
-        var lastSearchJumpSequence = 0
+        /// Search counters are session-local, so the stable editor identity is part of dedupe.
+        private struct ConsumedSearchJump: Equatable {
+            let identity: EditorDocumentIdentity
+            let sequence: Int
+        }
+        private var lastConsumedSearchJump: ConsumedSearchJump?
         /// 저널별 마지막 커서 위치(세션 메모리) — 전환 후 돌아오면 그 자리로 복원 (M6).
         var selectionByDocument: [EditorDocumentIdentity: NSRange] = [:]
         /// 현재 로드된 안정적 문서 identity — 전환 감지·커서 저장/복원 키.
@@ -314,6 +316,25 @@ public struct MintBlockEditor: NSViewRepresentable {
 
         init(_ parent: MintBlockEditor) {
             self.parent = parent
+        }
+
+        func markSearchJumpConsumed(
+            _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
+        ) {
+            guard let jump, jump.documentID == identity.documentID else { return }
+            lastConsumedSearchJump = ConsumedSearchJump(
+                identity: identity, sequence: jump.sequence)
+        }
+
+        func consumeSearchJump(
+            _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
+        ) -> EditorSearchJump? {
+            guard let jump, jump.documentID == identity.documentID else { return nil }
+            let consumption = ConsumedSearchJump(
+                identity: identity, sequence: jump.sequence)
+            guard consumption != lastConsumedSearchJump else { return nil }
+            lastConsumedSearchJump = consumption
+            return jump
         }
 
         func attach(to textView: BlockTextView) {

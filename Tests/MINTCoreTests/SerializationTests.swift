@@ -401,6 +401,38 @@ final class SerializationTests: XCTestCase {
         XCTAssertNil(view.ghostSnapshotForAccessibility())
     }
 
+    /// Search request counters are local to a project session. A new stable project identity
+    /// must therefore consume its own sequence even when an imported document UUID collides.
+    @MainActor func testSameSequenceSearchJumpIsConsumedAcrossProjectIdentityChange() {
+        let view = makeEditor()
+        view.load(markdown: "first target second target")
+        let documentID = WritingDocumentID()
+        let firstIdentity = EditorDocumentIdentity.project(
+            ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
+        let secondIdentity = EditorDocumentIdentity.project(
+            ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
+        var body = view.serialize()
+        let editor = MintBlockEditor(
+            text: Binding(get: { body }, set: { body = $0 }),
+            documentIdentity: firstIdentity)
+        let coordinator = editor.makeCoordinator()
+        let firstJump = EditorSearchJump(
+            documentID: documentID, query: "first", sequence: 1)
+        let secondJump = EditorSearchJump(
+            documentID: documentID, query: "second", sequence: 1)
+
+        coordinator.markSearchJumpConsumed(firstJump, for: firstIdentity)
+        XCTAssertNil(coordinator.consumeSearchJump(firstJump, for: firstIdentity))
+        let consumed = coordinator.consumeSearchJump(secondJump, for: secondIdentity)
+        if let consumed {
+            view.revealMatch(of: consumed.query)
+        }
+
+        XCTAssertEqual(
+            (view.string as NSString).substring(with: view.selectedRange()), "second")
+        XCTAssertNil(coordinator.consumeSearchJump(secondJump, for: secondIdentity))
+    }
+
     /// Project-scoped position persistence stores a full selection, not only its leading caret.
     @MainActor func testWritingPositionSnapshotIncludesSelectionLength() {
         let view = makeEditor()

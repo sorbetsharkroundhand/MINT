@@ -155,4 +155,34 @@ final class WritingPositionTests: XCTestCase {
         XCTAssertEqual(restored?.location, 2)
         XCTAssertEqual(restored?.selectionLength, 3)
     }
+
+    /// The shared cap must not evict one identity category wholesale merely because project and
+    /// legacy positions are held in separate dictionaries.
+    @MainActor
+    func testCombinedCapTrimsLegacyAndProjectPositionsEvenly() {
+        let store = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
+        store._testReset()
+        let legacyIDs = (0..<100).map { _ in UUID() }
+        let projectKeys = (0..<100).map { _ in
+            ProjectDocumentKey(
+                projectID: WritingProjectID(), documentID: WritingDocumentID())
+        }
+
+        for id in legacyIDs {
+            store.record(
+                entryID: id, location: 0, before: "", after: "", marked: false)
+        }
+        for key in projectKeys {
+            store.record(location: 0, selectionLength: 0, body: "", for: key)
+        }
+        store.record(
+            location: 0, selectionLength: 0, body: "",
+            for: ProjectDocumentKey(
+                projectID: WritingProjectID(), documentID: WritingDocumentID()))
+
+        let remainingLegacy = legacyIDs.filter { store.position(for: $0) != nil }.count
+        let remainingProject = projectKeys.filter { store.restore(in: "", for: $0) != nil }.count
+        XCTAssertEqual(remainingLegacy, 50)
+        XCTAssertEqual(remainingProject, 50)
+    }
 }

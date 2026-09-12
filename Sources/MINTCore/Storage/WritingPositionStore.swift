@@ -188,18 +188,25 @@ public final class WritingPositionStore {
     }
 
     private func trimIfNeeded(isNew: Bool) {
-        guard isNew, projectPositions.count + positions.count >= Self.maxEntries
-        else { return }
+        let totalCount = projectPositions.count + positions.count
+        guard isNew, totalCount >= Self.maxEntries else { return }
         let targetCount = Self.maxEntries / 2
-        let excess = projectPositions.count + positions.count - targetCount
-        for projectKey in projectPositions.keys.prefix(excess) {
+        // There is no persisted recency metadata in the legacy schema. Retain the same
+        // proportion of each identity category and choose evictions by stable key order so the
+        // combined cap is deterministic without pretending to provide LRU semantics.
+        let projectTarget = targetCount * projectPositions.count / totalCount
+        let legacyTarget = targetCount - projectTarget
+        let projectRemovalCount = projectPositions.count - projectTarget
+        let legacyRemovalCount = positions.count - legacyTarget
+        let projectKeys = projectPositions.keys.sorted {
+            Self.storageKey(for: $0) < Self.storageKey(for: $1)
+        }
+        let legacyIDs = positions.keys.sorted { $0.uuidString < $1.uuidString }
+        for projectKey in projectKeys.prefix(projectRemovalCount) {
             projectPositions.removeValue(forKey: projectKey)
         }
-        if projectPositions.count + positions.count > targetCount {
-            let remaining = projectPositions.count + positions.count - targetCount
-            for legacyID in positions.keys.prefix(remaining) {
-                positions.removeValue(forKey: legacyID)
-            }
+        for legacyID in legacyIDs.prefix(legacyRemovalCount) {
+            positions.removeValue(forKey: legacyID)
         }
     }
 
