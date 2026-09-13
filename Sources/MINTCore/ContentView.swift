@@ -25,6 +25,7 @@ public struct ContentView: View {
     @ObservedObject private var projectSession: ProjectSession
     @ObservedObject private var editorRequests: ProjectEditorRequests
     @ObservedObject private var completion: CompletionController
+    private let indexer: BackgroundIndexer
     @ObservedObject private var livingMargin: LivingMarginModel
     private let firstRunFlow: FirstRunFlow
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
@@ -33,12 +34,14 @@ public struct ContentView: View {
         projectSession: ProjectSession,
         editorRequests: ProjectEditorRequests,
         completion: CompletionController,
+        indexer: BackgroundIndexer,
         livingMargin: LivingMarginModel,
         firstRunFlow: FirstRunFlow
     ) {
         self.projectSession = projectSession
         self.editorRequests = editorRequests
         self.completion = completion
+        self.indexer = indexer
         self.livingMargin = livingMargin
         self.firstRunFlow = firstRunFlow
     }
@@ -89,24 +92,38 @@ public struct ContentView: View {
                 // The controller itself enforces explicit completion authorization.
                 completion.preloadEngine()
                 // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
-                completion.documentContextProvider = { [weak projectSession] in
-                    guard let project = projectSession?.activeProject,
-                        let document = projectSession?.selectedDocument
+                completion.documentContextProvider = nil
+                completion.projectDocumentProvider = { [weak projectSession] in
+                    projectSession?.selectedDocumentSnapshot
+                }
+                indexer.attach(documentProvider: { [weak projectSession] in
+                    projectSession?.selectedDocumentSnapshot
+                })
+                indexer.caretProvider = { [weak completion] in completion?.lastCaretLocation }
+                completion.knowledgeProvider = { [weak projectSession, weak indexer] in
+                    guard let identity = projectSession?.runtimeIdentity,
+                        indexer?.snapshotRuntimeIdentity == identity
                     else { return nil }
-                    return DocumentContext(
-                        title: document.title,
-                        kind: project.mode == .fiction ? .novel : .journal,
-                        entryID: document.id.rawValue)
+                    return indexer?.snapshot
                 }
                 // JournalEntry-only decisions are not mirrored into project documents.
                 completion.onRecordConversation = nil
                 completion.recordedConversationHashesProvider = { [] }
-                completion.knowledgeProvider = nil
-                projectSession.willTransition = {
-                    guard let textView = NSApp.keyWindow?.firstResponder as? BlockTextView,
+                projectSession.willTransition = { [weak completion, weak indexer] in
+                    if let textView = NSApp.keyWindow?.firstResponder as? BlockTextView,
                         textView.hasMarkedText()
-                    else { return }
-                    textView.unmarkText()
+                    {
+                        textView.unmarkText()
+                    }
+                    completion?.prepareForProjectTransition()
+                    indexer?.prepareForProjectTransition()
+                }
+                projectSession.documentDidChange = { [weak completion, weak indexer] snapshot in
+                    completion?.noteDocumentChange(snapshot)
+                    indexer?.noteDocumentChange(snapshot)
+                }
+                if let snapshot = projectSession.selectedDocumentSnapshot {
+                    projectSession.documentDidChange?(snapshot)
                 }
             }
             .task {
@@ -820,6 +837,7 @@ struct LongParagraphNotice: View {
         projectSession: session,
         editorRequests: editorRequests,
         completion: CompletionController(),
+        indexer: BackgroundIndexer(engine: CompletionEngine()),
         livingMargin: LivingMarginModel(),
         firstRunFlow: FirstRunFlow(
             session: session,

@@ -57,7 +57,7 @@ final class ProjectSessionTests: XCTestCase {
         try await session.bootstrap()
         let initialIdentity = try XCTUnwrap(session.runtimeIdentity)
         var changedIdentity: ProjectRuntimeIdentity?
-        session.documentDidChange = { changedIdentity = $0 }
+        session.documentDidChange = { changedIdentity = $0.identity }
 
         session.updateSelectedDocumentBody("edited")
         XCTAssertEqual(session.selectedDocument?.body, "edited")
@@ -70,6 +70,38 @@ final class ProjectSessionTests: XCTestCase {
         let reopened = try await store.load(id: project.id)
         XCTAssertEqual(reopened.documents[0].body, "edited")
         XCTAssertEqual(session.savePhase, .saved)
+    }
+
+    func testDocumentSelectionRunsBarrierBeforePublishingImmutableSnapshot() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let project = fictionProject()
+        try await store.save(project)
+        try await store.activate(id: project.id)
+        let session = ProjectSession(store: store, defaults: defaults, autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        let original = try XCTUnwrap(session.selectedDocumentSnapshot)
+        var barrierIdentity: ProjectRuntimeIdentity?
+        var published: [ProjectDocumentSnapshot] = []
+        session.willTransition = {
+            barrierIdentity = session.runtimeIdentity
+            session.updateSelectedDocumentBody("committed composition")
+        }
+        session.documentDidChange = { published.append($0) }
+
+        session.selectDocument(project.documents[1].id)
+
+        XCTAssertEqual(barrierIdentity, original.identity)
+        XCTAssertEqual(original.body, "A", "Previously captured input must remain immutable")
+        XCTAssertEqual(session.activeProject?.documents[0].body, "committed composition")
+        XCTAssertEqual(published.last?.identity, session.runtimeIdentity)
+        XCTAssertEqual(published.last?.title, "Chapter 2")
+        XCTAssertEqual(published.last?.body, "B")
+        XCTAssertEqual(published.last?.mode, .fiction)
+        try await session.flush()
     }
 
     /// Protected break: a dirty project that receives no further edits must still reach

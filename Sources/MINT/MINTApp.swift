@@ -36,6 +36,7 @@ struct MINTApp: App {
                 projectSession: projectSession,
                 editorRequests: editorRequests,
                 completion: completion,
+                indexer: indexer,
                 livingMargin: livingMargin,
                 firstRunFlow: FirstRunFlow(
                     session: projectSession,

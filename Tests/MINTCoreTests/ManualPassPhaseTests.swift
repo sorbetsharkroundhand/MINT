@@ -44,7 +44,7 @@ final class ManualPassPhaseTests: XCTestCase {
         let settings = CompletionSettings()
         settings.autocompleteEnabled = false
         let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        indexer.attach(store: store)
+        indexer.attachLegacy(store: store)
 
         // 사용자 요청 없이는 취소 대상이 없다.
         indexer.cancelManualPass()

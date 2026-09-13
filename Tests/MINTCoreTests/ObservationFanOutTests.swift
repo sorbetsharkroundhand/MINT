@@ -59,7 +59,7 @@ final class ObservationFanOutTests: XCTestCase {
         let settings = CompletionSettings()
         settings.autocompleteEnabled = false
         let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        indexer.attach(store: store)
+        indexer.attachLegacy(store: store)
 
         let entryID = store.newEntry(kind: .novel)
         let snapshot = makeSnapshot(entryID: entryID)
@@ -96,7 +96,7 @@ final class ObservationFanOutTests: XCTestCase {
         let settings = CompletionSettings()
         settings.autocompleteEnabled = false
         let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        indexer.attach(store: store)
+        indexer.attachLegacy(store: store)
 
         XCTAssertEqual(indexer.snapshotGeneration, 0)
         let entryID = store.newEntry(kind: .novel)

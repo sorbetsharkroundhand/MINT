@@ -108,15 +108,18 @@ public struct ContextReport: Sendable, Equatable {
     public var entryID: UUID?
     /// 조립 시점의 예측 세대 — 문서 전환·편집으로 무효화됐는지 판정용 (이슈 #8).
     public var generation: Int
+    public var runtimeIdentity: ProjectRuntimeIdentity?
 
     public init(
         items: [Item], assembledAt: Date = .now,
-        entryID: UUID? = nil, generation: Int = 0
+        entryID: UUID? = nil, generation: Int = 0,
+        runtimeIdentity: ProjectRuntimeIdentity? = nil
     ) {
         self.items = items
         self.assembledAt = assembledAt
         self.entryID = entryID
         self.generation = generation
+        self.runtimeIdentity = runtimeIdentity
     }
 
     public static let empty = ContextReport(items: [])

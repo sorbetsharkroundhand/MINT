@@ -126,8 +126,46 @@ public final class BackgroundIndexer: ObservableObject {
     private let engine: CompletionEngine
     private let settings: CompletionSettings
     private let sidecarPersistence: any KnowledgeSidecarPersisting
-    private weak var store: EntryStore?
-    private var scopeProvider: ((UUID) -> StoryMemoryScope?)?
+    private weak var legacyStore: EntryStore?
+    private var legacyScopeProvider: ((UUID) -> StoryMemoryScope?)?
+    private var documentProvider: (() -> ProjectDocumentSnapshot?)?
+    private var observedRuntimeIdentity: ProjectRuntimeIdentity?
+    public private(set) var snapshotRuntimeIdentity: ProjectRuntimeIdentity?
+
+    /// Knowledge-specific metadata stays in the reader adapter, outside ProjectSession.
+    private struct DocumentInput {
+        let id: UUID
+        let scope: StoryMemoryScope
+        let runtimeIdentity: ProjectRuntimeIdentity?
+        let body: String
+        let isFiction: Bool
+        let characters: [CharacterCard]
+        let overrides: [NarrativeOverride]
+        let recorded: [RecordedConversation]
+        let rejectedNames: [String]
+    }
+
+    private func currentDocument() -> DocumentInput? {
+        if let documentProvider {
+            guard let document = documentProvider() else { return nil }
+            let key = document.identity.key
+            return DocumentInput(
+                id: key.documentID.rawValue,
+                scope: .project(projectID: key.projectID, documentID: key.documentID),
+                runtimeIdentity: document.identity, body: document.body,
+                isFiction: document.mode == .fiction,
+                characters: [], overrides: [], recorded: [], rejectedNames: [])
+        }
+        guard let entry = legacyStore?.activeEntry,
+            let scope = legacyScopeProvider?(entry.id)
+        else { return nil }
+        return DocumentInput(
+            id: entry.id, scope: scope, runtimeIdentity: nil, body: entry.body,
+            isFiction: entry.resolvedKind == .novel,
+            characters: entry.characters ?? [], overrides: entry.narrativeOverrides ?? [],
+            recorded: entry.recordedConversations ?? [],
+            rejectedNames: entry.rejectedCharacterNames ?? [])
+    }
 
     private var fastTimer: Task<Void, Never>?
     private var deepTimer: Task<Void, Never>?
@@ -146,6 +184,7 @@ public final class BackgroundIndexer: ObservableObject {
         let scope: StoryMemoryScope
         let generation: Int
         let documentVersion: String
+        var runtimeIdentity: ProjectRuntimeIdentity? = nil
     }
 
     /// 본문 지문 — 실행마다 달라지는 HashValue 대신 안정 해시 (이슈 #82).
@@ -180,7 +219,8 @@ public final class BackgroundIndexer: ObservableObject {
         passBodyHash = Self.contentFingerprint(body)
         return PassIdentity(
             scope: scope, generation: passGeneration,
-            documentVersion: Self.contentFingerprint(body))
+            documentVersion: Self.contentFingerprint(body),
+            runtimeIdentity: documentProvider?()?.identity)
     }
 
     /// 테스트 전용 — 사용자 패스 단계를 소유권과 함께 심는다 (#35).
@@ -208,16 +248,17 @@ public final class BackgroundIndexer: ObservableObject {
         _ identity: PassIdentity,
         currentScope: StoryMemoryScope? = nil
     ) -> Bool {
-        let resolvedScope = currentScope ?? scopeProvider?(identity.scope.documentID.rawValue)
+        let resolvedScope = currentScope ?? currentDocument()?.scope
         return passGeneration == identity.generation
             && passScope == identity.scope
             && passBodyHash == identity.documentVersion
             && resolvedScope == identity.scope
+            && identity.runtimeIdentity == documentProvider?()?.identity
     }
 
     private func owns(_ identity: PassIdentity) -> Bool {
         guard canPublish(identity),
-            let entry = store?.entries.first(where: { $0.id == identity.scope.documentID.rawValue })
+            let entry = currentDocument(), entry.id == identity.scope.documentID.rawValue
         else { return false }
         return Self.contentFingerprint(entry.body) == identity.documentVersion
     }
@@ -259,12 +300,21 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     /// ContentView가 1회 배선 — 패스 시점에 활성 문서를 pull하기 위한 약참조.
-    public func attach(
+    public func attach(documentProvider: @escaping () -> ProjectDocumentSnapshot?) {
+        prepareForProjectTransition()
+        legacyStore = nil
+        legacyScopeProvider = nil
+        self.documentProvider = documentProvider
+    }
+
+    public func attachLegacy(
         store: EntryStore,
         scopeProvider: ((UUID) -> StoryMemoryScope?)? = nil
     ) {
-        self.store = store
-        self.scopeProvider = scopeProvider ?? { entryID in
+        prepareForProjectTransition()
+        documentProvider = nil
+        self.legacyStore = store
+        self.legacyScopeProvider = scopeProvider ?? { entryID in
             .legacy(documentID: WritingDocumentID(rawValue: entryID))
         }
     }
@@ -273,6 +323,8 @@ public final class BackgroundIndexer: ObservableObject {
     /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 종료 시점의
     /// 백그라운드 이해는 어차피 버려질 결과다 — 원문은 flush로 이미 안전하다.
     public func shutdown() {
+        passGeneration += 1
+        hydrateGeneration += 1
         fastTimer?.cancel()
         fastTimer = nil
         deepTimer?.cancel()
@@ -287,6 +339,15 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     // MARK: - 트리거
+
+    public func noteDocumentChange(_ document: ProjectDocumentSnapshot) {
+        guard documentProvider?()?.identity == document.identity else { return }
+        if observedRuntimeIdentity?.key != document.identity.key {
+            prepareForProjectTransition()
+        }
+        observedRuntimeIdentity = document.identity
+        noteChange(entryID: document.identity.key.documentID.rawValue)
+    }
 
     /// 본문 편집·문서 전환 알림 (EntryStore 훅) — 진행 중 패스를 선점하고
     /// 유휴 타이머를 다시 감는다.
@@ -331,6 +392,12 @@ public final class BackgroundIndexer: ObservableObject {
     /// Project/document selection changes invalidate ownership even when the editor text
     /// did not emit a change notification.
     public func noteScopeChange(entryID: UUID) {
+        prepareForProjectTransition()
+        hydrateIfNeeded(entryID: entryID)
+    }
+
+    /// Cancels old ownership without reading the session before its next publication.
+    public func prepareForProjectTransition() {
         passGeneration += 1
         passEntryID = nil
         passBodyHash = nil
@@ -346,8 +413,13 @@ public final class BackgroundIndexer: ObservableObject {
         deepTimer?.cancel()
         setIsIndexing(false)
         snapshot = nil
+        snapshotRuntimeIdentity = nil
+        observedRuntimeIdentity = nil
+        characterCandidates = []
+        candidatesEntryID = nil
+        manualPassToken = nil
+        manualPhase = .idle
         setWarnings([])
-        hydrateIfNeeded(entryID: entryID)
     }
 
     @discardableResult
@@ -376,17 +448,17 @@ public final class BackgroundIndexer: ObservableObject {
     /// `force`: 사용자 수정(오버라이드) 변경 시 — 이미 스냅샷이 있어도 다시
     /// 조립해 수정이 즉시 보이게 한다 (LLM 없음, 결정적 재조립).
     private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
-        guard let scope = scopeProvider?(entryID) else { return }
+        guard let entry = currentDocument(), entry.id == entryID else { return }
+        let scope = entry.scope
         guard force || snapshot?.storyMemory?.scope != scope else { return }
-        guard let entry = store?.activeEntry, entry.id == entryID,
-            entry.resolvedKind == .novel
-        else { return }
+        guard entry.isFiction else { return }
+        let runtimeIdentity = entry.runtimeIdentity
         let body = entry.body
         let documentVersion = Self.contentFingerprint(body)
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        let characters = entry.characters ?? []
-        let overrides = entry.narrativeOverrides ?? []
-        let recorded = entry.recordedConversations ?? []
+        let characters = entry.characters
+        let overrides = entry.overrides
+        let recorded = entry.recorded
 
         hydrateGeneration += 1
         let token = hydrateGeneration
@@ -415,13 +487,13 @@ public final class BackgroundIndexer: ObservableObject {
                 guard let self else { return }
                 // 늦은 이전 hydrate는 현재 문서에만, 자기 토큰이 유효할 때만 (#82).
                 guard self.hydrateGeneration == token else { return }
-                guard self.store?.activeEntry?.id == entryID else { return }
-                guard self.scopeProvider?(entryID) == scope else { return }
-                guard let currentBody = self.store?.activeEntry?.body,
-                    Self.contentFingerprint(currentBody) == documentVersion
+                guard let current = self.currentDocument(), current.id == entryID,
+                    current.scope == scope, current.runtimeIdentity == runtimeIdentity,
+                    Self.contentFingerprint(current.body) == documentVersion
                 else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
                 guard force || self.snapshot?.storyMemory?.scope != scope else { return }
+                self.snapshotRuntimeIdentity = runtimeIdentity
                 self.snapshot = snapshot
                 self.snapshotGeneration += 1
                 self.setWarnings(warnings)
@@ -540,8 +612,9 @@ public final class BackgroundIndexer: ObservableObject {
     /// 안전하다** — 오버라이드는 entries.json에 살고, 여기서 지우는 것은
     /// 파생 캐시뿐이다 (CLAUDE.md §5-5: 실패해도 원문이 안전).
     public func requestFullPass() {
-        guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
-        guard let scope = scopeProvider?(entry.id) else { return }
+        guard let entry = currentDocument(), entry.isFiction else { return }
+        let scope = entry.scope
+        let runtimeIdentity = entry.runtimeIdentity
         beginManualPhase()
         // 진행 중 패스 선점 — 낡은 사이드카에 체크포인트를 덧쓰지 않게 먼저 멈춘다.
         passGeneration += 1
@@ -559,22 +632,28 @@ public final class BackgroundIndexer: ObservableObject {
             let previous = await self.sidecarPersistence.load(scope: scope)
             guard !Task.isCancelled else { return }
             guard self.passGeneration == resetToken,
-                self.scopeProvider?(entryID) == scope,
-                self.store?.activeEntry?.id == entryID,
-                self.store?.activeEntry.map({ Self.contentFingerprint($0.body) }) == documentVersion
+                let current = self.currentDocument(), current.scope == scope,
+                current.id == entryID, current.runtimeIdentity == runtimeIdentity,
+                Self.contentFingerprint(current.body) == documentVersion
             else { return }
             do {
                 _ = try await self.sidecarPersistence.replaceWithFresh(
                     scope: scope, generation: previous.generation + 1)
             } catch {
+                guard !Task.isCancelled, self.passGeneration == resetToken,
+                    let current = self.currentDocument(), current.scope == scope,
+                    current.runtimeIdentity == runtimeIdentity,
+                    Self.contentFingerprint(current.body) == documentVersion
+                else { return }
                 self.resetTask = nil
                 self.setTransientPhase(.stalled(message: "파생 지식을 초기화하지 못했어요"))
                 return
             }
             guard !Task.isCancelled else { return }
             guard self.passGeneration == resetToken,
-                self.scopeProvider?(entryID) == scope,
-                self.store?.activeEntry?.id == entryID
+                let current = self.currentDocument(), current.scope == scope,
+                current.id == entryID, current.runtimeIdentity == runtimeIdentity,
+                Self.contentFingerprint(current.body) == documentVersion
             else { return }
             self.resetTask = nil
             self.startPass(deep: true, userInitiated: true)
@@ -588,10 +667,8 @@ public final class BackgroundIndexer: ObservableObject {
         // 대용량 모델 다운로드를 유발해서는 안 된다 (폴더 명명과 같은 규칙).
         // 단 사용자 명시 요청(requestPass)은 예외 — 누른 것이 곧 동의다.
         guard settings.autocompleteEnabled || userInitiated else { return }
-        guard let entry = store?.activeEntry, entry.resolvedKind == .novel else { return }
-        guard let scope = scopeProvider?(entry.id), scope.documentID.rawValue == entry.id else {
-            return
-        }
+        guard let entry = currentDocument(), entry.isFiction else { return }
+        let scope = entry.scope
         let body = entry.body
         guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
 
@@ -600,19 +677,20 @@ public final class BackgroundIndexer: ObservableObject {
         // 요약은 낮은 온도로 결정성 우선 — 같은 씬이 패스마다 다른 요약을 얻으면
         // B 블록이 흔들려 KV 프리픽스가 식는다 (PLAN §12).
         parameters.temperature = min(parameters.temperature, 0.3)
-        let liveEntryIDs = Set(store?.entries.map(\.id) ?? [])
+        let liveEntryIDs = Set(legacyStore?.entries.map(\.id) ?? [])
         // 사건의 참여자로 링크할 수 있는 인물 = 등록된 카드뿐 (CLAUDE.md §3).
-        let characters = entry.characters ?? []
+        let characters = entry.characters
         // 인물 감지 제외 목록 — 이미 등록된 이름·별칭 + 사용자가 무시한 이름.
         let knownNames = Set(
-            (entry.characters ?? []).flatMap { card in
+            entry.characters.flatMap { card in
                 [card.name] + card.aliases.split(separator: ",").map {
                     $0.trimmingCharacters(in: .whitespaces)
                 }
             }.filter { !$0.isEmpty })
-        let rejectedNames = Set(entry.rejectedCharacterNames ?? [])
-        let overrides = entry.narrativeOverrides ?? []
-        let recorded = entry.recordedConversations ?? []
+        let rejectedNames = Set(entry.rejectedNames)
+        let overrides = entry.overrides
+        let recorded = entry.recorded
+        let allowsLegacyMetadataWrites = legacyStore != nil && documentProvider == nil
         let caret = caretProvider?()
 
         setIsIndexing(true)
@@ -623,7 +701,8 @@ public final class BackgroundIndexer: ObservableObject {
         passBodyHash = bodyHash
         passScope = scope
         let identity = PassIdentity(
-            scope: scope, generation: token, documentVersion: bodyHash)
+            scope: scope, generation: token, documentVersion: bodyHash,
+            runtimeIdentity: entry.runtimeIdentity)
         let persistence = sidecarPersistence
         // 파싱·디스크 IO·프롬프트 준비를 메인에서 떼어낸다 — 생성 자체는 엔진
         // actor에서 돌므로, 여기서 중요한 건 30만 자 파싱이 메인을 막지 않는 것.
@@ -646,7 +725,7 @@ public final class BackgroundIndexer: ObservableObject {
                 // 클릭이다. 별칭 후보(기존 인물의 변형일 가능성)는 자동 등록하지
                 // 않는다 — 병합/신규는 사용자 결정 (요구사항 §17).
                 let auto = candidates.filter {
-                    $0.confidence == .high && $0.aliasOfKnown == nil
+                    allowsLegacyMetadataWrites && $0.confidence == .high && $0.aliasOfKnown == nil
                 }
                 for candidate in auto { self.autoRegister(candidate, in: entryID) }
                 let remaining = candidates.filter { candidate in
@@ -663,7 +742,7 @@ public final class BackgroundIndexer: ObservableObject {
             }
             // 자동 등록이 카드를 늘렸을 수 있다 — 패스는 최신 카드로 돈다.
             let liveCharacters = await MainActor.run {
-                self.store?.entries.first(where: { $0.id == entryID })?.characters ?? characters
+                allowsLegacyMetadataWrites ? (self.currentDocument()?.characters ?? characters) : characters
             }
             await Self.runPass(
                 deep: deep, scope: scope, entryID: entryID, body: body,
@@ -681,6 +760,7 @@ public final class BackgroundIndexer: ObservableObject {
                     // 이 새 Task는 부모 취소를 물려받지 않는다 — 소유권 가드가 대신
                     // 걸러낸다 (토큰·문서 일치, #82).
                     guard self.owns(identity) else { return }
+                    self.snapshotRuntimeIdentity = identity.runtimeIdentity
                     self.snapshot = snapshot
                     self.snapshotGeneration += 1
                     self.setWarnings(warnings)
@@ -693,14 +773,14 @@ public final class BackgroundIndexer: ObservableObject {
             } progress: { done, total in
                 // "지금 읽기"의 결정적 진행률 (#35) — 자동 패스엔 노출 안 함.
                 Task { @MainActor in
-                    guard self.manualPassToken == token else { return }
+                    guard self.manualPassToken == token, self.owns(identity) else { return }
                     if done > 0 { self.manualProcessedAny = true }
                     self.manualDirtyTotal = total
                     self.manualPhase = .reading(done: done, total: total)
                 }
             } onBlocked: { reason in
                 Task { @MainActor in
-                    guard self.manualPassToken == token else { return }
+                    guard self.manualPassToken == token, self.owns(identity) else { return }
                     self.manualPhase = .blocked(reason: reason)
                 }
             } commit: { candidate, liveHashes in
@@ -730,7 +810,7 @@ public final class BackgroundIndexer: ObservableObject {
     private func autoRegister(
         _ candidate: CharacterDetector.Candidate, in entryID: UUID
     ) {
-        guard let store,
+        guard documentProvider == nil, let store = legacyStore,
             let entry = store.entries.first(where: { $0.id == entryID })
         else { return }
         // 이미 같은 이름의 카드가 있으면 만들지 않는다 (known 필터의 안전망).
@@ -747,7 +827,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 채운다 (PLAN §7 깔때기 3단). 프로파일링 실패 시 이름만 남는다 —
     /// 이름만으로도 카드 선택(§11)에는 충분하다.
     public func approveCandidate(_ candidate: CharacterDetector.Candidate) {
-        guard let store, let entry = store.activeEntry else { return }
+        guard documentProvider == nil, let store = legacyStore, let entry = store.activeEntry else { return }
         let card = CharacterCard(
             name: candidate.name,
             aliases: candidate.aliasForms.joined(separator: ", "))
@@ -762,7 +842,7 @@ public final class BackgroundIndexer: ObservableObject {
     public func approveCandidateAsAlias(
         _ candidate: CharacterDetector.Candidate, of ownerName: String
     ) {
-        guard let store, let entry = store.activeEntry,
+        guard documentProvider == nil, let store = legacyStore, let entry = store.activeEntry,
             var owner = entry.characters?.first(where: { $0.name == ownerName })
         else { return }
         var aliases = owner.aliases.split(separator: ",")
@@ -781,11 +861,13 @@ public final class BackgroundIndexer: ObservableObject {
         let body = entry.body
         let parameters = settings.parameters
         let entryID = entry.id
-        Task { [engine, weak store] in
+        Task { [engine, weak store = legacyStore, weak self] in
             let note = await Self.profileCharacter(
                 named: name, in: body,
                 engine: engine, parameters: parameters)
-            guard let note, let store else { return }
+            guard let note, let store, let self,
+                self.documentProvider == nil, self.legacyStore === store
+            else { return }
             // 그 사이 사용자가 직접 소개를 썼거나 카드를 잠갔다면 그쪽이 이긴다
             // (CLAUDE.md §1-5 — locked는 자동 추출이 덮지 못한다, PLAN §6.2).
             guard
@@ -800,7 +882,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 후보 무시 — 거부 목록에 저장, 같은 이름은 다시 묻지 않는다 (PLAN §7).
     public func rejectCandidate(_ candidate: CharacterDetector.Candidate) {
-        guard let store, let id = store.activeEntry?.id else { return }
+        guard documentProvider == nil, let store = legacyStore, let id = store.activeEntry?.id else { return }
         store.rejectCharacterName(candidate.name, in: id)
         characterCandidates.removeAll { $0.name == candidate.name }
     }

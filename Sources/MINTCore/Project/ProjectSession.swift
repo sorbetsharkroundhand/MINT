@@ -19,7 +19,7 @@ public final class ProjectSession: ObservableObject {
     @Published public private(set) var hasLoadedActiveProject = false
 
     public var willTransition: (() -> Void)?
-    public var documentDidChange: ((ProjectRuntimeIdentity) -> Void)?
+    public var documentDidChange: ((ProjectDocumentSnapshot) -> Void)?
 
     private let store: ProjectStore
     private let defaults: UserDefaults
@@ -47,6 +47,13 @@ public final class ProjectSession: ObservableObject {
     public var selectedDocument: WritingDocument? {
         guard let activeProject, let selectedDocumentID else { return nil }
         return activeProject.documents.first { $0.id == selectedDocumentID }
+    }
+
+    public var selectedDocumentSnapshot: ProjectDocumentSnapshot? {
+        guard let runtimeIdentity, let selectedDocument, let activeProject else { return nil }
+        return ProjectDocumentSnapshot(
+            identity: runtimeIdentity, title: selectedDocument.title,
+            body: selectedDocument.body, kind: selectedDocument.kind, mode: activeProject.mode)
     }
 
     /// Derived memory stays unscoped until active-project lookup has completed. Once
@@ -138,6 +145,7 @@ public final class ProjectSession: ObservableObject {
         }
         guard let id else {
             guard selectedDocumentID != nil else { return }
+            willTransition?()
             selectedDocumentID = nil
             defaults.removeObject(forKey: selectionPreferenceKey(project.id))
             noteDocumentChange()
@@ -147,6 +155,7 @@ public final class ProjectSession: ObservableObject {
             !project.trashedDocumentIDs.contains(id),
             project.documents.contains(where: { $0.id == id })
         else { return }
+        willTransition?()
         selectedDocumentID = id
         persistSelection(id, for: project.id)
         noteDocumentChange()
@@ -207,6 +216,8 @@ public final class ProjectSession: ObservableObject {
         kind: WritingDocument.Kind = .manuscript
     ) -> WritingDocumentID? {
         guard !isTransitioning else { return nil }
+        guard activeProject != nil else { return nil }
+        willTransition?()
         guard var project = activeProject else { return nil }
         let document = WritingDocument(
             id: WritingDocumentID(),
@@ -224,11 +235,14 @@ public final class ProjectSession: ObservableObject {
 
     public func trashSelectedDocument() {
         guard !isTransitioning else { return }
-        guard var project = activeProject,
+        guard let project = activeProject,
             let removedID = selectedDocumentID,
             let removed = project.documents.first(where: { $0.id == removedID }),
             !project.trashedDocumentIDs.contains(removedID)
         else { return }
+
+        willTransition?()
+        guard var project = activeProject else { return }
 
         project.trashedDocumentIDs.insert(removedID)
         var replacementID = project.documents.first {
@@ -253,10 +267,13 @@ public final class ProjectSession: ObservableObject {
 
     public func restoreDocument(_ id: WritingDocumentID) {
         guard !isTransitioning else { return }
-        guard var project = activeProject,
+        guard let project = activeProject,
             project.trashedDocumentIDs.contains(id),
             project.documents.contains(where: { $0.id == id })
         else { return }
+
+        if selectedDocumentID == nil { willTransition?() }
+        guard var project = activeProject else { return }
 
         project.trashedDocumentIDs.remove(id)
         activeProject = project
@@ -360,7 +377,7 @@ public final class ProjectSession: ObservableObject {
             key: ProjectDocumentKey(projectID: projectID, documentID: selectedDocumentID),
             generation: generation)
         runtimeIdentity = identity
-        documentDidChange?(identity)
+        if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
     }
 
     private func markDirty() {
