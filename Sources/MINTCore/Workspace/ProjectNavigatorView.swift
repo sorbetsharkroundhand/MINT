@@ -41,7 +41,7 @@ struct ProjectNavigatorView: View {
 
     @State private var searchText = ""
     @State private var searchResults: [ProjectSearchResult] = []
-    @State private var editingID: WritingDocumentID?
+    @State private var editingKey: ProjectDocumentKey?
     @State private var draftTitle = ""
     @State private var showingTrash = false
     @FocusState private var searchFocused: Bool
@@ -245,7 +245,7 @@ struct ProjectNavigatorView: View {
             Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(selected ? theme.blueC : theme.ink3C)
-            if editingID == document.id {
+            if editingKey == documentKey(for: document) {
                 TextField("문서 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
                     .focused($renameFocused)
@@ -284,21 +284,26 @@ struct ProjectNavigatorView: View {
     }
 
     private func startRename(_ document: WritingDocument) {
-        editingID = document.id
+        guard let key = documentKey(for: document) else { return }
+        editingKey = key
         draftTitle = document.title
         renameFocused = true
     }
 
     private func commitRename() {
-        guard let editingID else { return }
-        session.selectDocument(editingID)
-        ProjectCommandActions(session: session).renameDocument(draftTitle)
-        self.editingID = nil
+        guard let editingKey else { return }
+        session.renameDocument(editingKey, to: draftTitle)
+        self.editingKey = nil
     }
 
     private func cancelRename() {
-        editingID = nil
+        editingKey = nil
         renameFocused = false
+    }
+
+    private func documentKey(for document: WritingDocument) -> ProjectDocumentKey? {
+        guard let projectID = session.activeProject?.id else { return nil }
+        return ProjectDocumentKey(projectID: projectID, documentID: document.id)
     }
 }
 

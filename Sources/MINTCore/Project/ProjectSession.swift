@@ -178,10 +178,20 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func renameSelectedDocument(to title: String) {
+        guard let projectID = activeProject?.id, let selectedDocumentID else { return }
+        renameDocument(
+            ProjectDocumentKey(projectID: projectID, documentID: selectedDocumentID),
+            to: title)
+    }
+
+    /// Renames a captured project/document identity without changing a newer editor selection.
+    /// Deferred UI commits must not retarget a title edit after navigation or trashing.
+    public func renameDocument(_ key: ProjectDocumentKey, to title: String) {
         guard !isTransitioning else { return }
         guard var project = activeProject,
-            let selectedDocumentID,
-            let index = project.documents.firstIndex(where: { $0.id == selectedDocumentID }),
+            project.id == key.projectID,
+            !project.trashedDocumentIDs.contains(key.documentID),
+            let index = project.documents.firstIndex(where: { $0.id == key.documentID }),
             project.documents[index].title != title
         else { return }
 

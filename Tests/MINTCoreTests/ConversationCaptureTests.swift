@@ -22,6 +22,29 @@ final class ConversationCaptureTests: XCTestCase {
         """
     }
 
+    @MainActor
+    private func makeNovelController(
+        onRecord: ((RecordedConversation) -> Void)?
+    ) -> CompletionController {
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let completion = CompletionController(settings: settings)
+        completion.documentContextProvider = {
+            DocumentContext(title: "Novel", kind: .novel, entryID: UUID())
+        }
+        completion.onRecordConversation = onRecord
+        return completion
+    }
+
+    @MainActor
+    private func typeDialogue(into completion: CompletionController) {
+        completion.noteEdit(
+            prefix: dialogueBody,
+            caretLocation: (dialogueBody as NSString).length,
+            isComposing: false,
+            caretAtParagraphEnd: true)
+    }
+
     // MARK: - 블록 감지
 
     func test발화와_짧은서술끼움을_한_대화로_묶는다() throws {
@@ -121,5 +144,47 @@ final class ConversationCaptureTests: XCTestCase {
         let emptied = "전혀 다른 내용의 원고다." as NSString
 
         XCTAssertNil(ConversationDetector.reanchor(record, in: emptied))
+    }
+
+    // MARK: - Controller persistence availability
+
+    @MainActor
+    func test기록핸들러가없으면소설대화제안을예약하거나승인하지않는다() async throws {
+        let completion = makeNovelController(onRecord: nil)
+
+        typeDialogue(into: completion)
+        try await Task.sleep(for: CompletionController.conversationIdle + .milliseconds(100))
+
+        XCTAssertFalse(completion.hasConversationSuggestion)
+        XCTAssertFalse(completion.acceptConversationSuggestion())
+    }
+
+    @MainActor
+    func test기록핸들러를제거하면기존대화제안도즉시비활성화된다() async throws {
+        var recorded: [RecordedConversation] = []
+        let completion = makeNovelController { recorded.append($0) }
+        typeDialogue(into: completion)
+        try await Task.sleep(for: CompletionController.conversationIdle + .milliseconds(100))
+        XCTAssertTrue(
+            completion.hasConversationSuggestion,
+            "대화 캡처는 자동완성 마스터 스위치와 독립적이어야 한다")
+
+        completion.onRecordConversation = nil
+
+        XCTAssertFalse(completion.hasConversationSuggestion)
+        XCTAssertFalse(completion.acceptConversationSuggestion())
+        XCTAssertTrue(recorded.isEmpty)
+    }
+
+    @MainActor
+    func test기록핸들러가있으면자동완성이꺼져도대화를승인해기록한다() async throws {
+        var recorded: [RecordedConversation] = []
+        let completion = makeNovelController { recorded.append($0) }
+
+        typeDialogue(into: completion)
+        try await Task.sleep(for: CompletionController.conversationIdle + .milliseconds(100))
+
+        XCTAssertTrue(completion.acceptConversationSuggestion())
+        XCTAssertEqual(recorded.count, 1)
     }
 }

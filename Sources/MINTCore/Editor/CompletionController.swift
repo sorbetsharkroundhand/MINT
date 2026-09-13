@@ -90,8 +90,16 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var conversationSuggestion: ConversationDetector.Block?
     /// 에디터(BlockTextView)로의 직통 알림 — 은은한 하이라이트·인라인 pill 렌더.
     public var conversationSuggestionDidChange: ((ConversationDetector.Block?) -> Void)?
-    /// 기록 실행 다리 — ContentView가 스토어(재앵커 포함)로 배선한다.
-    public var onRecordConversation: ((RecordedConversation) -> Void)?
+    /// 기록 실행 다리 — ContentView가 스토어(재앵커 포함)로 배선한다. 핸들러가
+    /// 없으면 승인해도 durable decision을 만들 수 없으므로 affordance 자체를 끈다.
+    public var onRecordConversation: ((RecordedConversation) -> Void)? {
+        didSet {
+            guard onRecordConversation == nil else { return }
+            conversationTask?.cancel()
+            conversationTask = nil
+            clearConversationSuggestion()
+        }
+    }
     /// 이미 기록된 블록 해시 제공자 — 같은 대화를 다시 제안하지 않는다.
     public var recordedConversationHashesProvider: (() -> Set<String>)?
 
@@ -109,10 +117,13 @@ public final class CompletionController: ObservableObject {
     /// 키 입력 경로 비용은 태스크 예약뿐이다 (요구사항 §34).
     private func scheduleConversationDetection(prefix: String, caretLocation: Int) {
         conversationTask?.cancel()
-        guard documentContextProvider?()?.kind == .novel else { return }
+        conversationTask = nil
+        guard onRecordConversation != nil,
+            documentContextProvider?()?.kind == .novel
+        else { return }
         conversationTask = Task { [weak self] in
             try? await Task.sleep(for: Self.conversationIdle)
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, self.onRecordConversation != nil else { return }
             let text = prefix as NSString
             guard var block = ConversationDetector.blockEnding(at: text.length, in: text)
             else { return }
@@ -132,10 +143,12 @@ public final class CompletionController: ObservableObject {
     /// false를 리턴해 **개행도 정상 진행**시킨다 — 글쓰기 흐름이 끊기지 않는다.
     @discardableResult
     public func acceptConversationSuggestion() -> Bool {
-        guard let block = conversationSuggestion else { return false }
+        guard let block = conversationSuggestion,
+            let onRecordConversation
+        else { return false }
         clearConversationSuggestion()
         // 기록 승인 = 사용자 결정 — 참여자 귀속·주제는 백그라운드가 보완한다.
-        onRecordConversation?(ConversationDetector.record(from: block, utterances: []))
+        onRecordConversation(ConversationDetector.record(from: block, utterances: []))
         return true
     }
 

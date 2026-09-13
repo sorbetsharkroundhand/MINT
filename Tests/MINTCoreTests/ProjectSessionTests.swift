@@ -246,6 +246,70 @@ final class ProjectSessionTests: XCTestCase {
         XCTAssertEqual(reopened.documents[0].title, "Opening")
     }
 
+    func testTargetedRenameKeepsNewerSelectionAndRenamesCapturedDocument() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let project = fictionProject()
+        try await store.save(project)
+        try await store.activate(id: project.id)
+        let session = ProjectSession(store: store, defaults: defaults, autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        let captured = ProjectDocumentKey(
+            projectID: project.id,
+            documentID: project.documents[0].id)
+        session.selectDocument(project.documents[1].id)
+        let selectedBeforeRename = session.selectedDocumentID
+        let generationBeforeRename = try XCTUnwrap(session.runtimeIdentity?.generation)
+
+        session.renameDocument(captured, to: "Captured chapter")
+
+        XCTAssertEqual(
+            session.activeProject?.documents.first(where: { $0.id == captured.documentID })?.title,
+            "Captured chapter")
+        XCTAssertEqual(session.selectedDocumentID, selectedBeforeRename)
+        XCTAssertEqual(session.runtimeIdentity?.key.documentID, selectedBeforeRename)
+        XCTAssertEqual(session.runtimeIdentity?.generation, generationBeforeRename + 1)
+        try await session.flush()
+        let reopened = try await store.load(id: project.id)
+        XCTAssertEqual(reopened.documents[0].title, "Captured chapter")
+    }
+
+    func testTargetedRenameIgnoresTrashedMissingAndWrongProjectTargets() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let project = fictionProject()
+        try await store.save(project)
+        try await store.activate(id: project.id)
+        let session = ProjectSession(store: store, defaults: defaults, autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        let trashed = ProjectDocumentKey(
+            projectID: project.id,
+            documentID: project.documents[0].id)
+        session.trashSelectedDocument()
+        let selectedAfterTrash = session.selectedDocumentID
+        let generationAfterTrash = try XCTUnwrap(session.runtimeIdentity?.generation)
+
+        session.renameDocument(trashed, to: "Must stay unchanged")
+        session.renameDocument(
+            ProjectDocumentKey(projectID: project.id, documentID: WritingDocumentID()),
+            to: "Missing")
+        session.renameDocument(
+            ProjectDocumentKey(
+                projectID: WritingProjectID(), documentID: project.documents[1].id),
+            to: "Wrong project")
+
+        XCTAssertEqual(session.activeProject?.documents[0].title, project.documents[0].title)
+        XCTAssertEqual(session.activeProject?.documents[1].title, project.documents[1].title)
+        XCTAssertEqual(session.selectedDocumentID, selectedAfterTrash)
+        XCTAssertEqual(session.runtimeIdentity?.generation, generationAfterTrash)
+    }
+
     /// Protected break: creating a document without selecting and persisting it would make
     /// the editor and a relaunched session disagree about the active document.
     func testCreateDocumentSelectsAndPersistsNewDocument() async throws {
