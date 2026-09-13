@@ -7,10 +7,6 @@ import MINTCore
 @main
 struct MINTApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    // 저장소·자동완성은 앱 수명 동안 하나만 — 예전 WindowGroup은 ⌘N마다 새 창을
-    // 열고 각 창이 같은 entries.json에 별도 EntryStore로 써서 저장이 충돌했다.
-    // 단일 Window로 바꿔 그 위험을 없애고, ⌘N을 "새 저널"로 되돌린다(MintCommands).
-    @StateObject private var store = EntryStore()
     // 단일 모델 원칙 (CLAUDE.md §2-6) — 예측과 백그라운드 이해가 같은 엔진
     // (같은 상주 모델)을 쓴다. 인덱서는 예측에 항상 양보한다 (PLAN §9 선점).
     // 종료 훅(AppDelegate)에서도 접근하므로 internal.
@@ -32,20 +28,26 @@ struct MINTApp: App {
         engine: MINTApp.sharedEngine,
         sidecarPersistence: MINTApp.knowledgeSidecars)
     @StateObject private var projectSession = ProjectSession(store: MINTApp.projectStore)
+    @StateObject private var editorRequests = ProjectEditorRequests()
 
     var body: some Scene {
         Window("MINT", id: "main") {
             ContentView(
-                store: store,
+                projectSession: projectSession,
+                editorRequests: editorRequests,
                 completion: completion,
-                livingMargin: livingMargin,
-                indexer: indexer,
-                projectSession: projectSession)
+                livingMargin: livingMargin)
+                .onAppear { appDelegate.projectSession = projectSession }
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1180, height: 760)
-        .commands { MintCommands(store: store) }
+        .commands {
+            MintCommands(
+                session: projectSession,
+                projectStore: MINTApp.projectStore,
+                editorRequests: editorRequests)
+        }
 
         // ⌘, — 자동완성 설정 (M4): 모델 · 프롬프트 방식 · 디바운스 · 토큰.
         // 컨트롤러를 함께 넘겨 설정 창의 스위치·모델 변경도 의유 API로 무효화를
@@ -58,6 +60,9 @@ struct MINTApp: App {
 
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    weak var projectSession: ProjectSession?
+    private var isAwaitingProjectFlush = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -67,10 +72,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let projectSession, !isAwaitingProjectFlush else {
+            return isAwaitingProjectFlush ? .terminateLater : .terminateNow
+        }
+        isAwaitingProjectFlush = true
+        Task { @MainActor [weak self] in
+            do {
+                try await projectSession.flush()
+                sender.reply(toApplicationShouldTerminate: true)
+            } catch {
+                self?.isAwaitingProjectFlush = false
+                sender.reply(toApplicationShouldTerminate: false)
+            }
+        }
+        return .terminateLater
+    }
+
     // 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
-            EntryStore.current?.flush()
             WritingPositionStore.shared.persistNow()  // 집필 위치 영속 (#36)
             // 진행 중 생성의 부모 태스크부터 접는다 — 이 순서라 엔진 드레인은
             // 밀리초 단위다. 취소 없이 기다리면 생성이 끝날 때까지 종료가 막힌다.
@@ -93,6 +114,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidResignActive(_ notification: Notification) {
-        MainActor.assumeIsolated { EntryStore.current?.flush() }
+        Task { @MainActor [weak projectSession] in
+            try? await projectSession?.flush()
+        }
     }
 }

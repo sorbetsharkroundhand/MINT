@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 
 /// 메뉴 막대 명령 (에디터 v3 — 상용 v1.0).
 ///
-/// 단일 `Window` 씬으로 바꾸며 ⌘N을 "새 저널"로 되돌린다. 서식·정렬·목록 명령은
+/// 단일 `Window` 씬에서 ⌘N은 활성 프로젝트의 새 문서를 만든다. 서식·정렬·목록 명령은
 /// 리스폰더 체인(NSApp.sendAction)으로 포커스된 `BlockTextView`에 도달한다 —
 /// 단축키의 단일 소스라 에디터의 performKeyEquivalent과 이중 처리되지 않는다.
 /// 에디터(BlockTextView 서브트리)에 포커스가 있는가 — 서식·찾기 명령의
@@ -19,8 +19,38 @@ extension FocusedValues {
     }
 }
 
+/// Testable command routing for mutations owned by the active project session.
+@MainActor
+public struct ProjectCommandActions {
+    public let newDocument: (WritingDocument.Kind) -> Void
+    public let renameDocument: (String) -> Void
+    public let trashDocument: () -> Void
+    public let restoreDocument: (WritingDocumentID) -> Void
+    public let save: () async throws -> Void
+
+    public init(session: ProjectSession) {
+        newDocument = { kind in
+            session.createDocument(kind: kind)
+        }
+        renameDocument = { title in
+            session.renameSelectedDocument(to: title)
+        }
+        trashDocument = {
+            session.trashSelectedDocument()
+        }
+        restoreDocument = { id in
+            session.restoreDocument(id)
+        }
+        save = {
+            try await session.flush()
+        }
+    }
+}
+
 public struct MintCommands: Commands {
-    let store: EntryStore
+    @ObservedObject private var session: ProjectSession
+    @ObservedObject private var editorRequests: ProjectEditorRequests
+    private let projectStore: ProjectStore
     /// 에디터 포커스 여부 — 없으면 서식·찾기 명령을 비활성화해 "눌러도 무반응"을
     /// 없앤다 (이슈 #26).
     @FocusedValue(\.hasMintEditor) private var hasMintEditor
@@ -28,39 +58,64 @@ public struct MintCommands: Commands {
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
-    public init(store: EntryStore) {
-        self.store = store
+    public init(
+        session: ProjectSession,
+        projectStore: ProjectStore,
+        editorRequests: ProjectEditorRequests
+    ) {
+        self._session = ObservedObject(wrappedValue: session)
+        self.projectStore = projectStore
+        self._editorRequests = ObservedObject(wrappedValue: editorRequests)
     }
 
     public var body: some Commands {
-        // 파일 ▸ 새 저널/폴더 — ⌘N을 새 창이 아니라 새 저널에 묶는다.
+        // 파일 ▸ 프로젝트 문서와 verified project creation/import flows.
         CommandGroup(replacing: .newItem) {
-            Button("새 저널") { store.newEntry() }
+            Button("새 문서") {
+                ProjectCommandActions(session: session).newDocument(.manuscript)
+                editorRequests.focusEditor()
+            }
                 .keyboardShortcut("n", modifiers: .command)
-            Button("새 소설") { store.newEntry(kind: .novel) }
-                .keyboardShortcut("n", modifiers: [.command, .option])
-            Button("새 폴더") { store.newFolder() }
+                .disabled(session.activeProject == nil)
+
+            Divider()
+
+            Button("새 Fiction 프로젝트…") { presentNewProject(mode: .fiction) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+            Button("새 General 프로젝트…") { presentNewProject(mode: .general) }
+                .keyboardShortcut("n", modifiers: [.command, .option])
+            Button("레거시 라이브러리 가져오기…") { presentLegacyImport() }
+        }
+
+        CommandGroup(replacing: .saveItem) {
+            Button("저장") {
+                Task { try? await ProjectCommandActions(session: session).save() }
+            }
+            .keyboardShortcut("s", modifiers: .command)
+            .disabled(session.activeProject == nil)
         }
 
         // 파일 저장 영역 옆에 이름 바꾸기 · 내보내기 · 인쇄.
         CommandGroup(after: .saveItem) {
-            Button("저널 이름 바꾸기") {
+            Button("문서 이름 바꾸기") {
                 sidebarVisible = true
-                store.requestRename()
+                editorRequests.beginRename()
             }
+
+            Button("문서를 휴지통으로 이동", role: .destructive) {
+                ProjectCommandActions(session: session).trashDocument()
+                editorRequests.focusEditor()
+            }
+            .disabled(session.selectedDocument == nil)
 
             Divider()
 
-            Button("Markdown으로 내보내기…") { exportMarkdown() }
+            Button("Markdown으로 내보내기…") { presentProjectExportUnavailable() }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-            // 소설을 전자책으로 (요구 7) — 소설이 아닌 저널도 내보낼 수는 있다.
-            Button("EPUB으로 내보내기…") { exportEpub() }
-            // 인쇄는 first responder가 아니라 **현재 저널 전용 뷰**로 — 검색창·
-            // 사이드바 포커스에서 엉뚱한 대상을 찍지 않게 (이슈 #26).
+            Button("EPUB으로 내보내기…") { presentProjectExportUnavailable() }
             Button("인쇄…") { printActiveManuscript() }
                 .keyboardShortcut("p", modifiers: .command)
-                .disabled(store.activeEntry == nil)
+                .disabled(session.selectedDocument == nil)
         }
 
         // 서식 ▸ 텍스트 스타일 · 블록 · 정렬 · 이미지.
@@ -122,9 +177,9 @@ public struct MintCommands: Commands {
             }
             .disabled(hasMintEditor != true)
 
-            Button("저널 검색") {
+            Button("프로젝트 검색") {
                 sidebarVisible = true
-                store.requestSearchFocus()
+                editorRequests.focusSearch()
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
@@ -187,67 +242,74 @@ public struct MintCommands: Commands {
         }
     }
 
-    /// 현재 저널을 일반 Markdown(.md)으로 내보낸다 — 이미지 asset을 목적지 옆
-    /// `images/`로 복사하고 상대경로를 고쳐 외부 편집기에서도 이미지가 살아
-    /// 있게 한다 (이슈 #13).
-    private func exportMarkdown() {
-        guard let entry = store.activeEntry else { return }
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
-        panel.nameFieldStringValue = "\(sanitizedFileName(entry.title)).md"
-        panel.canCreateDirectories = true
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            // 누락 asset을 미리 검증해 명시적 계속을 받는다 (이슈 #15) —
-            // 조용히 깨진 참조만 남은 결과물을 만들지 않는다.
-            guard ImageAssetScanner.confirmContinueDespiteMissing(in: entry.body) else {
-                return
+    private func presentNewProject(mode: WritingMode) {
+        let alert = NSAlert()
+        alert.messageText = mode == .fiction ? "새 Fiction 프로젝트" : "새 General 프로젝트"
+        alert.informativeText = "프로젝트 이름을 입력하세요."
+        alert.addButton(withTitle: "만들기")
+        alert.addButton(withTitle: "취소")
+        let titleField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        titleField.placeholderString = "프로젝트 이름"
+        alert.accessoryView = titleField
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
+        Task { @MainActor in
+            do {
+                try await ProjectCreationCoordinator(session: session)
+                    .createProject(title: titleField.stringValue, mode: mode)
+                editorRequests.focusEditor()
+            } catch {
+                presentError(title: "프로젝트를 만들지 못했습니다", error: error)
             }
-            let report = try MarkdownExporter.export(entry, to: url)
-            // 성공 위치를 명시한다 — 어디에 저장됐는지 사용자가 바로 확인 (이슈 #10).
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-            // 소스 정책 경고 (이슈 #13) — 복사 못 한/안 한 참조가 있으면 조용한
-            // 성공으로 오해하지 않게 알려준다.
-            var notes: [String] = []
-            if !report.missingSources.isEmpty {
-                notes.append("원본 파일을 찾지 못한 이미지 \(report.missingSources.count)건은 참조를 그대로 남겼어요:\n\(report.missingSources.joined(separator: ", "))")
-            }
-            if report.remoteCount > 0 {
-                notes.append("웹 이미지 \(report.remoteCount)건은 주소 그대로 내보냈어요 — 오프라인에서는 안 보일 수 있어요.")
-            }
-            if report.blockedCount > 0 {
-                notes.append("해석할 수 없는 참조 \(report.blockedCount)건은 그대로 남겼어요.")
-            }
-            if !notes.isEmpty {
-                let alert = NSAlert()
-                alert.messageText = "Markdown 내보내기 완료"
-                alert.informativeText = notes.joined(separator: "\n\n")
-                alert.alertStyle = .warning
-                alert.runModal()
-            }
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Markdown 내보내기 실패"
-            alert.informativeText = "대상: \(url.path)\n\(error.localizedDescription)"
-            alert.alertStyle = .warning
-            alert.runModal()
         }
     }
 
-    /// 현재 저널을 EPUB 3 전자책으로 저장한다 (요구 7 — 소설 내보내기).
-    private func exportEpub() {
-        guard let entry = store.activeEntry else { return }
-        EpubExporter.exportWithPanel(entry)
+    private func presentLegacyImport() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.json]
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.message = "가져올 레거시 entries.json을 선택하세요. 원본은 변경되지 않습니다."
+        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
+
+        let modeAlert = NSAlert()
+        modeAlert.messageText = "가져올 프로젝트 종류"
+        modeAlert.informativeText = "원고에 맞는 작업 공간을 선택하세요."
+        modeAlert.addButton(withTitle: "Fiction")
+        modeAlert.addButton(withTitle: "General")
+        modeAlert.addButton(withTitle: "취소")
+        let response = modeAlert.runModal()
+        guard response != .alertThirdButtonReturn else { return }
+        let mode: WritingMode = response == .alertFirstButtonReturn ? .fiction : .general
+        let sourceTitle = sourceURL.deletingPathExtension().lastPathComponent
+        let title = sourceTitle == "entries" ? "Imported Project" : sourceTitle
+
+        Task { @MainActor in
+            do {
+                try await ImportProjectCoordinator(store: projectStore, session: session)
+                    .importLegacy(from: sourceURL, mode: mode, title: title)
+                editorRequests.focusEditor()
+            } catch {
+                presentError(title: "가져오지 못했습니다", error: error)
+            }
+        }
     }
 
-    /// 현재 저널을 전용 뷰로 조립해 인쇄한다 — 포커스와 무관하게 항상 같은
-    /// 원고가 나온다 (이슈 #26). 마크다운 마커는 그대로 두되 세리프 본문으로.
+    /// Project export is intentionally unavailable until the project-aware exporter lands.
+    private func presentProjectExportUnavailable() {
+        let alert = NSAlert()
+        alert.messageText = "프로젝트 내보내기 준비 중"
+        alert.informativeText = "현재 프로젝트를 레거시 저널로 변환하지 않고 내보내는 기능을 준비하고 있습니다."
+        alert.addButton(withTitle: "확인")
+        alert.runModal()
+    }
+
     private func printActiveManuscript() {
-        guard let entry = store.activeEntry else { return }
+        guard let document = session.selectedDocument else { return }
         let page = NSTextView(
             frame: NSRect(x: 0, y: 0, width: 620, height: 792))
         page.textStorage?.setAttributedString(NSAttributedString(
-            string: entry.body.isEmpty ? "(빈 원고)" : entry.body,
+            string: document.body.isEmpty ? "(빈 원고)" : document.body,
             attributes: [
                 .font: MintFonts.serif(12),
                 .foregroundColor: NSColor.black,
@@ -260,12 +322,13 @@ public struct MintCommands: Commands {
         page.printView(nil)
     }
 
-    /// 파일 이름에 쓸 수 없는 문자를 정리한다.
-    private func sanitizedFileName(_ name: String) -> String {
-        let cleaned = name.components(separatedBy: CharacterSet(charactersIn: "/:\\?%*|\"<>"))
-            .joined(separator: " ")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return cleaned.isEmpty ? "저널" : String(cleaned.prefix(60))
+    private func presentError(title: String, error: Error) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = error.localizedDescription
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "확인")
+        alert.runModal()
     }
 
     /// 현재 유효 외형이 다크인가 — 명시값이 있으면 그대로, "시스템 따름"이면 실제

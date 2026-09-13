@@ -3,67 +3,40 @@ import SwiftUI
 
 /// MINT 에디터 v3 메인 화면 — 디자인 "MINT Editor v3.dc.html" 완전 이식.
 ///
-/// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(다중 저널),
+/// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(프로젝트 문서),
 /// 우측 에디터 컬럼(툴바 · Notion식 블록 에디터 · 단축키 필 · 상태 바).
 public struct ContentView: View {
-    // 저장소·자동완성은 App(단일 인스턴스)에서 주입받는다 — 창마다 별도 저장소가
-    // 생기던 문제를 없애기 위해 소유권을 위로 올렸다.
-    @ObservedObject private var store: EntryStore
+    @ObservedObject private var projectSession: ProjectSession
+    @ObservedObject private var editorRequests: ProjectEditorRequests
     @ObservedObject private var completion: CompletionController
     @ObservedObject private var livingMargin: LivingMarginModel
-    private let projectSession: ProjectSession
-    /// 백그라운드 이해 파이프라인 (M6) — nil이면 지식 없이 동작 (프리뷰 등).
-    private let indexer: BackgroundIndexer?
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
-    /// 손상 복구 안내를 이번 세션에서 닫았는지 — 닫아도 저장 우회 보호는 계속된다.
-    @State private var recoveryGuideDismissed = false
     /// 첫 실행 모델 선택 시트 (#40) — 기본 모델(Basil 16.9GB)의 조용한 자동
     /// 다운로드 전에 사용자가 크기·성격을 보고 고르게 한다.
     @ObservedObject private var settings: CompletionSettings
 
     public init(
-        store: EntryStore,
+        projectSession: ProjectSession,
+        editorRequests: ProjectEditorRequests,
         completion: CompletionController,
-        livingMargin: LivingMarginModel,
-        indexer: BackgroundIndexer? = nil,
-        projectSession: ProjectSession
+        livingMargin: LivingMarginModel
     ) {
-        self.store = store
+        self.projectSession = projectSession
+        self.editorRequests = editorRequests
         self.completion = completion
         self.livingMargin = livingMargin
-        self.indexer = indexer
-        self.projectSession = projectSession
         self.settings = completion.settings
     }
 
     public var body: some View {
         WorkspaceSurface(
-            store: store,
-            completion: completion,
-            livingMargin: livingMargin,
             projectSession: projectSession,
-            indexer: indexer)
+            editorRequests: editorRequests,
+            completion: completion,
+            livingMargin: livingMargin)
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
-            .confirmationDialog(
-                "원고 파일 복구",
-                isPresented: recoveryDialogBinding,
-                titleVisibility: .visible
-            ) {
-                Button("안전 내보내기…") { exportSessionCopy() }
-                if let preserved = store.pendingRecovery?.preservedCopyURL {
-                    Button("보존 사본 위치 열기") {
-                        NSWorkspace.shared.activateFileViewerSelecting([preserved])
-                    }
-                }
-                Button("복구 파일로 라이브러리 승계", role: .destructive) {
-                    store.adoptRecoveredAsLibrary()
-                    recoveryGuideDismissed = false
-                }
-            } message: {
-                Text(recoveryMessage)
-            }
             // 첫 실행 모델 선택 (#40) — 확인 전엔 시트가 뜨고 시작 preload는 보류.
             .sheet(isPresented: initialModelSheetBinding) {
                 InitialModelPicker(settings: settings) {
@@ -75,69 +48,29 @@ public struct ContentView: View {
                 // 첫 실행(선택 전)이면 시트가 대신 받고, 고른 뒤 preload한다 (#40).
                 if settings.initialModelConfirmed { completion.preloadEngine() }
                 // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
-                completion.documentContextProvider = { [weak store] in
-                    store?.activeDocumentContext
+                completion.documentContextProvider = { [weak projectSession] in
+                    guard let project = projectSession?.activeProject,
+                        let document = projectSession?.selectedDocument
+                    else { return nil }
+                    return DocumentContext(
+                        title: document.title,
+                        kind: project.mode == .fiction ? .novel : .journal,
+                        entryID: document.id.rawValue)
                 }
-                // 대화 기록 (요구사항 §20–§21) — Enter 승인 → 마크다운 본문
-                // 좌표로 재앵커해 entries.json에 저장. 스토어가 재조립 신호를 쏜다.
-                completion.onRecordConversation = { [weak store] record in
-                    guard let store else { return }
-                    var record = record
-                    if let body = store.activeEntry?.body {
-                        record = ConversationDetector.reanchor(record, in: body as NSString)
-                            ?? record
-                    }
-                    store.recordConversation(record, in: store.activeID)
-                }
-                completion.recordedConversationHashesProvider = { [weak store] in
-                    Set((store?.activeEntry?.recordedConversations ?? []).map(\.contentHash))
-                }
-                // 백그라운드 이해 배선 (M6, PLAN §9) — 편집 신호 → 인덱서,
-                // 인덱서 스냅샷 → 예측 조립. 활성 문서 불일치는 여기서 거른다.
-                if let indexer {
-                    indexer.attach(store: store) { [weak projectSession] entryID in
-                        projectSession?.storyMemoryScope(for: entryID)
-                    }
-                    store.documentDidChange = { [weak indexer, weak completion] id in
-                        indexer?.noteChange(entryID: id)
-                        // 문서 전환을 예측 쪽에도 알린다 — 이전 작품의 고스트·
-                        // 리포트가 B 화면에 남거나 B 오버라이드에 기록되지 않게
-                        // (이슈 #8, Gate 2).
-                        completion?.noteDocumentSwitch(to: id)
-                    }
-                    // 사용자 수정(오버라이드) 변경 → LLM 없이 스냅샷만 재조립
-                    // (v4) — 타임라인·바이블·예측이 즉시 수정본을 본다.
-                    store.narrativeOverridesDidChange = { [weak indexer] id in
-                        indexer?.rehydrate(entryID: id)
-                    }
-                    // 커서 거리순 이해 (docs/m6-scene-split.md §5) — 쓰고 있는
-                    // 자리 근처부터 읽는다. 값 pull이라 키 입력 비용 없음.
-                    indexer.caretProvider = { [weak completion] in
-                        completion?.lastCaretLocation
-                    }
-                    completion.knowledgeProvider = { [weak indexer, weak store] in
-                        guard let snapshot = indexer?.snapshot,
-                            snapshot.entryID == store?.activeID,
-                            snapshot.storyMemory?.scope
-                                == projectSession.storyMemoryScope(for: snapshot.entryID)
-                        else { return nil }
-                        return snapshot
-                    }
-                    // 시작 직후에도 유휴 타이머를 감는다 — 앱을 켜두기만 해도
-                    // 열린 작품의 이해가 준비된다 (상주 앱의 이점, CLAUDE.md §1-4).
-                    indexer.noteChange(entryID: store.activeID)
+                // JournalEntry-only decisions are not mirrored into project documents.
+                completion.onRecordConversation = nil
+                completion.recordedConversationHashesProvider = { [] }
+                completion.knowledgeProvider = nil
+                projectSession.willTransition = {
+                    guard let textView = NSApp.keyWindow?.firstResponder as? BlockTextView,
+                        textView.hasMarkedText()
+                    else { return }
+                    textView.unmarkText()
                 }
             }
             .task {
                 guard !projectSession.hasLoadedActiveProject else { return }
                 try? await projectSession.loadActiveProject()
-                indexer?.noteScopeChange(entryID: store.activeID)
-            }
-            .onChange(of: projectSession.activeProject?.id) { _, _ in
-                indexer?.noteScopeChange(entryID: store.activeID)
-            }
-            .onChange(of: projectSession.selectedDocumentID) { _, _ in
-                indexer?.noteScopeChange(entryID: store.activeID)
             }
     }
 
@@ -147,16 +80,6 @@ public struct ContentView: View {
         case "light": .light
         default: nil
         }
-    }
-
-    // MARK: - 손상 복구 안내 (이슈 #6)
-
-    /// 복구 모드에서만 뜨고, 사용자가 닫으면 이번 세션에선 다시 열지 않는다.
-    /// 닫아도 데이터는 안전 — 저장은 계속 세션 복구 파일로 우회된다.
-    private var recoveryDialogBinding: Binding<Bool> {
-        Binding(
-            get: { store.pendingRecovery != nil && !recoveryGuideDismissed },
-            set: { shown in if !shown { recoveryGuideDismissed = true } })
     }
 
     /// 첫 실행 모델 선택 시트 바인딩 (#40) — 한 번 확인하면 다시 뜨지 않는다.
@@ -170,54 +93,16 @@ public struct ContentView: View {
             })
     }
 
-    private var recoveryTitle: String {
-        switch store.pendingRecovery?.cause {
-        case .unreadable: "원고 파일을 읽을 수 없습니다"
-        default: "원고 파일이 손상되어 있습니다"
-        }
-    }
-
-    private var recoveryMessage: String {
-        guard let recovery = store.pendingRecovery else { return "" }
-        var lines = ["""
-            원본은 그대로 보존됐고, 이 세션의 입력은 아래 복구 파일에 기록됩니다 \
-            (손상 원본을 덮지 않기 위한 우회).
-            """
-        ]
-        lines.append("• 원본: \(recovery.originalURL.lastPathComponent)")
-        if let preserved = recovery.preservedCopyURL {
-            lines.append("• 보존 사본: \(preserved.lastPathComponent)")
-        }
-        if case .corrupted(let reason) = recovery.cause {
-            lines.append("• 오류: \(reason)")
-        } else if case .unreadable(let message) = recovery.cause {
-            lines.append("• 오류: \(message)")
-        }
-        lines.append("• 이 세션 기록: \(recovery.sessionURL.lastPathComponent)")
-        return lines.joined(separator: "\n")
-    }
-
-    /// 현재 세션 전체를 사용자가 고른 위치로 내보낸다 (SavePanel).
-    private func exportSessionCopy() {
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = store.pendingRecovery?.sessionURL.lastPathComponent
-            ?? "entries-recovered.json"
-        panel.allowedContentTypes = [.json]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        _ = store.exportSessionCopy(to: url)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
 }
 
 // MARK: - 에디터 컬럼
 
 struct EditorPane: View {
-    @ObservedObject var store: EntryStore
+    @ObservedObject var projectSession: ProjectSession
+    @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
-    let projectSession: ProjectSession
     let theme: MintTheme
-    var indexer: BackgroundIndexer?
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
@@ -226,29 +111,46 @@ struct EditorPane: View {
         VStack(spacing: 0) {
             if !chromeHidden {
                 EditorToolbar(
-                    store: store, completion: completion, settings: settings,
-                    projectSession: projectSession, theme: theme, indexer: indexer)
+                    projectSession: projectSession,
+                    editorRequests: editorRequests,
+                    completion: completion,
+                    settings: settings,
+                    theme: theme)
                 theme.sepC.frame(height: 1)
             }
             editor
             if !chromeHidden {
                 theme.sepC.frame(height: 1)
                 EditorStatusBar(
-                    store: store, completion: completion, settings: settings, theme: theme)
+                    projectSession: projectSession,
+                    completion: completion,
+                    settings: settings,
+                    theme: theme)
             }
         }
     }
 
     private var editor: some View {
-        MintBlockEditor(
-            text: bodyBinding, controller: completion, theme: theme,
-            lineSpacing: CGFloat(settings.lineSpacing),
-            baseFontSize: CGFloat(settings.editorFontSize),
-            entryID: store.activeID,
-            focusRequest: store.editorFocusRequests,
-            searchJump: store.searchJump)
+        Group {
+            if let identity = editorIdentity {
+                MintBlockEditor(
+                    text: bodyBinding,
+                    controller: completion,
+                    theme: theme,
+                    lineSpacing: CGFloat(settings.lineSpacing),
+                    baseFontSize: CGFloat(settings.editorFontSize),
+                    documentIdentity: identity,
+                    focusRequest: editorRequests.editorFocusRequest,
+                    searchJump: editorRequests.searchJump)
+            } else {
+                Text("프로젝트에서 문서를 선택하세요")
+                    .font(MintFonts.uiFont(13))
+                    .foregroundStyle(theme.ink3C)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
             .overlay(alignment: .topLeading) {
-                if (store.activeEntry?.body ?? "").isEmpty {
+                if projectSession.selectedDocument?.body.isEmpty == true {
                     // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
                     // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
                     GeometryReader { geo in
@@ -271,9 +173,16 @@ struct EditorPane: View {
 
     private var bodyBinding: Binding<String> {
         Binding(
-            get: { store.activeEntry?.body ?? "" },
-            set: { store.updateActiveBody($0) }
+            get: { projectSession.selectedDocument?.body ?? "" },
+            set: { projectSession.updateSelectedDocumentBody($0) }
         )
+    }
+
+    private var editorIdentity: EditorDocumentIdentity? {
+        guard let projectID = projectSession.activeProject?.id,
+            let documentID = projectSession.selectedDocumentID
+        else { return nil }
+        return .project(ProjectDocumentKey(projectID: projectID, documentID: documentID))
     }
 }
 
@@ -285,12 +194,11 @@ struct EditorPane: View {
 struct EditorToolbar: View {
     @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @ObservedObject var store: EntryStore
+    @ObservedObject var projectSession: ProjectSession
+    @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
-    @ObservedObject var projectSession: ProjectSession
     let theme: MintTheme
-    var indexer: BackgroundIndexer?
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @State private var sidebarButtonHovered = false
     @State private var settingsButtonHovered = false
@@ -304,7 +212,7 @@ struct EditorToolbar: View {
     var body: some View {
         HStack(spacing: 10) {
             sidebarToggle
-            Text(store.activeEntry?.title ?? "문서")
+            Text(projectSession.selectedDocument?.title ?? "문서")
                 .font(MintFonts.uiFont(12, .medium))
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
@@ -322,7 +230,7 @@ struct EditorToolbar: View {
             }
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
-            if store.activeEntry?.resolvedKind == .novel {
+            if projectSession.activeProject?.mode == .fiction {
                 Button {
                     sidebarSection = SidebarSection.bible.rawValue
                 } label: {
@@ -331,15 +239,6 @@ struct EditorToolbar: View {
                             .font(.system(size: 9))
                         Text("소설")
                             .font(MintFonts.serifUI(11, .semibold))
-                        // 등록된 인물 수 — 배지가 바이블 입구임을 알리는 최소 신호.
-                        if let count = store.activeEntry?.characters?.count, count > 0 {
-                            Text("\(count)")
-                                .font(MintFonts.monoUI(9, .semibold))
-                        }
-                        // 감지된 인물 후보가 기다리는 중 — 점 하나만 (비침습, M6).
-                        if let indexer {
-                            CandidateDot(indexer: indexer, store: store, theme: theme)
-                        }
                     }
                     .foregroundStyle(theme.novelC)
                     .padding(.vertical, 3)
@@ -351,8 +250,7 @@ struct EditorToolbar: View {
                 .help("스토리 바이블 — 장르·인물·자동 이해")
                 .accessibilityLabel(Text("스토리 바이블"))
                 // 색점 없이도 후보 대기를 알 수 있게 (#59-3).
-                .accessibilityValue(
-                    Text(bibleBadgeAXValue(indexer: indexer, store: store)))
+                .accessibilityValue(Text("프로젝트 지식 기능 준비 중"))
             }
 
             // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
@@ -424,7 +322,7 @@ struct EditorToolbar: View {
                 WorkspaceModeSelection.select(
                     mode,
                     session: projectSession,
-                    editorStore: store)
+                    requestEditorFocus: editorRequests.focusEditor)
             })
     }
 
@@ -473,39 +371,6 @@ struct EditorToolbar: View {
             .accessibilityLabel(Text("설정"))
     }
 }
-
-/// 스토리 바이블 배지의 VoiceOver 값 — 후보 대기 수를 읽는다 (#59-3).
-@MainActor
-private func bibleBadgeAXValue(indexer: BackgroundIndexer?, store: EntryStore) -> String {
-    guard let indexer,
-        indexer.candidatesEntryID == store.activeID,
-        !indexer.characterCandidates.isEmpty
-    else { return "" }
-    return "인물 후보 검토 \(indexer.characterCandidates.count)명 대기"
-}
-
-/// 소설 배지 안의 인물 후보 대기 점 (M6, PLAN §7) — 감지는 자동이지만 UI는
-/// 점 하나뿐이다. 화면을 흔들지 않는다 (CLAUDE.md §3 "고스트는 조용히"의 연장).
-private struct CandidateDot: View {
-    @ObservedObject var indexer: BackgroundIndexer
-    @ObservedObject var store: EntryStore
-    let theme: MintTheme
-
-    var body: some View {
-        if indexer.candidatesEntryID == store.activeID,
-            !indexer.characterCandidates.isEmpty
-        {
-            Circle()
-                .fill(theme.novelC)
-                .frame(width: 5, height: 5)
-                // 상태 의미는 색이 아니라 소리로 전달한다 (#59): 점은 AX에서 숨기고
-                // 부모 배지의 accessibilityValue가 "검토 후보 N명"을 말한다.
-                .accessibilityHidden(true)
-        }
-    }
-}
-
-
 
 /// 리퀴드 글래스 토글 스위치 (42×25) — 창 유리 톤과 통일된 디테일.
 ///
@@ -723,7 +588,7 @@ struct ShortcutHintPill: View {
 /// (릴리즈 실측 — 대형 문서 타이핑 랙의 주범이었다, docs/editor-perf.md).
 /// 값이 최대 ~0.3s 낡을 수 있지만 단어 수는 그래도 된다. 랙은 안 된다.
 struct EditorStatusBar: View {
-    @ObservedObject var store: EntryStore
+    @ObservedObject var projectSession: ProjectSession
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
@@ -731,7 +596,7 @@ struct EditorStatusBar: View {
 
     var body: some View {
         HStack(spacing: 16) {
-            if let notice = store.notice {
+            if let notice = projectSession.lastErrorMessage {
                 Text(notice)
                     .font(MintFonts.uiFont(11))
                     .foregroundStyle(theme.blueC)
@@ -763,19 +628,21 @@ struct EditorStatusBar: View {
                 separator
             }
             // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
-            if case .failed(let message, _) = store.savePhase {
+            if projectSession.savePhase == .failed {
                 Text("저장 실패")
                     .foregroundStyle(theme.dangerC)
-                    .help("\(message)\n대상: \(store.saveTargetFileName)")
-                Button("다시 시도") { store.retrySave() }
+                    .help(projectSession.lastErrorMessage ?? "프로젝트를 저장하지 못했습니다.")
+                Button("다시 시도") {
+                    Task { try? await projectSession.flush() }
+                }
                     .buttonStyle(.link)
                     .font(MintFonts.monoUI(11))
-            } else if store.pendingRecovery != nil {
-                Text("복구 파일 기록 중 (\(store.saveTargetFileName))")
-            } else if store.isSaveInFlight {
+            } else if projectSession.savePhase == .saving {
                 Text("저장 중…")
-            } else if case .saved = store.savePhase {
+            } else if projectSession.savePhase == .saved {
                 Text("저장됨")
+            } else {
+                Text("저장 대기 중")
             }
             separator
             Text("Markdown")
@@ -791,7 +658,7 @@ struct EditorStatusBar: View {
         .task(id: statsKey) {
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled else { return }
-            let text = store.activeEntry?.body ?? ""
+            let text = projectSession.selectedDocument?.body ?? ""
             stats = await Task.detached(priority: .utility) {
                 TextStats.compute(text)
             }.value
@@ -802,7 +669,8 @@ struct EditorStatusBar: View {
     /// 디바운스 키 — 본문 변경 카운터 + 활성 문서. 문자열 비교(O(n))가 아니라
     /// 카운터 비교(O(1))로 변경을 감지한다.
     private var statsKey: String {
-        "\(store.activeID.uuidString)-\(store.bodyVersion)"
+        let key = projectSession.runtimeIdentity?.key
+        return "\(key?.projectID.rawValue.uuidString ?? "none")-\(key?.documentID.rawValue.uuidString ?? "none")-\(projectSession.runtimeIdentity?.generation ?? 0)"
     }
 
     private var keystrokeLabel: String {
@@ -914,13 +782,13 @@ struct LongParagraphNotice: View {
 
 #Preview {
     ContentView(
-        store: EntryStore(),
-        completion: CompletionController(),
-        livingMargin: LivingMarginModel(),
         projectSession: ProjectSession(
             store: ProjectStore(
                 root: FileManager.default.temporaryDirectory
-                    .appendingPathComponent("MINT-Preview-Projects", isDirectory: true))))
+                    .appendingPathComponent("MINT-Preview-Projects", isDirectory: true))),
+        editorRequests: ProjectEditorRequests(),
+        completion: CompletionController(),
+        livingMargin: LivingMarginModel())
         .frame(width: 1180, height: 760)
 }
 

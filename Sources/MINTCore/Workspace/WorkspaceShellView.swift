@@ -288,16 +288,13 @@ struct WorkspaceToolSurface: View {
     }
 }
 
-/// Connects the persistent project-routing session while preserving the current editor surface.
-/// Project-first document ownership remains the #118 runtime handoff.
+/// Connects the workspace directly to the sole mutable project owner.
 struct WorkspaceSurface: View {
-    @ObservedObject var store: EntryStore
+    @ObservedObject var projectSession: ProjectSession
+    @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var livingMargin: LivingMarginModel
-    let projectSession: ProjectSession
-    var indexer: BackgroundIndexer?
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.undoManager) private var windowUndoManager
     @StateObject private var palette = PaletteSettings.shared
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
@@ -308,27 +305,28 @@ struct WorkspaceSurface: View {
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
-        store.structureUndoManager = windowUndoManager
-        return WorkspaceShellView(
+        WorkspaceShellView(
             navigatorWidth: $sidebarWidth,
             navigatorVisible: sidebarVisible,
             onNavigatorCollapse: {
                 sidebarVisible = false
-                store.requestEditorFocus()
+                editorRequests.focusEditor()
             },
             contextVisible: section != SidebarSection.files.rawValue,
             toolDockPosition: ToolDockPosition(rawValue: toolDockRaw) ?? .automatic,
             theme: theme
         ) {
-            ProjectNavigatorView(store: store, completion: completion, theme: theme)
+            ProjectNavigatorView(
+                session: projectSession,
+                editorRequests: editorRequests,
+                theme: theme)
         } editor: {
             EditorPane(
-                store: store,
+                projectSession: projectSession,
+                editorRequests: editorRequests,
                 completion: completion,
                 settings: completion.settings,
-                projectSession: projectSession,
-                theme: theme,
-                indexer: indexer)
+                theme: theme)
         } context: {
             VStack(spacing: 0) {
                 HStack {
@@ -343,7 +341,7 @@ struct WorkspaceSurface: View {
                         ForEach(ToolDockPosition.allCases, id: \.self) { position in
                             Button {
                                 toolDockRaw = position.rawValue
-                                store.requestEditorFocus()
+                                editorRequests.focusEditor()
                             } label: {
                                 Label(position.label, systemImage: position.systemImage)
                                 if (ToolDockPosition(rawValue: toolDockRaw) ?? .automatic)
@@ -378,16 +376,19 @@ struct WorkspaceSurface: View {
                         mode: activeWritingMode,
                         theme: theme,
                         onJumpToEvidence: { anchor in
-                            _ = LivingMarginWorkspaceBridge.jump(to: anchor, in: store)
+                            let sequence = (editorRequests.searchJump?.sequence ?? 0) + 1
+                            guard let jump = LivingMarginWorkspaceBridge.jump(
+                                to: anchor,
+                                in: projectSession,
+                                sequence: sequence)
+                            else { return }
+                            editorRequests.issueJump(
+                                documentID: jump.documentID,
+                                query: jump.query)
                         },
                         onAction: nil)
                 } else {
-                    SidebarView(
-                        presentation: .context,
-                        store: store,
-                        completion: completion,
-                        theme: theme,
-                        indexer: indexer)
+                    ProjectToolUnavailableView(theme: theme)
                 }
             }
         }
@@ -400,8 +401,21 @@ struct WorkspaceSurface: View {
     }
 
     private var activeWritingMode: WritingMode {
-        if let mode = projectSession.activeProject?.mode { return mode }
-        return store.activeEntry?.resolvedKind == .novel ? .fiction : .general
+        projectSession.activeProject?.mode ?? .general
+    }
+}
+
+private struct ProjectToolUnavailableView: View {
+    let theme: MintTheme
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            Text("이 프로젝트 도구는 아직 사용할 수 없어요.")
+                .font(MintFonts.uiFont(11))
+                .foregroundStyle(theme.ink3C)
+                .padding(14)
+            Spacer(minLength: 0)
+        }
     }
 }
 
@@ -417,18 +431,25 @@ enum WorkspaceToolSelection {
     }
 }
 
-/// Temporary bridge while the editor is still backed by legacy entries (#118). Migration
-/// preserves each entry UUID as its WritingDocumentID, so evidence remains identity-safe.
+/// Resolves project evidence without projecting the manuscript into a legacy entry.
 @MainActor
 enum LivingMarginWorkspaceBridge {
     @discardableResult
-    static func jump(to anchor: EvidenceAnchor, in store: EntryStore) -> Bool {
-        guard let entry = store.entries.first(where: { $0.id == anchor.documentID.rawValue }),
-            let query = anchor.resolvedQuery(in: entry.body)
-        else { return false }
+    static func jump(
+        to anchor: EvidenceAnchor,
+        in session: ProjectSession,
+        sequence: Int
+    ) -> EditorSearchJump? {
+        guard let project = session.activeProject,
+            !project.trashedDocumentIDs.contains(anchor.documentID),
+            let document = project.documents.first(where: { $0.id == anchor.documentID }),
+            let query = anchor.resolvedQuery(in: document.body)
+        else { return nil }
 
-        store.requestSearchJump(entry.id, query: query)
-        store.requestEditorFocus()
-        return true
+        session.selectDocument(document.id)
+        return EditorSearchJump(
+            documentID: document.id,
+            query: query,
+            sequence: sequence)
     }
 }

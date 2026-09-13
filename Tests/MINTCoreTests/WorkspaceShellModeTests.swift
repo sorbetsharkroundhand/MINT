@@ -5,11 +5,8 @@ import XCTest
 @MainActor
 final class WorkspaceShellModeTests: XCTestCase {
     func testLivingMarginShowAndHideDoNotEmitEditorFocusRequests() {
-        let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("MINT-LivingMarginFocus-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let entryStore = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        let initialFocusRequests = entryStore.editorFocusRequests
+        let editorRequests = ProjectEditorRequests()
+        let initialFocusRequests = editorRequests.editorFocusRequest
         var section = SidebarSection.files.rawValue
 
         WorkspaceToolSelection.showLivingMargin(currentSection: &section)
@@ -17,44 +14,63 @@ final class WorkspaceShellModeTests: XCTestCase {
         WorkspaceToolSelection.hide(currentSection: &section)
 
         XCTAssertEqual(section, SidebarSection.files.rawValue)
-        XCTAssertEqual(entryStore.editorFocusRequests, initialFocusRequests)
+        XCTAssertEqual(editorRequests.editorFocusRequest, initialFocusRequests)
     }
 
-    func testLivingMarginEvidenceJumpUsesLegacyDocumentIdentity() {
+    func testLivingMarginEvidenceJumpUsesProjectDocumentIdentity() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MINT-LivingMarginJump-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let entryStore = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        entryStore.updateActiveBody("Before. The lantern was still lit. After.")
-        let initialFocusRequests = entryStore.editorFocusRequests
+        let defaultsName = "MINT.LivingMarginJump.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let session = ProjectSession(store: ProjectStore(root: root), defaults: defaults)
+        let document = WritingDocument(
+            id: WritingDocumentID(),
+            title: "Chapter",
+            body: "Before. The lantern was still lit. After.",
+            kind: .manuscript)
+        let project = WritingProject(
+            id: WritingProjectID(), title: "Novel", mode: .fiction, documents: [document])
+        try await session.saveAndActivate(project)
         let anchor = EvidenceAnchor(
-            documentID: WritingDocumentID(rawValue: entryStore.activeID),
+            documentID: document.id,
             quote: "The lantern was still lit.")
 
-        XCTAssertTrue(LivingMarginWorkspaceBridge.jump(to: anchor, in: entryStore))
-        XCTAssertEqual(entryStore.searchJump?.entryID, entryStore.activeID)
-        XCTAssertEqual(entryStore.searchJump?.query, "The lantern was still lit.")
-        XCTAssertEqual(entryStore.editorFocusRequests, initialFocusRequests + 1)
+        let jump = LivingMarginWorkspaceBridge.jump(to: anchor, in: session, sequence: 7)
+
+        XCTAssertEqual(jump?.documentID, document.id)
+        XCTAssertEqual(jump?.query, "The lantern was still lit.")
+        XCTAssertEqual(jump?.sequence, 7)
+        XCTAssertEqual(session.selectedDocumentID, document.id)
     }
 
-    func testLivingMarginRejectsUnknownOrStaleEvidenceWithoutMovingEditor() {
+    func testLivingMarginRejectsUnknownOrStaleEvidenceWithoutMovingEditor() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MINT-LivingMarginStale-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let entryStore = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        entryStore.updateActiveBody("Current manuscript text.")
-        let initialFocusRequests = entryStore.editorFocusRequests
+        let defaultsName = "MINT.LivingMarginStale.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: defaultsName))
+        defer { defaults.removePersistentDomain(forName: defaultsName) }
+        let session = ProjectSession(store: ProjectStore(root: root), defaults: defaults)
+        let document = WritingDocument(
+            id: WritingDocumentID(),
+            title: "Chapter",
+            body: "Current manuscript text.",
+            kind: .manuscript)
+        let project = WritingProject(
+            id: WritingProjectID(), title: "Novel", mode: .fiction, documents: [document])
+        try await session.saveAndActivate(project)
         let unknown = EvidenceAnchor(
             documentID: WritingDocumentID(),
             quote: "Current manuscript text.")
         let stale = EvidenceAnchor(
-            documentID: WritingDocumentID(rawValue: entryStore.activeID),
+            documentID: document.id,
             quote: "A vanished lantern sentence.")
 
-        XCTAssertFalse(LivingMarginWorkspaceBridge.jump(to: unknown, in: entryStore))
-        XCTAssertFalse(LivingMarginWorkspaceBridge.jump(to: stale, in: entryStore))
-        XCTAssertNil(entryStore.searchJump)
-        XCTAssertEqual(entryStore.editorFocusRequests, initialFocusRequests)
+        XCTAssertNil(LivingMarginWorkspaceBridge.jump(to: unknown, in: session, sequence: 1))
+        XCTAssertNil(LivingMarginWorkspaceBridge.jump(to: stale, in: session, sequence: 2))
+        XCTAssertEqual(session.selectedDocumentID, document.id)
     }
 
     func testModeOptionsMatchTheActiveProjectType() {
@@ -97,12 +113,13 @@ final class WorkspaceShellModeTests: XCTestCase {
             ])
         try await session.saveAndActivate(project)
 
-        let entryStore = EntryStore(directory: root, autosaveDelay: .seconds(3600))
-        let focusRequestsBeforeSelection = entryStore.editorFocusRequests
+        var focusRequests = 0
 
-        WorkspaceModeSelection.select(.map, session: session, editorStore: entryStore)
+        WorkspaceModeSelection.select(.map, session: session) {
+            focusRequests += 1
+        }
 
         XCTAssertEqual(session.workspaceMode, .map)
-        XCTAssertEqual(entryStore.editorFocusRequests, focusRequestsBeforeSelection + 1)
+        XCTAssertEqual(focusRequests, 1)
     }
 }
