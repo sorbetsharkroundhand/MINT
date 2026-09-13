@@ -269,9 +269,9 @@ public final class CompletionController: ObservableObject {
     // MARK: - 엔진 로드
 
     /// 앱 시작 시 모델을 미리 로드해 모델 상주(PLAN §9-2)로 첫 제안 지연을 지킨다.
-    /// 자동완성이 꺼져 있으면 로드하지 않는다 — 켜는 순간 로드한다.
+    /// 설정에서 자동완성을 명시적으로 허용한 뒤에만 모델을 로드한다.
     public func preloadEngine() {
-        guard settings.autocompleteEnabled else { return }
+        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         switch engineState {
         case .idle, .failed: break
         default: return
@@ -329,11 +329,14 @@ public final class CompletionController: ObservableObject {
         modelDidChange()
     }
 
-    /// 자동완성 마스터 스위치 토글 (모델 드롭다운의 스위치).
+    /// 자동완성 마스터 스위치 토글. 이 사용자 조작이 명시적 허용 상태를 기록한다.
     /// 끄면 진행 중인 제안까지 즉시 폐기하고, 켜면 모델을 로드한다.
     public func setAutocompleteEnabled(_ enabled: Bool) {
-        guard settings.autocompleteEnabled != enabled else { return }
-        settings.autocompleteEnabled = enabled
+        let authorization: CompletionAuthorization = enabled ? .enabled : .disabled
+        guard settings.authorization != authorization
+            || settings.autocompleteEnabled != enabled
+        else { return }
+        settings.setCompletionEnabled(enabled)
         if enabled {
             preloadEngine()
         } else {
@@ -418,7 +421,9 @@ public final class CompletionController: ObservableObject {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
 
-        guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
+        guard settings.authorization == .enabled,
+            settings.autocompleteEnabled
+        else { return }  // 명시적 허용 전이거나 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
         guard caretAtParagraphEnd else { return }
         // 같은 모델로 실패했으면 재시도 폭주 방지. 모델을 바꿨으면 다시 허용.
@@ -536,7 +541,7 @@ public final class CompletionController: ObservableObject {
     /// 같은 폴백. 고스트 자동완성의 generation/suggestion에는 손대지 않으므로
     /// 타이핑 중 제안 흐름과 간섭하지 않는다 (엔진 actor가 순차 처리).
     public func requestFolderName(for folderID: UUID, in store: EntryStore) {
-        guard settings.autocompleteEnabled else { return }
+        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         if case .failed = engineState { return }
         guard !namingFolderIDs.contains(folderID) else { return }
         let content = store.folderNamingContext(

@@ -36,7 +36,11 @@ struct MINTApp: App {
                 projectSession: projectSession,
                 editorRequests: editorRequests,
                 completion: completion,
-                livingMargin: livingMargin)
+                livingMargin: livingMargin,
+                firstRunFlow: FirstRunFlow(
+                    session: projectSession,
+                    store: MINTApp.projectStore,
+                    editorRequests: editorRequests))
                 .onAppear { appDelegate.projectSession = projectSession }
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.

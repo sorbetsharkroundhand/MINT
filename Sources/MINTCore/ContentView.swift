@@ -1,6 +1,22 @@
 import AppKit
 import SwiftUI
 
+enum ContentViewRoute: Equatable {
+    case progress
+    case firstRun
+    case workspace
+    case error
+
+    static func resolve(_ phase: ProjectSessionPhase) -> ContentViewRoute {
+        switch phase {
+        case .loading, .suspended: .progress
+        case .needsProject: .firstRun
+        case .ready: .workspace
+        case .failed: .error
+        }
+    }
+}
+
 /// MINT 에디터 v3 메인 화면 — 디자인 "MINT Editor v3.dc.html" 완전 이식.
 ///
 /// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(프로젝트 문서),
@@ -10,43 +26,68 @@ public struct ContentView: View {
     @ObservedObject private var editorRequests: ProjectEditorRequests
     @ObservedObject private var completion: CompletionController
     @ObservedObject private var livingMargin: LivingMarginModel
+    private let firstRunFlow: FirstRunFlow
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
-    /// 첫 실행 모델 선택 시트 (#40) — 기본 모델(Basil 16.9GB)의 조용한 자동
-    /// 다운로드 전에 사용자가 크기·성격을 보고 고르게 한다.
-    @ObservedObject private var settings: CompletionSettings
-
     public init(
         projectSession: ProjectSession,
         editorRequests: ProjectEditorRequests,
         completion: CompletionController,
-        livingMargin: LivingMarginModel
+        livingMargin: LivingMarginModel,
+        firstRunFlow: FirstRunFlow
     ) {
         self.projectSession = projectSession
         self.editorRequests = editorRequests
         self.completion = completion
         self.livingMargin = livingMargin
-        self.settings = completion.settings
+        self.firstRunFlow = firstRunFlow
     }
 
     public var body: some View {
-        WorkspaceSurface(
-            projectSession: projectSession,
-            editorRequests: editorRequests,
-            completion: completion,
-            livingMargin: livingMargin)
+        Group {
+            switch ContentViewRoute.resolve(projectSession.phase) {
+            case .progress:
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text(projectSession.phase == .suspended
+                        ? "프로젝트 전환을 마무리하는 중…"
+                        : "프로젝트 여는 중…")
+                        .font(MintFonts.uiFont(12))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .firstRun:
+                FirstRunView(flow: firstRunFlow)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            case .workspace:
+                WorkspaceSurface(
+                    projectSession: projectSession,
+                    editorRequests: editorRequests,
+                    completion: completion,
+                    livingMargin: livingMargin)
+            case .error:
+                VStack(spacing: 12) {
+                    Text("프로젝트를 열지 못했습니다")
+                        .font(MintFonts.uiFont(15, .semibold))
+                    if let message = projectSession.lastErrorMessage {
+                        Text(message)
+                            .font(MintFonts.uiFont(12))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    Button("다시 시도") {
+                        Task { try? await projectSession.bootstrap() }
+                    }
+                }
+                .padding(32)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
-            // 첫 실행 모델 선택 (#40) — 확인 전엔 시트가 뜨고 시작 preload는 보류.
-            .sheet(isPresented: initialModelSheetBinding) {
-                InitialModelPicker(settings: settings) {
-                    completion.preloadEngine()
-                }
-            }
             .onAppear {
-                // 모델 상주 — 미리 로드해 첫 제안 지연(<~500ms)을 지킨다 (PLAN §10).
-                // 첫 실행(선택 전)이면 시트가 대신 받고, 고른 뒤 preload한다 (#40).
-                if settings.initialModelConfirmed { completion.preloadEngine() }
+                // The controller itself enforces explicit completion authorization.
+                completion.preloadEngine()
                 // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
                 completion.documentContextProvider = { [weak projectSession] in
                     guard let project = projectSession?.activeProject,
@@ -80,17 +121,6 @@ public struct ContentView: View {
         case "light": .light
         default: nil
         }
-    }
-
-    /// 첫 실행 모델 선택 시트 바인딩 (#40) — 한 번 확인하면 다시 뜨지 않는다.
-    private var initialModelSheetBinding: Binding<Bool> {
-        Binding(
-            get: { !settings.initialModelConfirmed },
-            set: { shown in
-                // 시트를 내리는 길은 사용자의 선택(고르기·나중에)뿐이다.
-                // 드래그로 닫아도 "나중에"와 같다 — 다음 실행에선 다시 묻지 않는다.
-                if !shown { settings.initialModelConfirmed = true }
-            })
     }
 
 }
@@ -781,104 +811,19 @@ struct LongParagraphNotice: View {
 }
 
 #Preview {
+    let store = ProjectStore(
+        root: FileManager.default.temporaryDirectory
+            .appendingPathComponent("MINT-Preview-Projects", isDirectory: true))
+    let session = ProjectSession(store: store)
+    let editorRequests = ProjectEditorRequests()
     ContentView(
-        projectSession: ProjectSession(
-            store: ProjectStore(
-                root: FileManager.default.temporaryDirectory
-                    .appendingPathComponent("MINT-Preview-Projects", isDirectory: true))),
-        editorRequests: ProjectEditorRequests(),
+        projectSession: session,
+        editorRequests: editorRequests,
         completion: CompletionController(),
-        livingMargin: LivingMarginModel())
+        livingMargin: LivingMarginModel(),
+        firstRunFlow: FirstRunFlow(
+            session: session,
+            store: store,
+            editorRequests: editorRequests))
         .frame(width: 1180, height: 760)
-}
-
-// MARK: - 첫 실행 모델 선택 (이슈 #40)
-
-/// 첫 실행 모델 선택 시트 — 기본 모델(Basil, 16.9GB)이 조용히 내려받히기 **전에**
-/// 사용자가 라인업의 크기·성격을 보고 고르게 한다 (#65 Phase 4 결정안 2).
-/// 선택은 `CompletionSettings.modelID`에 저장되고, 확인과 함께 시작 preload가
-/// 풀린다. "나중에"는 기본값(Basil)을 유지하되 자동 다운로드만 미룬다.
-struct InitialModelPicker: View {
-    @ObservedObject var settings: CompletionSettings
-    /// 확인 후 호출 — 시작 preload를 이어간다 (ContentView 배선).
-    var onConfirmed: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Image(systemName: "brain")
-                    .foregroundStyle(MintTheme.of(.light).novelC)
-                Text("AI 모델을 고르세요")
-                    .font(MintFonts.uiFont(15, .semibold))
-            }
-            Text(
-                "제안 엔진은 기기 안에서만 도니다. 모델 파일(최대 17GB)을 한 번 "
-                    + "내려받으면 네트워크 없이 동작해요. 나중에 설정(⌘,)에서 바꿀 수 있어요."
-            )
-            .font(MintFonts.uiFont(12))
-            .foregroundStyle(MintTheme.of(.light).ink2C)
-            .fixedSize(horizontal: false, vertical: true)
-
-            ForEach(ModelChoice.all) { choice in
-                Button {
-                    settings.modelID = choice.id
-                    confirm()
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: settings.modelID == choice.id ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(settings.modelID == choice.id ? MintTheme.of(.light).novelC : MintTheme.of(.light).ink3C)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) {
-                                Text(choice.name)
-                                    .font(MintFonts.uiFont(13, .semibold))
-                                Text(choice.sizeLabel + " · " + downloadSize(choice.id))
-                                    .font(MintFonts.monoUI(10))
-                                    .foregroundStyle(MintTheme.of(.light).ink3C)
-                            }
-                            Text(choice.detail)
-                                .font(MintFonts.uiFont(11))
-                                .foregroundStyle(MintTheme.of(.light).ink2C)
-                        }
-                        Spacer()
-                        Text(choice.latencyLabel)
-                            .font(MintFonts.uiFont(10))
-                            .foregroundStyle(MintTheme.of(.light).ink3C)
-                    }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
-                            .fill(MintTheme.of(.light).chipC))
-                    .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-
-            HStack {
-                Spacer()
-                Button("나중에 결정") { confirm() }
-                    .buttonStyle(.bordered)
-                    .help("기본 모델(Basil)이 유지되지만 지금은 내려받지 않아요")
-            }
-        }
-        .padding(20)
-        .frame(width: 460)
-    }
-
-    private func confirm() {
-        settings.initialModelConfirmed = true
-        dismiss()
-        onConfirmed()
-    }
-
-    /// 라인업 다운로드 크기 표기 — 프리셋 id 기준 대략치.
-    private func downloadSize(_ id: String) -> String {
-        switch id {
-        case ModelPresets.ternaryBonsai27B: "8.5GB"
-        case ModelPresets.glm4_7_flash: "16.9GB"
-        case ModelPresets.qwen3_6_35B_A3B: "~20GB"
-        default: "수 GB"
-        }
-    }
 }

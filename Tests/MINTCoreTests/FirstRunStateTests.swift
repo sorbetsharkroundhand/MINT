@@ -66,4 +66,57 @@ final class FirstRunStateTests: XCTestCase {
         let stateAfterRelaunch = try await FirstRunStateResolver.resolve(using: store)
         XCTAssertEqual(stateAfterRelaunch, .ready(result.projectID))
     }
+
+    func testContentRouteFollowsBootstrapAndProjectCreation() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url)
+        let session = ProjectSession(store: store, defaults: defaults)
+
+        XCTAssertEqual(ContentViewRoute.resolve(session.phase), .progress)
+
+        try await session.bootstrap()
+        XCTAssertEqual(session.phase, .needsProject)
+        XCTAssertEqual(ContentViewRoute.resolve(session.phase), .firstRun)
+
+        let flow = FirstRunFlow(
+            session: session,
+            store: store,
+            editorRequests: ProjectEditorRequests())
+        try await flow.createProject(mode: .fiction)
+
+        XCTAssertEqual(session.phase, .ready)
+        XCTAssertEqual(ContentViewRoute.resolve(session.phase), .workspace)
+    }
+
+    func testCancelledLegacyPanelHasNoCoordinatorSideEffect() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url)
+        let session = ProjectSession(store: store, defaults: defaults)
+        try await session.bootstrap()
+        let flow = FirstRunFlow(
+            session: session,
+            store: store,
+            editorRequests: ProjectEditorRequests())
+
+        try await flow.importLegacy(selection: nil)
+
+        XCTAssertEqual(session.phase, .needsProject)
+        XCTAssertNil(session.activeProject)
+        let durableActive = try await store.activeProject()
+        XCTAssertNil(durableActive)
+    }
+
+    func testNonReadyPhasesNeverRouteToWorkspace() {
+        XCTAssertEqual(ContentViewRoute.resolve(.loading), .progress)
+        XCTAssertEqual(ContentViewRoute.resolve(.suspended), .progress)
+        XCTAssertEqual(ContentViewRoute.resolve(.failed), .error)
+        XCTAssertEqual(ContentViewRoute.resolve(.needsProject), .firstRun)
+        XCTAssertEqual(ContentViewRoute.resolve(.ready), .workspace)
+    }
 }

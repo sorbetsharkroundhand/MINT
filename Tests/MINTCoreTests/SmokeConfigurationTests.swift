@@ -3,7 +3,7 @@ import XCTest
 
 final class SmokeConfigurationTests: XCTestCase {
     @MainActor
-    func testBundleSmokeStartsOfflineAfterModelChoice() throws {
+    func testBundleSmokeStartsOfflineWithoutModelSetup() throws {
         let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
@@ -18,9 +18,9 @@ final class SmokeConfigurationTests: XCTestCase {
         defer { defaults.removePersistentDomain(forName: suiteName) }
         defaults.setPersistentDomain(values, forName: suiteName)
 
-        // 실제 설정 로더로 검증해야 키 변경·문자열 Bool 때문에 시트가 다시 뜨지 않는다.
+        // The legacy smoke fixture remains offline and migrates without presenting a model gate.
         let settings = CompletionSettings(defaults: defaults)
-        XCTAssertTrue(settings.initialModelConfirmed)
+        XCTAssertEqual(settings.authorization, .disabled)
         XCTAssertFalse(settings.autocompleteEnabled)
     }
 }
