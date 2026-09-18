@@ -1,5 +1,11 @@
 import SwiftUI
 
+enum SettingsModelPresentation {
+    static func displayName(for modelID: String) -> String {
+        ModelChoice.matching(modelID)?.name ?? "사용자 모델"
+    }
+}
+
 /// 설정 화면 — 앱 메뉴/⌘,의 Settings 씬, 툴바 톱니바퀴에서 연다.
 ///
 /// `CompletionSettings`(UserDefaults 보존)에 바인딩된다. 모델·프롬프트 방식
@@ -43,13 +49,13 @@ public struct SettingsView: View {
             generalTab
                 .tabItem { Label("일반", systemImage: "gearshape") }
             predictionTab
-                .tabItem { Label("예측", systemImage: "sparkles") }
+                .tabItem { Label("자동완성", systemImage: "sparkles") }
+            advancedTab
+                .tabItem { Label("고급", systemImage: "slider.horizontal.3") }
             novelTab
                 .tabItem { Label("소설", systemImage: "book.closed") }
             helpTab
                 .tabItem { Label("사용 방법", systemImage: "questionmark.circle") }
-            metricsTab
-                .tabItem { Label("지표", systemImage: "chart.bar") }
         }
         // 고정 크기 — 탭 안의 Form이 이 높이를 넘으면 그 안에서 스크롤한다.
         // 창이 내용을 따라 늘어나면 다시 "아래가 안 보이는" 문제로 돌아간다.
@@ -156,74 +162,144 @@ public struct SettingsView: View {
         )
     }
 
-    // MARK: - 예측 (모델 + 제안 동작)
+    // MARK: - 자동완성
 
-    /// 모델과 제안 파라미터는 같은 것(예측 품질)을 조절하므로 한 탭에 둔다.
+    /// Primary settings show product-facing choices only. Repository IDs and inference
+    /// tuning live in the Advanced tab so ordinary writing setup stays understandable.
     private var predictionTab: some View {
         Form {
-            Section("모델") {
-                // 초안/커밋 경계 (이슈 #25 / #65 H2) — TextField는 modelIDDraft만
-                // 편집한다. 타이핑이 changeModel을 부르면 불완전한 ID마다 취소·
-                // 다운로드·preload가 반복됐다. 커밋은 Enter/적용에서 1회.
-                TextField("Hugging Face 저장소 id (namespace/model)", text: $modelIDDraft)
+            Section("자동완성") {
+                Toggle("자동완성 사용", isOn: autocompleteBinding)
+
+                LabeledContent("모델") {
+                    Menu(SettingsModelPresentation.displayName(for: settings.modelID)) {
+                        ForEach(ModelChoice.all) { choice in
+                            Button {
+                                changeModel(choice.id)
+                            } label: {
+                                if choice.id == settings.modelID {
+                                    Label(choice.name, systemImage: "checkmark")
+                                } else {
+                                    Text(choice.name)
+                                }
+                            }
+                        }
+                    }
+                    .menuStyle(.borderlessButton)
+                }
+                caption("모델의 저장소 ID와 세부 추론 설정은 고급 탭에서 확인할 수 있어요.")
+            }
+
+            Section("제안") {
+                Stepper(
+                    "제안 길이: \(settings.maxTokens)",
+                    value: $settings.maxTokens,
+                    in: 4...32
+                )
+                caption("한 번에 이어 쓰는 분량이에요. 짧게 두면 덜 방해되고, 길게 두면 문장 단위 제안이 쉬워져요.")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    // MARK: - 고급 (모델 저장소 + 추론 파라미터)
+
+    private var advancedTab: some View {
+        Form {
+            Section("모델 저장소") {
+                LabeledContent("현재") {
+                    Text(settings.modelID)
+                        .font(MintFonts.monoUI(10.5))
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                TextField("Hugging Face 저장소 ID (namespace/model)", text: $modelIDDraft)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                     .onSubmit(commitModelIDDraft)
+
                 if let modelIDError {
                     Text(modelIDError)
                         .font(MintFonts.uiFont(11))
                         .foregroundStyle(MintTheme.of(colorScheme).dangerC)
                         .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
                 }
+
                 HStack {
-                    Menu("프리셋에서 선택") {
-                        ForEach(ModelPresets.all, id: \.self) { preset in
-                            Button(preset) { changeModel(preset) }  // 프리셋은 형식 보장 — 즉시 적용
+                    Menu("프리셋 ID") {
+                        ForEach(ModelChoice.all) { choice in
+                            Button("\(choice.name) — \(choice.id)") {
+                                changeModel(choice.id)
+                            }
+                        }
+                        Divider()
+                        ForEach(
+                            ModelPresets.all.filter { ModelChoice.matching($0) == nil },
+                            id: \.self
+                        ) { preset in
+                            Button(preset) { changeModel(preset) }
                         }
                     }
                     Spacer()
                     Button("적용", action: commitModelIDDraft)
-                        .disabled(modelIDDraft.trimmingCharacters(in: .whitespaces) == settings.modelID)
+                        .disabled(
+                            modelIDDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+                                == settings.modelID)
                 }
-                caption("모델 변경은 다음 제안부터 적용 — 새 모델은 첫 사용 시 다운로드돼요(수 GB).")
+                caption("새 모델은 첫 사용 시 로컬 캐시에 내려받습니다. 입력 중인 초안은 적용 전까지 현재 모델을 건드리지 않아요.")
             }
 
-            Section("제안") {
-                Toggle("자동완성 사용", isOn: autocompleteBinding)
+            Section("추론") {
                 Picker("프롬프트 방식", selection: $settings.promptStyle) {
                     ForEach(PromptStyle.allCases, id: \.self) { style in
                         Text(style.label).tag(style)
                     }
                 }
                 .pickerStyle(.radioGroup)
+
                 Stepper(
                     "디바운스: \(settings.debounceMilliseconds)ms",
                     value: $settings.debounceMilliseconds,
                     in: 150...1_000,
                     step: 50
                 )
-                Stepper(
-                    "최대 토큰: \(settings.maxTokens)",
-                    value: $settings.maxTokens,
-                    in: 4...32
-                )
-            }
 
-            Section("생성 파라미터") {
                 VStack(alignment: .leading) {
                     Slider(value: $settings.temperature, in: 0...1) {
                         Text(String(format: "온도: %.2f", settings.temperature))
                     }
                     caption("낮을수록 일관된 제안, 높을수록 다양한 제안.")
                 }
+
                 VStack(alignment: .leading) {
                     Slider(value: $settings.topP, in: 0.5...1.0) {
                         Text(String(format: "top-p: %.2f", settings.topP))
                     }
-                    caption("누적 확률 컷 — 벤치(MINTBench)로 확정하는 값이에요 (PLAN §10).")
+                    caption("누적 확률 컷. 품질 검증 없이 크게 바꾸지 않는 것을 권장해요.")
                 }
+
                 Toggle("KV 캐시 재사용", isOn: $settings.kvCacheEnabled)
-                caption("타이핑 중 프리필을 증분 처리해 제안이 빨라져요 — 이상 동작 시 꺼 보세요.")
+                caption("이상 동작을 진단할 때만 끄는 고급 옵션입니다.")
+            }
+
+            Section("로컬 진단") {
+                if metrics.shown == 0 {
+                    caption("아직 자동완성 사용 기록이 없어요.")
+                } else {
+                    LabeledContent("제안 노출", value: "\(metrics.shown)회")
+                    LabeledContent(
+                        "전체 수락 (Tab)",
+                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
+                    LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
+                }
+                Button("로컬 진단 기록 삭제") {
+                    AcceptanceMetrics.reset()
+                    metrics = .init()
+                }
+                caption("이 기록은 이 Mac에만 저장되고 원고 내용은 포함하지 않습니다.")
             }
         }
         .formStyle(.grouped)
@@ -288,38 +364,6 @@ public struct SettingsView: View {
             Section("마크다운 서식") {
                 MarkdownCheatSheet(theme: MintTheme.of(colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    // MARK: - 지표 (로컬 전용)
-
-    /// 실사용 품질 지표 (M7, PLAN §13) — 로컬 파일에만, 원격 전송 절대 금지.
-    private var metricsTab: some View {
-        Form {
-            Section("품질 지표 (로컬 전용)") {
-                if metrics.shown == 0 {
-                    caption("아직 기록이 없어요 — 제안이 뜨고 수락/거절될 때마다 이 Mac에만 기록돼요.")
-                } else {
-                    LabeledContent("제안 노출", value: "\(metrics.shown)회")
-                    LabeledContent(
-                        "전체 수락 (Tab)",
-                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
-                    LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
-                    ForEach(metrics.byMode.keys.sorted(), id: \.self) { mode in
-                        let stats = metrics.byMode[mode] ?? (0, 0)
-                        LabeledContent(
-                            "· \(mode)",
-                            value: "노출 \(stats.shown) · 수락 \(stats.accepted)")
-                        .font(.caption)
-                    }
-                }
-                Button("지표 삭제") {
-                    AcceptanceMetrics.reset()
-                    metrics = .init()
-                }
-                caption("어떤 지표도 기기 밖으로 나가지 않아요 (~/Documents/MINT/metrics.jsonl).")
             }
         }
         .formStyle(.grouped)

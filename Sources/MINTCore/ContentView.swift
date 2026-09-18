@@ -302,118 +302,163 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
-        HStack(spacing: 10) {
-            sidebarToggle
-            Text(store.activeEntry?.title ?? "문서")
-                .font(MintFonts.uiFont(12, .medium))
-                .foregroundStyle(theme.inkC)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if let projectMode = projectSession.activeProject?.mode {
-                Picker("작업 공간", selection: workspaceModeBinding) {
-                    ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
-                        Text(option.label).tag(option.mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .accessibilityIdentifier("mint.workspace-mode")
-                .accessibilityLabel("작업 공간")
-            }
-            // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
-            // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
-            if store.activeEntry?.resolvedKind == .novel {
-                Button {
-                    sidebarSection = SidebarSection.bible.rawValue
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "book.closed.fill")
-                            .font(.system(size: 9))
-                        Text("소설")
-                            .font(MintFonts.serifUI(11, .semibold))
-                        // 등록된 인물 수 — 배지가 바이블 입구임을 알리는 최소 신호.
-                        if let count = store.activeEntry?.characters?.count, count > 0 {
-                            Text("\(count)")
-                                .font(MintFonts.monoUI(9, .semibold))
-                        }
-                        // 감지된 인물 후보가 기다리는 중 — 점 하나만 (비침습, M6).
-                        if let indexer {
-                            CandidateDot(indexer: indexer, store: store, theme: theme)
-                        }
-                    }
-                    .foregroundStyle(theme.novelC)
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 8)
-                    .background(Capsule().fill(theme.novelBgC))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .help("스토리 바이블 — 장르·인물·자동 이해")
-                .accessibilityLabel(Text("스토리 바이블"))
-                // 색점 없이도 후보 대기를 알 수 있게 (#59-3).
-                .accessibilityValue(
-                    Text(bibleBadgeAXValue(indexer: indexer, store: store)))
-            }
+        GeometryReader { geometry in
+            let density = WorkspaceLayoutState.toolbarDensity(forEditorWidth: geometry.size.width)
+            HStack(spacing: density == .compact ? 6 : 10) {
+                sidebarToggle
+                Text(store.activeEntry?.title ?? "문서")
+                    .font(MintFonts.uiFont(12, .medium))
+                    .foregroundStyle(theme.inkC)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(
+                        maxWidth: density == .compact ? 150 : 260,
+                        alignment: .leading)
 
-            // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
-            // 조용히 나타난다. 누르면 설명·확인. 원문 수정은 사용자 확인이 필수.
-            if completion.longParagraph.count > 0 {
-                Button {
-                    longParagraphOpen.toggle()
-                } label: {
-                    Image(systemName: "bolt.horizontal")
-                        .font(.system(size: 10, weight: .semibold))
+                if let projectMode = projectSession.activeProject?.mode {
+                    if density == .compact {
+                        Menu {
+                            ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
+                                Button {
+                                    workspaceModeBinding.wrappedValue = option.mode
+                                } label: {
+                                    if option.mode == projectSession.workspaceMode {
+                                        Label(option.label, systemImage: "checkmark")
+                                    } else {
+                                        Text(option.label)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Text(
+                                    WorkspaceModePresentation.options(for: projectMode)
+                                        .first(where: { $0.mode == projectSession.workspaceMode })?.label
+                                        ?? "쓰기"
+                                )
+                                .font(MintFonts.uiFont(11, .semibold))
+                                Image(systemName: "chevron.down")
+                                    .font(.system(size: 8, weight: .semibold))
+                            }
+                            .foregroundStyle(theme.ink2C)
+                            .padding(.horizontal, 8)
+                            .frame(height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                                    .fill(theme.chipC))
+                        }
+                        .menuStyle(.borderlessButton)
+                        .fixedSize()
+                        .accessibilityIdentifier("mint.workspace-mode")
+                        .accessibilityLabel("작업 공간")
+                    } else {
+                        Picker("작업 공간", selection: workspaceModeBinding) {
+                            ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
+                                Text(option.label).tag(option.mode)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .fixedSize()
+                        .accessibilityIdentifier("mint.workspace-mode")
+                        .accessibilityLabel("작업 공간")
+                    }
+                }
+
+                if density == .standard, store.activeEntry?.resolvedKind == .novel {
+                    Button {
+                        sidebarSection = SidebarSection.bible.rawValue
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "book.closed.fill")
+                                .font(.system(size: 9))
+                            Text("소설")
+                                .font(MintFonts.serifUI(11, .semibold))
+                            if let count = store.activeEntry?.characters?.count, count > 0 {
+                                Text("\(count)")
+                                    .font(MintFonts.monoUI(9, .semibold))
+                            }
+                            if let indexer {
+                                CandidateDot(indexer: indexer, store: store, theme: theme)
+                            }
+                        }
                         .foregroundStyle(theme.novelC)
                         .padding(.vertical, 3)
-                        .padding(.horizontal, 7)
+                        .padding(.horizontal, 8)
                         .background(Capsule().fill(theme.novelBgC))
-                        // 알림 점 — 눈에 띄게 (조용한 아이콘만으론 놓치기 쉬움).
-                        // 툴바색 링으로 배경 알약과 분리한다.
-                        .overlay(alignment: .topTrailing) {
-                            Circle()
-                                .fill(theme.novelC)
-                                .frame(width: 6, height: 6)
-                                .overlay(Circle().stroke(theme.toolbarC, lineWidth: 1.5))
-                                .offset(x: 3, y: -3)
-                        }
                         .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("스토리 바이블 — 장르·인물·자동 이해")
+                    .accessibilityLabel(Text("스토리 바이블"))
+                    .accessibilityValue(
+                        Text(bibleBadgeAXValue(indexer: indexer, store: store)))
                 }
-                .buttonStyle(.plain)
-                .help("긴 문단이 있어 입력이 느려질 수 있어요")
-                .popover(isPresented: $longParagraphOpen, arrowEdge: .bottom) {
-                    LongParagraphNotice(
-                        completion: completion, theme: theme,
-                        onDismiss: { longParagraphOpen = false })
+
+                if completion.longParagraph.count > 0 {
+                    Button {
+                        longParagraphOpen.toggle()
+                    } label: {
+                        Image(systemName: "bolt.horizontal")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(theme.novelC)
+                            .frame(width: 26, height: 26)
+                            .background(
+                                RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                                    .fill(theme.novelBgC))
+                            .overlay(alignment: .topTrailing) {
+                                Circle()
+                                    .fill(theme.novelC)
+                                    .frame(width: 6, height: 6)
+                                    .overlay(Circle().stroke(theme.toolbarC, lineWidth: 1.5))
+                                    .offset(x: 2, y: -2)
+                            }
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("긴 문단이 있어 입력이 느려질 수 있어요")
+                    .popover(isPresented: $longParagraphOpen, arrowEdge: .bottom) {
+                        LongParagraphNotice(
+                            completion: completion, theme: theme,
+                            onDismiss: { longParagraphOpen = false })
+                    }
                 }
+
+                Spacer(minLength: 8)
+
+                Menu {
+                    Button("리빙 마진") {
+                        WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
+                    }
+                    Button("스토리 바이블") { sidebarSection = SidebarSection.bible.rawValue }
+                    Button("서사") { sidebarSection = SidebarSection.narrative.rawValue }
+                    Button("AI 컨텍스트") { sidebarSection = SidebarSection.context.rawValue }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(theme.ink2C)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .accessibilityLabel("글 도구")
+
+                ModelChip(
+                    completion: completion,
+                    settings: settings,
+                    theme: theme,
+                    compact: density == .compact)
+                settingsButton
             }
-            Spacer()
-            Menu {
-                Button("리빙 마진") {
-                    WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
-                }
-                Button("스토리 바이블") { sidebarSection = SidebarSection.bible.rawValue }
-                Button("서사") { sidebarSection = SidebarSection.narrative.rawValue }
-                Button("AI 컨텍스트") { sidebarSection = SidebarSection.context.rawValue }
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .font(MintFonts.uiFont(12))
-                    .foregroundStyle(theme.ink2C)
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("글 도구")
-            ModelChip(completion: completion, settings: settings, theme: theme)
-            settingsButton
+            .padding(
+                .leading,
+                sidebarVisible
+                    ? WindowChromeGeometry.toolbarHorizontalPadding
+                    : windowChromeLeadingInset)
+            .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
-        // When Navigator is hidden, use the measured macOS traffic-light safe region.
-        // With Navigator visible, regular design padding is enough.
-        .padding(
-            .leading,
-            sidebarVisible
-                ? WindowChromeGeometry.toolbarHorizontalPadding
-                : windowChromeLeadingInset)
-        .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
-        .frame(minHeight: 52)
+        .frame(height: 52)
         .background(theme.toolbarC)
     }
 
@@ -755,13 +800,6 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
-            // 입력 지연 계측 (로컬 전용 진단) — 핸들러(우리 코드) vs 총(렌더 포함).
-            // 랙 제보를 숫자로 받기 위한 장비. 표본이 쌓여야 나타난다.
-            if completion.keystrokeStats.samples > 0 {
-                Text(keystrokeLabel)
-                    .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
-                separator
-            }
             // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
             if case .failed(let message, _) = store.savePhase {
                 Text("저장 실패")
@@ -777,8 +815,6 @@ struct EditorStatusBar: View {
             } else if case .saved = store.savePhase {
                 Text("저장됨")
             }
-            separator
-            Text("Markdown")
         }
         .font(MintFonts.monoUI(11))
         .foregroundStyle(theme.ink3C)
@@ -803,13 +839,6 @@ struct EditorStatusBar: View {
     /// 카운터 비교(O(1))로 변경을 감지한다.
     private var statsKey: String {
         "\(store.activeID.uuidString)-\(store.bodyVersion)"
-    }
-
-    private var keystrokeLabel: String {
-        let stats = completion.keystrokeStats
-        return String(
-            format: "입력 %.1f/%.0fms·max %.0f",
-            stats.handlerP95, stats.totalP95, stats.totalMax)
     }
 
     private var separator: some View {

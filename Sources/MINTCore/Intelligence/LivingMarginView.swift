@@ -101,16 +101,12 @@ struct LivingMarginView: View {
                 emptyState
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 0) {
+                    LazyVStack(alignment: .leading, spacing: MintSpacing.md) {
                         ForEach(insights) { insight in
                             insightRow(insight)
-                            if insight.id != insights.last?.id {
-                                theme.sepC.frame(height: 1)
-                                    .padding(.horizontal, MintSpacing.lg)
-                                    .accessibilityHidden(true)
-                            }
                         }
                     }
+                    .padding(MintSpacing.md)
                 }
             }
         }
@@ -122,18 +118,30 @@ struct LivingMarginView: View {
     }
 
     private var emptyState: some View {
-        VStack(alignment: .leading, spacing: MintSpacing.sm) {
-            Text("지금 보여드릴 제안이 없어요")
-                .font(MintFonts.uiFont(12, .medium))
-                .foregroundStyle(theme.ink2C)
-            Text("확실한 맥락이나 문장 제안만 이 여백에 조용히 표시됩니다.")
-                .font(MintFonts.uiFont(11))
-                .foregroundStyle(theme.ink3C)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
+        VStack(spacing: MintSpacing.md) {
+            ZStack {
+                Circle()
+                    .fill(theme.activeBgC)
+                Image(systemName: "sparkles")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(theme.novelC)
+            }
+            .frame(width: 42, height: 42)
+            .accessibilityHidden(true)
+
+            VStack(spacing: MintSpacing.xs) {
+                Text("여백이 조용합니다")
+                    .font(MintFonts.uiFont(13, .semibold))
+                    .foregroundStyle(theme.inkC)
+                Text("확실한 맥락이나 문장 신호가 생기면\n여기에만 가볍게 표시합니다.")
+                    .font(MintFonts.uiFont(11))
+                    .foregroundStyle(theme.ink3C)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .padding(MintSpacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+        .padding(MintSpacing.xl)
         .accessibilityElement(children: .combine)
     }
 
@@ -201,7 +209,15 @@ struct LivingMarginView: View {
         }
         .padding(MintSpacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
+        .background(
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
+                .fill(theme.pillC)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
+                .strokeBorder(theme.sepC)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(LivingMarginRenderer.accessibilitySummary(for: insight))
         .accessibilityAction(named: Text("제안 닫기")) { dismiss(insight.id) }
