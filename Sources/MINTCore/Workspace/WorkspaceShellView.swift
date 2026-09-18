@@ -60,7 +60,7 @@ enum WorkspaceToolPresentation {
             WorkspaceToolDescriptor(
                 title: "서사",
                 subtitle: "장면 흐름과 이야기 구조",
-                systemImage: "point.3.connected.trianglepath.dotted")
+                systemImage: "list.bullet.rectangle")
         case .context:
             WorkspaceToolDescriptor(
                 title: "AI 컨텍스트",
