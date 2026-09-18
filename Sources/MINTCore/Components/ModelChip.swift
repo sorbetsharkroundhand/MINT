@@ -5,8 +5,12 @@ import SwiftUI
 /// The writing surface describes the capability and its state. Exact model identifiers,
 /// quantization, architecture and tuning controls belong in Settings.
 enum ModelChipPresentation {
-    static func toolbarLabel(modelID _: String, stateText: String) -> String {
-        "자동완성 · \(stateText)"
+    static func toolbarLabel(
+        modelID _: String,
+        stateText: String,
+        compact: Bool
+    ) -> String? {
+        compact ? nil : "자동완성 · \(stateText)"
     }
 }
 
@@ -18,6 +22,7 @@ struct ModelChip: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    var compact = false
 
     @Environment(\.openSettings) private var openSettings
     @State private var menuOpen = false
@@ -36,19 +41,27 @@ struct ModelChip: View {
                         .frame(width: 6, height: 6)
                         .accessibilityHidden(true)
                 }
-                Text(
-                    ModelChipPresentation.toolbarLabel(
-                        modelID: settings.modelID,
-                        stateText: stateText)
-                )
-                .font(MintFonts.monoUI(11, .semibold))
-                .foregroundStyle(theme.ink2C)
-                Image(systemName: "chevron.down")
-                    .font(.system(size: 8, weight: .semibold))
-                    .foregroundStyle(theme.ink3C)
+                if let label = ModelChipPresentation.toolbarLabel(
+                    modelID: settings.modelID,
+                    stateText: stateText,
+                    compact: compact
+                ) {
+                    Text(label)
+                        .font(MintFonts.monoUI(11, .semibold))
+                        .foregroundStyle(theme.ink2C)
+                } else {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.ink2C)
+                }
+                if !compact {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
+                        .foregroundStyle(theme.ink3C)
+                }
             }
             .padding(.vertical, 5)
-            .padding(.horizontal, 11)
+            .padding(.horizontal, compact ? 9 : 11)
             .background(
                 RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .fill(chipHovered ? theme.hoverC : theme.chipC)
