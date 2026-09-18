@@ -32,6 +32,49 @@ enum WorkspaceMotion {
     static let navigator = Animation.spring(response: 0.3, dampingFraction: 0.9)
 }
 
+enum WorkspaceToolbarDensity: Equatable {
+    case standard
+    case compact
+}
+
+struct WorkspaceToolDescriptor: Equatable {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+}
+
+enum WorkspaceToolPresentation {
+    static func descriptor(for section: SidebarSection) -> WorkspaceToolDescriptor {
+        switch section {
+        case .files:
+            WorkspaceToolDescriptor(
+                title: "문서",
+                subtitle: "프로젝트의 글과 폴더",
+                systemImage: "doc.text")
+        case .bible:
+            WorkspaceToolDescriptor(
+                title: "스토리 바이블",
+                subtitle: "인물 · 설정 · 작품 메모",
+                systemImage: "book.closed")
+        case .narrative:
+            WorkspaceToolDescriptor(
+                title: "서사",
+                subtitle: "장면 흐름과 이야기 구조",
+                systemImage: "point.3.connected.trianglepath.dotted")
+        case .context:
+            WorkspaceToolDescriptor(
+                title: "AI 컨텍스트",
+                subtitle: "현재 제안이 참고하는 정보",
+                systemImage: "text.viewfinder")
+        case .margin:
+            WorkspaceToolDescriptor(
+                title: "리빙 마진",
+                subtitle: "확실한 신호만 조용히 표시",
+                systemImage: "sparkles")
+        }
+    }
+}
+
 /// 저장된 폭 또는 드래그 중인 투영 폭을 창 크기에 맞춘다. 최소 폭 아래에서는
 /// 점진적인 저항을 주어 포인터가 움직이는데 패널만 멈추는 하드 스톱을 피한다.
 struct WorkspaceLayoutState {
@@ -79,6 +122,11 @@ struct WorkspaceLayoutState {
     static let toolWidth: CGFloat = 340
     static let bottomToolMaxHeight: CGFloat = 320
     static let floatingToolMaxHeight: CGFloat = 520
+    static let compactToolbarThreshold: CGFloat = 840
+
+    static func toolbarDensity(forEditorWidth width: CGFloat) -> WorkspaceToolbarDensity {
+        width < compactToolbarThreshold ? .compact : .standard
+    }
 
     /// Resolve the visible placement without mutating the persisted preference.
     /// Explicit side docks fall back to bottom when the editor's minimum width would
@@ -330,15 +378,30 @@ struct WorkspaceSurface: View {
                 theme: theme,
                 indexer: indexer)
         } context: {
+            let toolSection = SidebarSection(rawValue: section) ?? .context
+            let descriptor = WorkspaceToolPresentation.descriptor(for: toolSection)
             VStack(spacing: 0) {
-                HStack {
-                    Text(
-                        section == SidebarSection.margin.rawValue
-                            ? "리빙 마진"
-                            : "글 도구"
-                    )
-                    .font(MintFonts.uiFont(12, .semibold))
-                    Spacer()
+                HStack(spacing: 10) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                            .fill(theme.activeBgC)
+                        Image(systemName: descriptor.systemImage)
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(theme.novelC)
+                    }
+                    .frame(width: 30, height: 30)
+                    .accessibilityHidden(true)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(descriptor.title)
+                            .font(MintFonts.uiFont(12, .semibold))
+                            .foregroundStyle(theme.inkC)
+                        Text(descriptor.subtitle)
+                            .font(MintFonts.uiFont(10.5))
+                            .foregroundStyle(theme.ink3C)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
                     Menu {
                         ForEach(ToolDockPosition.allCases, id: \.self) { position in
                             Button {
@@ -356,6 +419,7 @@ struct WorkspaceSurface: View {
                     } label: {
                         Image(systemName: "rectangle.3.group")
                             .font(MintFonts.uiFont(12))
+                            .frame(width: 26, height: 26)
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
@@ -364,14 +428,18 @@ struct WorkspaceSurface: View {
                     Button {
                         WorkspaceToolSelection.hide(currentSection: &section)
                     } label: {
-                        Image(systemName: "xmark").font(MintFonts.uiFont(12))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel("문서로 돌아가기")
                     .help("문서로 돌아가기")
                 }
-                .foregroundStyle(theme.ink2C)
-                .padding(14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                theme.sepC.frame(height: 1)
                 if section == SidebarSection.margin.rawValue {
                     LivingMarginView(
                         model: livingMargin,
