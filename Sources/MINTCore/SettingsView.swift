@@ -211,6 +211,13 @@ public struct SettingsView: View {
                                     .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
                             }
                             HStack {
+                                Menu("저장소 프리셋") {
+                                    ForEach(ModelPresets.all, id: \.self) { preset in
+                                        Button(ModelChip.shortID(preset)) {
+                                            changeModel(preset)
+                                        }
+                                    }
+                                }
                                 Spacer()
                                 Button("적용", action: commitModelIDDraft)
                                     .disabled(
