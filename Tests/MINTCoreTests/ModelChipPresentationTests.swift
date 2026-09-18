@@ -19,3 +19,18 @@ final class ModelChipPresentationTests: XCTestCase {
             "자동완성 · 오류")
     }
 }
+
+
+final class SettingsModelPresentationTests: XCTestCase {
+    func testKnownPresetUsesFriendlyProductName() {
+        XCTAssertEqual(
+            SettingsModelPresentation.displayName(for: ModelChoice.basil.id),
+            "Basil")
+    }
+
+    func testCustomRepositoryIsLabeledWithoutExposingRawIDInSummary() {
+        XCTAssertEqual(
+            SettingsModelPresentation.displayName(for: "private/custom-model"),
+            "사용자 모델")
+    }
+}
