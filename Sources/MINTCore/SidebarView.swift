@@ -407,11 +407,50 @@ struct SidebarView: View {
     private var header: some View {
         // 로고 없이 액션만 — 앱 이름은 메뉴바가 이미 말한다. 왼쪽 빈 자리를
         // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
-        HStack(spacing: 2) {
+        HStack(spacing: 8) {
             Text("내 글")
                 .font(MintFonts.uiFont(12, .semibold))
                 .foregroundStyle(theme.ink2C)
-            Spacer(minLength: 0)
+
+            Spacer(minLength: 18)
+
+            Menu {
+                Button {
+                    store.newEntry()
+                } label: {
+                    Label("새 저널", systemImage: "doc.badge.plus")
+                }
+                Button {
+                    store.newEntry(kind: .novel)
+                } label: {
+                    Label("새 소설", systemImage: "book.closed")
+                }
+                Divider()
+                Button {
+                    store.newFolder()
+                } label: {
+                    Label("새 폴더", systemImage: "folder.badge.plus")
+                }
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.ink2C)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                            .fill(theme.chipC)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                            .strokeBorder(theme.chipBorderC)
+                    )
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .help("새로 만들기")
+            .accessibilityLabel("새로 만들기")
+
             HeaderIconButton(theme: theme, help: "휴지통") {
                 showingTrash = true
             } label: {
@@ -419,29 +458,13 @@ struct SidebarView: View {
                     .font(.system(size: 12.5, weight: .medium))
             }
             .accessibilityLabel(Text("휴지통"))
-            HeaderIconButton(theme: theme, help: "새 폴더") {
-                store.newFolder()
-            } label: {
-                Image(systemName: "folder.badge.plus")
-                    .font(.system(size: 13.5, weight: .medium))
-            }
-            HeaderIconButton(theme: theme, help: "새 소설") {
-                store.newEntry(kind: .novel)
-            } label: {
-                Image(systemName: "book.closed")
-                    .font(.system(size: 13, weight: .medium))
-            }
-            HeaderIconButton(theme: theme, help: "새 저널") {
-                store.newEntry()
-            } label: {
-                Text("＋").font(.system(size: 19))
-            }
         }
-        // 신호등 줄(타이틀바 안전영역) 바로 아래 — 우측 툴바와 같은 높이 기준.
-        // 고정 대신 **최소** 높이 — Dynamic Type 큰 글자에서 아이콘이 눌리지 않게 (#31).
+        // Native traffic lights remain untouched. Their measured safe inset gives this
+        // row enough breathing room while the remaining empty area stays visually calm.
         .padding(.leading, windowChromeLeadingInset)
         .padding(.trailing, 12)
         .frame(minHeight: 52)
+        .background(WorkspaceChromeSurface(theme: theme))
     }
 
     // MARK: - 전역 검색
