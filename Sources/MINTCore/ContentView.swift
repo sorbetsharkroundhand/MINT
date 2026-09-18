@@ -418,6 +418,30 @@ struct EditorToolbar: View {
             .onHover { toolButtonHovered = $0 }
             .accessibilityLabel("리빙 마진 열기")
             .help("리빙 마진 — 원고 옆에서 확인할 제안")
+            Menu {
+                if store.activeEntry?.resolvedKind == .novel {
+                    Button("스토리 바이블") {
+                        sidebarSection = SidebarSection.bible.rawValue
+                    }
+                    Divider()
+                }
+                Button("서사") {
+                    sidebarSection = SidebarSection.narrative.rawValue
+                }
+                Button("AI 컨텍스트") {
+                    sidebarSection = SidebarSection.context.rawValue
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.ink3C)
+                    .frame(width: 26, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel("기타 글 도구")
+            .help("기타 글 도구")
             ModelChip(completion: completion, settings: settings, theme: theme)
             settingsButton
         }
