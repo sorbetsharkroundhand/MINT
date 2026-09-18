@@ -90,6 +90,33 @@ final class WorkspaceLayoutTests: XCTestCase {
             .floating)
     }
 
+    func testToolbarDensityKeepsPrimaryControlsReadableAtNarrowEditorWidths() {
+        XCTAssertEqual(
+            WorkspaceLayoutState.toolbarDensity(forEditorWidth: 620),
+            .compact)
+        XCTAssertEqual(
+            WorkspaceLayoutState.toolbarDensity(forEditorWidth: 760),
+            .compact)
+        XCTAssertEqual(
+            WorkspaceLayoutState.toolbarDensity(forEditorWidth: 980),
+            .standard)
+    }
+
+    func testWorkspaceToolDescriptorsUseProductFacingTitles() {
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: .margin).title,
+            "리빙 마진")
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: .bible).title,
+            "스토리 바이블")
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: .narrative).title,
+            "서사")
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: .context).title,
+            "AI 컨텍스트")
+    }
+
     func testEditorialSurfaceIsOpaqueInBothAppearancesAndCustomPalettes() {
         for theme in [MintTheme.light, .dark, MintTheme.light.tinted(with: .lightDefault, dark: false),
                       MintTheme.dark.tinted(with: .darkDefault, dark: true)] {
