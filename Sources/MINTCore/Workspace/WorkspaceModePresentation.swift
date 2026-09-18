@@ -8,8 +8,19 @@ struct WorkspaceModeOption: Equatable, Identifiable {
 }
 
 enum WorkspaceModePresentation {
+    /// Primary release navigation deliberately exposes only surfaces that are ready
+    /// to be part of the writing loop. Routing keeps the deferred modes intact so
+    /// existing project preferences/data are not destroyed and post-release work can
+    /// re-expose them without a migration.
     static func options(for projectMode: WritingMode) -> [WorkspaceModeOption] {
-        WorkspaceRouting.availableModes(for: projectMode).map { mode in
+        let visibleModes: [WorkspaceMode]
+        switch projectMode {
+        case .fiction:
+            visibleModes = [.write]
+        case .general:
+            visibleModes = [.write, .outline]
+        }
+        return visibleModes.map { mode in
             WorkspaceModeOption(mode: mode, label: label(for: mode))
         }
     }
