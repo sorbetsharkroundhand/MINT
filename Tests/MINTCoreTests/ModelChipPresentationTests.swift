@@ -7,7 +7,8 @@ final class ModelChipPresentationTests: XCTestCase {
         XCTAssertEqual(
             ModelChipPresentation.toolbarLabel(
                 modelID: "mlx-community/Some-Technical-Model-4bit",
-                stateText: "대기"),
+                stateText: "대기",
+                compact: false),
             "자동완성 · 대기")
     }
 
@@ -15,8 +16,17 @@ final class ModelChipPresentationTests: XCTestCase {
         XCTAssertEqual(
             ModelChipPresentation.toolbarLabel(
                 modelID: "custom/private-model",
-                stateText: "오류"),
+                stateText: "오류",
+                compact: false),
             "자동완성 · 오류")
+    }
+
+    func testCompactToolbarUsesIconOnlyInsteadOfTechnicalText() {
+        XCTAssertNil(
+            ModelChipPresentation.toolbarLabel(
+                modelID: "mlx-community/Some-Technical-Model-4bit",
+                stateText: "대기",
+                compact: true))
     }
 }
 
