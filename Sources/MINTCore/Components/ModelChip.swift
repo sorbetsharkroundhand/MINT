@@ -7,6 +7,7 @@ struct ModelChip: View {
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
 
+    @Environment(\.openSettings) private var openSettings
     @State private var menuOpen = false
     @State private var hoveredID: String?
     @State private var chipHovered = false
@@ -47,6 +48,8 @@ struct ModelChip: View {
         }
         .buttonStyle(.plain)
         .onHover { chipHovered = $0 }
+        .accessibilityLabel("자동완성")
+        .accessibilityValue(engineStateAXValue)
         .popover(isPresented: $menuOpen, arrowEdge: .bottom) {
             dropdown
         }
@@ -54,14 +57,17 @@ struct ModelChip: View {
 
     private var dropdown: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("온디바이스 모델")
-                .font(MintFonts.monoUI(10.5))
-                .kerning(0.8)
-                .textCase(.uppercase)
-                .foregroundStyle(theme.ink3C)
-                .padding(.horizontal, 14)
-                .padding(.top, 11)
-                .padding(.bottom, 8)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("자동완성")
+                    .font(MintFonts.uiFont(13, .semibold))
+                    .foregroundStyle(theme.inkC)
+                Text("글을 멈추면 다음 내용을 이 Mac에서 제안합니다.")
+                    .font(MintFonts.uiFont(10.5))
+                    .foregroundStyle(theme.ink3C)
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 13)
+            .padding(.bottom, 10)
             theme.sepC.frame(height: 1)
             VStack(spacing: 0) {
                 ForEach(ModelChoice.all) { choice in
@@ -81,14 +87,16 @@ struct ModelChip: View {
                 }
             }
             .padding(6)
+            downloadFailureFooter
             theme.sepC.frame(height: 1)
             autocompleteToggle
             theme.sepC.frame(height: 1)
             predictionLengthRow
+            theme.sepC.frame(height: 1)
+            advancedModelSettingsButton
         }
-        .frame(width: 264)
+        .frame(width: 292)
         // 열 때마다 로컬 캐시를 다시 확인한다 — 엔진 로드로 받아진 모델도 반영.
-        .overlay(alignment: .bottom) { downloadFailureFooter }
         .onAppear { downloads.refresh(ModelChoice.all.map(\.id)) }
     }
 
@@ -158,23 +166,15 @@ struct ModelChip: View {
             pick(choice.id)
         } label: {
             HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        Text(choice.name)
-                            .font(MintFonts.uiFont(13, .semibold))
-                            .foregroundStyle(theme.inkC)
-                        Text(choice.sizeLabel)
-                            .font(MintFonts.monoUI(10.5))
-                            .foregroundStyle(theme.ink3C)
-                    }
-                    Text(choice.detail)
-                        .font(MintFonts.uiFont(11.5))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(choice.name)
+                        .font(MintFonts.uiFont(13, .semibold))
+                        .foregroundStyle(theme.inkC)
+                    Text(Self.userFacingSummary(for: choice))
+                        .font(MintFonts.uiFont(11))
                         .foregroundStyle(theme.ink2C)
                 }
                 Spacer(minLength: 0)
-                Text(choice.latencyLabel)
-                    .font(MintFonts.monoUI(10.5))
-                    .foregroundStyle(theme.ink3C)
                 Text(selected ? "✓" : "")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundStyle(theme.blueC)
@@ -194,7 +194,7 @@ struct ModelChip: View {
         .onHover { hoveredID = $0 ? choice.id : nil }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(Text("\(choice.name) 모델"))
-        .accessibilityValue(Text(selected ? "선택됨 · \(choice.latencyLabel)" : choice.latencyLabel))
+        .accessibilityValue(Text(selected ? "선택됨" : Self.userFacingSummary(for: choice)))
         .accessibilityHint(Text("이 모델로 전환"))
         .overlay(alignment: .trailing) {
             downloadAccessory(choice)
@@ -293,13 +293,18 @@ struct ModelChip: View {
         }
     }
 
-    /// Settings(⌘,)에서 직접 입력한 저장소 id도 선택 상태로 보이게.
+    /// 사용자 지정 저장소 ID는 primary writing surface에 그대로 노출하지 않는다.
+    /// 정확한 저장소 ID와 생성 파라미터는 Settings의 고급 모델 영역에서 관리한다.
     private var customRow: some View {
         HStack(spacing: 10) {
-            Text(ModelChip.shortID(settings.modelID))
-                .font(MintFonts.uiFont(12, .semibold))
-                .foregroundStyle(theme.inkC)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("사용자 지정 모델")
+                    .font(MintFonts.uiFont(12, .semibold))
+                    .foregroundStyle(theme.inkC)
+                Text("고급 설정에서 관리")
+                    .font(MintFonts.uiFont(10.5))
+                    .foregroundStyle(theme.ink3C)
+            }
             Spacer(minLength: 0)
             Text("✓")
                 .font(.system(size: 12, weight: .bold))
@@ -314,6 +319,27 @@ struct ModelChip: View {
         )
     }
 
+    private var advancedModelSettingsButton: some View {
+        Button {
+            menuOpen = false
+            openSettings()
+        } label: {
+            HStack {
+                Label("고급 모델 설정", systemImage: "gearshape")
+                    .font(MintFonts.uiFont(11.5, .medium))
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .foregroundStyle(theme.ink2C)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("모델 ID와 생성 파라미터 설정 열기")
+    }
+
     private func pick(_ id: String) {
         menuOpen = false
         guard id != settings.modelID else { return }
@@ -322,7 +348,7 @@ struct ModelChip: View {
     }
 
     private var statusLabel: String {
-        "\(ModelChip.displayName(settings.modelID)) · \(stateText)"
+        "자동완성 · \(stateText)"
     }
 
     private var stateText: String {
@@ -360,8 +386,21 @@ struct ModelChip: View {
         }
     }
 
+    static func userFacingSummary(for choice: ModelChoice) -> String {
+        switch choice.id {
+        case ModelPresets.ternaryBonsai27B:
+            "8.5GB · 실험적"
+        case ModelPresets.glm4_7_flash:
+            "16.9GB · 기본"
+        case ModelPresets.qwen3_6_35B_A3B:
+            "20GB · 큰 모델"
+        default:
+            "로컬 모델"
+        }
+    }
+
     static func displayName(_ modelID: String) -> String {
-        ModelChoice.matching(modelID)?.name ?? shortID(modelID)
+        ModelChoice.matching(modelID)?.name ?? "사용자 지정 모델"
     }
 
     static func shortID(_ modelID: String) -> String {
