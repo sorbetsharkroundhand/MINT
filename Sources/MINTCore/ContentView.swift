@@ -443,9 +443,11 @@ struct EditorToolbar: View {
                 .fixedSize()
                 .accessibilityLabel("글 도구")
 
-                if density == .standard {
-                    ModelChip(completion: completion, settings: settings, theme: theme)
-                }
+                ModelChip(
+                    completion: completion,
+                    settings: settings,
+                    theme: theme,
+                    compact: density == .compact)
                 settingsButton
             }
             .padding(
