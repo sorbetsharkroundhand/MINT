@@ -56,8 +56,6 @@ public struct SettingsView: View {
                 .tabItem { Label("소설", systemImage: "book.closed") }
             helpTab
                 .tabItem { Label("사용 방법", systemImage: "questionmark.circle") }
-            metricsTab
-                .tabItem { Label("지표", systemImage: "chart.bar") }
         }
         // 고정 크기 — 탭 안의 Form이 이 높이를 넘으면 그 안에서 스크롤한다.
         // 창이 내용을 따라 늘어나면 다시 "아래가 안 보이는" 문제로 돌아간다.
@@ -286,6 +284,23 @@ public struct SettingsView: View {
                 Toggle("KV 캐시 재사용", isOn: $settings.kvCacheEnabled)
                 caption("이상 동작을 진단할 때만 끄는 고급 옵션입니다.")
             }
+
+            Section("로컬 진단") {
+                if metrics.shown == 0 {
+                    caption("아직 자동완성 사용 기록이 없어요.")
+                } else {
+                    LabeledContent("제안 노출", value: "\(metrics.shown)회")
+                    LabeledContent(
+                        "전체 수락 (Tab)",
+                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
+                    LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
+                }
+                Button("로컬 진단 기록 삭제") {
+                    AcceptanceMetrics.reset()
+                    metrics = .init()
+                }
+                caption("이 기록은 이 Mac에만 저장되고 원고 내용은 포함하지 않습니다.")
+            }
         }
         .formStyle(.grouped)
     }
@@ -349,38 +364,6 @@ public struct SettingsView: View {
             Section("마크다운 서식") {
                 MarkdownCheatSheet(theme: MintTheme.of(colorScheme))
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .formStyle(.grouped)
-    }
-
-    // MARK: - 지표 (로컬 전용)
-
-    /// 실사용 품질 지표 (M7, PLAN §13) — 로컬 파일에만, 원격 전송 절대 금지.
-    private var metricsTab: some View {
-        Form {
-            Section("품질 지표 (로컬 전용)") {
-                if metrics.shown == 0 {
-                    caption("아직 기록이 없어요 — 제안이 뜨고 수락/거절될 때마다 이 Mac에만 기록돼요.")
-                } else {
-                    LabeledContent("제안 노출", value: "\(metrics.shown)회")
-                    LabeledContent(
-                        "전체 수락 (Tab)",
-                        value: "\(metrics.acceptedFull)회 · \(metrics.acceptanceRate)%")
-                    LabeledContent("단어 수락 (→)", value: "\(metrics.acceptedWord)회")
-                    ForEach(metrics.byMode.keys.sorted(), id: \.self) { mode in
-                        let stats = metrics.byMode[mode] ?? (0, 0)
-                        LabeledContent(
-                            "· \(mode)",
-                            value: "노출 \(stats.shown) · 수락 \(stats.accepted)")
-                        .font(.caption)
-                    }
-                }
-                Button("지표 삭제") {
-                    AcceptanceMetrics.reset()
-                    metrics = .init()
-                }
-                caption("어떤 지표도 기기 밖으로 나가지 않아요 (~/Documents/MINT/metrics.jsonl).")
             }
         }
         .formStyle(.grouped)
