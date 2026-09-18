@@ -454,6 +454,7 @@ struct EditorToolbar: View {
                     ? WindowChromeGeometry.toolbarHorizontalPadding
                     : windowChromeLeadingInset)
             .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
         }
         .frame(height: 52)
         .background(theme.toolbarC)
