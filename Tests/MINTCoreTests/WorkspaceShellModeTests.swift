@@ -62,16 +62,33 @@ final class WorkspaceShellModeTests: XCTestCase {
             WorkspaceModePresentation.options(for: .fiction),
             [
                 WorkspaceModeOption(mode: .write, label: "쓰기"),
-                WorkspaceModeOption(mode: .map, label: "지도"),
-                WorkspaceModeOption(mode: .review, label: "검토"),
             ])
         XCTAssertEqual(
             WorkspaceModePresentation.options(for: .general),
             [
                 WorkspaceModeOption(mode: .write, label: "쓰기"),
                 WorkspaceModeOption(mode: .outline, label: "개요"),
-                WorkspaceModeOption(mode: .review, label: "검토"),
             ])
+    }
+
+
+    func testReleaseToolPresentationUsesPlainWriterFacingLabels() {
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: SidebarSection.margin.rawValue),
+            WorkspaceToolDescriptor(
+                title: "리빙 마진",
+                subtitle: "원고 옆에서 확인할 제안",
+                systemImage: "sparkles"))
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: SidebarSection.bible.rawValue).title,
+            "스토리 바이블")
+    }
+
+    func testModelChoicesUseWriterFacingSummaries() {
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .mint), "8.5GB · 실험적")
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .basil), "16.9GB · 기본")
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .peppermint), "20GB · 큰 모델")
+        XCTAssertEqual(ModelChip.displayName("custom/model"), "사용자 지정 모델")
     }
 
     func testModeSelectionUpdatesSessionAndRestoresEditorFocus() async throws {

@@ -294,6 +294,7 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @State private var sidebarButtonHovered = false
     @State private var settingsButtonHovered = false
+    @State private var toolButtonHovered = false
     @State private var longParagraphOpen = false
     /// ⌘,의 Settings 씬을 여는 표준 액션 (macOS 14+). 다크 모드·사용 방법·
     /// 저자 이름이 전부 설정으로 옮겨 가면서 눈에 보이는 입구가 필요해졌다.
@@ -310,15 +311,18 @@ struct EditorToolbar: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             if let projectMode = projectSession.activeProject?.mode {
-                Picker("작업 공간", selection: workspaceModeBinding) {
-                    ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
-                        Text(option.label).tag(option.mode)
+                let options = WorkspaceModePresentation.options(for: projectMode)
+                if options.count > 1 {
+                    Picker("작업 공간", selection: workspaceModeBinding) {
+                        ForEach(options) { option in
+                            Text(option.label).tag(option.mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityIdentifier("mint.workspace-mode")
+                    .accessibilityLabel("작업 공간")
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .accessibilityIdentifier("mint.workspace-mode")
-                .accessibilityLabel("작업 공간")
             }
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
@@ -387,21 +391,57 @@ struct EditorToolbar: View {
                 }
             }
             Spacer()
-            Menu {
-                Button("리빙 마진") {
-                    WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
-                }
-                Button("스토리 바이블") { sidebarSection = SidebarSection.bible.rawValue }
-                Button("서사") { sidebarSection = SidebarSection.narrative.rawValue }
-                Button("AI 컨텍스트") { sidebarSection = SidebarSection.context.rawValue }
+            Button {
+                WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
             } label: {
                 Image(systemName: "sidebar.right")
-                    .font(MintFonts.uiFont(12))
-                    .foregroundStyle(theme.ink2C)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(
+                        sidebarSection == SidebarSection.margin.rawValue
+                            ? theme.blueC
+                            : theme.ink2C
+                    )
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                            .fill(
+                                toolButtonHovered
+                                    ? theme.hoverC
+                                    : (sidebarSection == SidebarSection.margin.rawValue
+                                        ? theme.activeBgC
+                                        : .clear)
+                            )
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { toolButtonHovered = $0 }
+            .accessibilityLabel("리빙 마진 열기")
+            .help("리빙 마진 — 원고 옆에서 확인할 제안")
+            Menu {
+                if store.activeEntry?.resolvedKind == .novel {
+                    Button("스토리 바이블") {
+                        sidebarSection = SidebarSection.bible.rawValue
+                    }
+                    Divider()
+                }
+                Button("서사") {
+                    sidebarSection = SidebarSection.narrative.rawValue
+                }
+                Button("AI 컨텍스트") {
+                    sidebarSection = SidebarSection.context.rawValue
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.ink3C)
+                    .frame(width: 26, height: 28)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .accessibilityLabel("글 도구")
+            .accessibilityLabel("기타 글 도구")
+            .help("기타 글 도구")
             ModelChip(completion: completion, settings: settings, theme: theme)
             settingsButton
         }
@@ -755,13 +795,6 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
-            // 입력 지연 계측 (로컬 전용 진단) — 핸들러(우리 코드) vs 총(렌더 포함).
-            // 랙 제보를 숫자로 받기 위한 장비. 표본이 쌓여야 나타난다.
-            if completion.keystrokeStats.samples > 0 {
-                Text(keystrokeLabel)
-                    .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
-                separator
-            }
             // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
             if case .failed(let message, _) = store.savePhase {
                 Text("저장 실패")
@@ -803,13 +836,6 @@ struct EditorStatusBar: View {
     /// 카운터 비교(O(1))로 변경을 감지한다.
     private var statsKey: String {
         "\(store.activeID.uuidString)-\(store.bodyVersion)"
-    }
-
-    private var keystrokeLabel: String {
-        let stats = completion.keystrokeStats
-        return String(
-            format: "입력 %.1f/%.0fms·max %.0f",
-            stats.handlerP95, stats.totalP95, stats.totalMax)
     }
 
     private var separator: some View {
