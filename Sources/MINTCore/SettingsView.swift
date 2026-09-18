@@ -25,6 +25,7 @@ public struct SettingsView: View {
     /// 색상 팔레트 — 고르는 즉시 앱 전체에 반영된다 (ContentView도 관찰).
     // 앱 수명 싱글턴 — StateObject 소유 의미 (#60).
     @StateObject private var palette = PaletteSettings.shared
+    @State private var advancedPredictionSettingsExpanded = false
     /// 모델 ID 초안 — 커밋(Enter/적용)까지 settings에 쓰지 않는다 (#65 H2).
     @State private var modelIDDraft = ""
     /// 초안 검증 실패 문구 — nil이면 오류 없음.
@@ -43,7 +44,7 @@ public struct SettingsView: View {
             generalTab
                 .tabItem { Label("일반", systemImage: "gearshape") }
             predictionTab
-                .tabItem { Label("예측", systemImage: "sparkles") }
+                .tabItem { Label("자동완성", systemImage: "sparkles") }
             novelTab
                 .tabItem { Label("소설", systemImage: "book.closed") }
             helpTab
@@ -156,77 +157,125 @@ public struct SettingsView: View {
         )
     }
 
-    // MARK: - 예측 (모델 + 제안 동작)
+    // MARK: - 자동완성
 
-    /// 모델과 제안 파라미터는 같은 것(예측 품질)을 조절하므로 한 탭에 둔다.
     private var predictionTab: some View {
         Form {
-            Section("모델") {
-                // 초안/커밋 경계 (이슈 #25 / #65 H2) — TextField는 modelIDDraft만
-                // 편집한다. 타이핑이 changeModel을 부르면 불완전한 ID마다 취소·
-                // 다운로드·preload가 반복됐다. 커밋은 Enter/적용에서 1회.
-                TextField("Hugging Face 저장소 id (namespace/model)", text: $modelIDDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .autocorrectionDisabled()
-                    .onSubmit(commitModelIDDraft)
-                if let modelIDError {
-                    Text(modelIDError)
-                        .font(MintFonts.uiFont(11))
-                        .foregroundStyle(MintTheme.of(colorScheme).dangerC)
-                        .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
-                }
-                HStack {
-                    Menu("프리셋에서 선택") {
-                        ForEach(ModelPresets.all, id: \.self) { preset in
-                            Button(preset) { changeModel(preset) }  // 프리셋은 형식 보장 — 즉시 적용
-                        }
-                    }
-                    Spacer()
-                    Button("적용", action: commitModelIDDraft)
-                        .disabled(modelIDDraft.trimmingCharacters(in: .whitespaces) == settings.modelID)
-                }
-                caption("모델 변경은 다음 제안부터 적용 — 새 모델은 첫 사용 시 다운로드돼요(수 GB).")
-            }
-
-            Section("제안") {
+            Section("자동완성") {
                 Toggle("자동완성 사용", isOn: autocompleteBinding)
-                Picker("프롬프트 방식", selection: $settings.promptStyle) {
-                    ForEach(PromptStyle.allCases, id: \.self) { style in
-                        Text(style.label).tag(style)
+                caption(
+                    settings.autocompleteEnabled
+                        ? "글을 멈추면 이 Mac에서 이어질 내용을 제안해요."
+                        : "꺼져 있어도 편집·저장·검색·내보내기는 그대로 사용할 수 있어요."
+                )
+
+                Picker("모델", selection: userFacingModelBinding) {
+                    ForEach(ModelChoice.all) { choice in
+                        Text(choice.name).tag(choice.id)
+                    }
+                    if ModelChoice.matching(settings.modelID) == nil {
+                        Text("사용자 지정").tag(settings.modelID)
                     }
                 }
-                .pickerStyle(.radioGroup)
+                caption(modelSelectionCaption)
+
                 Stepper(
-                    "디바운스: \(settings.debounceMilliseconds)ms",
-                    value: $settings.debounceMilliseconds,
-                    in: 150...1_000,
-                    step: 50
-                )
-                Stepper(
-                    "최대 토큰: \(settings.maxTokens)",
+                    "제안 길이: \(settings.maxTokens)",
                     value: $settings.maxTokens,
-                    in: 4...32
+                    in: 4...32,
+                    step: 2
                 )
+                caption("한 번에 보여줄 제안의 최대 길이예요.")
             }
 
-            Section("생성 파라미터") {
-                VStack(alignment: .leading) {
-                    Slider(value: $settings.temperature, in: 0...1) {
-                        Text(String(format: "온도: %.2f", settings.temperature))
+            Section {
+                DisclosureGroup(
+                    "고급 설정",
+                    isExpanded: $advancedPredictionSettingsExpanded
+                ) {
+                    VStack(alignment: .leading, spacing: 14) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("모델 저장소")
+                                .font(MintFonts.uiFont(12, .semibold))
+                            TextField(
+                                "Hugging Face 저장소 ID (namespace/model)",
+                                text: $modelIDDraft
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .autocorrectionDisabled()
+                            .onSubmit(commitModelIDDraft)
+                            if let modelIDError {
+                                Text(modelIDError)
+                                    .font(MintFonts.uiFont(11))
+                                    .foregroundStyle(MintTheme.of(colorScheme).dangerC)
+                                    .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
+                            }
+                            HStack {
+                                Spacer()
+                                Button("적용", action: commitModelIDDraft)
+                                    .disabled(
+                                        modelIDDraft.trimmingCharacters(in: .whitespaces)
+                                            == settings.modelID
+                                    )
+                            }
+                        }
+
+                        Divider()
+
+                        Picker("프롬프트 방식", selection: $settings.promptStyle) {
+                            ForEach(PromptStyle.allCases, id: \.self) { style in
+                                Text(style.label).tag(style)
+                            }
+                        }
+                        .pickerStyle(.radioGroup)
+
+                        Stepper(
+                            "제안 대기: \(settings.debounceMilliseconds)ms",
+                            value: $settings.debounceMilliseconds,
+                            in: 150...1_000,
+                            step: 50
+                        )
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Slider(value: $settings.temperature, in: 0...1) {
+                                Text(String(format: "온도: %.2f", settings.temperature))
+                            }
+                            caption("낮을수록 일관되고, 높을수록 다양한 제안을 만들어요.")
+                        }
+
+                        VStack(alignment: .leading, spacing: 4) {
+                            Slider(value: $settings.topP, in: 0.5...1.0) {
+                                Text(String(format: "top-p: %.2f", settings.topP))
+                            }
+                            caption("생성 후보의 누적 확률 범위를 조절해요.")
+                        }
+
+                        Toggle("KV 캐시 재사용", isOn: $settings.kvCacheEnabled)
+                        caption("입력 중 프리필을 재사용합니다. 문제가 있을 때만 꺼 보세요.")
                     }
-                    caption("낮을수록 일관된 제안, 높을수록 다양한 제안.")
+                    .padding(.top, 8)
                 }
-                VStack(alignment: .leading) {
-                    Slider(value: $settings.topP, in: 0.5...1.0) {
-                        Text(String(format: "top-p: %.2f", settings.topP))
-                    }
-                    caption("누적 확률 컷 — 벤치(MINTBench)로 확정하는 값이에요 (PLAN §10).")
-                }
-                Toggle("KV 캐시 재사용", isOn: $settings.kvCacheEnabled)
-                caption("타이핑 중 프리필을 증분 처리해 제안이 빨라져요 — 이상 동작 시 꺼 보세요.")
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var userFacingModelBinding: Binding<String> {
+        Binding(
+            get: { settings.modelID },
+            set: { id in
+                guard id != settings.modelID else { return }
+                changeModel(id)
+            }
+        )
+    }
+
+    private var modelSelectionCaption: String {
+        guard let choice = ModelChoice.matching(settings.modelID) else {
+            return "사용자 지정 모델 · 세부 저장소 ID는 고급 설정에서 관리해요."
+        }
+        return ModelChip.userFacingSummary(for: choice)
+            + " · 새 모델은 처음 사용할 때 내려받아요."
     }
 
     // MARK: - 소설 (작품 메타데이터·이해 범위)
