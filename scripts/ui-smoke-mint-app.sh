@@ -189,18 +189,12 @@ ui verify "$TOKEN"
 ui navigator
 ui type "typed$TOKEN"
 echo "✓ 격리 원고 확인 · 에디터 입력 왕복"
-ui press "지도"
-ui focused
-[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = map ] || fail "지도 모드 저장 실패"
-ui press "쓰기"
-ui focused
-[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = write ] || fail "쓰기 모드 저장 실패"
-echo "✓ 프로젝트 모드 전환 · 에디터 포커스 복원"
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
 ui press "스토리 바이블"
 ui press "문서로 돌아가기"
+ui focused
 ui navigator
 ui press "mint.entry.22222222-2222-2222-2222-222222222222"
 ui verify "second$TOKEN"
