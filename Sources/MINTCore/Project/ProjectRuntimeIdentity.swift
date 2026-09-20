@@ -39,11 +39,14 @@ public enum ProjectSavePhase: Equatable, Sendable {
 
 public enum ProjectSessionError: Error, Equatable, LocalizedError, Sendable {
     case transitionInProgress
+    case staleRuntime
 
     public var errorDescription: String? {
         switch self {
         case .transitionInProgress:
             "다른 프로젝트 전환이 진행 중입니다."
+        case .staleRuntime:
+            "이미지를 가져오는 동안 문서가 변경되었습니다."
         }
     }
 }

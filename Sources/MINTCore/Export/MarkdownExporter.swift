@@ -16,7 +16,7 @@ import Foundation
 public enum MarkdownExporter {
 
     /// 내보내기 결과 — 성공 알림과 정책 경고의 재료.
-    public struct Report: Equatable {
+    public struct Report: Equatable, Sendable {
         /// 이번 내보내기에서 실제로 새로 쓴 asset 파일 수.
         public var copiedAssets = 0
         /// 대상에 같은 내용이 이미 있어 복사 대신 재사용한 소스 수.
@@ -40,7 +40,21 @@ public enum MarkdownExporter {
     public static func export(
         _ entry: JournalEntry, to destination: URL
     ) throws -> Report {
-        let body = entry.body
+        try exportBody(entry.body, to: destination) { reference in
+            try? Data(contentsOf: MintImageStore.url(for: reference))
+        }
+    }
+
+    @discardableResult
+    public static func export(
+        _ document: WritingDocument, assets: ProjectAssetCatalog, to destination: URL
+    ) throws -> Report {
+        try exportBody(document.body, to: destination, resolve: assets.data(for:))
+    }
+
+    private static func exportBody(
+        _ body: String, to destination: URL, resolve: (String) -> Data?
+    ) throws -> Report {
         let definitions = ImageReferenceParser.collectDefinitions(in: body)
         let destinationDir = destination.deletingLastPathComponent()
         let imagesDir = destinationDir.appendingPathComponent("images", isDirectory: true)
@@ -68,13 +82,13 @@ public enum MarkdownExporter {
                 case .managedRelative, .externalFile:
                     _ = try planCopy(
                         ref.destinationRaw, into: imagesDir, created: &newPaths,
-                        report: &report)
+                        report: &report, resolve: resolve)
                 }
             } else if isDefinitionLine(line), let oldRaw = definitionDestination(line) {
                 // 참조 형태 이미지의 경로는 정의 줄에 있다 — 정의 줄도 같은 정책으로.
                 switch ImageReferenceParser.classify(oldRaw) {
                 case .managedRelative, .externalFile:
-                    _ = try planCopy(oldRaw, into: imagesDir, created: &newPaths, report: &report)
+                    _ = try planCopy(oldRaw, into: imagesDir, created: &newPaths, report: &report, resolve: resolve)
                 default:
                     break  // 원격·차단 정의는 건드리지 않는다
                 }
@@ -98,9 +112,7 @@ public enum MarkdownExporter {
             }
             out.append(rewriteLine(rawLine, definitions: definitions, newPaths: newPaths, report: &report))
         }
-        var exported = out.joined(separator: "\n")
-        // split/joined 왕복은 후행 개행을 지운다 — 원문이 개행으로 끝났으면 되살린다.
-        if body.hasSuffix("\n") { exported += "\n" }
+        let exported = out.joined(separator: "\n")
 
         try exported.write(to: destination, atomically: true, encoding: .utf8)
         return report
@@ -110,21 +122,22 @@ public enum MarkdownExporter {
 
     /// 소스 하나의 새 이름을 정하고 파일을 복사한다. 같은 소스 재등장은 메모이즈.
     /// 반환값은 새 상대경로 (누락이면 nil).
-    @MainActor
     private static func planCopy(
         _ sourceRaw: String, into imagesDir: URL,
-        created newPaths: inout [String: String], report: inout Report
+        created newPaths: inout [String: String], report: inout Report,
+        resolve: (String) -> Data?
     ) throws -> String? {
         if let memoized = newPaths[sourceRaw] {
             return memoized.isEmpty ? nil : memoized
         }
         let fm = FileManager.default
-        let sourceURL = MintImageStore.url(for: sourceRaw)
-        guard fm.fileExists(atPath: sourceURL.path) else {
+        let sourceURL = URL(fileURLWithPath: sourceRaw)
+        guard let bytes = resolve(sourceRaw) else {
             report.missingSources.append(sourceRaw)
             newPaths[sourceRaw] = ""  // 누락도 메모이즈 — 줄마다 경고를 늘리지 않는다
             return nil
         }
+        try ProjectPaths.rejectSymlink(imagesDir)
         try fm.createDirectory(at: imagesDir, withIntermediateDirectories: true)
 
         let stem = sourceURL.deletingPathExtension().lastPathComponent
@@ -132,9 +145,9 @@ public enum MarkdownExporter {
         var candidate = sourceURL.lastPathComponent
         var index = 1
         while true {
-            let target = imagesDir.appendingPathComponent(candidate)
+            let target = try ProjectPaths.checked(candidate, under: imagesDir)
             if fm.fileExists(atPath: target.path) {
-                if filesEqual(sourceURL, target) {
+                if (try? Data(contentsOf: target)) == bytes {
                     // 같은 내용이 이미 있다 — 복사 없이 재사용 (재내보내기 멱등성).
                     newPaths[sourceRaw] = "images/\(candidate)"
                     report.reusedAssets += 1
@@ -144,18 +157,11 @@ public enum MarkdownExporter {
                 index += 1
                 continue
             }
-            try fm.copyItem(at: sourceURL, to: target)
+            try bytes.write(to: target, options: .atomic)
             newPaths[sourceRaw] = "images/\(candidate)"
             report.copiedAssets += 1
             return "images/\(candidate)"
         }
-    }
-
-    private static func filesEqual(_ a: URL, _ b: URL) -> Bool {
-        guard let da = try? Data(contentsOf: a, options: .mappedIfSafe),
-            let db = try? Data(contentsOf: b, options: .mappedIfSafe)
-        else { return false }
-        return da == db
     }
 
     // MARK: - 한 줄 재작성

@@ -2,6 +2,74 @@ import XCTest
 @testable import MINTCore
 
 final class ProjectStoreTests: XCTestCase {
+    // Catches dropped manuscript/trash/source records and unverified or mutable asset storage.
+    func testAddAssetPersistsVerifiedBytesAndRetainsExistingDocuments() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.trashedDocumentIDs = [project.documents[1].id]
+        try await store.save(project)
+        try await store.addAsset(Data([1, 2, 3]), reference: "images/a.png", to: project.id)
+        let asset = try await store.assetData(reference: "images/a.png", in: project.id)
+        let reopened = try await store.load(id: project.id)
+        XCTAssertEqual(asset, Data([1, 2, 3]))
+        XCTAssertEqual(reopened, project)
+        let catalog = try await store.assetCatalog(id: project.id)
+        try await store.addAsset(Data([4, 5]), reference: "images/a.png", to: project.id)
+        let replacement = try await store.assetCatalog(id: project.id)
+        XCTAssertEqual(catalog.projectID, project.id)
+        XCTAssertEqual(catalog.data(for: "images/a.png"), Data([1, 2, 3]))
+        XCTAssertEqual(replacement.data(for: "images/a.png"), Data([4, 5]))
+        let oldBlob = root.appendingPathComponent("\(project.id.rawValue.uuidString)/Assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81")
+        XCTAssertEqual(try Data(contentsOf: oldBlob), Data([1, 2, 3]))
+        let recovered = try await store.previousProject(id: project.id)
+        XCTAssertEqual(recovered, project)
+    }
+
+    func testAssetWriteFailureAndUnsafePathsPreserveManifest() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+        let manifestURL = root.appendingPathComponent("\(project.id.rawValue.uuidString)/project.json")
+        let original = try Data(contentsOf: manifestURL)
+        for reference in ["../outside", "/tmp/outside", "images/../outside", "images//a.png"] {
+            do { try await store.addAsset(Data([1]), reference: reference, to: project.id); XCTFail("Unsafe reference accepted") }
+            catch ProjectStoreError.unsafePath {}
+        }
+        let failing = ProjectStore(root: root, fileSystem: FailingProjectFiles(fragment: "project.json"))
+        do { try await failing.addAsset(Data([1]), reference: "images/a.png", to: project.id); XCTFail("Failed commit accepted") }
+        catch {}
+        XCTAssertEqual(try Data(contentsOf: manifestURL), original)
+        let assets = root.appendingPathComponent("\(project.id.rawValue.uuidString)/Assets")
+        let outside = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.moveItem(at: assets, to: assets.appendingPathExtension("saved"))
+        try FileManager.default.createSymbolicLink(at: assets, withDestinationURL: outside)
+        do { try await store.addAsset(Data([2]), reference: "images/b.png", to: project.id); XCTFail("Symlink write accepted") }
+        catch ProjectStoreError.unsafePath {}
+        XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: outside.path).isEmpty)
+        XCTAssertEqual(try Data(contentsOf: manifestURL), original)
+    }
+
+    func testCatalogRejectsDamagedBytesAndDoesNotConsultDiskAfterCreation() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+        try await store.addAsset(Data([1, 2, 3]), reference: "images/a.png", to: project.id)
+        let catalog = try await store.assetCatalog(id: project.id)
+        let blob = root.appendingPathComponent("\(project.id.rawValue.uuidString)/Assets/039058c6f2c0cb492c533b0a4d14ef77cc0f78abccced5287d84a1a2011cfb81")
+        try Data([9]).write(to: blob)
+        XCTAssertEqual(catalog.data(for: "images/a.png"), Data([1, 2, 3]))
+        XCTAssertNil(catalog.data(for: "../outside"))
+        do { _ = try await store.assetCatalog(id: project.id); XCTFail("Damaged asset published") }
+        catch ProjectStoreError.damagedFile {}
+    }
+
     func testActivateAndLoadReturnsExactlyTheDurableActiveProject() async throws {
         let root = try temporaryProjectRoot()
         defer { try? FileManager.default.removeItem(at: root) }

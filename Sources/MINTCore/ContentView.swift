@@ -188,7 +188,14 @@ struct EditorPane: View {
                     baseFontSize: CGFloat(settings.editorFontSize),
                     documentIdentity: identity,
                     focusRequest: editorRequests.editorFocusRequest,
-                    searchJump: editorRequests.searchJump)
+                    searchJump: editorRequests.searchJump,
+                    assetCatalog: projectSession.assetCatalog,
+                    assetImporter: { [runtime = projectSession.runtimeIdentity] data, reference in
+                        guard let runtime else { throw ProjectSessionError.staleRuntime }
+                        _ = try await projectSession.importAsset(data: data, reference: reference, for: runtime)
+                        guard let catalog = projectSession.assetCatalog else { throw ProjectSessionError.staleRuntime }
+                        return catalog
+                    })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
                     .font(MintFonts.uiFont(13))

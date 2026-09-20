@@ -48,6 +48,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let focusRequest: Int
     /// 전역 검색 결과 클릭 — seq가 바뀌면 본문 매치 위치로 스크롤·선택 표시 (요구 2).
     private let searchJump: EditorSearchJump?
+    private let assetCatalog: ProjectAssetCatalog?
+    private let assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)?
 
     public init(
         text: Binding<String>,
@@ -57,7 +59,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         documentIdentity: EditorDocumentIdentity,
         focusRequest: Int = 0,
-        searchJump: EditorSearchJump? = nil
+        searchJump: EditorSearchJump? = nil,
+        assetCatalog: ProjectAssetCatalog? = nil,
+        assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)? = nil
     ) {
         self._text = text
         self.controller = controller
@@ -67,6 +71,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.documentIdentity = documentIdentity
         self.focusRequest = focusRequest
         self.searchJump = searchJump
+        self.assetCatalog = assetCatalog
+        self.assetImporter = assetImporter
     }
 
     /// Explicit legacy-workspace bridge. Project workspace composition uses the neutral primary
@@ -144,6 +150,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.palette = theme
         textView.lineSpacing = lineSpacing
         textView.baseFontSize = baseFontSize
+        configureAssets(textView)
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
         context.coordinator.loadedDocumentIdentity = documentIdentity
@@ -178,6 +185,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? BlockTextView else { return }
+        configureAssets(textView)
         let documentChanged = documentIdentity != context.coordinator.loadedDocumentIdentity
         if documentChanged {
             context.coordinator.isDocumentTransitioning = true
@@ -285,6 +293,13 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func makeCoordinator() -> Coordinator {
         Coordinator(self)
+    }
+
+    private func configureAssets(_ view: BlockTextView) {
+        if case .project = documentIdentity { view.usesProjectAssets = true }
+        else { view.usesProjectAssets = false }
+        view.projectAssetCatalog = assetCatalog
+        view.projectAssetImporter = assetImporter
     }
 
     // MARK: - Coordinator
@@ -728,6 +743,97 @@ extension NSAttributedString.Key {
 
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
+    var usesProjectAssets = false
+    var projectAssetCatalog: ProjectAssetCatalog? {
+        didSet {
+            if projectAssetCatalog != nil { usesProjectAssets = true }
+            if oldValue != projectAssetCatalog { projectImageCache.removeAll() }
+        }
+    }
+    var projectAssetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)?
+    private var projectImageCache = ImageLRU(budgetBytes: 128 * 1024 * 1024)
+
+    func resolvedImage(for reference: String, maxPixelWidth: CGFloat? = nil) -> NSImage? {
+        guard usesProjectAssets else {
+            if let maxPixelWidth { return MintImageStore.displayImage(for: reference, maxPixelWidth: maxPixelWidth) }
+            return MintImageStore.image(for: reference)
+        }
+        guard let bytes = projectAssetCatalog?.data(for: reference) else { return nil }
+        let key = "\(reference)|\(maxPixelWidth ?? 0)"
+        if let image = projectImageCache.find(key) { return image }
+        let image = maxPixelWidth.map { MintImageStore.displayImage(data: bytes, maxPixelWidth: $0) }
+            ?? NSImage(data: bytes)
+        guard let image else { return nil }
+        projectImageCache.insert(key: key, image: image,
+            bytes: max(1, Int(image.size.width * image.size.height * 4)))
+        return image
+    }
+
+    private func imageFailure(for reference: String) -> ImageLoadFailure? {
+        guard usesProjectAssets else { return ImageFailure.classify(reference) }
+        switch ImageReferenceParser.classify(reference) {
+        case .remote, .blocked: return nil
+        case .managedRelative, .externalFile: break
+        }
+        let ext = (reference as NSString).pathExtension.lowercased()
+        if !ext.isEmpty, !MintImageStore.imageExtensions.contains(ext) { return .unsupported }
+        guard projectAssetCatalog?.data(for: reference) != nil else { return .missing }
+        guard let image = resolvedImage(for: reference), image.size.width > 0 else { return .corrupt }
+        return nil
+    }
+
+    func insertProjectImage(data: Data, reference: String, object: MintImageObject? = nil) async throws {
+        try await importProjectAsset(data: data, reference: reference) { view in
+            if var object {
+                object.src = reference
+                view.insertImageParagraph(markdown: object.markdown)
+            } else {
+                view.insertImageBlock(relativePath: reference)
+            }
+        }
+    }
+
+    /// Keep a multi-file drop in one runtime generation until every asset is durable.
+    func insertProjectImages(_ images: [(data: Data, reference: String)]) async throws {
+        for image in images {
+            try await importProjectAsset(data: image.data, reference: image.reference) { _ in }
+        }
+        for image in images { insertImageBlock(relativePath: image.reference) }
+    }
+
+    private func importProjectAsset(
+        data: Data, reference: String, apply: (BlockTextView) -> Void
+    ) async throws {
+        guard let importer = projectAssetImporter, !hasMarkedText() else { throw ProjectSessionError.staleRuntime }
+        let body = string
+        let selection = selectedRange()
+        let projectID = projectAssetCatalog?.projectID
+        let catalog = try await importer(data, reference)
+        guard !Task.isCancelled, !hasMarkedText(), string == body, selectedRange() == selection,
+            projectAssetCatalog?.projectID == projectID, catalog.projectID == projectID
+        else { throw ProjectSessionError.staleRuntime }
+        projectAssetCatalog = catalog
+        apply(self)
+    }
+
+    private func saveAndInsertImage(_ data: Data, ext: String, object: MintImageObject? = nil) {
+        guard usesProjectAssets else {
+            guard let relative = MintImageStore.save(data, ext: ext) else {
+                alertAssetWriteFailure("이미지 파일을 저장하지 못했어요.")
+                return
+            }
+            insertImageBlock(relativePath: relative)
+            return
+        }
+        let suffix = MintImageStore.imageExtensions.contains(ext.lowercased()) ? ext.lowercased() : "png"
+        let reference = "images/\(UUID().uuidString).\(suffix)"
+        Task { [weak self] in
+            guard let self else { return }
+            do { try await insertProjectImage(data: data, reference: reference, object: object) }
+            catch ProjectSessionError.staleRuntime {} catch is CancellationError {}
+            catch { alertAssetWriteFailure(error.localizedDescription) }
+        }
+    }
 
     /// 레이아웃 매니저(nonisolated 드로잉)에서도 읽는다 — 쓰기는 메인 스레드뿐.
     /// nonisolated 드로잉이 읽기 때문에 @MainActor 전환이 불가능하다 — 이 탈출구는
@@ -2179,7 +2285,7 @@ final class BlockTextView: NSTextView {
                 !isTransforming
             {
                 out += Self.spokenDescription(
-                    attrs: attrs, failure: ImageFailure.classify(attrs.src))
+                    attrs: attrs, failure: imageFailure(for: attrs.src))
             } else {
                 // 산문 — 인라인 수식 원자(U+FFFC+attachment)를 "수식: …"로 치환해
                 // 읽고, 나머지 글자는 그대로 흘려보낸다 (이슈 #22).
@@ -2443,21 +2549,31 @@ final class BlockTextView: NSTextView {
             UTType(filenameExtension: $0)
         }
         guard panel.runModal() == .OK else { return }
-        for url in panel.urls { insertImageFile(url) }
+        insertImageFiles(panel.urls)
     }
 
     /// 파일 URL 하나를 읽어 images 폴더에 복사한 뒤 이미지 블록으로 삽입한다.
     /// 저장 실패는 조용히 무시하지 않는다 (이슈 #15).
-    private func insertImageFile(_ url: URL) {
-        guard let data = try? Data(contentsOf: url) else {
-            alertAssetWriteFailure("파일을 읽지 못했어요: \(url.lastPathComponent)")
-            return
+    private func insertImageFiles(_ urls: [URL]) {
+        var images: [(data: Data, reference: String)] = []
+        for url in urls {
+            guard let data = try? Data(contentsOf: url) else {
+                alertAssetWriteFailure("파일을 읽지 못했어요: \(url.lastPathComponent)")
+                return
+            }
+            if usesProjectAssets {
+                images.append((data, "images/\(UUID().uuidString).\(url.pathExtension.lowercased())"))
+            } else {
+                saveAndInsertImage(data, ext: url.pathExtension)
+            }
         }
-        guard let relative = MintImageStore.save(data, ext: url.pathExtension) else {
-            alertAssetWriteFailure("'\(url.lastPathComponent)'을 images 폴더에 복사하지 못했어요.")
-            return
+        guard !images.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do { try await insertProjectImages(images) }
+            catch ProjectSessionError.staleRuntime {} catch is CancellationError {}
+            catch { alertAssetWriteFailure(error.localizedDescription) }
         }
-        insertImageBlock(relativePath: relative)
     }
 
     /// 페이스트보드에서 이미지(파일 URL 또는 비트맵)를 찾아 삽입한다. 하나라도 넣었으면 true.
@@ -2476,28 +2592,20 @@ final class BlockTextView: NSTextView {
                 MintImageStore.imageExtensions.contains($0.pathExtension.lowercased())
             }
             if !images.isEmpty {
-                images.forEach(insertImageFile)
+                insertImageFiles(images)
                 return true
             }
         }
         // 2) 비트맵 데이터(스크린샷·복사한 이미지) — PNG로 정규화해 저장한다.
         // 저장 실패도 조용히 넘기지 않는다 (이슈 #15).
         if let data = pasteboard.data(forType: .png) {
-            guard let relative = MintImageStore.save(data, ext: "png") else {
-                alertAssetWriteFailure("붙여넣은 이미지를 images 폴더에 저장하지 못했어요.")
-                return true
-            }
-            insertImageBlock(relativePath: relative)
+            saveAndInsertImage(data, ext: "png")
             return true
         }
         if let tiff = pasteboard.data(forType: .tiff),
             let rep = NSBitmapImageRep(data: tiff),
             let png = rep.representation(using: .png, properties: [:]) {
-            guard let relative = MintImageStore.save(png, ext: "png") else {
-                alertAssetWriteFailure("붙여넣은 이미지를 images 폴더에 저장하지 못했어요.")
-                return true
-            }
-            insertImageBlock(relativePath: relative)
+            saveAndInsertImage(png, ext: "png")
             return true
         }
         return false
@@ -2629,8 +2737,8 @@ final class BlockTextView: NSTextView {
             blockInfo(in: caretPara).block == .image,
             let caretAttrs = Self.imageAttrs(
                 from: paragraphContent(caretPara).trimmingCharacters(in: .whitespaces)),
-            MintImageStore.image(for: caretAttrs.src) != nil
-                || ImageFailure.classify(caretAttrs.src) != nil
+            resolvedImage(for: caretAttrs.src) != nil
+                || imageFailure(for: caretAttrs.src) != nil
         else { return }
         // 커서는 그대로 두고(어차피 숨김) 객체 선택만 채택 — setSelectedRange
         // 재귀를 피한다. refresh가 뒤이어 렌더를 유지한다.
@@ -2684,7 +2792,7 @@ final class BlockTextView: NSTextView {
         let para = ns.paragraphRange(for: NSRange(location: min(loc, ns.length), length: 0))
         guard let attrs = Self.imageAttrs(
                 from: paragraphContent(para).trimmingCharacters(in: .whitespaces)),
-            let image = MintImageStore.image(for: attrs.src)
+            let image = resolvedImage(for: attrs.src)
         else { return false }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -2693,10 +2801,13 @@ final class BlockTextView: NSTextView {
         if let payload = object.encoded() {
             pasteboard.setData(payload, forType: .mintImageObject)
         }
+        if usesProjectAssets, let bytes = projectAssetCatalog?.data(for: attrs.src) {
+            pasteboard.setData(bytes, forType: Self.projectImageBytesType)
+        }
         // 2) Markdown 소스 — 텍스트 편집기로 붙이면 구문째로.
         pasteboard.setString(attrs.markdown, forType: .string)
         // 3) 원본 파일 URL — 파일을 받아들이는 앱용.
-        pasteboard.writeObjects([MintImageStore.url(for: attrs.src) as NSURL])
+        if !usesProjectAssets { pasteboard.writeObjects([MintImageStore.url(for: attrs.src) as NSURL]) }
         // 4) 호환 비트맵 — 이미지를 받는 모든 앱용 (기존 동작).
         pasteboard.writeObjects([image])
         return true
@@ -2709,9 +2820,24 @@ final class BlockTextView: NSTextView {
         guard let data = pasteboard.data(forType: .mintImageObject),
             let object = MintImageObject(data: data)
         else { return false }
+        if usesProjectAssets {
+            // Project references cannot be reused across owners; import clipboard bytes instead.
+            if let bytes = pasteboard.data(forType: Self.projectImageBytesType) {
+                saveAndInsertImage(bytes, ext: (object.src as NSString).pathExtension, object: object)
+            } else if let png = pasteboard.data(forType: .png) {
+                saveAndInsertImage(png, ext: "png", object: object)
+            } else if let tiff = pasteboard.data(forType: .tiff),
+                let rep = NSBitmapImageRep(data: tiff),
+                let png = rep.representation(using: .png, properties: [:]) {
+                saveAndInsertImage(png, ext: "png", object: object)
+            } else { return false }
+            return true
+        }
         insertImageParagraph(markdown: object.markdown)
         return true
     }
+
+    private static let projectImageBytesType = NSPasteboard.PasteboardType("app.mint.project-image-bytes")
 
     /// 렌더된 이미지 위에서는 포인터 커서 — 클릭(객체 선택) 대상임을 알린다.
     /// 렌더된 수식 위에서는 열린 손 — 끌어 옮길 수 있음을 알린다 (요구 6).
@@ -2767,6 +2893,21 @@ final class BlockTextView: NSTextView {
         guard panel.runModal() == .OK, let url = panel.urls.first,
             let data = try? Data(contentsOf: url)
         else { return }
+        if usesProjectAssets {
+            let reference = (try? ProjectPaths.validateRelative(attrs.src)) != nil
+                ? attrs.src : "images/\(UUID().uuidString).\(url.pathExtension)"
+            Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await importProjectAsset(data: data, reference: reference) { view in
+                        if reference != attrs.src { view.rewriteImage(para, setSrc: reference) }
+                        view.refreshRenderedBlocks()
+                    }
+                } catch ProjectSessionError.staleRuntime {} catch is CancellationError {}
+                catch { alertAssetWriteFailure(error.localizedDescription) }
+            }
+            return
+        }
         switch ImageReferenceParser.classify(attrs.src) {
         case .managedRelative:
             do {
@@ -2790,6 +2931,7 @@ final class BlockTextView: NSTextView {
 
     /// 깨진 이미지가 참조하던 위치를 Finder에서 연다 — 파일이 없으면 그 부모 폴더.
     private func revealBrokenImage(_ para: NSRange) {
+        guard !usesProjectAssets else { return }
         guard let attrs = Self.imageAttrs(
             from: paragraphContent(para).trimmingCharacters(in: .whitespaces))
         else { return }
@@ -2923,7 +3065,7 @@ final class BlockTextView: NSTextView {
         let view = ImageObjectToolbarView(
             theme: palette, width: overrideWidth ?? attrs.width, align: attrs.align,
             // 로드 실패 플레이스홀더면 찾기·Finder 복구 액션을 노출한다 (이슈 #15).
-            isPlaceholder: ImageFailure.classify(attrs.src) != nil
+            isPlaceholder: imageFailure(for: attrs.src) != nil
         ) { [weak self] action in
             self?.performImage(action)
         }
@@ -3731,7 +3873,7 @@ final class BlockTextView: NSTextView {
                 // 표시용 다운샘플 (#53) — 그리기엔 컬럼 폭×배율이면 충분하다.
                 // 전체 해상도 디코딩은 복사·내보내기 경로만 남는다.
                 rendered = attrs.flatMap {
-                    MintImageStore.displayImage(
+                    resolvedImage(
                         for: $0.src,
                         maxPixelWidth: Self.imageDecodePixelWidth(
                             containerWidth: textContainer?.size.width,
@@ -3776,7 +3918,7 @@ final class BlockTextView: NSTextView {
                 guard let image = rendered else {
                     // 로드 실패 — 소스로 빠지는 대신 원인·alt·경로를 적은
                     // 플레이스홀더를 렌더한다 (이슈 #15). 소스 노출 금지 불변식 유지.
-                    if let a = attrs, let failure = ImageFailure.classify(a.src) {
+                    if let a = attrs, let failure = imageFailure(for: a.src) {
                         let placeholder = ImageFailure.placeholder(
                             reason: failure, alt: a.alt, path: a.src, theme: palette)
                         let size = imageDisplaySize(placeholder, widthPercent: a.width)

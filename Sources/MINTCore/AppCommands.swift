@@ -110,9 +110,11 @@ public struct MintCommands: Commands {
 
             Divider()
 
-            Button("Markdown으로 내보내기…") { presentProjectExportUnavailable() }
+            Button("Markdown으로 내보내기…") { presentProjectExport(epub: false) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-            Button("EPUB으로 내보내기…") { presentProjectExportUnavailable() }
+                .disabled(session.selectedDocument == nil || session.assetCatalog == nil)
+            Button("EPUB으로 내보내기…") { presentProjectExport(epub: true) }
+                .disabled(session.selectedDocument == nil || session.assetCatalog == nil)
             Button("인쇄…") { printActiveManuscript() }
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(session.selectedDocument == nil)
@@ -295,13 +297,36 @@ public struct MintCommands: Commands {
         }
     }
 
-    /// Project export is intentionally unavailable until the project-aware exporter lands.
-    private func presentProjectExportUnavailable() {
-        let alert = NSAlert()
-        alert.messageText = "프로젝트 내보내기 준비 중"
-        alert.informativeText = "현재 프로젝트를 레거시 저널로 변환하지 않고 내보내는 기능을 준비하고 있습니다."
-        alert.addButton(withTitle: "확인")
-        alert.runModal()
+    private func presentProjectExport(epub: Bool) {
+        guard let document = session.selectedDocument, let assets = session.assetCatalog,
+            assets.projectID == session.activeProject?.id else { return }
+        let panel = NSSavePanel()
+        let ext = epub ? "epub" : "md"
+        panel.allowedContentTypes = [UTType(filenameExtension: ext) ?? .plainText]
+        let title = document.title.replacingOccurrences(of: "/", with: "-")
+        panel.nameFieldStringValue = (title.isEmpty ? "Untitled" : title) + "." + ext
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let author = CompletionSettings.shared.authorName
+        Task {
+            do {
+                if epub {
+                    try await EpubExporter.exportAsync(document, assets: assets, to: destination, author: author)
+                } else {
+                    let report = try await Task.detached(priority: .userInitiated) {
+                        try MarkdownExporter.export(document, assets: assets, to: destination)
+                    }.value
+                    if !report.missingSources.isEmpty {
+                        let alert = NSAlert()
+                        alert.messageText = "일부 이미지 없이 내보냈습니다"
+                        alert.informativeText = report.missingSources.joined(separator: "\n")
+                        alert.runModal()
+                    }
+                }
+            } catch is CancellationError {} catch {
+                presentError(title: "내보내지 못했습니다", error: error)
+            }
+        }
     }
 
     private func printActiveManuscript() {

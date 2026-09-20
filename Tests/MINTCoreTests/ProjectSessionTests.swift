@@ -1,10 +1,103 @@
 import Combine
+import AppKit
 import Foundation
 import XCTest
 @testable import MINTCore
 
 @MainActor
 final class ProjectSessionTests: XCTestCase {
+    func testMultiImageImportPersistsEntireBatchBeforeInsertingMarkers() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let session = ProjectSession(store: store, defaults: defaults)
+        let project = fictionProject()
+        try await session.saveAndActivate(project)
+        let identity = try XCTUnwrap(session.runtimeIdentity)
+        let view = BlockTextView(frame: .zero)
+        view.textStorage?.delegate = view
+        view.projectAssetCatalog = session.assetCatalog
+        view.projectAssetImporter = { data, reference in
+            XCTAssertFalse(view.serialize().contains("images/"), "A partial batch inserted before all bytes were committed")
+            _ = try await session.importAsset(data: data, reference: reference, for: identity)
+            return try XCTUnwrap(session.assetCatalog)
+        }
+        try await view.insertProjectImages([
+            (Data([1]), "images/a.png"), (Data([2]), "images/b.png")])
+        XCTAssertTrue(view.serialize().contains("![](images/a.png)"), view.serialize())
+        XCTAssertTrue(view.serialize().contains("![](images/b.png)"), view.serialize())
+        let a = try await store.assetData(reference: "images/a.png", in: project.id)
+        let b = try await store.assetData(reference: "images/b.png", in: project.id)
+        XCTAssertEqual(a, Data([1]))
+        XCTAssertEqual(b, Data([2]))
+    }
+    // Catches a switch while the actual asset manifest commit is suspended.
+    func testInFlightAssetCommitCannotInsertIntoNewEditorDocument() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let reliable = ProjectStore(root: root)
+        let project = fictionProject()
+        try await reliable.save(project)
+        try await reliable.activate(id: project.id)
+        let files = BlockingManifestProjectFiles()
+        defer { files.releaseWrite() }
+        let session = ProjectSession(store: ProjectStore(root: root, fileSystem: files), defaults: defaults)
+        try await session.bootstrap()
+        let view = BlockTextView(frame: .zero)
+        view.projectAssetCatalog = session.assetCatalog
+        let identity = try XCTUnwrap(session.runtimeIdentity)
+        view.projectAssetImporter = { data, reference in
+            _ = try await session.importAsset(data: data, reference: reference, for: identity)
+            return try XCTUnwrap(session.assetCatalog)
+        }
+        view.load(markdown: "A")
+        let insertion = Task { try await view.insertProjectImage(data: Data([1, 2, 3]), reference: "images/a.png") }
+        let blocked = await Task.detached { files.waitUntilBlocked(timeout: 2) }.value
+        guard blocked else { files.releaseWrite(); _ = try? await insertion.value; return XCTFail("No asset commit reached gate") }
+        session.selectDocument(project.documents[1].id)
+        view.load(markdown: "B")
+        files.releaseWrite()
+        do { try await insertion.value; XCTFail("Stale insertion accepted") }
+        catch ProjectSessionError.staleRuntime {}
+        XCTAssertEqual(view.serialize(), "B")
+        XCTAssertEqual(session.selectedDocument?.body, "B")
+        let committed = try await reliable.assetData(reference: "images/a.png", in: project.id)
+        XCTAssertEqual(committed, Data([1, 2, 3]), "Committed bytes remain recoverable even after ownership is lost")
+    }
+    // Catches stale async image results retargeting another document or body generation.
+    func testAssetResultForOldRuntimeDoesNotInsertMarkerIntoNewDocument() async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: root)
+        let session = ProjectSession(store: store, defaults: defaults)
+        let project = fictionProject()
+        try await session.saveAndActivate(project)
+        let identity = try XCTUnwrap(session.runtimeIdentity)
+        session.selectDocument(project.documents[1].id)
+        do {
+            _ = try await session.importAsset(data: Data([1, 2, 3]), reference: "images/a.png", for: identity)
+            XCTFail("Old runtime returned an insertable marker")
+        } catch ProjectSessionError.staleRuntime {}
+        XCTAssertEqual(session.selectedDocument?.body, "B")
+        let current = try XCTUnwrap(session.runtimeIdentity)
+        let marker = try await session.importAsset(data: Data([4]), reference: "images/b.png", for: current)
+        XCTAssertEqual(marker, "images/b.png")
+        let bytes = try await store.assetData(reference: marker, in: project.id)
+        XCTAssertEqual(bytes, Data([4]))
+        XCTAssertEqual(session.assetCatalog?.data(for: marker), Data([4]))
+        session.updateSelectedDocumentBody("New revision")
+        do {
+            _ = try await session.importAsset(data: Data([5]), reference: "images/c.png", for: current)
+            XCTFail("Old body generation returned an insertable marker")
+        } catch ProjectSessionError.staleRuntime {}
+        XCTAssertEqual(session.selectedDocument?.body, "New revision")
+    }
 
     func testFailedFlushReconnectsReadersForActivateProject() async throws {
         try await assertFailedTransitionReconnectsReaders(failingFlush: true, savingCandidate: false)

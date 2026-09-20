@@ -52,9 +52,48 @@ public actor ProjectStore {
     /// 기존 본문의 상대경로를 바꾸지 않고 이관된 사본을 읽는다.
     public func assetData(reference: String, in id: WritingProjectID) throws -> Data? {
         try withStoreLock {
+            try ProjectPaths.validateRelative(reference)
             guard let record = try readManifest(id: id).assets.first(where: { $0.reference == reference })
             else { return nil }
             return try verified(record.file, in: id)
+        }
+    }
+
+    public func assetCatalog(id: WritingProjectID) throws -> ProjectAssetCatalog {
+        try withStoreLock {
+            var assets: [String: Data] = [:]
+            for record in try readManifest(id: id).assets {
+                try Task.checkCancellation()
+                assets[record.reference] = try verified(record.file, in: id)
+            }
+            return ProjectAssetCatalog(projectID: id, verifiedAssets: assets)
+        }
+    }
+
+    /// Commit immutable bytes before changing their reference; retain previous blobs for recovery.
+    public func addAsset(_ data: Data, reference: String, to id: WritingProjectID) throws {
+        try withStoreLock {
+            try ProjectPaths.validateRelative(reference)
+            var manifest = try readManifest(id: id)
+            _ = try materialize(manifest)
+            let manifestURL = try projectURL(id, "project.json")
+            let oldData = try files.read(manifestURL)
+            let hash = ProjectDigest.hash(data)
+            let record = ProjectAssetRecord(reference: reference,
+                file: ProjectFileRecord(relativePath: "Assets/\(hash)", contentHash: hash))
+            try writeImmutable(data, path: record.file.relativePath, id: id)
+            if let index = manifest.assets.firstIndex(where: { $0.reference == reference }) {
+                if manifest.assets[index] == record { return }
+                manifest.assets[index] = record
+            } else {
+                manifest.assets.append(record)
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let updated = try encoder.encode(manifest)
+            try files.writeAtomically(oldData, to: projectURL(id, "previous-project.json"))
+            try Task.checkCancellation()
+            try files.writeAtomically(updated, to: manifestURL)
         }
     }
 

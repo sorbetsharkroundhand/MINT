@@ -13,6 +13,7 @@ public final class ProjectSession: ObservableObject {
     @Published public private(set) var phase: ProjectSessionPhase = .loading
     @Published public private(set) var savePhase: ProjectSavePhase = .saved
     @Published public private(set) var runtimeIdentity: ProjectRuntimeIdentity?
+    @Published public private(set) var assetCatalog: ProjectAssetCatalog?
     @Published public private(set) var recentProjects: [RecentProjectSummary] = []
     @Published public private(set) var lastErrorMessage: String?
     /// `false` means persistence scope is still unknown; callers must not assume legacy.
@@ -75,6 +76,10 @@ public final class ProjectSession: ObservableObject {
         lastErrorMessage = nil
         do {
             let project = try await store.activeProject()
+            let catalog: ProjectAssetCatalog?
+            if let project { catalog = try await store.assetCatalog(id: project.id) }
+            else { catalog = nil }
+            assetCatalog = catalog
             adopt(project)
             hasLoadedActiveProject = true
             phase = project == nil ? .needsProject : .ready
@@ -95,8 +100,10 @@ public final class ProjectSession: ObservableObject {
         do {
             try await flush()
             phase = .loading
+            let catalog = try await store.assetCatalog(id: id)
             let project = try await store.activateAndLoad(id: id)
             // Activation has committed. Adoption intentionally has no cancellation point.
+            assetCatalog = catalog
             adopt(project)
             hasLoadedActiveProject = true
             phase = .ready
@@ -123,8 +130,10 @@ public final class ProjectSession: ObservableObject {
         do {
             try await flush()
             try await store.save(project)
+            let catalog = try await store.assetCatalog(id: project.id)
             let verified = try await store.activateAndLoad(id: project.id)
             // Activation has committed. Adoption intentionally has no cancellation point.
+            assetCatalog = catalog
             adopt(verified)
             hasLoadedActiveProject = true
             phase = .ready
@@ -188,6 +197,19 @@ public final class ProjectSession: ObservableObject {
         activeProject = project
         noteDocumentChange()
         markDirty()
+    }
+
+    /// The returned reference is insertable only by the initiating full runtime generation.
+    /// Bytes already committed for an obsolete request remain durable, without a marker.
+    public func importAsset(
+        data: Data, reference: String, for identity: ProjectRuntimeIdentity
+    ) async throws -> String {
+        guard !isTransitioning, runtimeIdentity == identity else { throw ProjectSessionError.staleRuntime }
+        try await store.addAsset(data, reference: reference, to: identity.key.projectID)
+        let catalog = try await store.assetCatalog(id: identity.key.projectID)
+        guard !isTransitioning, runtimeIdentity == identity else { throw ProjectSessionError.staleRuntime }
+        assetCatalog = catalog
+        return reference
     }
 
     public func renameSelectedDocument(to title: String) {

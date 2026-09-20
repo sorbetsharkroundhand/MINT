@@ -153,6 +153,20 @@ public enum MintImageStore {
         return image
     }
 
+    /// Decode verified project bytes without consulting global roots or filesystem paths.
+    public static func displayImage(data: Data, maxPixelWidth: CGFloat) -> NSImage? {
+        let width = max(64, min(Int(maxPixelWidth), 4096))
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+            let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceCreateThumbnailWithTransform: true,
+                kCGImageSourceThumbnailMaxPixelSize: width,
+                kCGImageSourceShouldCacheImmediately: true,
+            ] as CFDictionary)
+        else { return nil }
+        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+    }
+
     /// 대략적 디코딩 바이트 — RGBA 4바이트 가정. LRU 한도 판정용이라 정밀도 불필요.
     private static func approximateBytes(width: Int, height: Int) -> Int {
         max(1, width * height * 4)
