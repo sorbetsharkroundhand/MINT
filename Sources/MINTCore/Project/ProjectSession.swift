@@ -107,6 +107,9 @@ public final class ProjectSession: ObservableObject {
         } catch {
             phase = activeProject == nil ? .failed : .ready
             lastErrorMessage = error.localizedDescription
+            // The barrier detached readers, but persistence kept the previous owner.
+            // Reconnect only that surviving snapshot; do not advance its generation.
+            if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
             throw error
         }
     }
@@ -132,6 +135,7 @@ public final class ProjectSession: ObservableObject {
         } catch {
             phase = activeProject == nil ? .failed : .ready
             lastErrorMessage = error.localizedDescription
+            if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
             throw error
         }
     }

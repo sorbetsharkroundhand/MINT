@@ -1,9 +1,88 @@
+import Combine
 import Foundation
 import XCTest
 @testable import MINTCore
 
 @MainActor
 final class ProjectSessionTests: XCTestCase {
+
+    func testFailedFlushReconnectsReadersForActivateProject() async throws {
+        try await assertFailedTransitionReconnectsReaders(failingFlush: true, savingCandidate: false)
+    }
+
+    func testFailedActivationReconnectsReadersForActivateProject() async throws {
+        try await assertFailedTransitionReconnectsReaders(failingFlush: false, savingCandidate: false)
+    }
+
+    func testFailedFlushReconnectsReadersForSaveAndActivate() async throws {
+        try await assertFailedTransitionReconnectsReaders(failingFlush: true, savingCandidate: true)
+    }
+
+    func testFailedActivationReconnectsReadersForSaveAndActivate() async throws {
+        try await assertFailedTransitionReconnectsReaders(failingFlush: false, savingCandidate: true)
+    }
+
+    private func assertFailedTransitionReconnectsReaders(
+        failingFlush: Bool, savingCandidate: Bool
+    ) async throws {
+        let root = temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (defaults, suite) = defaultsSuite()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let reliableStore = ProjectStore(root: root)
+        let original = fictionProject()
+        let other = generalProject()
+        try await reliableStore.save(original)
+        try await reliableStore.save(other)
+        try await reliableStore.activate(id: original.id)
+        let failurePath = failingFlush
+            ? "/Documents/\(original.documents[0].id.rawValue.uuidString)/" : "active-project.json"
+        let failingStore = ProjectStore(root: root, fileSystem: FailingProjectFiles(fragment: failurePath))
+        let session = ProjectSession(store: failingStore, defaults: defaults, autosaveDelay: .seconds(60))
+        try await session.bootstrap()
+        if failingFlush { session.updateSelectedDocumentBody("Surviving unsaved manuscript") }
+        let surviving = try XCTUnwrap(session.selectedDocumentSnapshot)
+        let settings = CompletionSettings(defaults: defaults)
+        let completion = CompletionController(settings: settings)
+        let reader = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings,
+            sidecarPersistence: KnowledgeSidecarRepository(projectStore: reliableStore))
+        defer { reader.shutdown(); completion.shutdown() }
+        reader.attach(documentProvider: { session.selectedDocumentSnapshot })
+        completion.projectDocumentProvider = { session.selectedDocumentSnapshot }
+        var attachedIdentity: ProjectRuntimeIdentity? = surviving.identity
+        var publications: [ProjectDocumentSnapshot] = []
+        session.willTransition = {
+            attachedIdentity = nil
+            reader.prepareForProjectTransition()
+            completion.prepareForProjectTransition()
+        }
+        session.documentDidChange = { snapshot in
+            XCTAssertEqual(session.phase, .ready)
+            attachedIdentity = snapshot.identity
+            publications.append(snapshot)
+            reader.noteDocumentChange(snapshot)
+            completion.noteDocumentChange(snapshot)
+        }
+        let restored = expectation(description: "Surviving project reader restored")
+        let subscription = reader.$snapshotGeneration.dropFirst().prefix(1).sink { _ in restored.fulfill() }
+
+        do {
+            if savingCandidate { try await session.saveAndActivate(other) }
+            else { try await session.activateProject(id: other.id) }
+            XCTFail("Injected persistence failure did not fail the transition")
+        } catch {}
+
+        await fulfillment(of: [restored], timeout: 1)
+        XCTAssertEqual(attachedIdentity, surviving.identity)
+        XCTAssertEqual(publications, [surviving], "Only the surviving snapshot may be republished")
+        XCTAssertEqual(reader.snapshotRuntimeIdentity, surviving.identity)
+        XCTAssertEqual(session.selectedDocumentSnapshot, surviving)
+        XCTAssertEqual(session.phase, .ready)
+        let active = try await reliableStore.activeProject()
+        XCTAssertEqual(active?.id, original.id)
+        withExtendedLifetime(subscription) {}
+    }
     private func temporaryRoot() -> URL {
         FileManager.default.temporaryDirectory
             .appendingPathComponent("MINT-ProjectSession-\(UUID().uuidString)", isDirectory: true)

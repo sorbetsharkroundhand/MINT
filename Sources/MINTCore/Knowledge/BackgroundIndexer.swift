@@ -131,6 +131,9 @@ public final class BackgroundIndexer: ObservableObject {
     private var documentProvider: (() -> ProjectDocumentSnapshot?)?
     private var observedRuntimeIdentity: ProjectRuntimeIdentity?
     public private(set) var snapshotRuntimeIdentity: ProjectRuntimeIdentity?
+    /// One active project's already-loaded derived values. Edits revalidate them against
+    /// the new body in background without adding sidecar reads to the typing path.
+    private var preparedProjectSidecar: KnowledgeSidecar?
 
     /// Knowledge-specific metadata stays in the reader adapter, outside ProjectSession.
     private struct DocumentInput {
@@ -355,6 +358,11 @@ public final class BackgroundIndexer: ObservableObject {
         // 선점: 백그라운드 생성은 예측(그리고 그 앞의 타이핑)에 항상 진다 (CLAUDE.md §2-6).
         // 세대를 먼저 올린다 — 취소가 늦게 끝난 이전 작업의 모든 발행/정리를 무효화 (#82).
         passGeneration += 1
+        if manualPassToken != nil {
+            manualPassToken = nil
+            transientClearTask?.cancel()
+            manualPhase = .idle
+        }
         passEntryID = nil
         passBodyHash = nil
         passScope = nil
@@ -414,6 +422,7 @@ public final class BackgroundIndexer: ObservableObject {
         setIsIndexing(false)
         snapshot = nil
         snapshotRuntimeIdentity = nil
+        preparedProjectSidecar = nil
         observedRuntimeIdentity = nil
         characterCandidates = []
         candidatesEntryID = nil
@@ -450,15 +459,17 @@ public final class BackgroundIndexer: ObservableObject {
     private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
         guard let entry = currentDocument(), entry.id == entryID else { return }
         let scope = entry.scope
-        guard force || snapshot?.storyMemory?.scope != scope else { return }
-        guard entry.isFiction else { return }
         let runtimeIdentity = entry.runtimeIdentity
+        guard force || snapshot?.storyMemory?.scope != scope
+            || snapshotRuntimeIdentity != runtimeIdentity
+        else { return }
+        guard entry.isFiction else { return }
         let body = entry.body
-        let documentVersion = Self.contentFingerprint(body)
-        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let characters = entry.characters
         let overrides = entry.overrides
         let recorded = entry.recorded
+        let prepared = !force && runtimeIdentity != nil && preparedProjectSidecar?.scope == scope
+            ? preparedProjectSidecar : nil
 
         hydrateGeneration += 1
         let token = hydrateGeneration
@@ -466,10 +477,17 @@ public final class BackgroundIndexer: ObservableObject {
         // 파싱·디스크 읽기를 메인에서 떼어낸다 (30만 자 파싱이 메인을 막지 않게).
         let persistence = sidecarPersistence
         hydrateTask = Task.detached(priority: .utility) { [weak self] in
+            guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             let outline = DocumentOutline.parse(body)
             guard !outline.scenes.isEmpty, !Task.isCancelled else { return }
             let loadStart = CFAbsoluteTimeGetCurrent()
-            let sidecar = await persistence.load(scope: scope)
+            let sidecar: KnowledgeSidecar
+            if let prepared {
+                sidecar = prepared
+            } else {
+                sidecar = await persistence.load(scope: scope)
+            }
+            guard !Task.isCancelled, sidecar.scope == scope else { return }
             let loadMs = (CFAbsoluteTimeGetCurrent() - loadStart) * 1000
             let utterances = DialogueAttribution.utterances(in: body, cards: characters)
             let deriveStart = CFAbsoluteTimeGetCurrent()
@@ -489,10 +507,13 @@ public final class BackgroundIndexer: ObservableObject {
                 guard self.hydrateGeneration == token else { return }
                 guard let current = self.currentDocument(), current.id == entryID,
                     current.scope == scope, current.runtimeIdentity == runtimeIdentity,
-                    Self.contentFingerprint(current.body) == documentVersion
+                    current.body == body
                 else { return }
                 // 그 사이 진짜 패스가 이 문서 걸 발행했다면 그쪽이 더 최신이다.
-                guard force || self.snapshot?.storyMemory?.scope != scope else { return }
+                guard force || self.snapshot?.storyMemory?.scope != scope
+                    || self.snapshotRuntimeIdentity != runtimeIdentity
+                else { return }
+                if runtimeIdentity != nil { self.preparedProjectSidecar = sidecar }
                 self.snapshotRuntimeIdentity = runtimeIdentity
                 self.snapshot = snapshot
                 self.snapshotGeneration += 1
@@ -572,8 +593,8 @@ public final class BackgroundIndexer: ObservableObject {
     /// 수동 패스 종료 판정 (#35) — 새 이해(세대 증가)·무변경·조용한 중단을 갈라
     /// 표시한다. 취소는 cancelManualPass가 직접 표시하고, 게이트 차단은 진행 중
     /// onBlocked가 이미 표시했으므로 여기서 덮지 않는다.
-    private func finishManualPhase(token: Int) {
-        guard manualPassToken == token else { return }
+    private func finishManualPhase(identity: PassIdentity) {
+        guard manualPassToken == identity.generation, owns(identity) else { return }
         switch manualPhase {
         case .blocked, .cancelled:
             return  // 이미 의미 있는 상태 — 유지.
@@ -637,8 +658,14 @@ public final class BackgroundIndexer: ObservableObject {
                 Self.contentFingerprint(current.body) == documentVersion
             else { return }
             do {
-                _ = try await self.sidecarPersistence.replaceWithFresh(
+                let fresh = try await self.sidecarPersistence.replaceWithFresh(
                     scope: scope, generation: previous.generation + 1)
+                if self.passGeneration == resetToken,
+                    self.currentDocument()?.runtimeIdentity == runtimeIdentity,
+                    runtimeIdentity != nil
+                {
+                    self.preparedProjectSidecar = fresh
+                }
             } catch {
                 guard !Task.isCancelled, self.passGeneration == resetToken,
                     let current = self.currentDocument(), current.scope == scope,
@@ -791,10 +818,14 @@ public final class BackgroundIndexer: ObservableObject {
                 } catch {
                     return false
                 }
-                return await MainActor.run(body: { owned() })
+                return await MainActor.run {
+                    guard owned() else { return false }
+                    if identity.runtimeIdentity != nil { self.preparedProjectSidecar = candidate }
+                    return true
+                }
             }
             await MainActor.run {
-                self.finishManualPhase(token: token)
+                self.finishManualPhase(identity: identity)
                 self.finishPass(token: token)
             }
         }
