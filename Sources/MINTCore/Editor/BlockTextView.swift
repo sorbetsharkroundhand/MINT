@@ -783,7 +783,30 @@ final class BlockTextView: NSTextView {
     }
 
     func insertProjectImage(data: Data, reference: String, object: MintImageObject? = nil) async throws {
-        try await importProjectAsset(data: data, reference: reference) { view in
+        try await insertProjectImage(data: data, reference: reference, object: object,
+            context: captureProjectImageOperation())
+    }
+
+    private struct ProjectImageOperation {
+        let importer: @MainActor (Data, String) async throws -> ProjectAssetCatalog
+        let body: String
+        let selection: NSRange
+        let projectID: WritingProjectID
+    }
+
+    /// Capture before enqueuing: SwiftUI may reuse this view before the task starts.
+    private func captureProjectImageOperation() throws -> ProjectImageOperation {
+        guard usesProjectAssets, let importer = projectAssetImporter,
+            let projectID = projectAssetCatalog?.projectID, !hasMarkedText()
+        else { throw ProjectSessionError.staleRuntime }
+        return ProjectImageOperation(importer: importer, body: string,
+            selection: selectedRange(), projectID: projectID)
+    }
+
+    private func insertProjectImage(
+        data: Data, reference: String, object: MintImageObject?, context: ProjectImageOperation
+    ) async throws {
+        try await importProjectAsset(data: data, reference: reference, context: context) { view in
             if var object {
                 object.src = reference
                 view.insertImageParagraph(markdown: object.markdown)
@@ -795,22 +818,25 @@ final class BlockTextView: NSTextView {
 
     /// Keep a multi-file drop in one runtime generation until every asset is durable.
     func insertProjectImages(_ images: [(data: Data, reference: String)]) async throws {
+        try await insertProjectImages(images, context: captureProjectImageOperation())
+    }
+
+    private func insertProjectImages(
+        _ images: [(data: Data, reference: String)], context: ProjectImageOperation
+    ) async throws {
         for image in images {
-            try await importProjectAsset(data: image.data, reference: image.reference) { _ in }
+            try await importProjectAsset(data: image.data, reference: image.reference, context: context) { _ in }
         }
         for image in images { insertImageBlock(relativePath: image.reference) }
     }
 
     private func importProjectAsset(
-        data: Data, reference: String, apply: (BlockTextView) -> Void
+        data: Data, reference: String, context: ProjectImageOperation, apply: (BlockTextView) -> Void
     ) async throws {
-        guard let importer = projectAssetImporter, !hasMarkedText() else { throw ProjectSessionError.staleRuntime }
-        let body = string
-        let selection = selectedRange()
-        let projectID = projectAssetCatalog?.projectID
-        let catalog = try await importer(data, reference)
-        guard !Task.isCancelled, !hasMarkedText(), string == body, selectedRange() == selection,
-            projectAssetCatalog?.projectID == projectID, catalog.projectID == projectID
+        try Task.checkCancellation()
+        let catalog = try await context.importer(data, reference)
+        guard !Task.isCancelled, !hasMarkedText(), string == context.body, selectedRange() == context.selection,
+            projectAssetCatalog?.projectID == context.projectID, catalog.projectID == context.projectID
         else { throw ProjectSessionError.staleRuntime }
         projectAssetCatalog = catalog
         apply(self)
@@ -827,9 +853,10 @@ final class BlockTextView: NSTextView {
         }
         let suffix = MintImageStore.imageExtensions.contains(ext.lowercased()) ? ext.lowercased() : "png"
         let reference = "images/\(UUID().uuidString).\(suffix)"
+        guard let context = try? captureProjectImageOperation() else { return }
         Task { [weak self] in
             guard let self else { return }
-            do { try await insertProjectImage(data: data, reference: reference, object: object) }
+            do { try await insertProjectImage(data: data, reference: reference, object: object, context: context) }
             catch ProjectSessionError.staleRuntime {} catch is CancellationError {}
             catch { alertAssetWriteFailure(error.localizedDescription) }
         }
@@ -2568,9 +2595,10 @@ final class BlockTextView: NSTextView {
             }
         }
         guard !images.isEmpty else { return }
+        guard let context = try? captureProjectImageOperation() else { return }
         Task { [weak self] in
             guard let self else { return }
-            do { try await insertProjectImages(images) }
+            do { try await insertProjectImages(images, context: context) }
             catch ProjectSessionError.staleRuntime {} catch is CancellationError {}
             catch { alertAssetWriteFailure(error.localizedDescription) }
         }
@@ -2896,10 +2924,11 @@ final class BlockTextView: NSTextView {
         if usesProjectAssets {
             let reference = (try? ProjectPaths.validateRelative(attrs.src)) != nil
                 ? attrs.src : "images/\(UUID().uuidString).\(url.pathExtension)"
+            guard let context = try? captureProjectImageOperation() else { return }
             Task { [weak self] in
                 guard let self else { return }
                 do {
-                    try await importProjectAsset(data: data, reference: reference) { view in
+                    try await importProjectAsset(data: data, reference: reference, context: context) { view in
                         if reference != attrs.src { view.rewriteImage(para, setSrc: reference) }
                         view.refreshRenderedBlocks()
                     }

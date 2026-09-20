@@ -152,6 +152,7 @@ public enum EpubExporter {
         _ entry: WritingDocument, assetURLs: [String: URL], assets: ProjectAssetCatalog? = nil, to destination: URL,
         author: String, progress: (@Sendable (Double) -> Void)? = nil
     ) throws {
+        let destination = try ExportDestination.validatedFile(destination)
         let fm = FileManager.default
         let staging = fm.temporaryDirectory
             .appendingPathComponent("mint-epub-\(UUID().uuidString)", isDirectory: true)
@@ -197,8 +198,7 @@ public enum EpubExporter {
         try runZip(["-rX", "book.epub", "META-INF", "OEBPS"], in: staging)
         progress?(0.95)
 
-        if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
-        try fm.moveItem(at: staging.appendingPathComponent("book.epub"), to: destination)
+        try ExportDestination.replaceCompletedFile(staging.appendingPathComponent("book.epub"), to: destination)
         progress?(1)
     }
 

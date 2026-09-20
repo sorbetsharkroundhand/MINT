@@ -6,6 +6,65 @@ import XCTest
 
 @MainActor
 final class ProjectSessionTests: XCTestCase {
+    // Exercises the synchronous production paste entry before its enqueued task gets a turn.
+    func testQueuedImagePasteKeepsInitiatingRuntimeWhenViewIsReusedBeforeTaskStarts() async throws {
+        for fileBatch in [false, true] {
+            let root = temporaryRoot()
+            defer { try? FileManager.default.removeItem(at: root) }
+            let (defaults, suite) = defaultsSuite()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let store = ProjectStore(root: root)
+            let session = ProjectSession(store: store, defaults: defaults)
+            let project = fictionProject()
+            try await session.saveAndActivate(project)
+            let view = BlockTextView(frame: .zero)
+            view.textStorage?.delegate = view
+            view.projectAssetCatalog = session.assetCatalog
+            view.load(markdown: "A")
+            let started = expectation(description: "Enqueued import starts")
+            let finished = expectation(description: "Real import completes")
+            let release = AsyncStream<Void>.makeStream()
+            var reference: String?
+            var invokedIdentity: ProjectRuntimeIdentity?
+            func importer(_ identity: ProjectRuntimeIdentity) -> @MainActor (Data, String) async throws -> ProjectAssetCatalog {
+                { data, path in
+                    reference = path
+                    invokedIdentity = identity
+                    started.fulfill()
+                    for await _ in release.stream { break }
+                    defer { finished.fulfill() }
+                    _ = try await session.importAsset(data: data, reference: path, for: identity)
+                    return try XCTUnwrap(session.assetCatalog)
+                }
+            }
+            let original = try XCTUnwrap(session.runtimeIdentity)
+            view.projectAssetImporter = importer(original)
+            let pasteboard = NSPasteboard.withUniqueName()
+            defer { pasteboard.releaseGlobally() }
+            if fileBatch {
+                let image = root.appendingPathComponent("input.png")
+                try Data([1, 2, 3]).write(to: image)
+                pasteboard.writeObjects([image as NSURL])
+            } else { pasteboard.setData(Data([1, 2, 3]), forType: .png) }
+
+            XCTAssertTrue(view.insertImages(from: pasteboard))
+            // No await: reuse the same view before the queued operation begins.
+            session.selectDocument(project.documents[1].id)
+            view.load(markdown: "B")
+            view.projectAssetImporter = importer(try XCTUnwrap(session.runtimeIdentity))
+
+            await fulfillment(of: [started], timeout: 2)
+            release.continuation.yield(())
+            release.continuation.finish()
+            await fulfillment(of: [finished], timeout: 2)
+            let path = try XCTUnwrap(reference)
+            let bytes = try await store.assetData(reference: path, in: project.id)
+            XCTAssertEqual(invokedIdentity, original)
+            XCTAssertNil(bytes, "The queued paste wrote bytes under the newer runtime")
+            XCTAssertEqual(view.serialize(), "B")
+            XCTAssertEqual(session.selectedDocument?.body, "B")
+        }
+    }
     func testMultiImageImportPersistsEntireBatchBeforeInsertingMarkers() async throws {
         let root = temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

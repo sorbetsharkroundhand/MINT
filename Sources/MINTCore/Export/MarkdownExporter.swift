@@ -55,6 +55,7 @@ public enum MarkdownExporter {
     private static func exportBody(
         _ body: String, to destination: URL, resolve: (String) -> Data?
     ) throws -> Report {
+        let destination = try ExportDestination.validatedFile(destination)
         let definitions = ImageReferenceParser.collectDefinitions(in: body)
         let destinationDir = destination.deletingLastPathComponent()
         let imagesDir = destinationDir.appendingPathComponent("images", isDirectory: true)
@@ -114,7 +115,7 @@ public enum MarkdownExporter {
         }
         let exported = out.joined(separator: "\n")
 
-        try exported.write(to: destination, atomically: true, encoding: .utf8)
+        try ExportDestination.write(Data(exported.utf8), to: destination)
         return report
     }
 
