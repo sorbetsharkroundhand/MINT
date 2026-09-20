@@ -29,6 +29,7 @@ public final class ProjectSession: ObservableObject {
     private var dirtyGeneration: UInt64?
     private var saveTask: Task<Void, Never>?
     private var isTransitioning = false
+    private var suspensionReleaseCheck: (() -> Bool)?
 
     public init(
         store: ProjectStore,
@@ -72,6 +73,9 @@ public final class ProjectSession: ObservableObject {
 
     /// Resolve the durable active marker into the sole mutable in-memory project value.
     public func bootstrap() async throws {
+        guard phase != .suspended, !isTransitioning else {
+            throw ProjectSessionError.transitionInProgress
+        }
         phase = .loading
         lastErrorMessage = nil
         do {
@@ -117,6 +121,48 @@ public final class ProjectSession: ObservableObject {
             // The barrier detached readers, but persistence kept the previous owner.
             // Reconnect only that surviving snapshot; do not advance its generation.
             if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
+            throw error
+        }
+    }
+
+    /// Flush and detach the mutable project while retaining the durable active marker.
+    public func suspend(canResume: @escaping () -> Bool = { true }) async throws {
+        guard phase != .loading else { throw ProjectSessionError.transitionInProgress }
+        try beginTransition()
+        defer { finishTransition() }
+        do {
+            try await flush()
+            suspensionReleaseCheck = canResume
+            assetCatalog = nil
+            adopt(nil)
+            phase = .suspended
+        } catch {
+            lastErrorMessage = error.localizedDescription
+            if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
+            throw error
+        }
+    }
+
+    /// The legacy controller releases its writer before asking to reload the durable owner.
+    public func resume() async throws {
+        guard phase == .suspended, !isTransitioning, suspensionReleaseCheck?() != false else {
+            throw ProjectSessionError.transitionInProgress
+        }
+        isTransitioning = true
+        defer { finishTransition() }
+        do {
+            let project = try await store.activeProject()
+            let catalog: ProjectAssetCatalog?
+            if let project { catalog = try await store.assetCatalog(id: project.id) }
+            else { catalog = nil }
+            assetCatalog = catalog
+            phase = project == nil ? .needsProject : .ready
+            adopt(project)
+            suspensionReleaseCheck = nil
+            hasLoadedActiveProject = true
+            lastErrorMessage = nil
+        } catch {
+            lastErrorMessage = error.localizedDescription
             throw error
         }
     }
@@ -335,10 +381,27 @@ public final class ProjectSession: ObservableObject {
         }
     }
 
+    /// Keep mutations fenced after a successful final save until the process exits.
+    /// A failed save reopens editing and reconnects the surviving project consumers.
+    func flushForTermination() async throws {
+        try beginTransition()
+        do {
+            try await flush()
+        } catch {
+            finishTransition()
+            if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
+            throw error
+        }
+    }
+
+    public func reportError(_ error: Error) {
+        lastErrorMessage = error.localizedDescription
+    }
+
     /// Transition participants may synchronously commit marked text before the gate closes.
     /// Once closed, stale UI callbacks cannot mutate either side of the ownership handoff.
     private func beginTransition() throws {
-        guard !isTransitioning else { throw ProjectSessionError.transitionInProgress }
+        guard !isTransitioning, phase != .suspended else { throw ProjectSessionError.transitionInProgress }
         willTransition?()
         isTransitioning = true
     }

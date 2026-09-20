@@ -49,6 +49,7 @@ public struct ProjectCommandActions {
 
 public struct MintCommands: Commands {
     @ObservedObject private var session: ProjectSession
+    @ObservedObject private var legacyWorkspace: LegacyWorkspaceController
     @ObservedObject private var editorRequests: ProjectEditorRequests
     private let projectStore: ProjectStore
     /// 에디터 포커스 여부 — 없으면 서식·찾기 명령을 비활성화해 "눌러도 무반응"을
@@ -60,10 +61,12 @@ public struct MintCommands: Commands {
 
     public init(
         session: ProjectSession,
+        legacyWorkspace: LegacyWorkspaceController,
         projectStore: ProjectStore,
         editorRequests: ProjectEditorRequests
     ) {
         self._session = ObservedObject(wrappedValue: session)
+        self._legacyWorkspace = ObservedObject(wrappedValue: legacyWorkspace)
         self.projectStore = projectStore
         self._editorRequests = ObservedObject(wrappedValue: editorRequests)
     }
@@ -72,52 +75,75 @@ public struct MintCommands: Commands {
         // 파일 ▸ 프로젝트 문서와 verified project creation/import flows.
         CommandGroup(replacing: .newItem) {
             Button("새 문서") {
-                ProjectCommandActions(session: session).newDocument(.manuscript)
-                editorRequests.focusEditor()
+                if let store = legacyWorkspace.legacyStore { store.newEntry() }
+                else {
+                    ProjectCommandActions(session: session).newDocument(.manuscript)
+                    editorRequests.focusEditor()
+                }
             }
                 .keyboardShortcut("n", modifiers: .command)
-                .disabled(session.activeProject == nil)
+                .disabled(!hasWorkspace || legacyWorkspace.isTransitioning)
 
             Divider()
 
             Button("새 Fiction 프로젝트…") { presentNewProject(mode: .fiction) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("새 General 프로젝트…") { presentNewProject(mode: .general) }
                 .keyboardShortcut("n", modifiers: [.command, .option])
+                .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("레거시 라이브러리 가져오기…") { presentLegacyImport() }
+                .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
+            Divider()
+            Button(legacyWorkspace.mode == .legacy ? "프로젝트로 돌아가기" : "레거시 라이브러리 열기") {
+                Task {
+                    do {
+                        if legacyWorkspace.mode == .legacy { try await legacyWorkspace.leave() }
+                        else { try await legacyWorkspace.enter() }
+                    } catch { presentError(title: "작업 공간을 전환하지 못했습니다", error: error) }
+                }
+            }
+            .disabled(legacyWorkspace.isTransitioning || session.phase == .loading)
         }
 
         CommandGroup(replacing: .saveItem) {
             Button("저장") {
-                Task { try? await ProjectCommandActions(session: session).save() }
+                Task { try? await legacyWorkspace.flushActiveOwner() }
             }
             .keyboardShortcut("s", modifiers: .command)
-            .disabled(session.activeProject == nil)
+            .disabled(!hasWorkspace || legacyWorkspace.isTransitioning)
         }
 
         // 파일 저장 영역 옆에 이름 바꾸기 · 내보내기 · 인쇄.
         CommandGroup(after: .saveItem) {
             Button("문서 이름 바꾸기") {
-                sidebarVisible = true
-                editorRequests.beginRename()
+                if let store = legacyWorkspace.legacyStore { renameLegacyEntry(in: store) }
+                else {
+                    sidebarVisible = true
+                    editorRequests.beginRename()
+                }
             }
+            .disabled(!hasWorkspace || legacyWorkspace.isTransitioning)
 
             Button("문서를 휴지통으로 이동", role: .destructive) {
-                ProjectCommandActions(session: session).trashDocument()
-                editorRequests.focusEditor()
+                if let store = legacyWorkspace.legacyStore { store.delete(store.activeID) }
+                else {
+                    ProjectCommandActions(session: session).trashDocument()
+                    editorRequests.focusEditor()
+                }
             }
-            .disabled(session.selectedDocument == nil)
+            .disabled(!hasWorkspace || legacyWorkspace.isTransitioning)
 
             Divider()
 
             Button("Markdown으로 내보내기…") { presentProjectExport(epub: false) }
                 .keyboardShortcut("e", modifiers: [.command, .shift])
-                .disabled(session.selectedDocument == nil || session.assetCatalog == nil)
+                .disabled(!canExport || legacyWorkspace.isTransitioning)
             Button("EPUB으로 내보내기…") { presentProjectExport(epub: true) }
-                .disabled(session.selectedDocument == nil || session.assetCatalog == nil)
+                .disabled(!canExport || legacyWorkspace.isTransitioning)
             Button("인쇄…") { printActiveManuscript() }
                 .keyboardShortcut("p", modifiers: .command)
-                .disabled(session.selectedDocument == nil)
+                .disabled(!hasWorkspace)
         }
 
         // 서식 ▸ 텍스트 스타일 · 블록 · 정렬 · 이미지.
@@ -179,9 +205,10 @@ public struct MintCommands: Commands {
             }
             .disabled(hasMintEditor != true)
 
-            Button("프로젝트 검색") {
+            Button(legacyWorkspace.mode == .legacy ? "라이브러리 검색" : "프로젝트 검색") {
                 sidebarVisible = true
-                editorRequests.focusSearch()
+                if let store = legacyWorkspace.legacyStore { store.requestSearchFocus() }
+                else { editorRequests.focusSearch() }
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 
@@ -298,6 +325,25 @@ public struct MintCommands: Commands {
     }
 
     private func presentProjectExport(epub: Bool) {
+        if let entry = legacyWorkspace.legacyStore?.activeEntry {
+            if epub { EpubExporter.exportWithPanel(entry) }
+            else {
+                let panel = NSSavePanel()
+                panel.allowedContentTypes = [.plainText]
+                panel.nameFieldStringValue = entry.title.replacingOccurrences(of: "/", with: "-") + ".md"
+                guard panel.runModal() == .OK, let url = panel.url else { return }
+                do {
+                    let report = try MarkdownExporter.export(entry, to: url)
+                    if !report.missingSources.isEmpty {
+                        let alert = NSAlert()
+                        alert.messageText = "일부 이미지 없이 내보냈습니다"
+                        alert.informativeText = report.missingSources.joined(separator: "\n")
+                        alert.runModal()
+                    }
+                } catch { presentError(title: "내보내지 못했습니다", error: error) }
+            }
+            return
+        }
         guard let document = session.selectedDocument, let assets = session.assetCatalog,
             assets.projectID == session.activeProject?.id else { return }
         let panel = NSSavePanel()
@@ -330,11 +376,11 @@ public struct MintCommands: Commands {
     }
 
     private func printActiveManuscript() {
-        guard let document = session.selectedDocument else { return }
+        guard let body = legacyWorkspace.legacyStore?.activeEntry?.body ?? session.selectedDocument?.body else { return }
         let page = NSTextView(
             frame: NSRect(x: 0, y: 0, width: 620, height: 792))
         page.textStorage?.setAttributedString(NSAttributedString(
-            string: document.body.isEmpty ? "(빈 원고)" : document.body,
+            string: body.isEmpty ? "(빈 원고)" : body,
             attributes: [
                 .font: MintFonts.serif(12),
                 .foregroundColor: NSColor.black,
@@ -354,6 +400,28 @@ public struct MintCommands: Commands {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "확인")
         alert.runModal()
+    }
+
+    private var hasWorkspace: Bool {
+        session.selectedDocument != nil || legacyWorkspace.legacyStore?.activeEntry != nil
+    }
+
+    private var canExport: Bool {
+        legacyWorkspace.legacyStore?.activeEntry != nil
+            || (session.selectedDocument != nil && session.assetCatalog != nil)
+    }
+
+    private func renameLegacyEntry(in store: EntryStore) {
+        let id = store.activeID
+        let alert = NSAlert()
+        alert.messageText = "문서 이름 바꾸기"
+        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        field.stringValue = store.activeEntry?.title ?? ""
+        alert.accessoryView = field
+        alert.addButton(withTitle: "이름 바꾸기")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        store.rename(id, to: field.stringValue)
     }
 
     /// 현재 유효 외형이 다크인가 — 명시값이 있으면 그대로, "시스템 따름"이면 실제

@@ -27,13 +27,21 @@ struct MINTApp: App {
     @StateObject private var indexer = BackgroundIndexer(
         engine: MINTApp.sharedEngine,
         sidecarPersistence: MINTApp.knowledgeSidecars)
-    @StateObject private var projectSession = ProjectSession(store: MINTApp.projectStore)
+    @StateObject private var projectSession: ProjectSession
+    @StateObject private var legacyWorkspace: LegacyWorkspaceController
     @StateObject private var editorRequests = ProjectEditorRequests()
+
+    init() {
+        let session = ProjectSession(store: Self.projectStore)
+        _projectSession = StateObject(wrappedValue: session)
+        _legacyWorkspace = StateObject(wrappedValue: LegacyWorkspaceController(session: session))
+    }
 
     var body: some Scene {
         Window("MINT", id: "main") {
             ContentView(
                 projectSession: projectSession,
+                legacyWorkspace: legacyWorkspace,
                 editorRequests: editorRequests,
                 completion: completion,
                 indexer: indexer,
@@ -42,7 +50,10 @@ struct MINTApp: App {
                     session: projectSession,
                     store: MINTApp.projectStore,
                     editorRequests: editorRequests))
-                .onAppear { appDelegate.projectSession = projectSession }
+                .onAppear {
+                    appDelegate.configure(session: projectSession, legacyWorkspace: legacyWorkspace,
+                        completion: completion, indexer: indexer)
+                }
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
         .windowStyle(.hiddenTitleBar)
@@ -50,6 +61,7 @@ struct MINTApp: App {
         .commands {
             MintCommands(
                 session: projectSession,
+                legacyWorkspace: legacyWorkspace,
                 projectStore: MINTApp.projectStore,
                 editorRequests: editorRequests)
         }
@@ -64,9 +76,29 @@ struct MINTApp: App {
 }
 
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     weak var projectSession: ProjectSession?
-    private var isAwaitingProjectFlush = false
+    private weak var legacyWorkspace: LegacyWorkspaceController?
+    private var termination: ProjectTerminationCoordinator?
+    private var backgroundFlush: Task<Void, Never>?
+
+    func configure(session: ProjectSession, legacyWorkspace: LegacyWorkspaceController,
+                   completion: CompletionController, indexer: BackgroundIndexer) {
+        guard termination == nil else { return }
+        projectSession = session
+        self.legacyWorkspace = legacyWorkspace
+        termination = ProjectTerminationCoordinator(
+            session: session, legacyWorkspace: legacyWorkspace,
+            persistPositions: { WritingPositionStore.shared.persistNow() },
+            shutdown: { completion.shutdown(); indexer.shutdown() },
+            drain: {
+                // Yield the main actor until every engine operation has released its resources.
+                while MINTApp.sharedEngine.pendingOperationCount > 0 {
+                    try? await Task.sleep(for: .milliseconds(50))
+                }
+            })
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -78,49 +110,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard let projectSession, !isAwaitingProjectFlush else {
-            return isAwaitingProjectFlush ? .terminateLater : .terminateNow
-        }
-        isAwaitingProjectFlush = true
-        Task { @MainActor [weak self] in
-            do {
-                try await projectSession.flush()
-                sender.reply(toApplicationShouldTerminate: true)
-            } catch {
-                self?.isAwaitingProjectFlush = false
-                sender.reply(toApplicationShouldTerminate: false)
+        guard let termination else { return .terminateNow }
+        return termination.requestTermination { [weak self] success in
+            sender.reply(toApplicationShouldTerminate: success)
+            if !success, let message = self?.projectSession?.lastErrorMessage {
+                let alert = NSAlert()
+                alert.messageText = "저장하지 못해 종료를 취소했습니다"
+                alert.informativeText = message
+                alert.runModal()
             }
-        }
-        return .terminateLater
-    }
-
-    // 입력 직후 ⌘Q·앱 전환으로 마지막 문장을 잃지 않도록 디바운스 저장을 즉시 비운다.
-    func applicationWillTerminate(_ notification: Notification) {
-        MainActor.assumeIsolated {
-            WritingPositionStore.shared.persistNow()  // 집필 위치 영속 (#36)
-            // 진행 중 생성의 부모 태스크부터 접는다 — 이 순서라 엔진 드레인은
-            // 밀리초 단위다. 취소 없이 기다리면 생성이 끝날 때까지 종료가 막힌다.
-            CompletionController.current?.shutdown()
-            BackgroundIndexer.current?.shutdown()
-        }
-        // 남은 GPU 연산(프리필·토큰 루프)이 완전히 물러난 뒤 프로세스를 내려보낸다.
-        // 이 대기가 없으면 teardown이 mlx eval 스레드와 경합해 종료 세그폴트가
-        // 난다 — 앱 번들 스모크에서 3/3 재현 후 수정 (이슈 #65 Gate 0).
-        //
-        // 종료 컨텍스트에선 Swift 동시성 스케줄링이 보장되지 않는다 — detached
-        // 태스크가 액터 진입 전에 정지하는 것을 스모크로 확인했다. 그래서 액터를
-        // 거치지 않는 잠금 기반 카운터를 짧게 폴링한다 (50ms × 100 = 최대 5초).
-        var polls = 0
-        while polls < 100 {
-            if MINTApp.sharedEngine.pendingOperationCount == 0 { break }
-            usleep(50_000)
-            polls += 1
         }
     }
 
     func applicationDidResignActive(_ notification: Notification) {
-        Task { @MainActor [weak projectSession] in
-            try? await projectSession?.flush()
+        guard backgroundFlush == nil, let legacyWorkspace, !legacyWorkspace.isTransitioning else { return }
+        backgroundFlush = Task { @MainActor [weak self, weak legacyWorkspace] in
+            defer { self?.backgroundFlush = nil }
+            try? await legacyWorkspace?.flushActiveOwner()
         }
     }
 }

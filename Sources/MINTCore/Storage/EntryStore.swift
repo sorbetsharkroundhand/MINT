@@ -305,9 +305,8 @@ public final class EntryStore: ObservableObject {
     /// 덮는 사고가 구조적으로 불가능해진다.
     private var writeTargetURL: URL { recoveredSessionURL ?? fileURL }
 
-    /// 앱 수명주기 훅(AppDelegate)이 종료·백그라운드 전환 직전 flush할 수 있도록
-    /// 하는 약참조. 클래스 격리(@MainActor)가 접근을 메인으로 강제한다 —
-    /// nonisolated(unsafe) 탈출구를 없앴다 (이슈 #45). 메인 스레드에서만 읽고 쓴다.
+    /// Compatibility lookup only. The explicit legacy controller owns lifecycle flushing;
+    /// project shutdown must never resolve its write owner through this weak reference.
     public static weak var current: EntryStore?
 
     // MARK: - 구조 변경 Undo + 휴지통 (이슈 #9)
@@ -1499,6 +1498,28 @@ public final class EntryStore: ObservableObject {
         saveTask = nil
         saveGeneration += 1
         noteOutcome(writeAndWait(currentSnapshot))
+    }
+
+    /// Lifecycle saves yield the main actor while the writer persists each accepted generation.
+    /// Returns the failure message without discarding the in-memory manuscript or undo state.
+    public func flushAsync() async -> String? {
+        while true {
+            flushAllDebouncedUndo()
+            saveTask?.cancel()
+            saveTask = nil
+            saveGeneration += 1
+            let generation = saveGeneration
+            let snapshot = currentSnapshot
+            savePhase = .saving
+            let failure = await writer.write(snapshot, to: writeTargetURL)
+            if let failure {
+                noteOutcome(failure)
+                return failure
+            }
+            guard generation == saveGeneration else { continue }
+            noteOutcome(nil)
+            return nil
+        }
     }
 
     // MARK: - 복구 액션 (이슈 #6)

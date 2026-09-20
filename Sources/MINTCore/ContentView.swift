@@ -23,6 +23,7 @@ enum ContentViewRoute: Equatable {
 /// 우측 에디터 컬럼(툴바 · Notion식 블록 에디터 · 단축키 필 · 상태 바).
 public struct ContentView: View {
     @ObservedObject private var projectSession: ProjectSession
+    @ObservedObject private var legacyWorkspace: LegacyWorkspaceController
     @ObservedObject private var editorRequests: ProjectEditorRequests
     @ObservedObject private var completion: CompletionController
     private let indexer: BackgroundIndexer
@@ -32,6 +33,7 @@ public struct ContentView: View {
     @AppStorage("mint.appearance") private var appearance = ""
     public init(
         projectSession: ProjectSession,
+        legacyWorkspace: LegacyWorkspaceController,
         editorRequests: ProjectEditorRequests,
         completion: CompletionController,
         indexer: BackgroundIndexer,
@@ -39,6 +41,7 @@ public struct ContentView: View {
         firstRunFlow: FirstRunFlow
     ) {
         self.projectSession = projectSession
+        self.legacyWorkspace = legacyWorkspace
         self.editorRequests = editorRequests
         self.completion = completion
         self.indexer = indexer
@@ -48,15 +51,30 @@ public struct ContentView: View {
 
     public var body: some View {
         Group {
+            if let store = legacyWorkspace.legacyStore, legacyWorkspace.mode == .legacy {
+                LegacyWorkspaceView(store: store, completion: completion,
+                    settings: completion.settings, indexer: indexer,
+                    updateBody: { [weak legacyWorkspace, weak store] body in
+                        guard let legacyWorkspace, let store,
+                            legacyWorkspace.legacyStore === store else { return }
+                        legacyWorkspace.updateLegacyBody(body)
+                    })
+                    .disabled(legacyWorkspace.isTransitioning)
+            } else {
             switch ContentViewRoute.resolve(projectSession.phase) {
             case .progress:
                 VStack(spacing: 12) {
+                    if projectSession.phase == .suspended, let message = legacyWorkspace.lastErrorMessage {
+                        Text(message)
+                        Button("프로젝트 다시 열기") { Task { try? await legacyWorkspace.leave() } }
+                    } else {
                     ProgressView()
                     Text(projectSession.phase == .suspended
                         ? "프로젝트 전환을 마무리하는 중…"
                         : "프로젝트 여는 중…")
                         .font(MintFonts.uiFont(12))
                         .foregroundStyle(.secondary)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .firstRun:
@@ -85,30 +103,29 @@ public struct ContentView: View {
                 .padding(32)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            }
         }
             .frame(minWidth: 860, minHeight: 540)
             .preferredColorScheme(preferredScheme)
             .onAppear {
                 // The controller itself enforces explicit completion authorization.
                 completion.preloadEngine()
-                // 예측 조립에 쓸 활성 문서 스냅샷 공급 — 예측 직전 pull (PLAN §10).
-                completion.documentContextProvider = nil
-                completion.projectDocumentProvider = { [weak projectSession] in
-                    projectSession?.selectedDocumentSnapshot
+                if let store = legacyWorkspace.legacyStore {
+                    LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
+                } else {
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer)
                 }
-                indexer.attach(documentProvider: { [weak projectSession] in
-                    projectSession?.selectedDocumentSnapshot
-                })
                 indexer.caretProvider = { [weak completion] in completion?.lastCaretLocation }
-                completion.knowledgeProvider = { [weak projectSession, weak indexer] in
-                    guard let identity = projectSession?.runtimeIdentity,
-                        indexer?.snapshotRuntimeIdentity == identity
-                    else { return nil }
-                    return indexer?.snapshot
+                legacyWorkspace.didEnterLegacy = { [weak completion, weak indexer] store in
+                    guard let completion, let indexer else { return }
+                    LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
                 }
-                // JournalEntry-only decisions are not mirrored into project documents.
-                completion.onRecordConversation = nil
-                completion.recordedConversationHashesProvider = { [] }
+                legacyWorkspace.willFlushLegacy = Self.commitMarkedText
+                legacyWorkspace.willLeaveLegacy = { [weak projectSession, weak completion, weak indexer] in
+                    guard let projectSession, let completion, let indexer else { return }
+                    completion.prepareForProjectTransition()
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer)
+                }
                 projectSession.willTransition = { [weak completion, weak indexer] in
                     if let textView = NSApp.keyWindow?.firstResponder as? BlockTextView,
                         textView.hasMarkedText()
@@ -130,6 +147,27 @@ public struct ContentView: View {
                 guard !projectSession.hasLoadedActiveProject else { return }
                 try? await projectSession.loadActiveProject()
             }
+    }
+
+    private static func commitMarkedText() {
+        if let textView = NSApp.keyWindow?.firstResponder as? BlockTextView, textView.hasMarkedText() {
+            textView.unmarkText()
+        }
+    }
+
+    private static func connectProjectConsumers(
+        session: ProjectSession, completion: CompletionController, indexer: BackgroundIndexer
+    ) {
+        completion.documentContextProvider = nil
+        completion.projectDocumentProvider = { [weak session] in session?.selectedDocumentSnapshot }
+        indexer.attach(documentProvider: { [weak session] in session?.selectedDocumentSnapshot })
+        completion.knowledgeProvider = { [weak session, weak indexer] in
+            guard let identity = session?.runtimeIdentity,
+                indexer?.snapshotRuntimeIdentity == identity else { return nil }
+            return indexer?.snapshot
+        }
+        completion.onRecordConversation = nil
+        completion.recordedConversationHashesProvider = { [] }
     }
 
     private var preferredScheme: ColorScheme? {
@@ -842,6 +880,7 @@ struct LongParagraphNotice: View {
     let editorRequests = ProjectEditorRequests()
     ContentView(
         projectSession: session,
+        legacyWorkspace: LegacyWorkspaceController(session: session),
         editorRequests: editorRequests,
         completion: CompletionController(),
         indexer: BackgroundIndexer(engine: CompletionEngine()),
