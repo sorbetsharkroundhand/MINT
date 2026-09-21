@@ -18,6 +18,8 @@ public final class ProjectSession: ObservableObject {
     @Published public private(set) var lastErrorMessage: String?
     /// `false` means persistence scope is still unknown; callers must not assume legacy.
     @Published public private(set) var hasLoadedActiveProject = false
+    /// Generic mutation gate exposed so native editor bridges can mirror ownership transitions.
+    @Published public private(set) var isTransitioning = false
 
     public var willTransition: (() -> Void)?
     public var documentDidChange: ((ProjectDocumentSnapshot) -> Void)?
@@ -28,7 +30,6 @@ public final class ProjectSession: ObservableObject {
     private var generation: UInt64 = 0
     private var dirtyGeneration: UInt64?
     private var saveTask: Task<Void, Never>?
-    private var isTransitioning = false
     private var suspensionReleaseCheck: (() -> Bool)?
 
     public init(
@@ -49,6 +50,10 @@ public final class ProjectSession: ObservableObject {
     public var selectedDocument: WritingDocument? {
         guard let activeProject, let selectedDocumentID else { return nil }
         return activeProject.documents.first { $0.id == selectedDocumentID }
+    }
+
+    public var isEditorEditable: Bool {
+        phase == .ready && selectedDocument != nil && !isTransitioning
     }
 
     public var selectedDocumentSnapshot: ProjectDocumentSnapshot? {

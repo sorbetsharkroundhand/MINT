@@ -294,6 +294,7 @@ struct WorkspaceSurface: View {
     @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var livingMargin: LivingMarginModel
+    var editorBridge: ProjectEditorBridge? = nil
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var palette = PaletteSettings.shared
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
@@ -326,7 +327,8 @@ struct WorkspaceSurface: View {
                 editorRequests: editorRequests,
                 completion: completion,
                 settings: completion.settings,
-                theme: theme)
+                theme: theme,
+                editorBridge: editorBridge)
         } context: {
             VStack(spacing: 0) {
                 HStack {

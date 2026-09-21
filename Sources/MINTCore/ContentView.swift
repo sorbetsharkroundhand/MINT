@@ -29,6 +29,7 @@ public struct ContentView: View {
     private let indexer: BackgroundIndexer
     @ObservedObject private var livingMargin: LivingMarginModel
     private let firstRunFlow: FirstRunFlow
+    @State private var projectEditorBridge = ProjectEditorBridge()
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
     public init(
@@ -85,7 +86,8 @@ public struct ContentView: View {
                     projectSession: projectSession,
                     editorRequests: editorRequests,
                     completion: completion,
-                    livingMargin: livingMargin)
+                    livingMargin: livingMargin,
+                    editorBridge: projectEditorBridge)
             case .error:
                 VStack(spacing: 12) {
                     Text("프로젝트를 열지 못했습니다")
@@ -126,11 +128,14 @@ public struct ContentView: View {
                     completion.prepareForProjectTransition()
                     Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer)
                 }
-                projectSession.willTransition = { [weak completion, weak indexer] in
-                    if let textView = NSApp.keyWindow?.firstResponder as? BlockTextView,
-                        textView.hasMarkedText()
-                    {
-                        textView.unmarkText()
+                projectSession.willTransition = { [weak projectEditorBridge, weak completion, weak indexer] in
+                    if let textView = projectEditorBridge?.editor {
+                        if textView.hasMarkedText() {
+                            textView.unmarkText()
+                            // Publish accepted composition before the session closes its mutation gate.
+                            textView.didChangeText()
+                        }
+                        textView.isEditable = false
                     }
                     completion?.prepareForProjectTransition()
                     indexer?.prepareForProjectTransition()
@@ -182,12 +187,19 @@ public struct ContentView: View {
 
 // MARK: - 에디터 컬럼
 
+/// View-scoped, weak native handle: transitions also work while this window is not key.
+@MainActor
+final class ProjectEditorBridge {
+    weak var editor: BlockTextView?
+}
+
 struct EditorPane: View {
     @ObservedObject var projectSession: ProjectSession
     @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    var editorBridge: ProjectEditorBridge? = nil
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
@@ -225,6 +237,7 @@ struct EditorPane: View {
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
                     documentIdentity: identity,
+                    isEditable: projectSession.isEditorEditable,
                     focusRequest: editorRequests.editorFocusRequest,
                     searchJump: editorRequests.searchJump,
                     assetCatalog: projectSession.assetCatalog,
@@ -233,6 +246,16 @@ struct EditorPane: View {
                         _ = try await projectSession.importAsset(data: data, reference: reference, for: runtime)
                         guard let catalog = projectSession.assetCatalog else { throw ProjectSessionError.staleRuntime }
                         return catalog
+                    },
+                    onEditorWindowChange: { [weak projectSession, weak editorBridge] view in
+                        guard let editor = view as? BlockTextView else { return }
+                        if view.window != nil {
+                            editorBridge?.editor = editor
+                            // Read the live gate even if this representable update was queued earlier.
+                            editor.isEditable = projectSession?.isEditorEditable == true
+                        } else if editorBridge?.editor === editor {
+                            editorBridge?.editor = nil
+                        }
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
