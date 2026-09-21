@@ -1,8 +1,46 @@
+import AppKit
 import XCTest
 @testable import MINTCore
 
 @MainActor
 final class LegacyWorkspaceControllerTests: XCTestCase {
+    // Catches releasing the only editable owner before fallible resume verification succeeds.
+    func testFailedProjectReloadKeepsLegacyOwnerConsumersAndUndo() async throws {
+        let fixture = try await LegacyBoundaryFixture()
+        defer { fixture.cleanUp() }
+        let controller = fixture.controller()
+        try await controller.enter()
+        let owner = try XCTUnwrap(controller.legacyStore)
+        let undo = UndoManager()
+        undo.groupsByEvent = false
+        owner.structureUndoManager = undo
+        let id = owner.activeID
+        let folder = owner.newFolder()
+        undo.beginUndoGrouping()
+        owner.move(id, toFolder: folder)
+        undo.endUndoGrouping()
+        var consumersDetached = false
+        controller.willLeaveLegacy = { consumersDetached = true }
+        let marker = fixture.root.appendingPathComponent("Projects/active-project.json")
+        let bytes = try Data(contentsOf: marker)
+        try Data("invalid active project".utf8).write(to: marker)
+        do { try await controller.leave(); XCTFail("Corrupt active marker resumed") } catch {}
+        XCTAssertTrue(controller.legacyStore === owner)
+        XCTAssertEqual(controller.mode, .legacy)
+        XCTAssertFalse(controller.isTransitioning)
+        XCTAssertFalse(consumersDetached)
+        XCTAssertNil(fixture.session.activeProject)
+        XCTAssertTrue(undo.canUndo)
+        undo.undo()
+        XCTAssertNil(owner.entries.first(where: { $0.id == id })?.folderID)
+        controller.updateLegacyBody("editable after failed reload")
+        XCTAssertEqual(owner.activeEntry?.body, "editable after failed reload")
+        try bytes.write(to: marker)
+        try await controller.leave()
+        XCTAssertEqual(fixture.session.activeProject?.id, fixture.project.id)
+        XCTAssertTrue(consumersDetached)
+    }
+
     // Catches initial bootstrap racing legacy entry and publishing a project over its writer.
     func testLegacyEntryRejectsUnresolvedProjectLoading() async throws {
         let fixture = try await LegacyBoundaryFixture()

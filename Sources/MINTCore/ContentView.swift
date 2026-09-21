@@ -52,7 +52,7 @@ public struct ContentView: View {
     public var body: some View {
         Group {
             if let store = legacyWorkspace.legacyStore, legacyWorkspace.mode == .legacy {
-                LegacyWorkspaceView(store: store, completion: completion,
+                LegacyWorkspaceView(workspace: legacyWorkspace, store: store, completion: completion,
                     settings: completion.settings, indexer: indexer,
                     updateBody: { [weak legacyWorkspace, weak store] body in
                         guard let legacyWorkspace, let store,

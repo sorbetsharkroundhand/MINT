@@ -143,9 +143,18 @@ public final class ProjectSession: ObservableObject {
         }
     }
 
-    /// The legacy controller releases its writer before asking to reload the durable owner.
+    /// Resume without another owner only after the suspension release check permits it.
     public func resume() async throws {
-        guard phase == .suspended, !isTransitioning, suspensionReleaseCheck?() != false else {
+        guard suspensionReleaseCheck?() != false else {
+            throw ProjectSessionError.transitionInProgress
+        }
+        try await resume(releasing: {})
+    }
+
+    /// Verify every fallible input while the other owner is retained. Release and adoption
+    /// then occur synchronously on the main actor, with no remaining suspension/failure point.
+    func resume(releasing releaseOwner: () -> Void) async throws {
+        guard phase == .suspended, !isTransitioning else {
             throw ProjectSessionError.transitionInProgress
         }
         isTransitioning = true
@@ -155,6 +164,7 @@ public final class ProjectSession: ObservableObject {
             let catalog: ProjectAssetCatalog?
             if let project { catalog = try await store.assetCatalog(id: project.id) }
             else { catalog = nil }
+            releaseOwner()
             assetCatalog = catalog
             phase = project == nil ? .needsProject : .ready
             adopt(project)

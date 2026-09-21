@@ -8,7 +8,9 @@ public final class LegacyWorkspaceController: ObservableObject {
 
     @Published public private(set) var mode: Mode = .project
     @Published public private(set) var legacyStore: EntryStore?
-    @Published public private(set) var isTransitioning = false
+    @Published public private(set) var isTransitioning = false {
+        didSet { editor?.isEditable = !isTransitioning && mode == .legacy }
+    }
     @Published public private(set) var lastErrorMessage: String?
     public var didEnterLegacy: ((EntryStore) -> Void)?
     public var willFlushLegacy: (() -> Void)?
@@ -17,6 +19,7 @@ public final class LegacyWorkspaceController: ObservableObject {
     private let session: ProjectSession
     private let entryStoreFactory: () -> EntryStore
     private var isFlushing = false
+    private weak var editor: BlockTextView?
 
     public init(session: ProjectSession, entryStoreFactory: @escaping () -> EntryStore = { EntryStore() }) {
         self.session = session
@@ -46,18 +49,40 @@ public final class LegacyWorkspaceController: ObservableObject {
         legacyStore?.updateActiveBody(body)
     }
 
+    func attachEditor(_ view: BlockTextView, to store: EntryStore) {
+        guard legacyStore === store, mode == .legacy else { return }
+        guard view.window != nil else {
+            if editor === view { detachEditor() }
+            return
+        }
+        if editor !== view { detachEditor(); editor = view }
+        view.isEditable = !isTransitioning
+        store.structureUndoManager = view.undoManager
+    }
+
+    private func detachEditor() {
+        // A workspace handoff ends both text and structural undo for its departed owner.
+        legacyStore?.structureUndoManager?.removeAllActions()
+        legacyStore?.structureUndoManager = nil
+        editor?.isEditable = false
+        editor?.editorWindowDidChange = nil
+        editor = nil
+    }
+
     public func leave() async throws {
         guard !isTransitioning, !isFlushing else { throw ProjectSessionError.transitionInProgress }
         guard mode == .legacy || session.phase == .suspended else { return }
-        willFlushLegacy?()
+        commitLegacyMarkedText()
         isTransitioning = true
         defer { isTransitioning = false }
         do {
             try await flushLegacy()
-            willLeaveLegacy?()
-            legacyStore = nil
-            mode = .project
-            try await session.resume()
+            try await session.resume(releasing: {
+                detachEditor()
+                willLeaveLegacy?()
+                legacyStore = nil
+                mode = .project
+            })
             lastErrorMessage = nil
         } catch {
             lastErrorMessage = error.localizedDescription
@@ -69,7 +94,7 @@ public final class LegacyWorkspaceController: ObservableObject {
     /// a concurrent workspace handoff while an asynchronous save is still running.
     public func flushActiveOwner() async throws {
         guard !isTransitioning, !isFlushing else { throw ProjectSessionError.transitionInProgress }
-        if mode == .legacy { willFlushLegacy?() }
+        if mode == .legacy { commitLegacyMarkedText() }
         isFlushing = true
         defer { isFlushing = false }
         do {
@@ -87,7 +112,7 @@ public final class LegacyWorkspaceController: ObservableObject {
         guard !isTransitioning, !isFlushing, session.phase != .loading else {
             throw ProjectSessionError.transitionInProgress
         }
-        if mode == .legacy { willFlushLegacy?() }
+        if mode == .legacy { commitLegacyMarkedText() }
         isTransitioning = true
         do {
             if mode == .legacy { try await flushLegacy() }
@@ -105,6 +130,16 @@ public final class LegacyWorkspaceController: ObservableObject {
         if let message = await legacyStore.flushAsync() {
             throw LegacyWorkspaceError.saveFailed(message)
         }
+    }
+
+    private func commitLegacyMarkedText() {
+        if let editor, editor.hasMarkedText() {
+            editor.unmarkText()
+            // Unmarking alone does not guarantee a delegate notification. Publish the
+            // accepted composition through the existing editor binding before fencing it.
+            editor.didChangeText()
+        }
+        willFlushLegacy?()
     }
 }
 

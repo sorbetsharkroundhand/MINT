@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 /// Compatibility UI receives only its legacy writer, never project mutation closures or assets.
 struct LegacyWorkspaceView: View {
+    @ObservedObject var workspace: LegacyWorkspaceController
     @ObservedObject var store: EntryStore
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
@@ -52,12 +53,17 @@ struct LegacyWorkspaceView: View {
                 }
                 theme.sepC.frame(height: 1)
                 MintBlockEditor(
-                    text: Binding(get: { store.activeEntry?.body ?? "" }, set: updateBody),
+                    text: Binding(get: { store.activeEntry?.body ?? "" }, set: { updateBody($0) }),
                     controller: completion, theme: theme,
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
-                    entryID: store.activeID, focusRequest: store.editorFocusRequests,
-                    searchJump: store.searchJump)
+                    entryID: store.activeID, isEditable: !workspace.isTransitioning,
+                    focusRequest: store.editorFocusRequests,
+                    searchJump: store.searchJump,
+                    onEditorWindowChange: { [weak workspace, weak store] editor in
+                        guard let store, let editor = editor as? BlockTextView else { return }
+                        workspace?.attachEditor(editor, to: store)
+                    })
                     .focusedValue(\.hasMintEditor, true)
                 HStack {
                     if case .failed(let message, _) = store.savePhase {

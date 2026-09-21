@@ -50,6 +50,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let searchJump: EditorSearchJump?
     private let assetCatalog: ProjectAssetCatalog?
     private let assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)?
+    private let onEditorWindowChange: ((NSTextView) -> Void)?
+    private let isEditable: Bool
 
     public init(
         text: Binding<String>,
@@ -58,10 +60,12 @@ public struct MintBlockEditor: NSViewRepresentable {
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         documentIdentity: EditorDocumentIdentity,
+        isEditable: Bool = true,
         focusRequest: Int = 0,
         searchJump: EditorSearchJump? = nil,
         assetCatalog: ProjectAssetCatalog? = nil,
-        assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)? = nil
+        assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)? = nil,
+        onEditorWindowChange: ((NSTextView) -> Void)? = nil
     ) {
         self._text = text
         self.controller = controller
@@ -73,6 +77,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.searchJump = searchJump
         self.assetCatalog = assetCatalog
         self.assetImporter = assetImporter
+        self.onEditorWindowChange = onEditorWindowChange
+        self.isEditable = isEditable
     }
 
     /// Explicit legacy-workspace bridge. Project workspace composition uses the neutral primary
@@ -84,8 +90,10 @@ public struct MintBlockEditor: NSViewRepresentable {
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         entryID: UUID = UUID(),
+        isEditable: Bool = true,
         focusRequest: Int = 0,
-        searchJump: EntryStore.SearchJump? = nil
+        searchJump: EntryStore.SearchJump? = nil,
+        onEditorWindowChange: ((NSTextView) -> Void)? = nil
     ) {
         self.init(
             text: text,
@@ -94,11 +102,13 @@ public struct MintBlockEditor: NSViewRepresentable {
             lineSpacing: lineSpacing,
             baseFontSize: baseFontSize,
             documentIdentity: .legacy(entryID),
+            isEditable: isEditable,
             focusRequest: focusRequest,
             searchJump: searchJump.map {
                 EditorSearchJump(
                     documentID: $0.entryID, query: $0.query, sequence: $0.seq)
-            })
+            },
+            onEditorWindowChange: onEditorWindowChange)
     }
 
     public func makeNSView(context: Context) -> NSScrollView {
@@ -125,6 +135,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.autoresizingMask = [.width]
 
         textView.delegate = context.coordinator
+        textView.isEditable = isEditable
         textView.isRichText = false
         textView.allowsUndo = true
         textView.drawsBackground = false
@@ -150,6 +161,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.palette = theme
         textView.lineSpacing = lineSpacing
         textView.baseFontSize = baseFontSize
+        textView.editorWindowDidChange = onEditorWindowChange
         configureAssets(textView)
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
@@ -185,6 +197,13 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? BlockTextView else { return }
+        if !isEditable, textView.hasMarkedText() {
+            textView.unmarkText()
+            textView.didChangeText()
+        }
+        textView.isEditable = isEditable
+        textView.editorWindowDidChange = onEditorWindowChange
+        if textView.window != nil { onEditorWindowChange?(textView) }
         configureAssets(textView)
         let documentChanged = documentIdentity != context.coordinator.loadedDocumentIdentity
         if documentChanged {
@@ -1071,9 +1090,11 @@ final class BlockTextView: NSTextView {
 
     /// 창에 처음 붙을 때 한 번만 자동 포커스 — 앱을 켜면 곧바로 쓸 수 있게.
     private var didInitialFocus = false
+    var editorWindowDidChange: ((NSTextView) -> Void)?
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        editorWindowDidChange?(self)
         guard !didInitialFocus, window != nil else { return }
         didInitialFocus = true
         DispatchQueue.main.async { [weak self] in
@@ -1085,6 +1106,8 @@ final class BlockTextView: NSTextView {
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok {
+            // AppKit may provide the window undo manager only after editor activation.
+            editorWindowDidChange?(self)
             DispatchQueue.main.async { [weak self] in
                 // 포커스가 돌아오면 커서 문단의 수식을 소스 모드로 되돌린다.
                 self?.refreshRenderedBlocks()
