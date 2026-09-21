@@ -262,8 +262,8 @@ User Canon
 ### Still in progress
 
 - 🚧 First-run UI + project-first runtime handoff
-- 🚧 Living Margin
-- 🚧 hierarchical story memory
+- ✅ Living Margin
+- ✅ hierarchical story memory
 - 🚧 atomic / temporal Story Knowledge
 - 🚧 structure-first retrieval
 - 🚧 evidence-bounded continuity judge
@@ -360,7 +360,6 @@ Sources/
 │  ├─ Editor/         TextKit editor and Ghost Completion
 │  ├─ Inference/      MLX runtime, completion, context assembly
 │  ├─ Knowledge/      story understanding / retrieval foundations
-│  ├─ Fiction/        Fiction-specific domain intelligence
 │  ├─ Storage/
 │  └─ Export/
 └─ MINTBench/         quality / latency benchmark CLI
