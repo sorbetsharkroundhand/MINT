@@ -60,8 +60,8 @@ mkdir -p "$SMOKE_HOME/Documents" "$SMOKE_HOME/Library/Logs/DiagnosticReports"
 ditto "$SOURCE_APP" "$APP"
 
 # CFFIXED_USER_HOME은 문서를 격리하지만 UserDefaults의 데몬 저장소까지 옮기지 않는다.
-# 복사본에 고유 식별자를 주고 설정 API로 초기화해야 실제 사용자 설정을 읽거나 쓰지 않는다.
-# #100은 모델 다운로드 없는 번들 수명주기 검사다. 첫 실행 UI는 #118에서 검증한다.
+# 복사본에 고유 식별자를 주어 실제 사용자 설정을 읽거나 쓰지 않는다. 설정은 일부러
+# 비워 둔다: 모델 선택이나 다운로드 없이 깨끗한 첫 실행 화면까지 뜨는 것이 계약이다.
 BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")
 SMOKE_BUNDLE_ID="$BUNDLE_ID.smoke.$(uuidgen)"
 if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then
@@ -71,14 +71,14 @@ fi
 plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 PREFERENCES_OWNED=1
-defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
 
 # 시작 시점 표식 — 이후 새로 생긴 MINT 크래시 리포트가 있으면 실패로 본다.
 MARKER="$SMOKE_ROOT/started"
 touch "$MARKER"
 
 echo "▸ 격리 앱 실행 (open): $SMOKE_HOME"
-open -n --env "CFFIXED_USER_HOME=$SMOKE_HOME" "$APP" || {
+open -n --env "CFFIXED_USER_HOME=$SMOKE_HOME" \
+    --env "HF_HOME=$SMOKE_HOME/ModelDownloads" "$APP" || {
     echo "✗ LaunchServices 실행 실패" >&2
     exit 1
 }
@@ -90,7 +90,7 @@ for i in 1 2 3 4 5 6 7 8 9 10; do
 done
 [ -n "$PID" ] || { echo "✗ 프로세스가 뜨지 않았다" >&2; exit 1; }
 
-# SwiftUI 첫 창 + EntryStore·백그라운드 인덱서 부팅까지 여유.
+# SwiftUI 첫 창 + project-first onboarding 부팅까지 여유.
 sleep 8
 if ! kill -0 "$PID" 2>/dev/null; then
     echo "✗ 부팅 후 조기 종료 — 초기화 크래시" >&2
@@ -119,8 +119,12 @@ done
 }
 echo "✓ 정상 종료"
 
-[ -s "$SMOKE_HOME/Documents/MINT/entries.json" ] || {
-    echo "✗ 격리 홈에 원고 저장이 확인되지 않았다" >&2
+[ ! -e "$SMOKE_HOME/Documents/MINT/entries.json" ] || {
+    echo "✗ 정상 프로젝트 모드가 entries.json을 만들었다" >&2
+    exit 1
+}
+[ ! -e "$SMOKE_HOME/ModelDownloads" ] || {
+    echo "✗ 명시적 허가 없이 모델 다운로드 디렉터리가 생겼다" >&2
     exit 1
 }
 
@@ -140,4 +144,4 @@ if [ "$NEW_CRASHES" != "0" ]; then
 fi
 
 PASSED=1
-echo "✅ 스모크 통과 — 격리 번들 실행 · 생존 · 정상 종료 · 무크래시"
+echo "✅ 스모크 통과 — 깨끗한 홈 · 무모델 부팅 · 정상 종료 · 무크래시"
