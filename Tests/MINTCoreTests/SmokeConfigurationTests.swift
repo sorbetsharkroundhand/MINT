@@ -16,6 +16,23 @@ final class SmokeConfigurationTests: XCTestCase {
         XCTAssertTrue(result.output.contains("project state verified"), result.output)
     }
 
+    func testProjectStateVerifierAcceptsCanonicalPathForEveryDocumentKind() throws {
+        for kind in ["manuscript", "note", "reference"] {
+            let fixture = try SmokeScriptFixture()
+            defer { fixture.remove() }
+            let body = "\(kind)-body"
+            try fixture.writeProject(body: body, kind: kind)
+
+            let result = try fixture.runUISmoke(
+                arguments: ["--verify-project-state", fixture.library.path, body])
+
+            XCTAssertEqual(result.status, 0, "\(kind): \(result.output)")
+            XCTAssertTrue(
+                result.output.contains("project state verified"),
+                "\(kind): \(result.output)")
+        }
+    }
+
     func testProjectStateVerifierRejectsLegacyEntriesFallback() throws {
         let fixture = try SmokeScriptFixture()
         defer { fixture.remove() }
@@ -43,6 +60,19 @@ final class SmokeConfigurationTests: XCTestCase {
         XCTAssertTrue(result.output.contains("expected body absent"), result.output)
     }
 
+    func testProjectStateVerifierRequiresExactTrailingNewlineBytes() throws {
+        let fixture = try SmokeScriptFixture()
+        defer { fixture.remove() }
+        let expectedBody = "edited-token"
+        try fixture.writeProject(body: "\(expectedBody)\n")
+
+        let result = try fixture.runUISmoke(
+            arguments: ["--verify-project-state", fixture.library.path, expectedBody])
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("expected body absent"), result.output)
+    }
+
     func testProjectStateVerifierRejectsContentWhoseHashNoLongerMatchesManifest() throws {
         let fixture = try SmokeScriptFixture()
         defer { fixture.remove() }
@@ -55,6 +85,21 @@ final class SmokeConfigurationTests: XCTestCase {
 
         XCTAssertNotEqual(result.status, 0, result.output)
         XCTAssertTrue(result.output.contains("content hash mismatch"), result.output)
+    }
+
+    func testProjectStateVerifierRejectsHashValidNoncanonicalDocumentPath() throws {
+        let fixture = try SmokeScriptFixture()
+        defer { fixture.remove() }
+        let body = "hash-valid-body"
+        try fixture.writeProject(
+            body: body,
+            relativePath: "Documents/44444444-4444-4444-4444-444444444444/arbitrary.md")
+
+        let result = try fixture.runUISmoke(
+            arguments: ["--verify-project-state", fixture.library.path, body])
+
+        XCTAssertNotEqual(result.status, 0, result.output)
+        XCTAssertTrue(result.output.contains("noncanonical document path"), result.output)
     }
 
     func testProjectStateVerifierRejectsSymlinkedProjectDirectory() throws {
@@ -138,23 +183,28 @@ private struct SmokeScriptFixture {
         return (process.terminationStatus, output)
     }
 
-    func writeProject(body: String) throws {
+    func writeProject(
+        body: String,
+        kind: String = "manuscript",
+        relativePath customRelativePath: String? = nil
+    ) throws {
         let projectID = "33333333-3333-3333-3333-333333333333"
         let documentID = "44444444-4444-4444-4444-444444444444"
         let hash = SHA256.hash(data: Data(body.utf8))
             .map { String(format: "%02x", $0) }
             .joined()
-        let relativePath = "Documents/\(documentID)/\(hash).md"
+        let folder = kind == "note" ? "Notes" : "Documents"
+        let relativePath = customRelativePath ?? "\(folder)/\(documentID)/\(hash).md"
         let projectDirectory = library
             .appendingPathComponent("Projects/\(projectID)", isDirectory: true)
         try FileManager.default.createDirectory(
-            at: projectDirectory.appendingPathComponent("Documents/\(documentID)", isDirectory: true),
+            at: projectDirectory.appendingPathComponent(relativePath).deletingLastPathComponent(),
             withIntermediateDirectories: true)
         try Data(body.utf8).write(to: projectDirectory.appendingPathComponent(relativePath))
         try Data(#"{"rawValue":"33333333-3333-3333-3333-333333333333"}"#.utf8)
             .write(to: library.appendingPathComponent("Projects/active-project.json"))
         let manifest = """
-        {"schemaVersion":1,"id":{"rawValue":"\(projectID)"},"title":"Smoke","mode":"fiction","documents":[{"id":{"rawValue":"\(documentID)"},"title":"Chapter 1","kind":"manuscript","relativePath":"\(relativePath)","contentHash":"\(hash)"}],"trashedDocumentIDs":[],"assets":[]}
+        {"schemaVersion":1,"id":{"rawValue":"\(projectID)"},"title":"Smoke","mode":"fiction","documents":[{"id":{"rawValue":"\(documentID)"},"title":"Chapter 1","kind":"\(kind)","relativePath":"\(relativePath)","contentHash":"\(hash)"}],"trashedDocumentIDs":[],"assets":[]}
         """
         try Data(manifest.utf8).write(to: projectDirectory.appendingPathComponent("project.json"))
     }

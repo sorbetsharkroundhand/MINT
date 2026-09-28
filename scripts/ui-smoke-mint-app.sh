@@ -52,8 +52,24 @@ verify_project_state() {
     found=""
     document_index=0
     while [ "$document_index" -lt "$document_count" ]; do
+        document_id=$(plutil -extract "documents.$document_index.id.rawValue" raw -o - "$manifest" 2>/dev/null) || return 1
+        document_kind=$(plutil -extract "documents.$document_index.kind" raw -o - "$manifest" 2>/dev/null) || return 1
         relative_path=$(plutil -extract "documents.$document_index.relativePath" raw -o - "$manifest" 2>/dev/null) || return 1
         expected_hash=$(plutil -extract "documents.$document_index.contentHash" raw -o - "$manifest" 2>/dev/null) || return 1
+        case "$document_kind" in
+            note) document_folder=Notes ;;
+            manuscript|reference) document_folder=Documents ;;
+            *)
+                echo "project state invalid: unknown document kind" >&2
+                return 1
+                ;;
+        esac
+        canonical_document_id=$(printf '%s' "$document_id" | tr '[:lower:]' '[:upper:]')
+        canonical_relative_path="$document_folder/$canonical_document_id/$expected_hash.md"
+        [ "$relative_path" = "$canonical_relative_path" ] || {
+            echo "project state invalid: noncanonical document path" >&2
+            return 1
+        }
         case "/$relative_path/" in
             //*|*/../*|*/./*)
                 echo "project state invalid: unsafe document path" >&2
@@ -79,7 +95,7 @@ verify_project_state() {
             echo "project state invalid: content hash mismatch" >&2
             return 1
         }
-        if [ "$(cat "$content")" = "$expected_body" ]; then found=1; fi
+        if printf '%s' "$expected_body" | cmp -s - "$content"; then found=1; fi
         document_index=$((document_index + 1))
     done
     [ -n "$found" ] || {
