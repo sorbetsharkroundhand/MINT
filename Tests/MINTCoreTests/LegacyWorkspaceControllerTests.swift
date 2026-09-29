@@ -193,7 +193,7 @@ final class LegacyWorkspaceControllerTests: XCTestCase {
         let oldIdentity = session.runtimeIdentity
         let controller = fixture.controller()
         try await controller.enter()
-        weak let released = controller.legacyStore
+        weak var released = controller.legacyStore
         controller.legacyStore?.updateActiveBody("legacy is durable")
         var published: ProjectDocumentSnapshot?
         session.documentDidChange = { snapshot in
