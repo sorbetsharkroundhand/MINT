@@ -1,234 +1,218 @@
+<div align="center">
+
 # MINT
 
-> **A local writing environment that understands the context of what you write without taking control away from the writer.**
+**A local writing environment that understands your story without ever taking it over.**
 
-**MINT는 글을 대신 써 주는 AI가 아니라, 작가가 쓰고 있는 글과 세계를 이해하면서도 주도권은 끝까지 작가에게 남겨 두는 로컬 글쓰기 환경입니다.**
+*The writer owns the story. MINT helps them keep hold of it.*
 
-MINT 0.2.0의 방향은 **Writing Platform, Fiction First**입니다.
+<br>
 
-소설은 MINT가 가장 깊게 파고드는 첫 번째 전문 영역이지만, MINT 자체가 소설 전용 앱인 것은 아닙니다.  
-하나의 프로젝트 기반 글쓰기 플랫폼 위에서 Fiction에는 더 깊은 이야기 지능을, General Writing에는 더 가벼운 구조·검토 도구를 제공합니다.
+![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey?style=flat-square)
+![Chip](https://img.shields.io/badge/chip-Apple%20Silicon-111111?style=flat-square)
+![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=flat-square&logo=swift&logoColor=white)
+![Inference](https://img.shields.io/badge/inference-100%25%20local-2ea44f?style=flat-square)
+[![CI](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml/badge.svg)](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml)
+![License](https://img.shields.io/badge/license-Source%20Available-4c1?style=flat-square)
 
-모든 AI 추론은 **Apple Silicon Mac 안에서 로컬로 실행**됩니다. 원고를 서버로 보내지 않고, 원격 추론이나 텔레메트리를 제품 전제로 두지 않습니다.
+<br>
+
+<!-- TODO: replace with a real screenshot or a short GIF of Ghost Completion in action.
+     A writing app README without a picture of the writing surface is doing itself a disservice. -->
+<!-- <img src="docs/assets/hero.png" width="860" alt="The MINT editor with a Living Margin insight"> -->
+
+</div>
 
 ---
 
-## Why MINT
+## The problem
 
-대부분의 AI 글쓰기 도구는 채팅창에서 문장을 생성하거나, 사용자가 쓰기도 전에 적극적으로 개입합니다.
+Long-form fiction outgrows the writer's working memory before it outgrows the page.
 
-MINT가 원하는 경험은 다릅니다.
+By chapter thirty you are managing a cast who each know different things, a timeline that runs
+in two directions, threads you opened and have not closed, and a hundred small facts you
+established once and now have to honour. No editor helps with this. Most AI writing tools do
+something else entirely: they offer to write the next paragraph for you.
 
-- **Editor first** — AI가 없어도 좋은 글쓰기 앱이어야 합니다.
-- **Quiet AI** — 확신이 없으면 조용히 있는 편을 택합니다.
-- **Local only** — 원고와 추론은 사용자의 Mac 안에 머뭅니다.
-- **User Canon wins** — 사용자가 정한 설정과 판단은 자동 추론보다 항상 우선합니다.
-- **Evidence first** — 중요한 경고는 “AI가 그렇게 생각한다”가 아니라 실제 원고 근거로 돌아갈 수 있어야 합니다.
-- **Rebuildable intelligence** — AI가 이해한 지식은 다시 만들 수 있는 캐시이고, 원고와 사용자 결정은 오래 보존되는 데이터입니다.
-- **Writing flow over AI spectacle** — AI를 보여 주기 위한 UI보다 글의 흐름을 덜 끊는 UI를 우선합니다.
+MINT takes the other job. It reads what you have written, keeps track of it, and stays quiet
+until the moment it has something worth saying.
 
-MINT의 목표는 거대한 채팅 패널을 문서 옆에 붙이는 것이 아니라, **필요한 순간에만 나타나는 living intelligence**를 만드는 것입니다.
+Everything runs on your Mac. No manuscript leaves the machine.
+
+---
+
+## Principles
+
+|  | |
+| :-- | :-- |
+| **Editor first** | It has to be a good writing app with the AI switched off. |
+| **Quiet AI** | When confidence is low, showing nothing is the correct output. |
+| **Local only** | Manuscript and inference stay on your Mac. No remote calls, no telemetry. |
+| **User Canon wins** | What you decided always outranks what the model inferred. |
+| **Evidence first** | A warning that matters must lead back to real text in your manuscript. |
+| **Rebuildable intelligence** | Derived understanding is a cache. Your words and your decisions are not. |
+| **Flow over spectacle** | Prefer the UI that interrupts the sentence less. |
+
+The goal is not a chat panel bolted to the side of a document. It is intelligence that appears
+only when it is needed and disappears when it is not.
 
 ---
 
 ## The writing experience
 
-### Fiction
+MINT 0.2.0 is a **writing platform, fiction first**. Fiction is the domain it goes deepest on;
+it is not the only thing the app can do. Both modes sit on one project foundation.
 
-```text
-Write | Map | Review
+### Fiction — `Write · Map · Review`
+
+**Write** is where the manuscript lives.
+
+- A native macOS editor built on TextKit, tuned to stay out of the way
+- Ghost Completion that respects the Hangul IME and never fires mid-composition
+- Local autocomplete that draws on the project, not just the paragraph
+- A Living Margin that surfaces only when there is something to surface
+- `⌘K` to ask the whole project a question
+
+**Map** looks at the work as a story rather than a folder of files.
+
+```
+Scenes · Events · Characters · Relationships · Timeline
+Story Threads · World & Object State · Research & Ideas
 ```
 
-**Write**는 원고를 쓰는 기본 공간입니다.
+Map is not a database that replaces your manuscript. Everything the model builds is a
+*projection* of the text, and anything you confirm yourself becomes the reference the
+projection must respect.
 
-- 집중을 방해하지 않는 네이티브 macOS 에디터
-- 한글 IME를 존중하는 Ghost Completion
-- 프로젝트 맥락을 이용한 로컬 자동완성
-- 필요한 순간에만 나타나는 Living Margin
-- 프로젝트 전체를 질문하는 Ask MINT
+**Review** collects what is worth a second look, rather than rewriting sentences for you.
 
-**Map**은 작품을 “파일 목록”이 아니라 **이야기 구조**로 바라보는 공간입니다.
+- Prose quality and unintentional repetition
+- Continuity across setting, cast, time and relationships
+- Foreshadowing and threads still left open
+- The passage in your manuscript that triggered each one
+- `Intentional` · `Dismiss` · or fix it yourself
 
-목표 범위는 다음을 포함합니다.
+### General Writing — `Write · Outline · Review`
 
-- Scene / Event
-- Characters
-- Relationships
-- Timeline
-- Story Threads
-- World / Object State
-- Research / Ideas
-- 원고 근거로 돌아갈 수 있는 Story Map
+A standalone experience that does not depend on fiction types: document-centric navigator,
+outline, writing quality, research and reference notes, Ghost Completion, Ask MINT, search
+and export.
 
-Map은 작가의 원고를 대체하는 데이터베이스가 아닙니다.  
-AI가 만든 구조는 원고를 이해하기 위한 projection이며, 사용자가 확인한 설정과 판단이 최종 기준입니다.
-
-**Review**는 문장을 대신 고치는 화면이 아니라 **검토할 가치가 있는 것만 모아 주는 공간**을 지향합니다.
-
-- 문장 품질과 반복
-- 설정·인물·시간·관계의 연속성
-- 복선과 열린 스레드
-- 원문 evidence
-- `Intentional` / `Dismiss` / 사용자 수정
-
-중요한 경고일수록 반드시 원고의 실제 근거를 따라갈 수 있어야 합니다.
-
-### General Writing
-
-```text
-Write | Outline | Review
-```
-
-General Writing은 Fiction 타입에 의존하지 않는 독립적인 글쓰기 경험입니다.
-
-- 문서 중심 Navigator
-- Outline
-- Writing Quality
-- Research / Reference / Ideas
-- Ghost Completion
-- Ask MINT
-- Search / Export
-
-Fiction이 깊은 이야기 지능을 가진다고 해서, 일반 글쓰기가 “기능이 빠진 소설 모드”가 되어서는 안 됩니다.
+Fiction going deep must not turn general writing into "novel mode with the features removed."
 
 ---
 
 ## One project, one context
 
-MINT 0.2.0의 루트 도메인은 `WritingProject`입니다.
-
-```text
-MINT
-└─ WritingProject
-   ├─ mode: Fiction | General
-   ├─ Documents
-   ├─ Notes
-   ├─ Assets
-   ├─ User Canon
-   └─ Intelligence
+```
+WritingProject
+├─ mode: Fiction | General
+├─ Documents
+├─ Notes
+├─ Assets
+├─ User Canon
+└─ Intelligence
 ```
 
-공유 플랫폼 위에 모드별 지능을 얹습니다.
+Shared platform underneath, domain intelligence layered on top:
 
-```text
-Writing Platform
-├─ Project Navigator
-├─ Editor
-├─ Search / Export
-├─ Ask MINT
-├─ Ghost Completion
-└─ Local AI Runtime
-
-Writing Intelligence
-├─ Context Retrieval
-├─ Living Margin
-└─ Review
-
-Fiction Intelligence
-├─ Scene / Event / Character
-├─ Timeline / Relationship / Object State
-├─ Story Threads
-├─ Hierarchical Story Memory
-├─ Continuity
-└─ Story Map
+```
+Writing Platform            Writing Intelligence      Fiction Intelligence
+├─ Project Navigator        ├─ Context Retrieval      ├─ Scene · Event · Character
+├─ Editor                   ├─ Living Margin          ├─ Timeline · Relationships
+├─ Search / Export          └─ Review                 ├─ Object State
+├─ Ask MINT                                           ├─ Story Threads
+├─ Ghost Completion                                   ├─ Hierarchical Story Memory
+└─ Local AI Runtime                                   ├─ Continuity
+                                                      └─ Story Map
 ```
 
-이 구조 덕분에 MINT는 “소설 기능을 일반 문서에도 억지로 끼워 넣는 앱”이 아니라, 같은 글쓰기 기반 위에 필요한 도메인 지능만 선택적으로 올릴 수 있습니다.
+This is why MINT can add fiction depth without forcing novel-shaped features onto a memo.
 
 ---
 
-## Intelligence should stay beside the writer, not above them
+## How the intelligence behaves
 
 ### Ghost Completion
 
-MINT의 자동완성은 사용자가 문장을 작성하는 동안 전경을 빼앗지 않습니다.
+Pause for a moment and a suggestion appears in grey, inline, where the cursor already is.
 
-글을 잠깐 멈췄을 때 회색 Ghost로 제안하고:
+| Key | Action |
+| :-- | :-- |
+| <kbd>Tab</kbd> | Accept all |
+| <kbd>→</kbd> | Accept part |
+| <kbd>Esc</kbd> | Dismiss |
 
-- `Tab` — 전체 수락
-- `→` — 일부 수락
-- `Esc` — 거부
-
-를 사용합니다.
-
-예측은 가장 높은 실행 우선순위를 가지며, 백그라운드 이해 작업은 즉시 양보해야 합니다.
+Prediction holds the highest execution priority in the app. Background understanding yields to
+it immediately, and nothing in the prediction hot path is allowed to touch the disk, call a
+retrieval model, or rebuild an index.
 
 ### Living Margin
 
-AI가 모든 문장에 밑줄을 긋고 팝업을 띄우는 방향을 피합니다.
+No underlines on every sentence. No popups. A margin that stays empty until it has something
+like this:
 
-Living Margin은 현재 글과 관련된 중요한 정보가 있을 때만 조용히 나타나는 공간입니다.
+> *This character does not know that yet — they were not in the scene where it happened.*
+>
+> *This thread has not appeared in eleven chapters.*
+>
+> *The last four paragraphs end on the same rhythm.*
 
-예:
-
-- “이 인물은 이전 장면에서 이 사실을 아직 모릅니다.”
-- “이 플롯 스레드는 오랫동안 다시 등장하지 않았습니다.”
-- “최근 문단에서 비슷한 종결 표현이 반복됩니다.”
-
-확신이 낮으면 아무것도 보여 주지 않는 것이 올바른 결과일 수 있습니다.
+If confidence is low, the margin stays empty. That is a feature.
 
 ### Ask MINT
 
-Ask MINT는 영구적인 챗봇 사이드바가 아니라 **프로젝트 문맥에 잠깐 접근하는 도구**를 지향합니다.
-
-`⌘K`에서 현재 프로젝트 전체를 대상으로 질문하고, 결과가 원고의 사실을 주장한다면 가능한 한 실제 문서 근거로 돌아갈 수 있어야 합니다.
+Not a permanent sidebar. `⌘K` opens a question against the current project, answers it, and
+gets out of the way. When the answer asserts something about the manuscript, it should be able
+to point at the passage it came from.
 
 ---
 
 ## Story memory
 
-소설을 이해할 때 하나의 거대한 요약문에 모든 것을 넣지 않습니다.
+A novel does not compress into one large summary without losing the thing that matters.
 
-```text
+```
 Work
 └─ Part / Arc
    └─ Chapter
       └─ Scene
          └─ Atomic Story Knowledge
+            ├─ Event              ├─ Character State
+            ├─ Fact               ├─ Character Knowledge
+            ├─ Relationship State ├─ Object State
+            └─ Story Thread
 ```
 
-Atomic knowledge의 예:
+Summaries are a **retrieval router, not a source of truth**. Any judgement shown to the writer
+must be traceable down to real evidence in the text.
 
-- Event
-- Fact
-- Character State
-- Character Knowledge
-- Relationship State
-- Object State
-- Story Thread
+Fiction time is not one axis either:
 
-요약은 **진실의 원천이 아니라 retrieval router**입니다.
+- **Discourse position** — the order the reader encounters it
+- **Story time** — the order it happened in the world
 
-사용자에게 보여 주는 중요한 판단은 최종적으로 원고의 실제 evidence까지 내려갈 수 있어야 합니다.
-
-Fiction의 시간도 한 축으로 단순화하지 않습니다.
-
-- **discourse position** — 원고에 등장한 순서
-- **story time** — 작품 세계에서 실제로 일어난 순서
-
-시간을 알 수 없다면 모른다고 유지합니다. AI가 빈칸을 상상해서 강한 모순 경고를 만들어서는 안 됩니다.
+When the time is unknown it stays unknown. The model does not get to invent a gap and then
+raise a contradiction about it.
 
 ---
 
 ## Your manuscript is yours
 
-MINT의 데이터 우선순위는 다음과 같습니다.
+Data precedence, highest first:
 
-```text
-User Canon
-> explicit manuscript text
-> deterministic inference
-> agent inference
-> summary
+```
+User Canon  >  explicit manuscript text  >  deterministic inference
+            >  agent inference  >  summary
 ```
 
-사용자가 직접 고친 인물 설정, 관계, 사건 판단, 의도된 모순 같은 결정은 재분석이 덮어쓰지 못해야 합니다.
+Character sheets you corrected, relationships you fixed, contradictions you marked intentional:
+reanalysis never overwrites these. Summaries, extractions and search indexes are all
+disposable and can be rebuilt from the text.
 
-반대로 AI가 만든 요약·추출·검색 인덱스는 다시 만들 수 있어야 합니다.
+On disk:
 
-0.2.0의 프로젝트 저장 목표:
-
-```text
+```
 ~/Documents/MINT/Projects/<project-id>/
 ├─ project.json
 ├─ Documents/
@@ -237,82 +221,60 @@ User Canon
 └─ Intelligence/
 ```
 
-기존 `entries.json`에서 프로젝트 구조로 이동할 때도 **원본을 제자리에서 변형하지 않는 비파괴 migration**을 원칙으로 합니다.
+Migration from the older `entries.json` layout is **non-destructive by contract**. The original
+is never transformed in place, and a new project is verified before it is ever activated.
 
 ---
 
-## Current state — MINT 0.2.0
+## Status — 0.2.0
 
-0.2.0은 현재 개발 중입니다. README는 목표와 현재 구현을 구분합니다.
+0.2.0 is under active development. This table is a summary; the authoritative scope, sequence
+and gates live in
+[**Epic #99**](https://github.com/sorbetsharkroundhand/MINT/issues/99).
 
-### Landed on `main`
+| Area | State |
+| :-- | :-- |
+| Native editor, Ghost Completion, search, export | Working |
+| Project domain, store and non-destructive migration | Working |
+| Fiction / General workspace routing and shell | Working |
+| Living Margin framework | Landed, presentation in progress |
+| Hierarchical story memory | Landed, retrieval integration in progress |
+| Writing Quality core | Working, Korean rule set in progress |
+| Ask MINT, Story Map, Review surface | In progress |
+| Project-first runtime handoff ([#118](https://github.com/sorbetsharkroundhand/MINT/issues/118)) | In progress |
+| App Store distribution path ([#150](https://github.com/sorbetsharkroundhand/MINT/issues/150)) | In progress |
 
-- ✅ generic `WritingProject` / `WritingDocument` domain
-- ✅ `ProjectStore` + non-destructive legacy migration foundation
-- ✅ project-scoped `ProjectSession`
-- ✅ Fiction `Write / Map / Review` vs General `Write / Outline / Review` routing
-- ✅ per-project workspace mode persistence
-- ✅ document-centric workspace shell baseline
-- ✅ Navigator drag-collapse / persistent tool docking / titlebar geometry
-- ✅ Ghost Completion wrapped-line geometry regression coverage
-- ✅ project-first onboarding core
-- ✅ cancellable provider-independent Writing Quality core
-- ✅ native editor, Ghost Completion, search/export and existing Fiction intelligence foundations
-
-### Still in progress
-
-- 🚧 First-run UI + project-first runtime handoff
-- 🚧 Living Margin
-- 🚧 hierarchical story memory
-- 🚧 atomic / temporal Story Knowledge
-- 🚧 structure-first retrieval
-- 🚧 evidence-bounded continuity judge
-- 🚧 durable User Canon integration
-- 🚧 Ask MINT
-- 🚧 Story Map
-- 🚧 Review presentation
-- 🚧 Story Context → Ghost
-- 🚧 General Writing end-to-end proof
-- 🚧 Korean morphology provider / writing-quality rules
-- 🚧 final release-readiness and large-document performance evidence
-
-> **Important:** the current primary editor flow still contains the legacy `EntryStore` compatibility path while #118 completes the project-first runtime handoff.  
-> Therefore some 0.2.0 workspace UI can be present in code but not yet appear in the normal legacy document flow. Replacement surfaces land before legacy primary UI is retired.
-
-The release contract and live dependency map are tracked in [Epic #99 — MINT 0.2.0: Writing Platform, Fiction First](https://github.com/sorbetsharkroundhand/MINT/issues/99).
+> **Reading the code:** the primary editor flow still runs through the legacy `EntryStore`
+> compatibility path while [#118](https://github.com/sorbetsharkroundhand/MINT/issues/118)
+> completes the project-first runtime handoff. Some 0.2.0 workspace UI therefore exists in the
+> source without appearing in the normal document flow yet. Replacement surfaces land before
+> any legacy UI is retired.
 
 ---
 
 ## Technology
 
 | Area | Stack |
-| --- | --- |
+| :-- | :-- |
 | Language | Swift 6 |
 | Platform | macOS 14+, Apple Silicon |
 | UI | SwiftUI + AppKit / TextKit |
-| Local inference | Apple MLX |
-| Package manager | Swift Package Manager |
-| Model runtime | mlx-swift, mlx-swift-lm |
-| Tokenization / Hub | swift-transformers, swift-huggingface |
+| Local inference | Apple MLX — `mlx-swift`, `mlx-swift-lm` |
+| Tokenizer / Hub | `swift-transformers`, `swift-huggingface` |
 | Math rendering | SwiftMath |
-| Tests | XCTest + app/UI smoke |
+| Package manager | Swift Package Manager |
+| Tests | XCTest, plus app launch and UI smoke |
 
-MINT deliberately keeps the editor and domain model independent from any single model provider or Fiction-specific type where that coupling is not required.
+The editor and the domain model are deliberately kept independent of any single model provider,
+and of fiction-specific types wherever that coupling is not required.
 
 ---
 
 ## Run from source
 
-### Requirements
+**Requirements** — Apple Silicon Mac · macOS 14+ · Xcode 16+ · Swift 6 toolchain
 
-- Apple Silicon Mac
-- macOS 14+
-- Xcode 16+
-- Swift 6 toolchain
-
-### Development run
-
-SwiftPM can build the Swift executable, but MLX also needs its Metal shader library.
+SwiftPM builds the executable, but MLX also needs its Metal shader library.
 
 ```bash
 git clone https://github.com/sorbetsharkroundhand/MINT.git
@@ -322,24 +284,34 @@ scripts/prepare-metallib.sh
 swift run MINT
 ```
 
-`prepare-metallib.sh` can reuse its cache and rebuilds the metallib when the pinned `mlx-swift` revision changes.
+`prepare-metallib.sh` caches its output and rebuilds only when the pinned `mlx-swift`
+revision changes.
 
-### Build a local `.app`
+<details>
+<summary><strong>Building a local <code>.app</code></summary>
 
-For a path closer to the app lifecycle tested in CI:
+<br>
+
+Closer to the lifecycle CI actually exercises:
 
 ```bash
 scripts/build-mint-app.sh
 open build/MINT.app
 ```
 
-The build script prepares `mlx.metallib`, builds the release executable, creates `build/MINT.app`, and applies an ad-hoc signature for local execution.
+The script prepares `mlx.metallib`, builds the release executable, assembles
+`build/MINT.app` and applies an ad-hoc signature for local execution.
 
-### Verification
+</details>
+
+<details>
+<summary><strong>Verification</strong></summary>
+
+<br>
 
 ```bash
-swift test
 swift build
+swift test
 swift build --product MINTBench
 
 scripts/build-mint-app.sh
@@ -347,47 +319,70 @@ scripts/smoke-mint-app.sh
 scripts/ui-smoke-mint-app.sh
 ```
 
+</details>
+
 ---
 
 ## Repository map
 
-```text
+```
 Sources/
-├─ MINT/              thin @main application shell
+├─ MINT/                     @main application shell (thin)
 ├─ MINTCore/
-│  ├─ Project/        WritingProject, ProjectStore, ProjectSession
-│  ├─ Workspace/      shell, routing, navigator/workspace presentation
-│  ├─ Editor/         TextKit editor and Ghost Completion
-│  ├─ Inference/      MLX runtime, completion, context assembly
-│  ├─ Knowledge/      story understanding / retrieval foundations
-│  ├─ Fiction/        Fiction-specific domain intelligence
-│  ├─ Storage/
-│  └─ Export/
-└─ MINTBench/         quality / latency benchmark CLI
+│  ├─ Project/               WritingProject, ProjectStore, ProjectSession
+│  ├─ Workspace/             shell, routing, navigator presentation
+│  ├─ Onboarding/            first run, project creation and import
+│  ├─ Editor/                TextKit editor, Ghost Completion, math, images
+│  ├─ Inference/             MLX runtime, completion, context assembly
+│  ├─ Knowledge/             story understanding, retrieval, evidence anchors
+│  ├─ Intelligence/          Living Margin
+│  ├─ WritingQuality/        provider-independent diagnostics
+│  ├─ Media/                 image references, asset lifecycle
+│  ├─ Storage/               entries, images, trash, writing position
+│  ├─ Export/                Markdown and EPUB
+│  └─ Components/            shared view components
+└─ MINTBench/                quality and latency benchmark CLI
 
 Tests/
-└─ MINTCoreTests/
+└─ MINTCoreTests/            deterministic regression coverage
 ```
 
-Canonical architecture and implementation planning live in:
+## Documentation
 
-- [PLAN.md](PLAN.md)
-- [MINT 0.2.0 Design Specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md)
-- [Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99)
+| Document | What it is |
+| :-- | :-- |
+| [PLAN.md](PLAN.md) | Architecture and context index |
+| [AGENTS.md](AGENTS.md) | Shared invariants and verification commands |
+| [Design specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md) | 0.2.0 design contract |
+| [Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) | Release scope, sequence and gates |
+
+Historical plans and benchmark reports under `docs/` record their original contracts. They are
+not current implementation contracts — read them to answer a specific question, not to learn
+how the code works today.
 
 ---
 
-## The direction
+## License
 
-MINT가 잘 만들어졌을 때 사용자는 “AI 기능을 쓰고 있다”고 계속 의식하지 않아야 합니다.
+Source available, all rights reserved. See [LICENSE](LICENSE).
 
-그저 글을 쓰고,
+You may read this source and build it locally to evaluate MINT. You may not redistribute it,
+publish modified versions, or use it commercially. Licensing and commercial terms are being
+finalised in [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155) and may change.
 
-- MINT는 작품을 뒤에서 읽고,
-- 중요한 맥락을 기억하고,
-- 필요할 때만 조용히 알려 주고,
-- 물어보면 프로젝트 전체에서 근거를 찾아오고,
-- 사용자가 내린 결정을 기억하며,
-- 절대로 작가보다 작품을 더 잘 안다고 행동하지 않습니다.
+---
+
+<div align="center">
+
+When MINT is working, you should not be aware you are using AI at all.
+
+You write. MINT reads behind you, remembers what matters, speaks only when it should,
+finds the evidence when you ask, keeps every decision you made,
+
+and never behaves as though it knows the story better than you do.
+
+<br>
 
 **The writer owns the story. MINT helps them keep hold of it.**
+
+</div>
