@@ -43,6 +43,7 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let baseFontSize: CGFloat
     /// 현재 편집 중인 안정적인 문서 identity — runtime generation은 포함하지 않는다.
     private let documentIdentity: EditorDocumentIdentity
+    private let positionStore: WritingPositionStore
     /// 에디터 포커스 요청 카운터(EntryStore.editorFocusRequests) — 값이 바뀌면
     /// 텍스트 뷰를 first responder로 만든다 (새 저널 → 바로 타이핑).
     private let focusRequest: Int
@@ -60,6 +61,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         documentIdentity: EditorDocumentIdentity,
+        positionStore: WritingPositionStore = .shared,
         isEditable: Bool = true,
         focusRequest: Int = 0,
         searchJump: EditorSearchJump? = nil,
@@ -73,6 +75,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.lineSpacing = lineSpacing
         self.baseFontSize = baseFontSize
         self.documentIdentity = documentIdentity
+        self.positionStore = positionStore
         self.focusRequest = focusRequest
         self.searchJump = searchJump
         self.assetCatalog = assetCatalog
@@ -90,6 +93,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
         entryID: UUID = UUID(),
+        positionStore: WritingPositionStore = .shared,
         isEditable: Bool = true,
         focusRequest: Int = 0,
         searchJump: EntryStore.SearchJump? = nil,
@@ -102,6 +106,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             lineSpacing: lineSpacing,
             baseFontSize: baseFontSize,
             documentIdentity: .legacy(entryID),
+            positionStore: positionStore,
             isEditable: isEditable,
             focusRequest: focusRequest,
             searchJump: searchJump.map {
@@ -165,7 +170,6 @@ public struct MintBlockEditor: NSViewRepresentable {
         configureAssets(textView)
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
-        context.coordinator.loadedDocumentIdentity = documentIdentity
         // 최초 값은 소비된 것으로 간주 — 실제 포커스는 뷰가 창에 붙을 때(launch) 준다.
         context.coordinator.lastFocusRequest = focusRequest
         context.coordinator.markSearchJumpConsumed(searchJump, for: documentIdentity)
@@ -178,6 +182,12 @@ public struct MintBlockEditor: NSViewRepresentable {
         // 타이틀바 밑이 아니라 툴바·상태 바 사이에 있어 자동 상단 인셋은 어차피 0이다.
         scrollView.automaticallyAdjustsContentInsets = false
 
+        if let persisted = context.coordinator.restorePosition(
+            for: documentIdentity, body: textView.string, in: positionStore)
+        {
+            textView.restoreWritingPosition(persisted)
+        }
+        context.coordinator.loadedDocumentIdentity = documentIdentity
         context.coordinator.attach(to: textView)
         // 스크롤 주도 가시 렌더 (#18 2단계) — 스크롤이 멈출 때 화면 밖을 건너뛴
         // 블록을 채워 그린다 (편집·커서 경로는 여전히 전체 패스).
@@ -239,7 +249,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             if let snapshot = textView.writingPositionSnapshot() {
                 context.coordinator.recordPosition(
                     snapshot, body: textView.string, for: previous,
-                    in: WritingPositionStore.shared)
+                    in: positionStore)
             }
         }
         // 외부(저널 전환·로드)에서 본문이 바뀐 경우에만 다시 파싱한다.
@@ -262,12 +272,13 @@ public struct MintBlockEditor: NSViewRepresentable {
                 textView.restoreSelection(to: saved)
             } else if let persisted = context.coordinator.restorePosition(
                 for: documentIdentity, body: textView.string,
-                in: WritingPositionStore.shared)
+                in: positionStore)
             {
                 textView.restoreWritingPosition(persisted)
             }
         } else if text != context.coordinator.lastSyncedText {
             // Same stable identity: synchronize external body state without severing native undo.
+            context.coordinator.isDocumentTransitioning = true
             textView.load(markdown: text)
             context.coordinator.lastSyncedText = text
             textView.ghostText = nil
@@ -275,6 +286,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.showConversationPrompt(nil)
             controller?.dismissConversationSuggestion(remember: false)
             controller?.refreshLongParagraphDetection()
+            context.coordinator.isDocumentTransitioning = false
         }
         if documentChanged {
             context.coordinator.loadedDocumentIdentity = documentIdentity
@@ -423,7 +435,7 @@ public struct MintBlockEditor: NSViewRepresentable {
                 recordPosition(
                     snapshot, body: textView.string,
                     for: loadedDocumentIdentity ?? parent.documentIdentity,
-                    in: WritingPositionStore.shared)
+                    in: parent.positionStore)
             }
             forwardEditEvent(textView)
             let handlerMs = (CFAbsoluteTimeGetCurrent() - start) * 1000
@@ -493,6 +505,13 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.refreshRenderedBlocks()
             // 드래그 선택 위 서식 툴바 표시/숨김.
             textView.updateSelectionToolbar()
+            if let identity = loadedDocumentIdentity,
+                let snapshot = textView.writingPositionSnapshot(), !snapshot.marked
+            {
+                recordPosition(
+                    snapshot, body: textView.string, for: identity,
+                    in: parent.positionStore)
+            }
             guard let controller = parent.controller else { return }
             let range = textView.selectedRange()
             if range.length > 0 {

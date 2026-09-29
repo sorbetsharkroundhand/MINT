@@ -5,6 +5,90 @@ import XCTest
 
 @MainActor
 final class ProjectEditorTransitionTests: XCTestCase {
+    func testFirstProjectEditorMountRestoresPersistedCompositeSelection() async throws {
+        let suite = "MINT-project-position-mount-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let key = ProjectDocumentKey(
+            projectID: WritingProjectID(), documentID: WritingDocumentID())
+        let body = (0..<200)
+            .map { "\($0) long project paragraph keeps the restored caret below the first screen." }
+            .joined(separator: "\n")
+        let selected = NSRange(location: 8_000, length: 5)
+        let seed = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
+        seed.record(
+            location: selected.location, selectionLength: selected.length, body: body, for: key)
+        seed.persistNow()
+        let reopened = WritingPositionStore(defaults: defaults, persistDelay: .seconds(3600))
+        let window = LegacyUndoWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let host = NSHostingView(rootView: MintBlockEditor(
+            text: .constant(body), documentIdentity: .project(key), positionStore: reopened))
+        window.contentView = host
+        defer { window.contentView = nil; window.close() }
+
+        for _ in 0..<5 { host.layoutSubtreeIfNeeded(); await Task.yield() }
+        let editor = try XCTUnwrap(findEditor(host))
+
+        XCTAssertEqual(editor.selectedRange(), selected)
+        XCTAssertGreaterThan(
+            try XCTUnwrap(editor.enclosingScrollView).contentView.bounds.origin.y, 0)
+    }
+
+    func testSelectionOnlyMovePersistsThroughRealTerminationPath() async throws {
+        let harness = try await ProjectPositionViewHarness()
+        defer { harness.close() }
+        let editor = try await harness.editor()
+        let selected = NSRange(location: 3, length: 5)
+        editor.setSelectedRange(selected)
+        let termination = ProjectTerminationCoordinator(
+            session: harness.fixture.session,
+            legacyWorkspace: harness.legacyWorkspace,
+            persistPositions: { harness.positionStore.persistNow() },
+            shutdown: {}, drain: {})
+
+        let terminationResult = await termination.prepareForTermination()
+        XCTAssertEqual(terminationResult, .terminateNow)
+
+        let reopened = WritingPositionStore(
+            defaults: harness.fixture.defaults, persistDelay: .seconds(3600))
+        let key = ProjectDocumentKey(
+            projectID: harness.fixture.project.id,
+            documentID: harness.fixture.project.documents[0].id)
+        let restored = reopened.restore(in: "original project", for: key)
+        XCTAssertEqual(restored?.location, selected.location)
+        XCTAssertEqual(restored?.selectionLength, selected.length)
+    }
+
+    func testSelectionOnlyMovePersistsAcrossContentViewProjectSwitch() async throws {
+        let harness = try await ProjectPositionViewHarness()
+        defer { harness.close() }
+        let original = harness.fixture.project.documents[0]
+        let destination = WritingProject(
+            id: WritingProjectID(), title: "Destination", mode: .general,
+            documents: [WritingDocument(
+                id: WritingDocumentID(), title: "Other", body: "other project",
+                kind: .manuscript)])
+        try await harness.fixture.store.save(destination)
+        let editor = try await harness.editor()
+        let selected = NSRange(location: 4, length: 6)
+        editor.setSelectedRange(selected)
+
+        try await harness.fixture.session.activateProject(id: destination.id)
+        await harness.layout()
+        harness.positionStore.persistNow()
+
+        let reopened = WritingPositionStore(
+            defaults: harness.fixture.defaults, persistDelay: .seconds(3600))
+        let key = ProjectDocumentKey(
+            projectID: harness.fixture.project.id, documentID: original.id)
+        let restored = reopened.restore(in: original.body, for: key)
+        XCTAssertEqual(restored?.location, selected.location)
+        XCTAssertEqual(restored?.selectionLength, selected.length)
+    }
+
     // Exercises the real ContentView callback and EditorPane binding while durable I/O is held.
     func testProjectSaveCommitsIMEAndFencesNativeEditorUntilFailedSaveRestoresIt() async throws {
         try await verifyProjectTransition(fails: true, suspending: false)
@@ -108,6 +192,67 @@ final class ProjectEditorTransitionTests: XCTestCase {
     private func findEditor(_ view: NSView) -> BlockTextView? {
         if let editor = view as? BlockTextView { return editor }
         return view.subviews.lazy.compactMap { self.findEditor($0) }.first
+    }
+}
+
+@MainActor
+private final class ProjectPositionViewHarness {
+    let fixture: LegacyBoundaryFixture
+    let positionStore: WritingPositionStore
+    let legacyWorkspace: LegacyWorkspaceController
+    let completion: CompletionController
+    let indexer: BackgroundIndexer
+    let window: LegacyUndoWindow
+    let host: NSHostingView<ContentView>
+
+    init() async throws {
+        fixture = try await LegacyBoundaryFixture()
+        positionStore = WritingPositionStore(
+            defaults: fixture.defaults, persistDelay: .seconds(3600))
+        legacyWorkspace = LegacyWorkspaceController(session: fixture.session)
+        let settings = CompletionSettings(defaults: fixture.defaults)
+        completion = CompletionController(settings: settings)
+        indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
+        let requests = ProjectEditorRequests()
+        window = LegacyUndoWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1000, height: 650),
+            styleMask: [.titled], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        host = NSHostingView(rootView: ContentView(
+            projectSession: fixture.session,
+            legacyWorkspace: legacyWorkspace,
+            editorRequests: requests,
+            completion: completion,
+            indexer: indexer,
+            livingMargin: LivingMarginModel(),
+            firstRunFlow: FirstRunFlow(
+                session: fixture.session, store: fixture.store, editorRequests: requests),
+            positionStore: positionStore))
+        window.contentView = host
+        await layout()
+    }
+
+    func layout() async {
+        for _ in 0..<12 { host.layoutSubtreeIfNeeded(); await Task.yield() }
+    }
+
+    func editor() async throws -> BlockTextView {
+        await layout()
+        return try XCTUnwrap(findEditor(in: host))
+    }
+
+    func close() {
+        window.testUndo.removeAllActions()
+        window.contentView = nil
+        window.close()
+        completion.shutdown()
+        indexer.shutdown()
+        fixture.cleanUp()
+    }
+
+    private func findEditor(in view: NSView) -> BlockTextView? {
+        if let editor = view as? BlockTextView { return editor }
+        return view.subviews.lazy.compactMap { self.findEditor(in: $0) }.first
     }
 }
 

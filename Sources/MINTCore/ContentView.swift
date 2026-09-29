@@ -29,6 +29,7 @@ public struct ContentView: View {
     private let indexer: BackgroundIndexer
     @ObservedObject private var livingMargin: LivingMarginModel
     private let firstRunFlow: FirstRunFlow
+    private let positionStore: WritingPositionStore
     @State private var projectEditorBridge = ProjectEditorBridge()
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
@@ -39,7 +40,8 @@ public struct ContentView: View {
         completion: CompletionController,
         indexer: BackgroundIndexer,
         livingMargin: LivingMarginModel,
-        firstRunFlow: FirstRunFlow
+        firstRunFlow: FirstRunFlow,
+        positionStore: WritingPositionStore = .shared
     ) {
         self.projectSession = projectSession
         self.legacyWorkspace = legacyWorkspace
@@ -48,6 +50,7 @@ public struct ContentView: View {
         self.indexer = indexer
         self.livingMargin = livingMargin
         self.firstRunFlow = firstRunFlow
+        self.positionStore = positionStore
     }
 
     public var body: some View {
@@ -87,7 +90,8 @@ public struct ContentView: View {
                     editorRequests: editorRequests,
                     completion: completion,
                     livingMargin: livingMargin,
-                    editorBridge: projectEditorBridge)
+                    editorBridge: projectEditorBridge,
+                    positionStore: positionStore)
             case .error:
                 VStack(spacing: 12) {
                     Text("프로젝트를 열지 못했습니다")
@@ -200,6 +204,7 @@ struct EditorPane: View {
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     var editorBridge: ProjectEditorBridge? = nil
+    var positionStore: WritingPositionStore = .shared
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
@@ -237,6 +242,7 @@ struct EditorPane: View {
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
                     documentIdentity: identity,
+                    positionStore: positionStore,
                     isEditable: projectSession.isEditorEditable,
                     focusRequest: editorRequests.editorFocusRequest,
                     searchJump: editorRequests.searchJump,
