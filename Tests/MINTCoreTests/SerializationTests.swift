@@ -324,7 +324,9 @@ final class SerializationTests: XCTestCase {
         view.load(markdown: "A")
         view.ghostText = "old suggestion"
         view.undoManager?.registerUndo(withTarget: view) { target in
-            target.string = "A from old undo"
+            MainActor.assumeIsolated {
+                target.string = "A from old undo"
+            }
         }
         XCTAssertTrue(view.undoManager?.canUndo == true)
 
@@ -342,7 +344,9 @@ final class SerializationTests: XCTestCase {
         view.load(markdown: "A")
         view.ghostText = "current suggestion"
         view.undoManager?.registerUndo(withTarget: view) { target in
-            target.string = "undo remains local"
+            MainActor.assumeIsolated {
+                target.string = "undo remains local"
+            }
         }
         let key = ProjectDocumentKey(
             projectID: WritingProjectID(), documentID: WritingDocumentID())
