@@ -294,7 +294,6 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @State private var sidebarButtonHovered = false
     @State private var settingsButtonHovered = false
-    @State private var toolButtonHovered = false
     @State private var longParagraphOpen = false
     /// ⌘,의 Settings 씬을 여는 표준 액션 (macOS 14+). 다크 모드·사용 방법·
     /// 저자 이름이 전부 설정으로 옮겨 가면서 눈에 보이는 입구가 필요해졌다.
@@ -303,13 +302,22 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
-        HStack(spacing: 10) {
+        GeometryReader { geometry in
+            toolbar(density: WorkspaceLayoutState.toolbarDensity(forEditorWidth: geometry.size.width))
+        }
+        .frame(height: 52)
+        .background(theme.toolbarC)
+    }
+
+    private func toolbar(density: WorkspaceToolbarDensity) -> some View {
+        HStack(spacing: density == .compact ? 6 : 10) {
             sidebarToggle
             Text(store.activeEntry?.title ?? "문서")
                 .font(MintFonts.uiFont(12, .medium))
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .frame(maxWidth: density == .compact ? 150 : 260, alignment: .leading)
             if let projectMode = projectSession.activeProject?.mode {
                 let options = WorkspaceModePresentation.options(for: projectMode)
                 if options.count > 1 {
@@ -326,7 +334,7 @@ struct EditorToolbar: View {
             }
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
-            if store.activeEntry?.resolvedKind == .novel {
+            if density == .standard, store.activeEntry?.resolvedKind == .novel {
                 Button {
                     sidebarSection = SidebarSection.bible.rawValue
                 } label: {
@@ -390,34 +398,7 @@ struct EditorToolbar: View {
                         onDismiss: { longParagraphOpen = false })
                 }
             }
-            Spacer()
-            Button {
-                WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
-            } label: {
-                Image(systemName: "sidebar.right")
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundStyle(
-                        sidebarSection == SidebarSection.margin.rawValue
-                            ? theme.blueC
-                            : theme.ink2C
-                    )
-                    .frame(width: 28, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                            .fill(
-                                toolButtonHovered
-                                    ? theme.hoverC
-                                    : (sidebarSection == SidebarSection.margin.rawValue
-                                        ? theme.activeBgC
-                                        : .clear)
-                            )
-                    )
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .onHover { toolButtonHovered = $0 }
-            .accessibilityLabel("리빙 마진 열기")
-            .help("리빙 마진 — 원고 옆에서 확인할 제안")
+            Spacer(minLength: 8)
             Menu {
                 if store.activeEntry?.resolvedKind == .novel {
                     Button("스토리 바이블") {
@@ -442,7 +423,7 @@ struct EditorToolbar: View {
             .fixedSize()
             .accessibilityLabel("기타 글 도구")
             .help("기타 글 도구")
-            ModelChip(completion: completion, settings: settings, theme: theme)
+            ModelChip(completion: completion, settings: settings, theme: theme, compact: density == .compact)
             settingsButton
         }
         // When Navigator is hidden, use the measured macOS traffic-light safe region.
@@ -453,8 +434,7 @@ struct EditorToolbar: View {
                 ? WindowChromeGeometry.toolbarHorizontalPadding
                 : windowChromeLeadingInset)
         .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
-        .frame(minHeight: 52)
-        .background(theme.toolbarC)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var workspaceModeBinding: Binding<WorkspaceMode> {
@@ -692,12 +672,16 @@ struct MarkdownCheatSheet: View {
 
 // MARK: - 단축키 힌트 필
 
-/// 에디터 하단 중앙의 고스트 단축키 안내 (tab / → / esc, 디자인 sticky pill).
+/// Contextual keyboard teaching while a Ghost suggestion is available.
 struct ShortcutHintPill: View {
     let active: Bool
     let theme: MintTheme
 
     var body: some View {
+        if active { pill }
+    }
+
+    private var pill: some View {
         HStack(spacing: 14) {
             item(key: "tab", label: "수락")
             divider
@@ -720,7 +704,7 @@ struct ShortcutHintPill: View {
                 .strokeBorder(theme.pillBorderC)
         )
         .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
-        .opacity(active ? 1 : 0.6)
+        .accessibilityIdentifier("mint.ghost-shortcut-hint")
         // 모션 없음 — Tab/→/Esc마다 도는 고빈도 경로다 (감사 표, #27).
         // 과거 200ms fade가 키 피드백을 늦췄다.
         .allowsHitTesting(false)

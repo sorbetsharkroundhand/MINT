@@ -6,6 +6,7 @@ struct ModelChip: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
+    var compact = false
 
     @Environment(\.openSettings) private var openSettings
     @State private var menuOpen = false
@@ -27,15 +28,22 @@ struct ModelChip: View {
                         .frame(width: 6, height: 6)
                         .accessibilityHidden(true)  // 의미는 아래 AX 값이 말한다 (#59-3).
                 }
-                Text(statusLabel)
-                    .font(MintFonts.monoUI(11, .semibold))
-                    .foregroundStyle(theme.ink2C)
-                Text("▼")
-                    .font(.system(size: 8))
-                    .foregroundStyle(theme.ink3C)
+                if compact {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(theme.ink2C)
+                        .accessibilityHidden(true)
+                } else {
+                    Text(statusLabel)
+                        .font(MintFonts.monoUI(11, .semibold))
+                        .foregroundStyle(theme.ink2C)
+                    Text("▼")
+                        .font(.system(size: 8))
+                        .foregroundStyle(theme.ink3C)
+                }
             }
             .padding(.vertical, 5)
-            .padding(.horizontal, 11)
+            .padding(.horizontal, compact ? 9 : 11)
             .background(
                 RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                     .fill(chipHovered ? theme.hoverC : theme.chipC)
@@ -50,6 +58,7 @@ struct ModelChip: View {
         .onHover { chipHovered = $0 }
         .accessibilityLabel("자동완성")
         .accessibilityValue(engineStateAXValue)
+        .help(statusLabel)
         .popover(isPresented: $menuOpen, arrowEdge: .bottom) {
             dropdown
         }
@@ -293,8 +302,7 @@ struct ModelChip: View {
         }
     }
 
-    /// 사용자 지정 저장소 ID는 primary writing surface에 그대로 노출하지 않는다.
-    /// 정확한 저장소 ID와 생성 파라미터는 Settings의 고급 모델 영역에서 관리한다.
+    /// Keep repository IDs in advanced Settings while preserving custom-model access.
     private var customRow: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
@@ -325,7 +333,7 @@ struct ModelChip: View {
             openSettings()
         } label: {
             HStack {
-                Label("고급 모델 설정", systemImage: "gearshape")
+                Label("설정 열기", systemImage: "gearshape")
                     .font(MintFonts.uiFont(11.5, .medium))
                 Spacer()
                 Image(systemName: "chevron.right")
@@ -337,7 +345,7 @@ struct ModelChip: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityHint("모델 ID와 생성 파라미터 설정 열기")
+        .accessibilityHint("자동완성과 모델 옵션이 있는 설정 창 열기")
     }
 
     private func pick(_ id: String) {

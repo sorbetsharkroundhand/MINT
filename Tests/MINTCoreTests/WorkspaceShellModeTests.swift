@@ -67,10 +67,8 @@ final class WorkspaceShellModeTests: XCTestCase {
             WorkspaceModePresentation.options(for: .general),
             [
                 WorkspaceModeOption(mode: .write, label: "쓰기"),
-                WorkspaceModeOption(mode: .outline, label: "개요"),
             ])
     }
-
 
     func testReleaseToolPresentationUsesPlainWriterFacingLabels() {
         XCTAssertEqual(
@@ -82,6 +80,15 @@ final class WorkspaceShellModeTests: XCTestCase {
         XCTAssertEqual(
             WorkspaceToolPresentation.descriptor(for: SidebarSection.bible.rawValue).title,
             "스토리 바이블")
+    }
+
+    func testReleaseHidesStoredEmptyMarginButPreservesExistingDataTools() {
+        for section in [SidebarSection.margin.rawValue, SidebarSection.files.rawValue, "unknown"] {
+            XCTAssertFalse(WorkspaceToolPresentation.isVisible(section), section)
+        }
+        for section in [SidebarSection.bible, .narrative, .context] {
+            XCTAssertTrue(WorkspaceToolPresentation.isVisible(section.rawValue), section.rawValue)
+        }
     }
 
     func testModelChoicesUseWriterFacingSummaries() {

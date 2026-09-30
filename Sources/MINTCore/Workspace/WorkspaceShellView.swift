@@ -32,6 +32,11 @@ enum WorkspaceMotion {
     static let navigator = Animation.spring(response: 0.3, dampingFraction: 0.9)
 }
 
+enum WorkspaceToolbarDensity: Equatable {
+    case standard
+    case compact
+}
+
 /// 저장된 폭 또는 드래그 중인 투영 폭을 창 크기에 맞춘다. 최소 폭 아래에서는
 /// 점진적인 저항을 주어 포인터가 움직이는데 패널만 멈추는 하드 스톱을 피한다.
 struct WorkspaceLayoutState {
@@ -79,6 +84,10 @@ struct WorkspaceLayoutState {
     static let toolWidth: CGFloat = 340
     static let bottomToolMaxHeight: CGFloat = 320
     static let floatingToolMaxHeight: CGFloat = 520
+
+    static func toolbarDensity(forEditorWidth width: CGFloat) -> WorkspaceToolbarDensity {
+        width < 840 ? .compact : .standard
+    }
 
     /// Resolve the visible placement without mutating the persisted preference.
     /// Explicit side docks fall back to bottom when the editor's minimum width would
@@ -316,7 +325,7 @@ struct WorkspaceSurface: View {
                 sidebarVisible = false
                 store.requestEditorFocus()
             },
-            contextVisible: section != SidebarSection.files.rawValue,
+            contextVisible: WorkspaceToolPresentation.isVisible(section),
             toolDockPosition: ToolDockPosition(rawValue: toolDockRaw) ?? .automatic,
             theme: theme
         ) {
@@ -432,6 +441,13 @@ struct WorkspaceToolDescriptor: Equatable {
 }
 
 enum WorkspaceToolPresentation {
+    static func isVisible(_ rawSection: String) -> Bool {
+        switch SidebarSection(rawValue: rawSection) {
+        case .bible, .narrative, .context: true
+        case .files, .margin, .none: false
+        }
+    }
+
     static func descriptor(for rawSection: String) -> WorkspaceToolDescriptor {
         switch SidebarSection(rawValue: rawSection) {
         case .margin:
