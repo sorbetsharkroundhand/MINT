@@ -47,6 +47,14 @@ BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plis
 SMOKE_BUNDLE_ID="$BUNDLE_ID.ui-smoke.$(uuidgen)"
 if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then fail "격리 설정 식별자가 이미 존재합니다"; fi
 plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+# System Events converts PID queries into name-based object references. A unique
+# executable name prevents those references from resolving to another running MINT.
+SMOKE_EXECUTABLE="MINTUISmoke-${SMOKE_BUNDLE_ID##*.}"
+mv "$BIN" "$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
+BIN="$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
+plutil -replace CFBundleExecutable -string "$SMOKE_EXECUTABLE" "$APP/Contents/Info.plist"
+plutil -replace CFBundleName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+plutil -insert CFBundleDisplayName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 PREFERENCES_OWNED=1
 defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
@@ -108,6 +116,7 @@ on run argv
     set expectedValue to item 3 of argv
     tell application "System Events"
         set targetProcess to first application process whose unix id is targetPID
+        if unix id of targetProcess is not targetPID then error "Accessibility process resolved to another app"
         if not (exists window 1 of targetProcess) then error "메인 창 없음"
         set rootElement to window 1 of targetProcess
         if operation is "press" or operation is "present" or operation is "absent" then
@@ -125,6 +134,8 @@ on run argv
             set size of rootElement to {expectedValue as integer, 700}
         else if operation is "autocomplete" then
             set autocompleteControl to my findElement(rootElement, "AXDescription", "자동완성", 30)
+            -- Newer macOS versions expose SwiftUI labels as AXAttributedDescription.
+            if autocompleteControl is missing value then set autocompleteControl to my findElementContaining(rootElement, "AXHelp", "자동완성 ·", 30)
             if autocompleteControl is missing value then error "자동완성 컨트롤 없음"
             if (value of attribute "AXValue" of autocompleteControl as text) is not "자동완성 꺼짐" then error "자동완성 접근성 상태 유실"
         else if operation is "navigator" then
