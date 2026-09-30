@@ -47,9 +47,18 @@ BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plis
 SMOKE_BUNDLE_ID="$BUNDLE_ID.ui-smoke.$(uuidgen)"
 if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then fail "격리 설정 식별자가 이미 존재합니다"; fi
 plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+# System Events converts PID queries into name-based object references. A unique
+# executable name prevents those references from resolving to another running MINT.
+SMOKE_EXECUTABLE="MINTUISmoke-${SMOKE_BUNDLE_ID##*.}"
+mv "$BIN" "$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
+BIN="$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
+plutil -replace CFBundleExecutable -string "$SMOKE_EXECUTABLE" "$APP/Contents/Info.plist"
+plutil -replace CFBundleName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+plutil -insert CFBundleDisplayName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 PREFERENCES_OWNED=1
 defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
+defaults write "$SMOKE_BUNDLE_ID" mint.sidebarSection -string margin
 [ "$(defaults read "$SMOKE_BUNDLE_ID" mint.initialModelConfirmed)" = 1 ] || fail "격리 초기 설정 실패"
 [ "$(defaults read "$SMOKE_BUNDLE_ID" completion.enabled)" = 0 ] || fail "모델 없는 집필 설정 실패"
 
@@ -65,7 +74,7 @@ PROJECT_DOCUMENT_PATH="Documents/$PROJECT_DOCUMENT_ID/$PROJECT_HASH.md"
 mkdir -p "$PROJECT_DIRECTORY/Documents/$PROJECT_DOCUMENT_ID"
 printf '%s' "$PROJECT_BODY" > "$PROJECT_DIRECTORY/$PROJECT_DOCUMENT_PATH"
 cat > "$PROJECT_DIRECTORY/project.json" <<JSON
-{"schemaVersion":1,"id":{"rawValue":"$PROJECT_ID"},"title":"격리 프로젝트","mode":"fiction","documents":[{"id":{"rawValue":"$PROJECT_DOCUMENT_ID"},"title":"격리 원고","kind":"manuscript","relativePath":"$PROJECT_DOCUMENT_PATH","contentHash":"$PROJECT_HASH"}],"assets":[]}
+{"schemaVersion":1,"id":{"rawValue":"$PROJECT_ID"},"title":"격리 프로젝트","mode":"general","documents":[{"id":{"rawValue":"$PROJECT_DOCUMENT_ID"},"title":"격리 원고","kind":"manuscript","relativePath":"$PROJECT_DOCUMENT_PATH","contentHash":"$PROJECT_HASH"}],"assets":[]}
 JSON
 cat > "$PROJECT_ROOT/active-project.json" <<JSON
 {"rawValue":"$PROJECT_ID"}
@@ -107,15 +116,28 @@ on run argv
     set expectedValue to item 3 of argv
     tell application "System Events"
         set targetProcess to first application process whose unix id is targetPID
+        if unix id of targetProcess is not targetPID then error "Accessibility process resolved to another app"
         if not (exists window 1 of targetProcess) then error "메인 창 없음"
         set rootElement to window 1 of targetProcess
-        if operation is "press" then
+        if operation is "press" or operation is "present" or operation is "absent" then
             set targetElement to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElementContaining(rootElement, "AXHelp", expectedValue, 30)
-            if targetElement is missing value then error "필요한 버튼 없음: " & expectedValue
-            click targetElement
+            if operation is "absent" then
+                if targetElement is not missing value then error "숨겨야 할 컨트롤이 표시됨: " & expectedValue
+            else
+                if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
+                if operation is "press" then click targetElement
+            end if
+        else if operation is "resize" then
+            set size of rootElement to {expectedValue as integer, 700}
+        else if operation is "autocomplete" then
+            set autocompleteControl to my findElement(rootElement, "AXDescription", "자동완성", 30)
+            -- Newer macOS versions expose SwiftUI labels as AXAttributedDescription.
+            if autocompleteControl is missing value then set autocompleteControl to my findElementContaining(rootElement, "AXHelp", "자동완성 ·", 30)
+            if autocompleteControl is missing value then error "자동완성 컨트롤 없음"
+            if (value of attribute "AXValue" of autocompleteControl as text) is not "자동완성 꺼짐" then error "자동완성 접근성 상태 유실"
         else if operation is "navigator" then
             if my findElement(rootElement, "AXIdentifier", "mint.navigator", 30) is missing value then error "탐색기 없음"
         else if operation is "focused" then
@@ -154,7 +176,7 @@ AS
 ui() {
     owned_pid || fail "격리 실행 파일 PID 확인 실패"
     osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
-    case "$1" in press|new) sleep 0.3 ;; esac
+    case "$1" in press|new|resize) sleep 0.3 ;; esac
 }
 launch() {
     check_original
@@ -189,24 +211,34 @@ ui verify "$TOKEN"
 ui navigator
 ui type "typed$TOKEN"
 echo "✓ 격리 원고 확인 · 에디터 입력 왕복"
-ui press "지도"
-ui focused
-[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = map ] || fail "지도 모드 저장 실패"
-ui press "쓰기"
-ui focused
-[ "$(defaults read "$SMOKE_BUNDLE_ID" "mint.workspaceMode.$PROJECT_ID")" = write ] || fail "쓰기 모드 저장 실패"
-echo "✓ 프로젝트 모드 전환 · 에디터 포커스 복원"
+ui absent "mint.workspace-mode"
+ui absent "리빙 마진"
+ui absent "문서로 돌아가기"
+ui absent "mint.ghost-shortcut-hint"
+ui resize 1250
+ui autocomplete
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
 ui press "스토리 바이블"
 ui press "문서로 돌아가기"
+ui focused
+ui resize 860
+ui autocomplete
+ui press "기타 글 도구"
+ui press "스토리 바이블"
+ui absent "리빙 마진"
+ui press "문서로 돌아가기"
+ui focused
 ui navigator
 ui press "mint.entry.22222222-2222-2222-2222-222222222222"
 ui verify "second$TOKEN"
 ui press "mint.entry.11111111-1111-1111-1111-111111111111"
 ui verify "typed$TOKEN"
-ui new
+ui press "새로 만들기"
+ui present "새 소설"
+ui present "새 폴더"
+ui press "새 저널"
 sleep 0.5
 ui empty
 ui type "new$TOKEN"

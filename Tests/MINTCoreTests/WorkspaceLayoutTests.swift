@@ -2,6 +2,13 @@ import XCTest
 @testable import MINTCore
 
 final class WorkspaceLayoutTests: XCTestCase {
+    func testToolbarDensityKeepsPrimaryControlsReadableAtNarrowEditorWidths() {
+        XCTAssertEqual(WorkspaceLayoutState.toolbarDensity(forEditorWidth: 560), .compact)
+        XCTAssertEqual(WorkspaceLayoutState.toolbarDensity(forEditorWidth: 760), .compact)
+        XCTAssertEqual(WorkspaceLayoutState.toolbarDensity(forEditorWidth: 840), .standard)
+        XCTAssertEqual(WorkspaceLayoutState.toolbarDensity(forEditorWidth: 980), .standard)
+    }
+
     func testNavigatorWidthLeavesRoomForEditorAndSurvivesCollapse() {
         let layout = WorkspaceLayoutState(navigatorWidth: 340)
         XCTAssertEqual(layout.navigatorWidth(in: 860), 300)

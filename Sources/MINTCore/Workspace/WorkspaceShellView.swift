@@ -32,6 +32,11 @@ enum WorkspaceMotion {
     static let navigator = Animation.spring(response: 0.3, dampingFraction: 0.9)
 }
 
+enum WorkspaceToolbarDensity: Equatable {
+    case standard
+    case compact
+}
+
 /// 저장된 폭 또는 드래그 중인 투영 폭을 창 크기에 맞춘다. 최소 폭 아래에서는
 /// 점진적인 저항을 주어 포인터가 움직이는데 패널만 멈추는 하드 스톱을 피한다.
 struct WorkspaceLayoutState {
@@ -79,6 +84,10 @@ struct WorkspaceLayoutState {
     static let toolWidth: CGFloat = 340
     static let bottomToolMaxHeight: CGFloat = 320
     static let floatingToolMaxHeight: CGFloat = 520
+
+    static func toolbarDensity(forEditorWidth width: CGFloat) -> WorkspaceToolbarDensity {
+        width < 840 ? .compact : .standard
+    }
 
     /// Resolve the visible placement without mutating the persisted preference.
     /// Explicit side docks fall back to bottom when the editor's minimum width would
@@ -316,7 +325,7 @@ struct WorkspaceSurface: View {
                 sidebarVisible = false
                 store.requestEditorFocus()
             },
-            contextVisible: section != SidebarSection.files.rawValue,
+            contextVisible: WorkspaceToolPresentation.isVisible(section),
             toolDockPosition: ToolDockPosition(rawValue: toolDockRaw) ?? .automatic,
             theme: theme
         ) {
@@ -330,15 +339,28 @@ struct WorkspaceSurface: View {
                 theme: theme,
                 indexer: indexer)
         } context: {
+            let tool = WorkspaceToolPresentation.descriptor(for: section)
             VStack(spacing: 0) {
-                HStack {
-                    Text(
-                        section == SidebarSection.margin.rawValue
-                            ? "리빙 마진"
-                            : "글 도구"
-                    )
-                    .font(MintFonts.uiFont(12, .semibold))
-                    Spacer()
+                HStack(spacing: 10) {
+                    Image(systemName: tool.systemImage)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(theme.ink2C)
+                        .frame(width: 28, height: 28)
+                        .background(
+                            RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
+                                .fill(theme.chipC)
+                        )
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(tool.title)
+                            .font(MintFonts.uiFont(12, .semibold))
+                            .foregroundStyle(theme.inkC)
+                        Text(tool.subtitle)
+                            .font(MintFonts.uiFont(10.5))
+                            .foregroundStyle(theme.ink3C)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
                     Menu {
                         ForEach(ToolDockPosition.allCases, id: \.self) { position in
                             Button {
@@ -363,15 +385,22 @@ struct WorkspaceSurface: View {
                     .help("글 도구 위치")
                     Button {
                         WorkspaceToolSelection.hide(currentSection: &section)
+                        store.requestEditorFocus()
                     } label: {
-                        Image(systemName: "xmark").font(MintFonts.uiFont(12))
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .foregroundStyle(theme.ink2C)
                     .accessibilityLabel("문서로 돌아가기")
                     .help("문서로 돌아가기")
                 }
-                .foregroundStyle(theme.ink2C)
-                .padding(14)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                theme.sepC.frame(height: 1)
+                    .accessibilityHidden(true)
                 if section == SidebarSection.margin.rawValue {
                     LivingMarginView(
                         model: livingMargin,
@@ -405,8 +434,53 @@ struct WorkspaceSurface: View {
     }
 }
 
-/// Living Margin show/hide is deliberately limited to presentation state. It does not
-/// emit editor focus or scroll requests, so the existing first responder remains intact.
+struct WorkspaceToolDescriptor: Equatable {
+    let title: String
+    let subtitle: String
+    let systemImage: String
+}
+
+enum WorkspaceToolPresentation {
+    static func isVisible(_ rawSection: String) -> Bool {
+        switch SidebarSection(rawValue: rawSection) {
+        case .bible, .narrative, .context: true
+        case .files, .margin, .none: false
+        }
+    }
+
+    static func descriptor(for rawSection: String) -> WorkspaceToolDescriptor {
+        switch SidebarSection(rawValue: rawSection) {
+        case .margin:
+            WorkspaceToolDescriptor(
+                title: "리빙 마진",
+                subtitle: "원고 옆에서 확인할 제안",
+                systemImage: "sparkles")
+        case .bible:
+            WorkspaceToolDescriptor(
+                title: "스토리 바이블",
+                subtitle: "인물과 작품 정보",
+                systemImage: "book.closed")
+        case .narrative:
+            WorkspaceToolDescriptor(
+                title: "서사",
+                subtitle: "작품의 흐름과 관계",
+                systemImage: "arrow.triangle.branch")
+        case .context:
+            WorkspaceToolDescriptor(
+                title: "AI 컨텍스트",
+                subtitle: "현재 제안에 쓰인 맥락",
+                systemImage: "text.magnifyingglass")
+        case .files, .none:
+            WorkspaceToolDescriptor(
+                title: "글 도구",
+                subtitle: "원고를 돕는 보조 도구",
+                systemImage: "sidebar.right")
+        }
+    }
+}
+
+/// Selection helpers mutate presentation state only. The close button itself restores
+/// editor focus so callers that merely update stored presentation state stay side-effect free.
 enum WorkspaceToolSelection {
     static func showLivingMargin(currentSection: inout String) {
         currentSection = SidebarSection.margin.rawValue

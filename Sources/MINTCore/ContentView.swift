@@ -302,27 +302,39 @@ struct EditorToolbar: View {
     @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
-        HStack(spacing: 10) {
+        GeometryReader { geometry in
+            toolbar(density: WorkspaceLayoutState.toolbarDensity(forEditorWidth: geometry.size.width))
+        }
+        .frame(height: 52)
+        .background(theme.toolbarC)
+    }
+
+    private func toolbar(density: WorkspaceToolbarDensity) -> some View {
+        HStack(spacing: density == .compact ? 6 : 10) {
             sidebarToggle
             Text(store.activeEntry?.title ?? "문서")
                 .font(MintFonts.uiFont(12, .medium))
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .frame(maxWidth: density == .compact ? 150 : 260, alignment: .leading)
             if let projectMode = projectSession.activeProject?.mode {
-                Picker("작업 공간", selection: workspaceModeBinding) {
-                    ForEach(WorkspaceModePresentation.options(for: projectMode)) { option in
-                        Text(option.label).tag(option.mode)
+                let options = WorkspaceModePresentation.options(for: projectMode)
+                if options.count > 1 {
+                    Picker("작업 공간", selection: workspaceModeBinding) {
+                        ForEach(options) { option in
+                            Text(option.label).tag(option.mode)
+                        }
                     }
+                    .pickerStyle(.segmented)
+                    .fixedSize()
+                    .accessibilityIdentifier("mint.workspace-mode")
+                    .accessibilityLabel("작업 공간")
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .accessibilityIdentifier("mint.workspace-mode")
-                .accessibilityLabel("작업 공간")
             }
             // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
             // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
-            if store.activeEntry?.resolvedKind == .novel {
+            if density == .standard, store.activeEntry?.resolvedKind == .novel {
                 Button {
                     sidebarSection = SidebarSection.bible.rawValue
                 } label: {
@@ -386,23 +398,32 @@ struct EditorToolbar: View {
                         onDismiss: { longParagraphOpen = false })
                 }
             }
-            Spacer()
+            Spacer(minLength: 8)
             Menu {
-                Button("리빙 마진") {
-                    WorkspaceToolSelection.showLivingMargin(currentSection: &sidebarSection)
+                if store.activeEntry?.resolvedKind == .novel {
+                    Button("스토리 바이블") {
+                        sidebarSection = SidebarSection.bible.rawValue
+                    }
+                    Divider()
                 }
-                Button("스토리 바이블") { sidebarSection = SidebarSection.bible.rawValue }
-                Button("서사") { sidebarSection = SidebarSection.narrative.rawValue }
-                Button("AI 컨텍스트") { sidebarSection = SidebarSection.context.rawValue }
+                Button("서사") {
+                    sidebarSection = SidebarSection.narrative.rawValue
+                }
+                Button("AI 컨텍스트") {
+                    sidebarSection = SidebarSection.context.rawValue
+                }
             } label: {
-                Image(systemName: "sidebar.right")
-                    .font(MintFonts.uiFont(12))
-                    .foregroundStyle(theme.ink2C)
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.ink3C)
+                    .frame(width: 26, height: 28)
+                    .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .accessibilityLabel("글 도구")
-            ModelChip(completion: completion, settings: settings, theme: theme)
+            .accessibilityLabel("기타 글 도구")
+            .help("기타 글 도구")
+            ModelChip(completion: completion, settings: settings, theme: theme, compact: density == .compact)
             settingsButton
         }
         // When Navigator is hidden, use the measured macOS traffic-light safe region.
@@ -413,8 +434,7 @@ struct EditorToolbar: View {
                 ? WindowChromeGeometry.toolbarHorizontalPadding
                 : windowChromeLeadingInset)
         .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
-        .frame(minHeight: 52)
-        .background(theme.toolbarC)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
     private var workspaceModeBinding: Binding<WorkspaceMode> {
@@ -652,12 +672,16 @@ struct MarkdownCheatSheet: View {
 
 // MARK: - 단축키 힌트 필
 
-/// 에디터 하단 중앙의 고스트 단축키 안내 (tab / → / esc, 디자인 sticky pill).
+/// Contextual keyboard teaching while a Ghost suggestion is available.
 struct ShortcutHintPill: View {
     let active: Bool
     let theme: MintTheme
 
     var body: some View {
+        if active { pill }
+    }
+
+    private var pill: some View {
         HStack(spacing: 14) {
             item(key: "tab", label: "수락")
             divider
@@ -680,7 +704,7 @@ struct ShortcutHintPill: View {
                 .strokeBorder(theme.pillBorderC)
         )
         .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
-        .opacity(active ? 1 : 0.6)
+        .accessibilityIdentifier("mint.ghost-shortcut-hint")
         // 모션 없음 — Tab/→/Esc마다 도는 고빈도 경로다 (감사 표, #27).
         // 과거 200ms fade가 키 피드백을 늦췄다.
         .allowsHitTesting(false)
@@ -755,13 +779,6 @@ struct EditorStatusBar: View {
                     .font(MintFonts.monoUI(11))
             }
             Spacer()
-            // 입력 지연 계측 (로컬 전용 진단) — 핸들러(우리 코드) vs 총(렌더 포함).
-            // 랙 제보를 숫자로 받기 위한 장비. 표본이 쌓여야 나타난다.
-            if completion.keystrokeStats.samples > 0 {
-                Text(keystrokeLabel)
-                    .help("키 입력 처리 시간 — 핸들러(에디터 코드) / 총(화면 갱신 포함), p95·최대")
-                separator
-            }
             // 저장 상태 — 실패를 "저장됨"으로 위장하지 않는다 (이슈 #10).
             if case .failed(let message, _) = store.savePhase {
                 Text("저장 실패")
@@ -803,13 +820,6 @@ struct EditorStatusBar: View {
     /// 카운터 비교(O(1))로 변경을 감지한다.
     private var statsKey: String {
         "\(store.activeID.uuidString)-\(store.bodyVersion)"
-    }
-
-    private var keystrokeLabel: String {
-        let stats = completion.keystrokeStats
-        return String(
-            format: "입력 %.1f/%.0fms·max %.0f",
-            stats.handlerP95, stats.totalP95, stats.totalMax)
     }
 
     private var separator: some View {
