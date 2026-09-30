@@ -21,7 +21,7 @@ public enum AssetJanitor {
     }
 
     /// 장부 파일 — images 폴더 안 점파일. MintImageStore override(테스트)를 따른다.
-    public static func ledgerURL() -> URL {
+    public static func ledgerURL() -> URL? {
         MintImageStore.url(for: "images/.mint-janitor.json")
     }
 
@@ -35,7 +35,9 @@ public enum AssetJanitor {
     /// asset 저장 시 후보 등록. 같은 키 재등록은 최초 시각을 유지한다 —
     /// 잦은 저장이 유예를 무한 리셋하지 않게. `at`은 회귀 테스트의 시간 주입용.
     public static func record(_ relativePath: String, at date: Date = .now) {
-        guard relativePath.hasPrefix("images/") else { return }
+        guard relativePath.hasPrefix("images/"),
+            case .managedRelative = ImageReferenceParser.classify(relativePath)
+        else { return }
         var ledger = load()
         guard ledger.candidates[relativePath] == nil else { return }
         ledger.candidates[relativePath] = date
@@ -78,7 +80,11 @@ public enum AssetJanitor {
         return sweep(now: now) { path in
             referenced.contains(path)
         } performDelete: { path in
-            try? FileManager.default.removeItem(at: MintImageStore.url(for: path))
+            guard path.hasPrefix("images/"),
+                case .managedRelative = ImageReferenceParser.classify(path),
+                let url = MintImageStore.url(for: path)
+            else { return }
+            try? FileManager.default.removeItem(at: url)
         }
     }
 
@@ -127,14 +133,14 @@ public enum AssetJanitor {
     // MARK: 장부 입출력 — 깨지면 버리고 새로 시작하는 캐시다.
 
     private static func load() -> Ledger {
-        guard let data = try? Data(contentsOf: ledgerURL()),
+        guard let url = ledgerURL(), let data = try? Data(contentsOf: url),
             let ledger = try? JSONDecoder().decode(Ledger.self, from: data)
         else { return Ledger() }
         return ledger
     }
 
     private static func save(_ ledger: Ledger) {
-        guard let data = try? JSONEncoder().encode(ledger) else { return }
-        try? data.write(to: ledgerURL(), options: .atomic)
+        guard let url = ledgerURL(), let data = try? JSONEncoder().encode(ledger) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }

@@ -21,10 +21,11 @@ public enum ImageAssetScanner {
             switch ImageReferenceParser.classify(rawDestination) {
             case .managedRelative, .externalFile:
                 guard seen.insert(rawDestination).inserted else { return }
-                if !FileManager.default.fileExists(
-                    atPath: MintImageStore.url(for: rawDestination).path)
-                {
+                guard let url = MintImageStore.url(for: rawDestination),
+                    FileManager.default.fileExists(atPath: url.path)
+                else {
                     missing.append(rawDestination)
+                    return
                 }
             case .remote, .blocked:
                 break  // 로컬 원본이 필요 없는 소스 — 누락이 아니다 (#12)

@@ -2506,7 +2506,9 @@ final class BlockTextView: NSTextView {
         // 2) Markdown 소스 — 텍스트 편집기로 붙이면 구문째로.
         pasteboard.setString(attrs.markdown, forType: .string)
         // 3) 원본 파일 URL — 파일을 받아들이는 앱용.
-        pasteboard.writeObjects([MintImageStore.url(for: attrs.src) as NSURL])
+        if let url = MintImageStore.url(for: attrs.src) {
+            pasteboard.writeObjects([url as NSURL])
+        }
         // 4) 호환 비트맵 — 이미지를 받는 모든 앱용 (기존 동작).
         pasteboard.writeObjects([image])
         return true
@@ -2579,9 +2581,12 @@ final class BlockTextView: NSTextView {
         else { return }
         switch ImageReferenceParser.classify(attrs.src) {
         case .managedRelative:
+            guard let destination = MintImageStore.url(for: attrs.src) else {
+                alertAssetWriteFailure("안전하지 않은 이미지 경로예요.")
+                return
+            }
             do {
-                try data.write(
-                    to: MintImageStore.url(for: attrs.src), options: .atomic)
+                try data.write(to: destination, options: .atomic)
             } catch {
                 alertAssetWriteFailure(error.localizedDescription)
                 return
@@ -2603,7 +2608,7 @@ final class BlockTextView: NSTextView {
         guard let attrs = Self.imageAttrs(
             from: paragraphContent(para).trimmingCharacters(in: .whitespaces))
         else { return }
-        let url = MintImageStore.url(for: attrs.src)
+        guard let url = MintImageStore.url(for: attrs.src) else { return }
         let target = FileManager.default.fileExists(atPath: url.path)
             ? url : url.deletingLastPathComponent()
         NSWorkspace.shared.activateFileViewerSelecting([target])
