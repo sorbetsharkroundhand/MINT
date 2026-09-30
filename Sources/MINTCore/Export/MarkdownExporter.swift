@@ -119,8 +119,9 @@ public enum MarkdownExporter {
             return memoized.isEmpty ? nil : memoized
         }
         let fm = FileManager.default
-        let sourceURL = MintImageStore.url(for: sourceRaw)
-        guard fm.fileExists(atPath: sourceURL.path) else {
+        guard let sourceURL = MintImageStore.url(for: sourceRaw),
+            fm.fileExists(atPath: sourceURL.path)
+        else {
             report.missingSources.append(sourceRaw)
             newPaths[sourceRaw] = ""  // 누락도 메모이즈 — 줄마다 경고를 늘리지 않는다
             return nil

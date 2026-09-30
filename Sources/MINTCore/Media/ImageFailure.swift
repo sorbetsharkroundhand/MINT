@@ -32,8 +32,9 @@ public enum ImageFailure {
         if !ext.isEmpty, !MintImageStore.imageExtensions.contains(ext) {
             return .unsupported
         }
-        let url = MintImageStore.url(for: src)
-        guard FileManager.default.fileExists(atPath: url.path) else { return .missing }
+        guard let url = MintImageStore.url(for: src),
+            FileManager.default.fileExists(atPath: url.path)
+        else { return .missing }
         // NSImage는 손상 데이터에서도 nil 또는 크기 0 이미지를 돌려준다.
         guard let image = NSImage(contentsOf: url), image.size.width > 0 else {
             return .corrupt

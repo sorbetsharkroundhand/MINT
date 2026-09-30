@@ -1,0 +1,68 @@
+MINT — Source Available License
+Copyright (c) 2026 sorbetsharkroundhand. All rights reserved.
+
+MINT is source available, not open source. The source code in this repository
+is published so that it can be read, audited and built locally. It is not
+placed in the public domain and no open source license is granted.
+
+1. GRANT
+
+   Subject to the terms below, you are granted a non-exclusive,
+   non-transferable, revocable, royalty-free license to:
+
+   (a) view, read and study the source code in this repository;
+   (b) clone the repository and build the software for your own personal
+       evaluation, testing or study on hardware you control; and
+   (c) create modifications locally for the purposes described in (a) and (b).
+
+2. RESTRICTIONS
+
+   Except as expressly permitted above, or as required by applicable law, you
+   may not:
+
+   (a) redistribute the source code, in original or modified form, in whole or
+       in part;
+   (b) distribute, publish, sell, lease, sublicense or otherwise make available
+       any binary built from this source;
+   (c) use the software or any part of it for commercial purposes, or to
+       provide a service to third parties;
+   (d) create or publish a derivative work based on this source; or
+   (e) remove or alter this notice or any copyright notice in the source.
+
+3. CONTRIBUTIONS
+
+   Contributions are not currently being accepted. If a contribution is
+   submitted and accepted, the contributor grants the copyright holder a
+   perpetual, worldwide, irrevocable, royalty-free license to use, modify,
+   relicense and distribute that contribution as part of the software.
+
+4. THIRD-PARTY COMPONENTS
+
+   This software depends on third-party packages that are distributed under
+   their own licenses. Those licenses govern those components and are not
+   modified or superseded by this license. See Package.resolved for the pinned
+   dependency set.
+
+5. NO WARRANTY
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+6. LIMITATION OF LIABILITY
+
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+   DEALINGS IN THE SOFTWARE.
+
+7. INTERIM TERMS
+
+   These are interim terms. Final licensing and commercial terms are being
+   decided in issue #155 and may replace this license in a future revision of
+   this repository. Rights already exercised under this license in good faith
+   before such a change remain unaffected.
+
+8. RESERVATION
+
+   All rights not expressly granted here are reserved by the copyright holder.

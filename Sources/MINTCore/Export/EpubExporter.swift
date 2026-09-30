@@ -405,13 +405,26 @@ public enum EpubExporter {
         _ src: String, into oebps: URL, missing: inout [String],
         assetURLs: [String: URL]
     ) -> String? {
-        switch ImageReferenceParser.classify(src) {
+        let kind = ImageReferenceParser.classify(src)
+        switch kind {
         case .managedRelative, .externalFile: break
         case .remote, .blocked: return nil
         }
         guard let sourceURL = assetURLs[src] else {
             if !missing.contains(src) { missing.append(src) }
             return nil
+        }
+        if case .managedRelative(let path) = kind {
+            // Recover the managed root from the trusted, pre-resolved map. A
+            // background export must not follow links introduced after resolution.
+            var root = sourceURL
+            for _ in path.split(separator: "/") { root.deleteLastPathComponent() }
+            guard let checked = MintImageStore.resolveURL(for: path, under: root),
+                checked == sourceURL
+            else {
+                if !missing.contains(src) { missing.append(src) }
+                return nil
+            }
         }
         return copyFile(sourceURL, src: src, into: oebps, missing: &missing)
     }
