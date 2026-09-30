@@ -242,8 +242,10 @@ public enum ImageReferenceParser {
         // 스킴 판별 — "xxx:" 가 경로 구분자보다 먼저 나오면 스킴이 있다.
         if let colon = trimmed.firstIndex(of: ":") {
             let scheme = String(trimmed[trimmed.startIndex..<colon]).lowercased()
+            let afterColon = trimmed.index(after: colon)
+            guard afterColon < trimmed.endIndex else { return .blocked(scheme) }
             let looksLikePathColon = colon > trimmed.startIndex
-                && trimmed[trimmed.index(after: colon)] == "/"
+                && trimmed[afterColon] == "/"
             if let url = URL(string: trimmed), let s = url.scheme?.lowercased() {
                 if s == "http" || s == "https" { return .remote(url) }
                 if s == "file" { return .externalFile(url.path) }

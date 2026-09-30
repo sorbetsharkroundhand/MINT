@@ -122,6 +122,26 @@ final class ImageReferenceParserTests: XCTestCase {
         }
     }
 
+    func testSingleLetterTerminalColonIsBlocked() {
+        if case .blocked = ImageReferenceParser.classify("a:") {} else {
+            XCTFail("A terminal-colon destination must be blocked")
+        }
+    }
+
+    func testHTTPTerminalColonIsBlocked() {
+        if case .blocked = ImageReferenceParser.classify("http:") {} else {
+            XCTFail("An incomplete HTTP destination must be blocked")
+        }
+    }
+
+    func testTerminalColonClassificationCorpusIsBlocked() {
+        for raw in [":", "x:", "https:", "file:", "mailto:", " http: "] {
+            if case .blocked = ImageReferenceParser.classify(raw) {} else {
+                XCTFail("\(raw) must be blocked")
+            }
+        }
+    }
+
     // MARK: - MINT 확장 {width align}
 
     func test확장옵션을분리하고적용한다() throws {
