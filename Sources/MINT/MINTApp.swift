@@ -17,15 +17,7 @@ struct MINTApp: App {
     static let sharedEngine = CompletionEngine()
     @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
     @StateObject private var livingMargin = LivingMarginModel()
-    private static let projectStore: ProjectStore = {
-        let documents = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return ProjectStore(
-            root: documents
-                .appendingPathComponent("MINT", isDirectory: true)
-                .appendingPathComponent("Projects", isDirectory: true))
-    }()
+    private static let projectStore = ProjectStore(root: MintStorageLocation.standard.projectsDirectory)
     private static let knowledgeSidecars = KnowledgeSidecarRepository(
         projectStore: MINTApp.projectStore)
     @StateObject private var indexer = BackgroundIndexer(

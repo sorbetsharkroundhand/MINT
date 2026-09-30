@@ -22,24 +22,20 @@ public enum AcceptanceMetrics {
     private static let queue = DispatchQueue(
         label: "mint.metrics", qos: .utility)
 
-    static var fileURL: URL {
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return base.appendingPathComponent("MINT/metrics.jsonl", isDirectory: false)
-    }
-
     /// 사건 한 줄 append — 실패는 조용히 버린다 (지표가 글쓰기를 방해하면 본말전도).
-    public static func log(_ event: Event, mode: String, latencyMs: Int? = nil) {
+    public static func log(
+        _ event: Event, mode: String, latencyMs: Int? = nil,
+        storageLocation: MintStorageLocation = .standard
+    ) {
         let timestamp = ISO8601DateFormatter().string(from: .now)
         var line = #"{"ts":"\#(timestamp)","event":"\#(event.rawValue)","mode":"\#(mode)""#
         if let latencyMs { line += #","latencyMs":\#(latencyMs)"# }
         line += "}\n"
         // 비동기 블록엔 값 스냅샷을 넘긴다 — var 캡처는 동시성 검사의 경고 대상.
         let payload = line
+        let url = storageLocation.metricsFileURL
         queue.async {
             guard let data = payload.data(using: .utf8) else { return }
-            let url = fileURL
             if !FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.createDirectory(
                     at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -77,9 +73,9 @@ public enum AcceptanceMetrics {
 
     /// 파일 집계 — 백그라운드 스레드에서 부를 것 (Settings의 .task가 부른다).
     /// 파서는 관대하게: 깨진 줄은 건너뛴다 (지표는 근사면 충분).
-    public static func summarize() -> Summary {
+    public static func summarize(storageLocation: MintStorageLocation = .standard) -> Summary {
         var summary = Summary()
-        guard let text = try? String(contentsOf: fileURL, encoding: .utf8) else {
+        guard let text = try? String(contentsOf: storageLocation.metricsFileURL, encoding: .utf8) else {
             return summary
         }
         for line in text.split(separator: "\n") {
@@ -106,7 +102,8 @@ public enum AcceptanceMetrics {
     }
 
     /// 지표 삭제 — 파일을 지운다. 원고와 무관한 파생 기록이라 확인 없이 안전.
-    public static func reset() {
-        queue.async { try? FileManager.default.removeItem(at: fileURL) }
+    public static func reset(storageLocation: MintStorageLocation = .standard) {
+        let url = storageLocation.metricsFileURL
+        queue.async { try? FileManager.default.removeItem(at: url) }
     }
 }
