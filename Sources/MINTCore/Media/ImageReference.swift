@@ -248,7 +248,10 @@ public enum ImageReferenceParser {
                 && trimmed[afterColon] == "/"
             if let url = URL(string: trimmed), let s = url.scheme?.lowercased() {
                 if s == "http" || s == "https" { return .remote(url) }
-                if s == "file" { return .externalFile(url.path) }
+                if s == "file" {
+                    guard url.path.hasPrefix("/") else { return .blocked(scheme) }
+                    return .externalFile(url.path)
+                }
                 return .blocked(scheme)
             }
             if looksLikePathColon { return .blocked(scheme) }
@@ -256,7 +259,12 @@ public enum ImageReferenceParser {
         if trimmed.hasPrefix("/") || trimmed.hasPrefix("~/") {
             return .externalFile(trimmed)
         }
-        return .managedRelative(trimmed)
+        do {
+            try ProjectPaths.validateRelative(trimmed)
+            return .managedRelative(trimmed)
+        } catch {
+            return .blocked(trimmed)
+        }
     }
 
     // MARK: - 저수준 스캐너
