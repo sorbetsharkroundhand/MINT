@@ -39,8 +39,8 @@ public actor ProjectStore {
         try withStoreLock { _ = try activateUnlocked(id: id) }
     }
 
-    public func activateAndLoad(id: WritingProjectID) throws -> WritingProject {
-        try withStoreLock { try activateUnlocked(id: id) }
+    public func activateAndLoad(id: WritingProjectID, expected: WritingProject? = nil) throws -> WritingProject {
+        try withStoreLock { try activateUnlocked(id: id, expected: expected) }
     }
 
     public func activeProject() throws -> WritingProject? {
@@ -340,8 +340,9 @@ public actor ProjectStore {
         try files.writeAtomically(data, to: manifestURL)
     }
 
-    func activateUnlocked(id: WritingProjectID) throws -> WritingProject {
+    func activateUnlocked(id: WritingProjectID, expected: WritingProject? = nil) throws -> WritingProject {
         let project = try loadUnlocked(id: id)
+        if let expected, project != expected { throw ProjectStoreError.changedDuringSave }
         let data = try JSONEncoder().encode(id)
         try Task.checkCancellation()
         try files.writeAtomically(data, to: rootURL("active-project.json"))
