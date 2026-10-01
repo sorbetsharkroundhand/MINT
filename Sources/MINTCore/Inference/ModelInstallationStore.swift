@@ -3,14 +3,15 @@ import CryptoKit
 
 public actor ModelInstallationStore {
     public enum State: Equatable, Sendable {
-        case missing, downloading, verifying, ready, interrupted
+        case missing, downloading, verifying, ready, interrupted, removing
         case failed(String)
     }
     public typealias Download = @Sendable (ModelInstallManifest, ModelInstallManifest.File, URL) async throws -> Void
     public static let shared = ModelInstallationStore(root: MintStorageLocation.standard.rootDirectory.appendingPathComponent("Models"))
     private let root: URL
-    private struct Job { let manifest: ModelInstallManifest; let task: Task<URL, Error> }
+    private struct Job { let token: UUID; let manifest: ModelInstallManifest; let task: Task<URL, Error> }
     private var jobs: [String: Job] = [:]
+    private var removals: [String: Task<Void, Error>] = [:]
     private var phases: [String: State] = [:]
     public init(root: URL) { self.root = root.standardizedFileURL }
 
@@ -25,6 +26,8 @@ public actor ModelInstallationStore {
     public func state(for manifest: ModelInstallManifest) async -> State {
         do {
             let directory = try directory(for: manifest)
+            if removals[manifest.id] != nil { return .removing }
+            if try hasTombstones(manifest.id) { return .interrupted }
             if let job = jobs[manifest.id] {
                 guard job.manifest == manifest else { return .failed(ModelInstallError.busy.localizedDescription) }
                 return phases[manifest.id] ?? .downloading
@@ -39,9 +42,11 @@ public actor ModelInstallationStore {
     public func install(_ manifest: ModelInstallManifest, download: @escaping Download,
                         onState: @Sendable @escaping (State, Double) -> Void = { _, _ in }) async throws -> URL {
         try manifest.validate()
+        try requireInstallAllowed(manifest.id)
         try Task.checkCancellation()
         let current = await state(for: manifest)
-        // Recheck after the suspension: another caller may have started the job.
+        // Recheck after the suspension: another caller may have started a lifecycle operation.
+        try requireInstallAllowed(manifest.id)
         if let job = jobs[manifest.id] {
             guard job.manifest == manifest else { throw ModelInstallError.busy }
             onState(phases[manifest.id] ?? .downloading, 0)
@@ -52,9 +57,103 @@ public actor ModelInstallationStore {
         if current == .ready { return try directory(for: manifest) }
         try Task.checkCancellation()
         let task = Task(priority: .utility) { try await self.perform(manifest, download: download, onState: onState) }
-        jobs[manifest.id] = Job(manifest: manifest, task: task)
-        defer { jobs[manifest.id] = nil; phases[manifest.id] = nil }
+        let token = UUID()
+        jobs[manifest.id] = Job(token: token, manifest: manifest, task: task)
+        defer {
+            if jobs[manifest.id]?.token == token { jobs[manifest.id] = nil; phases[manifest.id] = nil }
+        }
         return try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+    public func ownedModelIDs() -> [String] {
+        guard let keys = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return [] }
+        var ids = Set<String>()
+        for key in keys {
+            guard let folder = try? ProjectPaths.checked(key, under: root),
+                  let versions = try? FileManager.default.contentsOfDirectory(atPath: folder.path) else { continue }
+            for version in versions {
+                guard let directory = try? ProjectPaths.checked(version, under: folder),
+                      let receipt = try? readReceipt(in: directory), modelKey(receipt.id) == key,
+                      (try? ownedVersions(receipt.id)) != nil else { continue }
+                ids.insert(receipt.id)
+            }
+        }
+        return ids.sorted()
+    }
+    public func remove(_ id: String, onRetire: @Sendable @escaping () -> Void = {}) async throws {
+        try await removeVersions(id, keeping: nil, onRetire: onRetire)
+    }
+    public func replace(_ id: String, with manifest: ModelInstallManifest, download: @escaping Download) async throws -> URL {
+        let target = try await install(manifest, download: download)
+        try Task.checkCancellation()
+        try await removeVersions(id, keeping: id == manifest.id ? manifest.revision : nil, onRetire: {})
+        guard await state(for: manifest) == .ready else { throw ModelInstallError.integrity }
+        return target
+    }
+    private func removeVersions(_ id: String, keeping revision: String?, onRetire: @Sendable @escaping () -> Void) async throws {
+        try validateID(id)
+        try Task.checkCancellation()
+        if let operation = removals[id] { try await operation.value; return }
+        let task = Task(priority: .utility) {
+            onRetire()
+            if let job = self.jobs[id] {
+                job.task.cancel(); _ = try? await job.task.value
+                if self.jobs[id]?.token == job.token { self.jobs[id] = nil; self.phases[id] = nil }
+            }
+            // Preflight every version before mutating any of them.
+            let versions = try self.ownedVersions(id)
+            for directory in versions where directory.lastPathComponent != revision {
+                let tombstone = directory.pathExtension == "removing" ? directory : directory.appendingPathExtension("removing")
+                if directory != tombstone {
+                    guard !FileManager.default.fileExists(atPath: tombstone.path) else { throw ModelInstallError.integrity }
+                    try FileManager.default.moveItem(at: directory, to: tombstone)
+                }
+                try FileManager.default.removeItem(at: tombstone)
+            }
+            let folder = try ProjectPaths.checked(self.modelKey(id), under: self.root)
+            self.verified = self.verified.filter { !$0.key.path.hasPrefix(folder.path + "/") }
+            if FileManager.default.fileExists(atPath: folder.path),
+               try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty {
+                try FileManager.default.removeItem(at: folder)
+            }
+        }
+        removals[id] = task
+        defer { removals[id] = nil }
+        // Once retirement begins it finishes even if the UI caller disappears.
+        try await task.value
+    }
+    private func validateID(_ id: String) throws {
+        try ProjectPaths.validateRelative(id)
+        guard case .success(let valid) = ModelIDCommit.validate(id), valid == id else { throw ModelInstallError.metadata }
+    }
+    private func ownedVersions(_ id: String) throws -> [URL] {
+        try validateID(id)
+        let folder = try ProjectPaths.checked(modelKey(id), under: root)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
+        let names = try FileManager.default.contentsOfDirectory(atPath: folder.path).sorted()
+        guard !names.contains(where: { names.contains($0 + ".removing") }) else { throw ModelInstallError.integrity }
+        return try names.map { name in
+            let directory = try ProjectPaths.checked(name, under: folder)
+            if try FileManager.default.contentsOfDirectory(atPath: directory.path).isEmpty {
+                let revision = String(name.prefix(40))
+                guard revision.utf8.count == 40, revision.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }),
+                      [revision, revision + ".partial", revision + ".removing", revision + ".partial.removing"].contains(name)
+                else { throw ModelInstallError.integrity }
+                return directory
+            }
+            let receipt = try readReceipt(in: directory)
+            guard receipt.id == id,
+                  [receipt.revision, receipt.revision + ".partial", receipt.revision + ".removing", receipt.revision + ".partial.removing"].contains(name)
+            else { throw ModelInstallError.integrity }
+            try checkInventory(receipt, in: directory)
+            return directory
+        }
+    }
+    private func hasTombstones(_ id: String) throws -> Bool {
+        let folder = try ProjectPaths.checked(modelKey(id), under: root)
+        return (try? FileManager.default.contentsOfDirectory(atPath: folder.path))?.contains { $0.hasSuffix(".removing") } ?? false
+    }
+    private func requireInstallAllowed(_ id: String) throws {
+        if try removals[id] != nil || hasTombstones(id) { throw ModelInstallError.busy }
     }
     public func cancel(_ id: String) { jobs[id]?.task.cancel() }
 
