@@ -7,6 +7,9 @@ let package = Package(
         // MLX는 Apple Silicon + macOS 14+ 필요
         .macOS(.v14)
     ],
+    products: [
+        .library(name: "MINTCore", targets: ["MINTCore"]),
+    ],
     dependencies: [
         // 온디바이스 LLM 추론. MLXLLM/MLXLMCommon은 mlx-swift-examples에서
         // mlx-swift-lm 저장소로 이전됨.
