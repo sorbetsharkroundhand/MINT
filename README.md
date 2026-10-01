@@ -2,7 +2,7 @@
 
 # MINT
 
-**A local writing environment that understands your story without ever taking it over.**
+**A local, editor-first writing app. Fiction first; useful without AI.**
 
 *The writer owns the story. MINT helps them keep hold of it.*
 
@@ -19,7 +19,7 @@
 
 <!-- TODO: replace with a real screenshot or a short GIF of Ghost Completion in action.
      A writing app README without a picture of the writing surface is doing itself a disservice. -->
-<!-- <img src="docs/assets/hero.png" width="860" alt="The MINT editor with a Living Margin insight"> -->
+<!-- <img src="docs/assets/hero.png" width="860" alt="The MINT writing editor"> -->
 
 </div>
 
@@ -31,11 +31,12 @@ Long-form fiction outgrows the writer's working memory before it outgrows the pa
 
 By chapter thirty you are managing a cast who each know different things, a timeline that runs
 in two directions, threads you opened and have not closed, and a hundred small facts you
-established once and now have to honour. No editor helps with this. Most AI writing tools do
-something else entirely: they offer to write the next paragraph for you.
+established once and now have to honour. Writing still needs to feel like writing, not like
+managing an AI setup or a separate database of your story.
 
-MINT takes the other job. It reads what you have written, keeps track of it, and stays quiet
-until the moment it has something worth saying.
+MINT's first-release goal is a dependable place to create, import, write, save, search original
+sources and export, with optional local assistance. Fiction is the deepest first-release domain;
+General writing and AI-disabled editing remain supported paths.
 
 Everything runs on your Mac. No manuscript leaves the machine.
 
@@ -47,7 +48,7 @@ Everything runs on your Mac. No manuscript leaves the machine.
 | :-- | :-- |
 | **Editor first** | It has to be a good writing app with the AI switched off. |
 | **Quiet AI** | When confidence is low, showing nothing is the correct output. |
-| **Local only** | Manuscript and inference stay on your Mac. No remote calls, no telemetry. |
+| **Local only** | Manuscript and inference stay on your Mac. No remote inference, no telemetry. |
 | **User Canon wins** | What you decided always outranks what the model inferred. |
 | **Evidence first** | A warning that matters must lead back to real text in your manuscript. |
 | **Rebuildable intelligence** | Derived understanding is a cache. Your words and your decisions are not. |
@@ -58,84 +59,25 @@ only when it is needed and disappears when it is not.
 
 ---
 
-## The writing experience
+## First-release scope
 
-MINT 0.2.0 is a **writing platform, fiction first**. Fiction is the domain it goes deepest on;
-it is not the only thing the app can do. Both modes sit on one project foundation.
+The **first Mac App Store release is under development**. The scope below is a release contract,
+not a claim that every path is complete or that this checkout is Store-ready.
+[Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) owns scope and sequence;
+[gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) owns readiness for one
+identified release candidate.
 
-### Fiction — `Write · Map · Review`
+### Write first — Fiction and General
 
-**Write** is where the manuscript lives.
+- Create or import a manuscript, edit it, save and recover it, find original source text, and export.
+- No model or network setup is required for that writing workflow.
+- Fiction and General use the same project runtime; generic project and storage code stay
+  independent of Fiction types.
+- Preserve Hangul IME, selection, undo, writing position, and Markdown/EPUB/media/math round-trip.
 
-- A native macOS editor built on TextKit, tuned to stay out of the way
-- Ghost Completion that respects the Hangul IME and never fires mid-composition
-- Local autocomplete that draws on the project, not just the paragraph
-- A Living Margin that surfaces only when there is something to surface
-- `⌘K` to ask the whole project a question
+### Optional local Ghost Completion
 
-**Map** looks at the work as a story rather than a folder of files.
-
-```
-Scenes · Events · Characters · Relationships · Timeline
-Story Threads · World & Object State · Research & Ideas
-```
-
-Map is not a database that replaces your manuscript. Everything the model builds is a
-*projection* of the text, and anything you confirm yourself becomes the reference the
-projection must respect.
-
-**Review** collects what is worth a second look, rather than rewriting sentences for you.
-
-- Prose quality and unintentional repetition
-- Continuity across setting, cast, time and relationships
-- Foreshadowing and threads still left open
-- The passage in your manuscript that triggered each one
-- `Intentional` · `Dismiss` · or fix it yourself
-
-### General Writing — `Write · Outline · Review`
-
-A standalone experience that does not depend on fiction types: document-centric navigator,
-outline, writing quality, research and reference notes, Ghost Completion, Ask MINT, search
-and export.
-
-Fiction going deep must not turn general writing into "novel mode with the features removed."
-
----
-
-## One project, one context
-
-```
-WritingProject
-├─ mode: Fiction | General
-├─ Documents
-├─ Notes
-├─ Assets
-├─ User Canon
-└─ Intelligence
-```
-
-Shared platform underneath, domain intelligence layered on top:
-
-```
-Writing Platform            Writing Intelligence      Fiction Intelligence
-├─ Project Navigator        ├─ Context Retrieval      ├─ Scene · Event · Character
-├─ Editor                   ├─ Living Margin          ├─ Timeline · Relationships
-├─ Search / Export          └─ Review                 ├─ Object State
-├─ Ask MINT                                           ├─ Story Threads
-├─ Ghost Completion                                   ├─ Hierarchical Story Memory
-└─ Local AI Runtime                                   ├─ Continuity
-                                                      └─ Story Map
-```
-
-This is why MINT can add fiction depth without forcing novel-shaped features onto a memo.
-
----
-
-## How the intelligence behaves
-
-### Ghost Completion
-
-Pause for a moment and a suggestion appears in grey, inline, where the cursor already is.
+When enabled, Ghost offers suggestions in grey, inline, where the cursor already is.
 
 | Key | Action |
 | :-- | :-- |
@@ -143,57 +85,18 @@ Pause for a moment and a suggestion appears in grey, inline, where the cursor al
 | <kbd>→</kbd> | Accept part |
 | <kbd>Esc</kbd> | Dismiss |
 
-Prediction holds the highest execution priority in the app. Background understanding yields to
-it immediately, and nothing in the prediction hot path is allowed to touch the disk, call a
-retrieval model, or rebuild an index.
+Ghost is optional and local. Cursor-bounded completion must exclude future knowledge, and no
+Ghost is generated during marked IME text. Background work yields to foreground prediction;
+the prediction hot path must not scan disk, call a retrieval model, or rebuild an index.
 
-### Living Margin
+### Source search, not generated answers
 
-No underlines on every sentence. No popups. A margin that stays empty until it has something
-like this:
-
-> *This character does not know that yet — they were not in the scene where it happened.*
->
-> *This thread has not appeared in eleven chapters.*
->
-> *The last four paragraphs end on the same rhythm.*
-
-If confidence is low, the margin stays empty. That is a feature.
-
-### Ask MINT
-
-Not a permanent sidebar. `⌘K` opens a question against the current project, answers it, and
-gets out of the way. When the answer asserts something about the manuscript, it should be able
-to point at the passage it came from.
-
----
-
-## Story memory
-
-A novel does not compress into one large summary without losing the thing that matters.
-
-```
-Work
-└─ Part / Arc
-   └─ Chapter
-      └─ Scene
-         └─ Atomic Story Knowledge
-            ├─ Event              ├─ Character State
-            ├─ Fact               ├─ Character Knowledge
-            ├─ Relationship State ├─ Object State
-            └─ Story Thread
-```
-
-Summaries are a **retrieval router, not a source of truth**. Any judgement shown to the writer
-must be traceable down to real evidence in the text.
-
-Fiction time is not one axis either:
-
-- **Discourse position** — the order the reader encounters it
-- **Story time** — the order it happened in the world
-
-When the time is unknown it stays unknown. The model does not get to invent a gap and then
-raise a contradiction about it.
+The first-release search contract is deterministic, model-free manuscript search with a way to
+open the supporting passage and return to writing
+([#108](https://github.com/sorbetsharkroundhand/MINT/issues/108)). The planned `⌘K` flow
+([#112](https://github.com/sorbetsharkroundhand/MINT/issues/112)) is source inspection, not a
+promise of LLM-generated Ask MINT answers or a permanent chat sidebar. These integrations are
+still release work, not completed features inferred from UI scaffolding.
 
 ---
 
@@ -206,11 +109,13 @@ User Canon  >  explicit manuscript text  >  deterministic inference
             >  agent inference  >  summary
 ```
 
-Character sheets you corrected, relationships you fixed, contradictions you marked intentional:
-reanalysis never overwrites these. Summaries, extractions and search indexes are all
-disposable and can be rebuilt from the text.
+The release must preserve manuscripts and explicit writer decisions across reindexing,
+relaunch and recovery. Derived summaries, extractions and indexes are rebuildable; they must
+not replace original evidence or overwrite writer decisions. Durable project-owned writer data
+is tracked in [#111](https://github.com/sorbetsharkroundhand/MINT/issues/111), not claimed complete
+by the existence of an Intelligence cache.
 
-On disk:
+Current developer project layout:
 
 ```
 ~/Documents/MINT/Projects/<project-id>/
@@ -223,32 +128,45 @@ On disk:
 
 Migration from the older `entries.json` layout is **non-destructive by contract**. The original
 is never transformed in place, and a new project is verified before it is ever activated.
+Storage roots are centralized in `MintStorageLocation`; this developer layout is not proof of
+the final sandbox/container migration or Store distribution path.
 
 ---
 
-## Status — 0.2.0
+## Status — first Mac App Store release
 
-0.2.0 is under active development. This table is a summary; the authoritative scope, sequence
-and gates live in
-[**Epic #99**](https://github.com/sorbetsharkroundhand/MINT/issues/99).
+Existing foundations and remaining release work are separate. The current issue bodies in
+[Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) take precedence over this summary.
 
 | Area | State |
 | :-- | :-- |
-| Native editor, Ghost Completion, search, export | Working |
-| Project domain, store and non-destructive migration | Working |
-| Fiction / General workspace routing and shell | Working |
-| Living Margin framework | Landed, presentation in progress |
-| Hierarchical story memory | Landed, retrieval integration in progress |
-| Writing Quality core | Working, Korean rule set in progress |
-| Ask MINT, Story Map, Review surface | In progress |
-| Project-first runtime handoff ([#118](https://github.com/sorbetsharkroundhand/MINT/issues/118)) | In progress |
-| App Store distribution path ([#150](https://github.com/sorbetsharkroundhand/MINT/issues/150)) | In progress |
+| Native editor, Ghost Completion, document search and export | Existing foundations; integrated release verification remains |
+| Project domain, store and non-destructive migration | Existing foundations; runtime ownership remains [#118](https://github.com/sorbetsharkroundhand/MINT/issues/118) |
+| Recovery and durable writer data | Required release work: [#151](https://github.com/sorbetsharkroundhand/MINT/issues/151), [#111](https://github.com/sorbetsharkroundhand/MINT/issues/111) |
+| Model-free project source search | Required release work: [#108](https://github.com/sorbetsharkroundhand/MINT/issues/108), [#112](https://github.com/sorbetsharkroundhand/MINT/issues/112) |
+| Model lifecycle and Store distribution | Required release work: [#152](https://github.com/sorbetsharkroundhand/MINT/issues/152), [#150](https://github.com/sorbetsharkroundhand/MINT/issues/150) |
+| General/no-model, native UX and product decisions | Owner verification/decisions: [#116](https://github.com/sorbetsharkroundhand/MINT/issues/116), [#153](https://github.com/sorbetsharkroundhand/MINT/issues/153), [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155) |
 
 > **Reading the code:** the primary editor flow still runs through the legacy `EntryStore`
 > compatibility path while [#118](https://github.com/sorbetsharkroundhand/MINT/issues/118)
-> completes the project-first runtime handoff. Some 0.2.0 workspace UI therefore exists in the
-> source without appearing in the normal document flow yet. Replacement surfaces land before
-> any legacy UI is retired.
+> completes the project-first runtime handoff. Code or hidden UI is not evidence of a shipping
+> feature. User data must remain accessible when legacy UI is retired.
+
+Green unit tests or an ad-hoc developer bundle do not establish Store readiness. Signing,
+sandbox/archive checks, quality evidence and owner/manual checks must all refer to the same
+candidate under [#119](https://github.com/sorbetsharkroundhand/MINT/issues/119).
+
+### Post-release — not first-release promises
+
+- Map and Review breadth, including broad story projections and review dashboards.
+- LLM-generated Ask MINT answers, Living Margin suggestion generation, and Writing Quality UI.
+- Advanced Story Intelligence ([#158](https://github.com/sorbetsharkroundhand/MINT/issues/158)).
+- Generalized prompt-state reuse beyond the release topology
+  ([#149](https://github.com/sorbetsharkroundhand/MINT/issues/149)), presentation/motion/state
+  consolidation ([#163](https://github.com/sorbetsharkroundhand/MINT/issues/163)), and math-atom
+  extraction ([#165](https://github.com/sorbetsharkroundhand/MINT/issues/165)).
+
+Existing frameworks or experiments for these capabilities do not make them first-release features.
 
 ---
 
@@ -273,6 +191,10 @@ and of fiction-specific types wherever that coupling is not required.
 ## Run from source
 
 **Requirements** — Apple Silicon Mac · macOS 14+ · Xcode 16+ · Swift 6 toolchain
+
+These are development prerequisites, not final supported-model/hardware claims. Release support
+and licensing decisions remain subject to [#152](https://github.com/sorbetsharkroundhand/MINT/issues/152)
+and [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155).
 
 SwiftPM builds the executable, but MLX also needs its Metal shader library.
 
@@ -301,6 +223,7 @@ open build/MINT.app
 
 The script prepares `mlx.metallib`, builds the release executable, assembles
 `build/MINT.app` and applies an ad-hoc signature for local execution.
+It does not produce an App Store-validated distribution artifact.
 
 </details>
 
@@ -353,12 +276,14 @@ Tests/
 | :-- | :-- |
 | [PLAN.md](PLAN.md) | Architecture and context index |
 | [AGENTS.md](AGENTS.md) | Shared invariants and verification commands |
-| [Design specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md) | 0.2.0 design contract |
+| [Historical design specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md) | Former 0.2.0 breadth; not the current release contract |
 | [Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) | Release scope, sequence and gates |
+| [Gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) | Evidence and owner checks for one identified release candidate |
 
 Historical plans and benchmark reports under `docs/` record their original contracts. They are
 not current implementation contracts — read them to answer a specific question, not to learn
 how the code works today.
+Old inline `CLAUDE.md §N` / `PLAN §N` citations are historical references, not current requirements.
 
 ---
 
@@ -374,12 +299,7 @@ finalised in [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155) and
 
 <div align="center">
 
-When MINT is working, you should not be aware you are using AI at all.
-
-You write. MINT reads behind you, remembers what matters, speaks only when it should,
-finds the evidence when you ask, keeps every decision you made,
-
-and never behaves as though it knows the story better than you do.
+A dependable place to write, with optional local help and original evidence you can inspect.
 
 <br>
 
