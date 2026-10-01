@@ -29,8 +29,8 @@ Interfaces: ModelInstallManifest(id:revision:files:), validate(); File(path:size
 ## Task 2: Owned installation state
 Files: ModelInstallationStore.swift, ModelInstallationTests.swift.
 Interfaces: Task 1's manifest; ModelInstallationStore(root:), state(for:), install(_:download:onState:), cancel(_:), directory(for:). Download receives the manifest, file and safe destination asynchronously.
-- [ ] Write and run failing disposable-file tests for receipts, full digest verification, cancellation/retry, revision isolation, duplicate requests, unsafe paths, unlisted weights and unpinned indexed shards.
-- [ ] Implement, rerun focused/full isolated tests and Swift/bench builds; expect zero failures and successful builds. Review inline and open a stacked Draft PR.
+- [x] Write and run failing disposable-file tests for receipts, full digest verification, cancellation/retry, revision isolation, duplicate requests, unsafe paths, unlisted weights and unpinned indexed shards.
+- [x] Implement, rerun focused/full isolated tests and Swift/bench builds; expect zero failures and successful builds. Review inline and open a stacked Draft PR.
 
 ## Task 3: Real download and inference integration
 Files: ModelDownloadManager.swift, CompletionEngine.swift, ModelChip.swift and focused lifecycle tests.
