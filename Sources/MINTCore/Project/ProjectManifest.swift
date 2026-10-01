@@ -21,7 +21,9 @@ public struct ProjectAssetRecord: Codable, Equatable, Sendable {
 
 /// 원문은 별도 파일에 두어 manifest 교체 전까지 이전 세대를 보존한다 (PLAN §5.2).
 public struct ProjectManifest: Codable, Equatable, Sendable {
-    public static let currentSchemaVersion = 1
+    /// Older schema-1 apps must refuse writes rather than discard durable UserData references.
+    public static let currentSchemaVersion = 2
+    static func supportsSchema(_ version: Int) -> Bool { version == 1 || version == currentSchemaVersion }
     public var schemaVersion: Int = currentSchemaVersion
     public var id: WritingProjectID
     public var title: String
@@ -30,6 +32,7 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
     public var trashedDocumentIDs: Set<WritingDocumentID> = []
     public var assets: [ProjectAssetRecord] = []
     public var legacySource: ProjectFileRecord?
+    public var userData: [String: ProjectFileRecord] = [:]
 
     init(
         schemaVersion: Int = currentSchemaVersion,
@@ -39,7 +42,8 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         documents: [ProjectDocumentRecord],
         trashedDocumentIDs: Set<WritingDocumentID> = [],
         assets: [ProjectAssetRecord] = [],
-        legacySource: ProjectFileRecord? = nil
+        legacySource: ProjectFileRecord? = nil,
+        userData: [String: ProjectFileRecord] = [:]
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -49,6 +53,7 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         self.trashedDocumentIDs = trashedDocumentIDs
         self.assets = assets
         self.legacySource = legacySource
+        self.userData = userData
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -60,6 +65,7 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
         case trashedDocumentIDs
         case assets
         case legacySource
+        case userData
     }
 
     public init(from decoder: any Decoder) throws {
@@ -73,6 +79,7 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
             Set<WritingDocumentID>.self, forKey: .trashedDocumentIDs) ?? []
         assets = try container.decodeIfPresent([ProjectAssetRecord].self, forKey: .assets) ?? []
         legacySource = try container.decodeIfPresent(ProjectFileRecord.self, forKey: .legacySource)
+        userData = try container.decodeIfPresent([String: ProjectFileRecord].self, forKey: .userData) ?? [:]
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -87,6 +94,7 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
             forKey: .trashedDocumentIDs)
         try container.encode(assets, forKey: .assets)
         try container.encodeIfPresent(legacySource, forKey: .legacySource)
+        try container.encode(userData, forKey: .userData)
     }
 }
 

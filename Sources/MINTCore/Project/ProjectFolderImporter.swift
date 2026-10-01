@@ -18,7 +18,7 @@ extension ProjectStore {
             let manifest = try JSONDecoder().decode(ProjectManifest.self,
                 from: files.read(sourceManifest))
             guard manifest.id == id else { throw ProjectStoreError.invalidManifest }
-            guard manifest.schemaVersion == ProjectManifest.currentSchemaVersion else {
+            guard ProjectManifest.supportsSchema(manifest.schemaVersion) else {
                 throw ProjectStoreError.unsupportedSchema(manifest.schemaVersion)
             }
             let target = try rootURL(id.rawValue.uuidString)
