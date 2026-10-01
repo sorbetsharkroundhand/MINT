@@ -46,7 +46,7 @@ public enum ProjectSessionError: Error, Equatable, LocalizedError, Sendable {
         case .transitionInProgress:
             "다른 프로젝트 전환이 진행 중입니다."
         case .staleRuntime:
-            "이미지를 가져오는 동안 문서가 변경되었습니다."
+            "작업을 적용하기 전에 문서가 변경되었습니다."
         }
     }
 }
