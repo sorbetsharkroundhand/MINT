@@ -83,8 +83,22 @@ enum LegacyProjectMigrator {
 }
 
 extension ProjectStore {
+    public func migrateLegacy(
+        from sourceURL: URL,
+        mode: WritingMode,
+        title: String
+    ) throws -> LegacyMigrationResult {
+        let result = try prepareLegacyMigration(from: sourceURL, mode: mode, title: title)
+        _ = try activateAndLoad(id: result.projectID)
+        return result
+    }
+
     /// 명시적으로 가져온 원고만 다루며 기존 앱의 activeID는 변경하지 않는다.
-    public func migrateLegacy(from sourceURL: URL, mode: WritingMode, title: String) throws -> LegacyMigrationResult {
+    public func prepareLegacyMigration(
+        from sourceURL: URL,
+        mode: WritingMode,
+        title: String
+    ) throws -> LegacyMigrationResult {
         try withStoreLock {
             let snapshot = try LegacyProjectMigrator.read(from: sourceURL)
             let sourceHash = ProjectDigest.hash(snapshot.sourceData)
@@ -130,8 +144,6 @@ extension ProjectStore {
             let receipt = MigrationReceipt(requestFingerprint: requestHash, projectID: id)
             try Task.checkCancellation()
             try files.writeAtomically(JSONEncoder().encode(receipt), to: receiptURL)
-            // receipt 이후 활성화가 실패해도 다음 호출이 검증된 target을 재사용한다.
-            try activateUnlocked(id: id)
             return LegacyMigrationResult(projectID: id, migratedDocumentCount: snapshot.entries.count,
                 sourceFingerprint: sourceHash, reusedExistingProject: reusedID != nil)
         }

@@ -12,6 +12,56 @@ import XCTest
 ///  3. 같은 문서로의 전환(재선택)은 무해하다.
 final class ContextReportIsolationTests: XCTestCase {
 
+    @MainActor
+    func testProjectSnapshotUpdatePreservesPartiallyAcceptedGhost() {
+        let key = ProjectDocumentKey(projectID: WritingProjectID(), documentID: WritingDocumentID())
+        let completion = CompletionController()
+        completion.noteDocumentSwitch(to: ProjectRuntimeIdentity(key: key, generation: 1))
+        completion.publishCompletion(
+            .init(
+                text: " first second", timeToFirstChunk: nil, totalTime: 0,
+                promptTokensPerSecond: nil, generationTokensPerSecond: nil,
+                stoppedAtSentenceBoundary: false, promptTokenCount: 0, reusedPromptTokens: 0),
+            caretLocation: 5, mode: "fast")
+
+        XCTAssertEqual(completion.acceptWord(insertionLocation: 5), " first")
+        // The editor writes its binding before forwarding noteEdit; that binding
+        // synchronously publishes a new session snapshot for the accepted word.
+        completion.noteDocumentChange(ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 2),
+            title: "Draft", body: "Draft first", kind: .manuscript, mode: .general))
+        completion.noteEdit(
+            prefix: "Draft first", caretLocation: 11,
+            isComposing: false, caretAtParagraphEnd: true)
+
+        XCTAssertEqual(completion.suggestion, " second")
+        XCTAssertEqual(completion.acceptSuggestion(), " second")
+    }
+
+    @MainActor
+    func testABAReturnRejectsOriginalContext() {
+        let documentID = WritingDocumentID()
+        let aKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        let bKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        let identities = [
+            ProjectRuntimeIdentity(key: aKey, generation: 1),
+            ProjectRuntimeIdentity(key: bKey, generation: 2),
+            ProjectRuntimeIdentity(key: aKey, generation: 3),
+        ]
+        let completion = CompletionController()
+        completion.noteDocumentSwitch(to: identities[0])
+        completion.lastContextReport = ContextReport(
+            items: [.init(kind: .meta, text: "Original A", stableKey: "a")],
+            entryID: documentID.rawValue, generation: 1, runtimeIdentity: identities[0])
+
+        completion.noteDocumentSwitch(to: identities[1])
+        completion.noteDocumentSwitch(to: identities[2])
+
+        XCTAssertNil(completion.lastContextReport,
+            "A generation 1 context must not survive the return to A generation 3")
+        XCTAssertFalse(completion.isPredicting)
+    }
+
     private var dir: URL!
 
     override func setUpWithError() throws {

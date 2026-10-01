@@ -1,3 +1,4 @@
+import Combine
 import XCTest
 
 @testable import MINTCore
@@ -7,6 +8,211 @@ import XCTest
 /// 계약: 선점(noteChange·전체 다시 읽기)마다 세대가 올라가고, 늦게 끝난 이전
 /// 작업은 ① 핸들 정리(finishPass)도 ② 발행(canPublish)도 하지 못한다.
 final class IndexerOwnershipTests: XCTestCase {
+
+    @MainActor
+    func testPreemptedManualPassCannotPublishCompletionPhase() async {
+        let key = ProjectDocumentKey(projectID: WritingProjectID(), documentID: WritingDocumentID())
+        var document = ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 1),
+            title: "Draft", body: "# Draft\nThe manuscript.", kind: .manuscript, mode: .fiction)
+        let started = expectation(description: "Manual pass suspended after initial hydration")
+        let persistence = PausingSidecarPersistence(started: started, pauseOnLoad: 2)
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let reader = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        reader.attach(documentProvider: { document })
+        let hydrated = expectation(description: "Initial project hydration")
+        let hydration = reader.$snapshotGeneration.dropFirst().prefix(1).sink { _ in hydrated.fulfill() }
+        reader.noteDocumentChange(document)
+        await fulfillment(of: [hydrated], timeout: 1)
+        hydration.cancel()
+        reader.requestPass()
+        await fulfillment(of: [started], timeout: 5)
+        XCTAssertEqual(reader.manualPhase, .queued)
+
+        document = ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 2),
+            title: "Draft", body: "# Draft\nThe edited manuscript.", kind: .manuscript, mode: .fiction)
+        reader.noteDocumentChange(document)
+        XCTAssertEqual(reader.manualPhase, .idle, "Editing must release obsolete manual ownership")
+        let stalePhase = expectation(description: "Preempted finalizer must not publish")
+        stalePhase.isInverted = true
+        let subscription = reader.$manualPhase.dropFirst().sink { _ in stalePhase.fulfill() }
+        await persistence.release()
+        await fulfillment(of: [stalePhase], timeout: 0.2)
+        XCTAssertEqual(reader.manualPhase, .idle)
+        reader.shutdown()
+        withExtendedLifetime(subscription) {}
+    }
+
+    @MainActor
+    func testSameDocumentEditsReuseEligibleKnowledgeWithoutReloadingSidecar() async throws {
+        let key = ProjectDocumentKey(projectID: WritingProjectID(), documentID: WritingDocumentID())
+        let originalBody = "# First\nThe gate was unlocked.\n# Second\nA visitor waited."
+        var document = ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 1), title: "Draft",
+            body: originalBody, kind: .manuscript, mode: .fiction)
+        let scope = StoryMemoryScope.project(projectID: key.projectID, documentID: key.documentID)
+        let originalOutline = DocumentOutline.parse(originalBody)
+        let firstScene = try XCTUnwrap(originalOutline.scenes.first)
+        let secondScene = try XCTUnwrap(originalOutline.scenes.last)
+        var sidecar = KnowledgeSidecar(scope: scope)
+        sidecar.sceneSummaries[firstScene.contentHash] = .init(
+            contentHash: firstScene.contentHash, headingPath: firstScene.headingPath,
+            summary: "The gate was unlocked.", updatedAt: .now)
+        sidecar.sceneSummaries[secondScene.contentHash] = .init(
+            contentHash: secondScene.contentHash, headingPath: secondScene.headingPath,
+            summary: "The visitor waited.", updatedAt: .now)
+        let persistence = CountingSnapshotPersistence(sidecar: sidecar)
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let reader = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        reader.attach(documentProvider: { document })
+        defer { reader.shutdown() }
+
+        for generation in 1...3 {
+            if generation > 1 {
+                document = ProjectDocumentSnapshot(
+                    identity: ProjectRuntimeIdentity(key: key, generation: UInt64(generation)),
+                    title: "Draft", body: "# First\nThe gate was unlocked.\n# Second\nNew draft \(generation).",
+                    kind: .manuscript, mode: .fiction)
+            }
+            let refreshed = expectation(description: "Knowledge for generation \(generation)")
+            let subscription = reader.$snapshotGeneration.dropFirst().prefix(1).sink { _ in
+                refreshed.fulfill()
+            }
+            reader.noteDocumentChange(document)
+            await fulfillment(of: [refreshed], timeout: 1)
+            XCTAssertEqual(reader.snapshotRuntimeIdentity, document.identity)
+            let eligible = reader.snapshotRuntimeIdentity == document.identity ? reader.snapshot : nil
+            XCTAssertEqual(eligible?.summariesByHash[firstScene.contentHash], "The gate was unlocked.")
+            if generation > 1 {
+                XCTAssertNil(eligible?.summariesByHash[secondScene.contentHash])
+                let report = ContextAssembler.assembleWithReport(
+                    prefix: "New draft", document: DocumentContext(title: "Draft", kind: .novel),
+                    knowledge: eligible, prefixStartUTF16: firstScene.utf16Range.upperBound,
+                    style: .continuation).report
+                XCTAssertTrue(report.items.contains { $0.text.contains("The gate was unlocked.") })
+                XCTAssertFalse(report.items.contains { $0.text.contains("The visitor waited.") })
+            }
+            subscription.cancel()
+        }
+        let loadCount = await persistence.loadCount
+        XCTAssertEqual(loadCount, 1, "Typing must reuse already loaded sidecar values")
+    }
+
+    @MainActor
+    func testLateResetFailureDoesNotPublishIntoNewRuntime() async {
+        let key = ProjectDocumentKey(projectID: WritingProjectID(), documentID: WritingDocumentID())
+        var document = ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 1),
+            title: "A", body: "# A\nA manuscript.", kind: .manuscript, mode: .fiction)
+        let started = expectation(description: "Old reset suspended")
+        let persistence = FailingResetPersistence(started: started)
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let reader = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        reader.attach(documentProvider: { document })
+        reader.requestFullPass()
+        await fulfillment(of: [started], timeout: 5)
+        reader.prepareForProjectTransition()
+        document = ProjectDocumentSnapshot(
+            identity: ProjectRuntimeIdentity(key: key, generation: 3),
+            title: "A again", body: "# A\nA manuscript.", kind: .manuscript, mode: .fiction)
+        reader.noteDocumentChange(document)
+        let stalePhase = expectation(description: "Old reset failure must not publish")
+        stalePhase.isInverted = true
+        let subscription = reader.$manualPhase.dropFirst().sink { _ in stalePhase.fulfill() }
+
+        await persistence.release()
+        await fulfillment(of: [stalePhase], timeout: 0.2)
+        XCTAssertEqual(reader.manualPhase, .idle)
+        reader.shutdown()
+        withExtendedLifetime(subscription) {}
+    }
+
+    @MainActor
+    func testLateHydrationRejectsRetiredRuntimeEvenWhenBodyAndScopeMatch() async throws {
+        let documentID = WritingDocumentID()
+        let aKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        let bKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        var identity = ProjectRuntimeIdentity(key: aKey, generation: 1)
+        let document = {
+            ProjectDocumentSnapshot(
+                identity: identity, title: "A", body: "# A\nAn unchanged manuscript.",
+                kind: .manuscript, mode: .fiction)
+        }
+        let started = expectation(description: "Original A sidecar load suspended")
+        let persistence = PausingSidecarPersistence(started: started)
+        let settings = CompletionSettings()
+        settings.autocompleteEnabled = false
+        let reader = BackgroundIndexer(
+            engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
+        reader.attach(documentProvider: document)
+        reader.noteDocumentChange(document())
+        await fulfillment(of: [started], timeout: 5)
+
+        // Deliberately leave the reader's local task token unchanged: the immutable
+        // provider's runtime generation must independently reject the old result.
+        identity = ProjectRuntimeIdentity(key: bKey, generation: 2)
+        identity = ProjectRuntimeIdentity(key: aKey, generation: 3)
+        let stalePublication = expectation(description: "Retired A must not publish")
+        stalePublication.isInverted = true
+        let staleSubscription = reader.$snapshot.compactMap { $0 }.sink { _ in
+            stalePublication.fulfill()
+        }
+        await persistence.release()
+        await fulfillment(of: [stalePublication], timeout: 0.2)
+        XCTAssertNil(reader.snapshot)
+        staleSubscription.cancel()
+
+        let currentPublication = expectation(description: "Current A can still hydrate")
+        let currentSubscription = reader.$snapshot.compactMap { $0 }.prefix(1).sink { _ in
+            currentPublication.fulfill()
+        }
+        reader.noteDocumentChange(document())
+        await fulfillment(of: [currentPublication], timeout: 5)
+        XCTAssertEqual(reader.snapshotRuntimeIdentity, identity)
+        XCTAssertEqual(reader.snapshot?.outline.scenes.first?.headingPath, ["A"])
+        reader.shutdown()
+        withExtendedLifetime(currentSubscription) {}
+    }
+
+    @MainActor
+    func testABAReturnWithSameDocumentUUIDRejectsOriginalAResult() async throws {
+        let documentID = WritingDocumentID()
+        let aKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        let bKey = ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID)
+        var identity = ProjectRuntimeIdentity(key: aKey, generation: 1)
+        let document = {
+            ProjectDocumentSnapshot(
+                identity: identity, title: "A", body: "# Original A\nThe original manuscript is here.",
+                kind: .manuscript, mode: .fiction)
+        }
+        indexer.attach(documentProvider: document)
+        let hydrated = expectation(description: "Original A hydrated")
+        let subscription = indexer.$snapshot.dropFirst().compactMap { $0 }.prefix(1).sink { _ in
+            hydrated.fulfill()
+        }
+        indexer.noteDocumentChange(document())
+        await fulfillment(of: [hydrated], timeout: 5)
+        XCTAssertNotNil(indexer.snapshot)
+
+        // Both transitions happen before detached hydration can publish. A cached result
+        // with the same project/document key still belongs to the retired generation.
+        identity = ProjectRuntimeIdentity(key: bKey, generation: 2)
+        indexer.noteDocumentChange(document())
+        identity = ProjectRuntimeIdentity(key: aKey, generation: 3)
+        indexer.noteDocumentChange(document())
+
+        XCTAssertNil(indexer.snapshot,
+            "A generation 1 result must not remain visible under A generation 3")
+        indexer.shutdown()
+        withExtendedLifetime(subscription) {}
+    }
 
     private var root: URL!
     private var store: EntryStore!
@@ -23,7 +229,7 @@ final class IndexerOwnershipTests: XCTestCase {
             let settings = CompletionSettings()
             settings.autocompleteEnabled = false  // 네트워크 유발 방지
             let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-            indexer.attach(store: store)
+            indexer.attachLegacy(store: store)
             return (store, indexer)
         }
         store = fixture.0
@@ -167,7 +373,7 @@ final class IndexerOwnershipTests: XCTestCase {
         var currentScope = scopeA
         let scopedIndexer = BackgroundIndexer(
             engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
-        scopedIndexer.attach(store: store) { _ in currentScope }
+        scopedIndexer.attachLegacy(store: store) { _ in currentScope }
         let identity = scopedIndexer._testBeginPassForOwnership(scope: scopeA, body: "draft")
 
         currentScope = scopeB
@@ -190,7 +396,7 @@ final class IndexerOwnershipTests: XCTestCase {
         settings.autocompleteEnabled = false
         let scopedIndexer = BackgroundIndexer(
             engine: CompletionEngine(), settings: settings, sidecarPersistence: persistence)
-        scopedIndexer.attach(store: store) { _ in scope }
+        scopedIndexer.attachLegacy(store: store) { _ in scope }
         let identity = scopedIndexer._testBeginPassForOwnership(scope: scope, body: "draft")
         scopedIndexer._testSetManualPhase(.queued, token: identity.generation)
 
@@ -240,5 +446,82 @@ private actor RecordingSidecarPersistence: KnowledgeSidecarPersisting {
         return sidecar
     }
 
+    func pruneLegacyOrphans(keeping documentIDs: Set<WritingDocumentID>) async {}
+}
+
+private actor PausingSidecarPersistence: KnowledgeSidecarPersisting {
+    let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    private let pauseOnLoad: Int
+    private var loadCount = 0
+
+    init(started: XCTestExpectation, pauseOnLoad: Int = 1) {
+        self.started = started
+        self.pauseOnLoad = pauseOnLoad
+    }
+
+    func load(scope: StoryMemoryScope) async -> KnowledgeSidecar {
+        loadCount += 1
+        if loadCount == pauseOnLoad {
+            await withCheckedContinuation { continuation in
+                self.continuation = continuation
+                started.fulfill()
+            }
+        }
+        return KnowledgeSidecar(scope: scope)
+    }
+
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+
+    func save(
+        _ sidecar: KnowledgeSidecar, pruningTo liveHashes: Set<String>?, scope: StoryMemoryScope
+    ) async throws {}
+
+    func replaceWithFresh(scope: StoryMemoryScope, generation: Int) async throws -> KnowledgeSidecar {
+        KnowledgeSidecar(scope: scope)
+    }
+
+    func pruneLegacyOrphans(keeping documentIDs: Set<WritingDocumentID>) async {}
+}
+
+private actor FailingResetPersistence: KnowledgeSidecarPersisting {
+    let started: XCTestExpectation
+    private var continuation: CheckedContinuation<Void, Never>?
+    init(started: XCTestExpectation) { self.started = started }
+    func load(scope: StoryMemoryScope) async -> KnowledgeSidecar { KnowledgeSidecar(scope: scope) }
+    func save(
+        _ sidecar: KnowledgeSidecar, pruningTo liveHashes: Set<String>?, scope: StoryMemoryScope
+    ) async throws {}
+    func replaceWithFresh(scope: StoryMemoryScope, generation: Int) async throws -> KnowledgeSidecar {
+        await withCheckedContinuation { continuation in
+            self.continuation = continuation
+            started.fulfill()
+        }
+        throw CocoaError(.fileWriteUnknown)
+    }
+    func release() {
+        continuation?.resume()
+        continuation = nil
+    }
+    func pruneLegacyOrphans(keeping documentIDs: Set<WritingDocumentID>) async {}
+}
+
+private actor CountingSnapshotPersistence: KnowledgeSidecarPersisting {
+    let sidecar: KnowledgeSidecar
+    private(set) var loadCount = 0
+    init(sidecar: KnowledgeSidecar) { self.sidecar = sidecar }
+    func load(scope: StoryMemoryScope) async -> KnowledgeSidecar {
+        loadCount += 1
+        return sidecar
+    }
+    func save(
+        _ sidecar: KnowledgeSidecar, pruningTo liveHashes: Set<String>?, scope: StoryMemoryScope
+    ) async throws {}
+    func replaceWithFresh(scope: StoryMemoryScope, generation: Int) async throws -> KnowledgeSidecar {
+        KnowledgeSidecar(scope: scope)
+    }
     func pruneLegacyOrphans(keeping documentIDs: Set<WritingDocumentID>) async {}
 }

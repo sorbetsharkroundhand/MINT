@@ -20,7 +20,7 @@ final class PublishedWriteGuardTests: XCTestCase {
         let settings = CompletionSettings()
         settings.autocompleteEnabled = false
         let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        indexer.attach(store: store)
+        indexer.attachLegacy(store: store)
 
         var willChangeCount = 0
         let token = indexer.objectWillChange.sink { willChangeCount += 1 }

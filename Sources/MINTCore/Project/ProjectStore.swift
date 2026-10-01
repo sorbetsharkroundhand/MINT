@@ -26,6 +26,10 @@ public actor ProjectStore {
     }
 
     public func activate(id: WritingProjectID) throws {
+        try withStoreLock { _ = try activateUnlocked(id: id) }
+    }
+
+    public func activateAndLoad(id: WritingProjectID) throws -> WritingProject {
         try withStoreLock { try activateUnlocked(id: id) }
     }
 
@@ -48,9 +52,48 @@ public actor ProjectStore {
     /// 기존 본문의 상대경로를 바꾸지 않고 이관된 사본을 읽는다.
     public func assetData(reference: String, in id: WritingProjectID) throws -> Data? {
         try withStoreLock {
+            try ProjectPaths.validateRelative(reference)
             guard let record = try readManifest(id: id).assets.first(where: { $0.reference == reference })
             else { return nil }
             return try verified(record.file, in: id)
+        }
+    }
+
+    public func assetCatalog(id: WritingProjectID) throws -> ProjectAssetCatalog {
+        try withStoreLock {
+            var assets: [String: Data] = [:]
+            for record in try readManifest(id: id).assets {
+                try Task.checkCancellation()
+                assets[record.reference] = try verified(record.file, in: id)
+            }
+            return ProjectAssetCatalog(projectID: id, verifiedAssets: assets)
+        }
+    }
+
+    /// Commit immutable bytes before changing their reference; retain previous blobs for recovery.
+    public func addAsset(_ data: Data, reference: String, to id: WritingProjectID) throws {
+        try withStoreLock {
+            try ProjectPaths.validateRelative(reference)
+            var manifest = try readManifest(id: id)
+            _ = try materialize(manifest)
+            let manifestURL = try projectURL(id, "project.json")
+            let oldData = try files.read(manifestURL)
+            let hash = ProjectDigest.hash(data)
+            let record = ProjectAssetRecord(reference: reference,
+                file: ProjectFileRecord(relativePath: "Assets/\(hash)", contentHash: hash))
+            try writeImmutable(data, path: record.file.relativePath, id: id)
+            if let index = manifest.assets.firstIndex(where: { $0.reference == reference }) {
+                if manifest.assets[index] == record { return }
+                manifest.assets[index] = record
+            } else {
+                manifest.assets.append(record)
+            }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            let updated = try encoder.encode(manifest)
+            try files.writeAtomically(oldData, to: projectURL(id, "previous-project.json"))
+            try Task.checkCancellation()
+            try files.writeAtomically(updated, to: manifestURL)
         }
     }
 
@@ -122,8 +165,10 @@ public actor ProjectStore {
         guard manifest.schemaVersion == ProjectManifest.currentSchemaVersion else {
             throw ProjectStoreError.unsupportedSchema(manifest.schemaVersion)
         }
+        let documentIDs = Set(manifest.documents.map(\.id))
         guard manifest.id == id,
-            Set(manifest.documents.map(\.id)).count == manifest.documents.count,
+            documentIDs.count == manifest.documents.count,
+            manifest.trashedDocumentIDs.isSubset(of: documentIDs),
             Set(manifest.assets.map(\.reference)).count == manifest.assets.count
         else { throw ProjectStoreError.invalidManifest }
         for record in manifest.documents {
@@ -169,7 +214,12 @@ public actor ProjectStore {
             _ = try verified(record.file, in: manifest.id)
         }
         if let source = manifest.legacySource { _ = try verified(source, in: manifest.id) }
-        return WritingProject(id: manifest.id, title: manifest.title, mode: manifest.mode, documents: documents)
+        return WritingProject(
+            id: manifest.id,
+            title: manifest.title,
+            mode: manifest.mode,
+            documents: documents,
+            trashedDocumentIDs: manifest.trashedDocumentIDs)
     }
 
     func loadUnlocked(id: WritingProjectID) throws -> WritingProject { try materialize(readManifest(id: id)) }
@@ -202,7 +252,10 @@ public actor ProjectStore {
     }
 
     func saveUnlocked(_ project: WritingProject, importedAssets: [String: Data] = [:], source: Data? = nil) throws {
-        guard Set(project.documents.map(\.id)).count == project.documents.count else {
+        let documentIDs = Set(project.documents.map(\.id))
+        guard documentIDs.count == project.documents.count,
+            project.trashedDocumentIDs.isSubset(of: documentIDs)
+        else {
             throw ProjectStoreError.invalidManifest
         }
         let manifestURL = try projectURL(project.id, "project.json")
@@ -212,7 +265,12 @@ public actor ProjectStore {
         for directory in ["Documents", "Notes", "Assets", "Intelligence", "UserData"] {
             try files.createDirectory(at: projectURL(project.id, directory))
         }
-        var manifest = ProjectManifest(id: project.id, title: project.title, mode: project.mode, documents: [])
+        var manifest = ProjectManifest(
+            id: project.id,
+            title: project.title,
+            mode: project.mode,
+            documents: [],
+            trashedDocumentIDs: project.trashedDocumentIDs)
         manifest.assets = old?.assets ?? []
         manifest.legacySource = old?.legacySource
         for document in project.documents {
@@ -249,10 +307,11 @@ public actor ProjectStore {
         try files.writeAtomically(data, to: manifestURL)
     }
 
-    func activateUnlocked(id: WritingProjectID) throws {
-        _ = try loadUnlocked(id: id)
+    func activateUnlocked(id: WritingProjectID) throws -> WritingProject {
+        let project = try loadUnlocked(id: id)
         let data = try JSONEncoder().encode(id)
         try Task.checkCancellation()
         try files.writeAtomically(data, to: rootURL("active-project.json"))
+        return project
     }
 }

@@ -45,6 +45,38 @@ public final class CompletionController: ObservableObject {
         }
         invalidate()
     }
+
+    private var runtimeIdentity: ProjectRuntimeIdentity?
+
+    /// The transition barrier runs before the session publishes the next identity.
+    public func prepareForProjectTransition() {
+        runtimeIdentity = nil
+        lastContextReport = nil
+        dismissConversationSuggestion(remember: false)
+        dismissedConversationHashes.removeAll()
+        invalidate()
+    }
+
+    public func noteDocumentSwitch(to identity: ProjectRuntimeIdentity) {
+        guard runtimeIdentity != identity else { return }
+        if runtimeIdentity?.key != identity.key {
+            dismissConversationSuggestion(remember: false)
+            dismissedConversationHashes.removeAll()
+        }
+        runtimeIdentity = identity
+        lastContextReport = nil
+        invalidate()
+    }
+
+    public func noteDocumentChange(_ snapshot: ProjectDocumentSnapshot) {
+        if runtimeIdentity?.key == snapshot.identity.key, retainSuggestionOnNextEdit {
+            runtimeIdentity = snapshot.identity
+            lastContextReport = nil
+            invalidate(preservingSuggestion: true)
+            return
+        }
+        noteDocumentSwitch(to: snapshot.identity)
+    }
     /// 제안 요청이 예약·진행 중인가 — 툴바 칩의 "예측 중" 표시용 (에디터 v3).
     @Published public private(set) var isPredicting = false
 
@@ -90,8 +122,16 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var conversationSuggestion: ConversationDetector.Block?
     /// 에디터(BlockTextView)로의 직통 알림 — 은은한 하이라이트·인라인 pill 렌더.
     public var conversationSuggestionDidChange: ((ConversationDetector.Block?) -> Void)?
-    /// 기록 실행 다리 — ContentView가 스토어(재앵커 포함)로 배선한다.
-    public var onRecordConversation: ((RecordedConversation) -> Void)?
+    /// 기록 실행 다리 — ContentView가 스토어(재앵커 포함)로 배선한다. 핸들러가
+    /// 없으면 승인해도 durable decision을 만들 수 없으므로 affordance 자체를 끈다.
+    public var onRecordConversation: ((RecordedConversation) -> Void)? {
+        didSet {
+            guard onRecordConversation == nil else { return }
+            conversationTask?.cancel()
+            conversationTask = nil
+            clearConversationSuggestion()
+        }
+    }
     /// 이미 기록된 블록 해시 제공자 — 같은 대화를 다시 제안하지 않는다.
     public var recordedConversationHashesProvider: (() -> Set<String>)?
 
@@ -109,10 +149,13 @@ public final class CompletionController: ObservableObject {
     /// 키 입력 경로 비용은 태스크 예약뿐이다 (요구사항 §34).
     private func scheduleConversationDetection(prefix: String, caretLocation: Int) {
         conversationTask?.cancel()
-        guard documentContextProvider?()?.kind == .novel else { return }
+        conversationTask = nil
+        guard onRecordConversation != nil,
+            currentDocumentContext()?.kind == .novel
+        else { return }
         conversationTask = Task { [weak self] in
             try? await Task.sleep(for: Self.conversationIdle)
-            guard !Task.isCancelled, let self else { return }
+            guard !Task.isCancelled, let self, self.onRecordConversation != nil else { return }
             let text = prefix as NSString
             guard var block = ConversationDetector.blockEnding(at: text.length, in: text)
             else { return }
@@ -132,10 +175,12 @@ public final class CompletionController: ObservableObject {
     /// false를 리턴해 **개행도 정상 진행**시킨다 — 글쓰기 흐름이 끊기지 않는다.
     @discardableResult
     public func acceptConversationSuggestion() -> Bool {
-        guard let block = conversationSuggestion else { return false }
+        guard let block = conversationSuggestion,
+            let onRecordConversation
+        else { return false }
         clearConversationSuggestion()
         // 기록 승인 = 사용자 결정 — 참여자 귀속·주제는 백그라운드가 보완한다.
-        onRecordConversation?(ConversationDetector.record(from: block, utterances: []))
+        onRecordConversation(ConversationDetector.record(from: block, utterances: []))
         return true
     }
 
@@ -169,6 +214,17 @@ public final class CompletionController: ObservableObject {
     /// 제목·장르·인물 카드를 조립기에 넘긴다 (PLAN §10). 푸시(onChange) 대신
     /// pull인 이유: 본문이 큰 저널에서 매 키 입력마다 Equatable 비교를 하지 않는다.
     public var documentContextProvider: (() -> DocumentContext?)?
+    public var projectDocumentProvider: (() -> ProjectDocumentSnapshot?)?
+
+    private func currentDocumentContext() -> DocumentContext? {
+        if let projectDocumentProvider {
+            guard let snapshot = projectDocumentProvider() else { return nil }
+            return DocumentContext(
+                title: snapshot.title, kind: snapshot.mode == .fiction ? .novel : .journal,
+                entryID: snapshot.identity.key.documentID.rawValue)
+        }
+        return documentContextProvider?()
+    }
 
     /// 지식 스냅샷 공급자 (M6, PLAN §11) — 인덱서가 발행한 인메모리 값만 pull.
     /// 활성 문서와의 일치 확인은 배선부(ContentView)의 몫이다.
@@ -177,7 +233,7 @@ public final class CompletionController: ObservableObject {
     /// 종류별 컨텍스트 창 상한 — 소설은 넓게 (PLAN §10 Smart/Story 예산).
     /// 에디터(BlockTextView)가 prefix 추출 한도로 읽는다.
     public var effectiveContextCharacters: Int {
-        documentContextProvider?()?.kind == .novel
+        currentDocumentContext()?.kind == .novel
             ? settings.novelContextCharacters
             : settings.contextCharacters
     }
@@ -256,9 +312,9 @@ public final class CompletionController: ObservableObject {
     // MARK: - 엔진 로드
 
     /// 앱 시작 시 모델을 미리 로드해 모델 상주(PLAN §9-2)로 첫 제안 지연을 지킨다.
-    /// 자동완성이 꺼져 있으면 로드하지 않는다 — 켜는 순간 로드한다.
+    /// 설정에서 자동완성을 명시적으로 허용한 뒤에만 모델을 로드한다.
     public func preloadEngine() {
-        guard settings.autocompleteEnabled else { return }
+        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         switch engineState {
         case .idle, .failed: break
         default: return
@@ -316,11 +372,14 @@ public final class CompletionController: ObservableObject {
         modelDidChange()
     }
 
-    /// 자동완성 마스터 스위치 토글 (모델 드롭다운의 스위치).
+    /// 자동완성 마스터 스위치 토글. 이 사용자 조작이 명시적 허용 상태를 기록한다.
     /// 끄면 진행 중인 제안까지 즉시 폐기하고, 켜면 모델을 로드한다.
     public func setAutocompleteEnabled(_ enabled: Bool) {
-        guard settings.autocompleteEnabled != enabled else { return }
-        settings.autocompleteEnabled = enabled
+        let authorization: CompletionAuthorization = enabled ? .enabled : .disabled
+        guard settings.authorization != authorization
+            || settings.autocompleteEnabled != enabled
+        else { return }
+        settings.setCompletionEnabled(enabled)
         if enabled {
             preloadEngine()
         } else {
@@ -405,7 +464,9 @@ public final class CompletionController: ObservableObject {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
 
-        guard settings.autocompleteEnabled else { return }  // 마스터 스위치 꺼짐
+        guard settings.authorization == .enabled,
+            settings.autocompleteEnabled
+        else { return }  // 명시적 허용 전이거나 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
         guard caretAtParagraphEnd else { return }
         // 같은 모델로 실패했으면 재시도 폭주 방지. 모델을 바꿨으면 다시 허용.
@@ -523,7 +584,7 @@ public final class CompletionController: ObservableObject {
     /// 같은 폴백. 고스트 자동완성의 generation/suggestion에는 손대지 않으므로
     /// 타이핑 중 제안 흐름과 간섭하지 않는다 (엔진 actor가 순차 처리).
     public func requestFolderName(for folderID: UUID, in store: EntryStore) {
-        guard settings.autocompleteEnabled else { return }
+        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         if case .failed = engineState { return }
         guard !namingFolderIDs.contains(folderID) else { return }
         let content = store.folderNamingContext(
@@ -595,13 +656,14 @@ public final class CompletionController: ObservableObject {
         cancelAllFolderNaming()
     }
 
-    private func invalidate() {
+    private func invalidate(preservingSuggestion: Bool = false) {
         generation += 1
         pendingTask?.cancel()
         pendingTask = nil
         pendingCaret = nil
-        suggestionAnchor = nil
         if isPredicting { isPredicting = false }
+        guard !preservingSuggestion else { return }
+        suggestionAnchor = nil
         if suggestion != nil {
             // 수락 경로가 아니면 이 소멸은 거절이다 (편집·Esc·커서 이동).
             if !suppressDismissLog {
@@ -624,11 +686,16 @@ public final class CompletionController: ObservableObject {
         defer { if expected == generation, isPredicting { isPredicting = false } }
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
-        let document = documentContextProvider?()
+        let capturedIdentity = projectDocumentProvider?()?.identity
+        let document = currentDocumentContext()
         let knowledge = knowledgeProvider?()
         // 토큰 카운터 (#43) — 로드된 모델이 있으면 예산을 토큰으로 접고, 없으면
         // 조립기가 현행 문자 상수를 쓴다 (동작 불변).
         let counter = await tokenCounter(for: parameters.modelID)
+        guard expected == generation,
+            capturedIdentity == projectDocumentProvider?()?.identity,
+            !Task.isCancelled
+        else { return }
         var (prompt, report) = ContextAssembler.assembleWithReport(
             prefix: prefix,
             document: document,
@@ -644,6 +711,7 @@ public final class CompletionController: ObservableObject {
         // 보여지거나 그 오버라이드에 기록되는 일을 막는다 (이슈 #8).
         report.entryID = document?.entryID
         report.generation = expected
+        report.runtimeIdentity = capturedIdentity
         lastContextReport = report
         // 대화 모드 (PLAN §10) — 커서가 열린 따옴표 안이면 정지 사다리를 발화
         // 끝으로 확장한다. 조립기의 말투 승격과 같은 감지를 써서 어긋나지 않는다.
@@ -664,22 +732,33 @@ public final class CompletionController: ObservableObject {
                     self?.noteLoadProgress(fraction)
                 }
             }
-            guard expected == generation else { return }  // 그 사이 편집됨 — stale 폐기
-            markEngineReady()
-            lastLatency = completion.totalTime
-            guard !completion.text.isEmpty else { return }
-            suggestion = completion.text
-            suggestionAnchor = caretLocation
-            currentSuggestionMode = mode
-            AcceptanceMetrics.log(
-                .shown, mode: mode,
-                latencyMs: Int(completion.totalTime * 1000))
-            suggestionDidChange?(completion.text)
+            guard expected == generation,
+                capturedIdentity == projectDocumentProvider?()?.identity
+            else { return }
+            publishCompletion(completion, caretLocation: caretLocation, mode: mode)
         } catch is CancellationError {
             // 새 입력으로 취소됨 — 정상 흐름.
         } catch {
-            guard expected == generation else { return }
+            guard expected == generation,
+                capturedIdentity == projectDocumentProvider?()?.identity
+            else { return }
             markEngineFailed(error, modelID: parameters.modelID)
         }
+    }
+
+    /// Commit an owned engine result to the editor's acceptance lifecycle.
+    func publishCompletion(
+        _ completion: CompletionEngine.Completion, caretLocation: Int, mode: String
+    ) {
+        markEngineReady()
+        lastLatency = completion.totalTime
+        guard !completion.text.isEmpty else { return }
+        suggestion = completion.text
+        suggestionAnchor = caretLocation
+        currentSuggestionMode = mode
+        AcceptanceMetrics.log(
+            .shown, mode: mode,
+            latencyMs: Int(completion.totalTime * 1000))
+        suggestionDidChange?(completion.text)
     }
 }

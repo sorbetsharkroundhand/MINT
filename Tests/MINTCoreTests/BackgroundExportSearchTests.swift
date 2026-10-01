@@ -10,6 +10,38 @@ import XCTest
 /// - 검색 필터는 값 스냅샷만 받는 순수 함수 — 메인 밖에서 같은 결과.
 @MainActor
 final class BackgroundExportSearchTests: XCTestCase {
+    func testProjectEpubReportsMissingAssetWithoutReplacingExistingExport() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        let project = projectFixture()
+        try await store.save(project)
+        let catalog = try await store.assetCatalog(id: project.id)
+        let destination = root.appendingPathComponent("existing.epub")
+        try Data([9, 8, 7]).write(to: destination)
+        do {
+            try await EpubExporter.exportAsync(project.documents[0], assets: catalog, to: destination)
+            XCTFail("Missing image silently exported")
+        } catch {}
+        XCTAssertEqual(try Data(contentsOf: destination), Data([9, 8, 7]))
+    }
+    func testProjectEpubIncludesResolvedAsset() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.documents[0].body = "![그림](images/a.png){width=60}\n\n$x^2$\n\n$$\ny=2x\n$$"
+        try await store.save(project)
+        try await store.addAsset(Data([1, 2, 3]), reference: "images/a.png", to: project.id)
+        let catalog = try await store.assetCatalog(id: project.id)
+        let destination = root.appendingPathComponent("project.epub")
+        try await EpubExporter.exportAsync(project.documents[0], assets: catalog, to: destination)
+        XCTAssertEqual(try epubMember("OEBPS/images/a.png", in: destination), Data([1, 2, 3]))
+        let chapter = String(decoding: try epubMember("OEBPS/chapter0.xhtml", in: destination), as: UTF8.self)
+        XCTAssertTrue(chapter.contains("images/a.png"))
+        XCTAssertTrue(chapter.contains("x^2"))
+        XCTAssertTrue(chapter.contains("y=2x"))
+    }
 
     private func makeTempRoot() -> URL {
         let root = FileManager.default.temporaryDirectory
@@ -76,6 +108,19 @@ final class BackgroundExportSearchTests: XCTestCase {
         let none = EntryStore.filterMatches(entries, query: "  ")
         XCTAssertTrue(none.isEmpty)
     }
+}
+
+func epubMember(_ path: String, in archive: URL) throws -> Data {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+    process.arguments = ["-p", archive.path, path]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try process.run()
+    let bytes = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    XCTAssertEqual(process.terminationStatus, 0)
+    return bytes
 }
 
 /// @Sendable 클로저에서 수집하는 진행률 박스.

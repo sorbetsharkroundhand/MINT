@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 
 @testable import MINTCore
@@ -314,6 +315,150 @@ final class SerializationTests: XCTestCase {
 
         view.undoManager?.redo()
         XCTAssertEqual(view.serialize(), after, "redo 후 저장 텍스트가 화면과 달라졌다")
+    }
+
+    /// Switching the stable project/document identity must sever every editing artifact from
+    /// the outgoing manuscript. Otherwise Undo or a late Ghost callback can mutate the target.
+    @MainActor func testProjectIdentityChangeClearsUndoAndGhost() {
+        let view = makeEditor()
+        view.load(markdown: "A")
+        view.ghostText = "old suggestion"
+        view.undoManager?.registerUndo(withTarget: view) { target in
+            MainActor.assumeIsolated {
+                target.string = "A from old undo"
+            }
+        }
+        XCTAssertTrue(view.undoManager?.canUndo == true)
+
+        view.prepareForDocumentTransition(markdown: "B")
+
+        XCTAssertEqual(view.string, "B")
+        XCTAssertNil(view.ghostSnapshotForAccessibility())
+        XCTAssertFalse(view.undoManager?.canUndo == true)
+    }
+
+    /// Runtime generations advance for ordinary body mutations. The editor identity intentionally
+    /// excludes that generation so typing cannot reload TextKit or erase native Undo.
+    @MainActor func testSameProjectDocumentAcrossRuntimeGenerationsDoesNotTransition() {
+        let view = makeEditor()
+        view.load(markdown: "A")
+        view.ghostText = "current suggestion"
+        view.undoManager?.registerUndo(withTarget: view) { target in
+            MainActor.assumeIsolated {
+                target.string = "undo remains local"
+            }
+        }
+        let key = ProjectDocumentKey(
+            projectID: WritingProjectID(), documentID: WritingDocumentID())
+        let firstRuntime = ProjectRuntimeIdentity(key: key, generation: 1)
+        let nextRuntime = ProjectRuntimeIdentity(key: key, generation: 2)
+
+        let didTransition = view.prepareForDocumentTransition(
+            from: .project(firstRuntime.key),
+            to: .project(nextRuntime.key),
+            markdown: "B")
+
+        XCTAssertFalse(didTransition)
+        XCTAssertEqual(view.string, "A")
+        XCTAssertEqual(view.ghostSnapshotForAccessibility()?.text, "current suggestion")
+        XCTAssertTrue(view.undoManager?.canUndo == true)
+    }
+
+    /// A callback retained by an outgoing completion request must not paint its Ghost into the
+    /// newly loaded document after the stable identity has changed.
+    @MainActor func testOutgoingSuggestionCallbackCannotPublishAfterABA() {
+        let view = makeEditor()
+        let controller = CompletionController()
+        var body = "A"
+        let oldIdentity = EditorDocumentIdentity.project(
+            ProjectDocumentKey(
+                projectID: WritingProjectID(), documentID: WritingDocumentID()))
+        let nextIdentity = EditorDocumentIdentity.project(
+            ProjectDocumentKey(
+                projectID: WritingProjectID(), documentID: WritingDocumentID()))
+        let editor = MintBlockEditor(
+            text: Binding(get: { body }, set: { body = $0 }),
+            controller: controller,
+            documentIdentity: oldIdentity)
+        let coordinator = editor.makeCoordinator()
+        coordinator.loadedDocumentIdentity = oldIdentity
+        coordinator.attach(to: view)
+        let outgoingCallback = controller.suggestionDidChange
+
+        let editorB = MintBlockEditor(
+            text: Binding(get: { body }, set: { body = $0 }),
+            controller: controller,
+            documentIdentity: nextIdentity)
+        coordinator.loadedDocumentIdentity = nextIdentity
+        coordinator.parent = editorB
+        coordinator.attach(to: view)
+
+        let editorA2 = MintBlockEditor(
+            text: Binding(get: { body }, set: { body = $0 }),
+            controller: controller,
+            documentIdentity: oldIdentity)
+        coordinator.loadedDocumentIdentity = oldIdentity
+        coordinator.parent = editorA2
+        coordinator.attach(to: view)
+        outgoingCallback?("stale suggestion")
+
+        XCTAssertNil(view.ghostSnapshotForAccessibility())
+    }
+
+    /// Search request counters are local to a project session. Returning A after consuming B
+    /// must not replay A's unchanged request over the selection restored for A.
+    @MainActor func testSearchJumpConsumptionSurvivesABAReturn() {
+        let view = makeEditor()
+        view.load(markdown: "first target second target third target")
+        let documentID = WritingDocumentID()
+        let identityA = EditorDocumentIdentity.project(
+            ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
+        let identityB = EditorDocumentIdentity.project(
+            ProjectDocumentKey(projectID: WritingProjectID(), documentID: documentID))
+        var body = view.serialize()
+        let editor = MintBlockEditor(
+            text: Binding(get: { body }, set: { body = $0 }),
+            documentIdentity: identityA)
+        let coordinator = editor.makeCoordinator()
+        let jumpA1 = EditorSearchJump(
+            documentID: documentID, query: "first", sequence: 1)
+        let jumpB1 = EditorSearchJump(
+            documentID: documentID, query: "second", sequence: 1)
+        let jumpA2 = EditorSearchJump(
+            documentID: documentID, query: "third", sequence: 2)
+
+        coordinator.markSearchJumpConsumed(jumpA1, for: identityA)
+        XCTAssertNil(coordinator.consumeSearchJump(jumpA1, for: identityA))
+        if let consumedB1 = coordinator.consumeSearchJump(jumpB1, for: identityB) {
+            view.revealMatch(of: consumedB1.query)
+        }
+        XCTAssertEqual(
+            (view.string as NSString).substring(with: view.selectedRange()), "second")
+
+        let restoredASelection = NSRange(location: 7, length: 0)
+        coordinator.selectionByDocument[identityA] = restoredASelection
+        view.setSelectedRange(coordinator.selectionByDocument[identityA]!)
+        if let staleA1 = coordinator.consumeSearchJump(jumpA1, for: identityA) {
+            view.revealMatch(of: staleA1.query)
+        }
+        XCTAssertEqual(view.selectedRange(), restoredASelection)
+
+        guard let consumedA2 = coordinator.consumeSearchJump(jumpA2, for: identityA) else {
+            return XCTFail("A/2 must remain a new search request")
+        }
+        view.revealMatch(of: consumedA2.query)
+        XCTAssertEqual(
+            (view.string as NSString).substring(with: view.selectedRange()), "third")
+        XCTAssertNil(coordinator.consumeSearchJump(jumpA2, for: identityA))
+    }
+
+    /// Project-scoped position persistence stores a full selection, not only its leading caret.
+    @MainActor func testWritingPositionSnapshotIncludesSelectionLength() {
+        let view = makeEditor()
+        view.load(markdown: "가나다라마바사")
+        view.setSelectedRange(NSRange(location: 2, length: 3))
+
+        XCTAssertEqual(view.writingPositionSnapshot()?.selectionLength, 3)
     }
 
     // MARK: - 성능 작업의 핵심 불변조건

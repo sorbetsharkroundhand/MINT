@@ -1,89 +1,224 @@
 #!/bin/sh
-# 실제 사용자 앱과 원고를 건드리지 않는 작업공간 UI 스모크 (#103).
+# 실제 사용자 앱과 원고를 건드리지 않는 project-owned editor UI 스모크 (#118).
 # 먼저 scripts/build-mint-app.sh 실행. 손쉬운 사용 권한이 필요하다.
-# 한글 IME·고스트 지연은 자동 입력으로 검증하지 않는다 (AGENTS §6).
+# 한글 marked text와 Ghost 상호작용은 이 자동화가 증명하지 않는다.
 set -eu
 cd "$(dirname "$0")/.."
+
+verify_project_state() {
+    library=$1
+    expected_body=$2
+    projects="$library/Projects"
+    [ -d "$projects" ] && [ ! -L "$projects" ] || {
+        echo "project state invalid: unsafe projects directory" >&2
+        return 1
+    }
+    active_marker="$projects/active-project.json"
+    [ -f "$active_marker" ] && [ ! -L "$active_marker" ] || {
+        echo "project state invalid: active project marker missing" >&2
+        return 1
+    }
+    project_id=$(plutil -extract rawValue raw -o - "$active_marker" 2>/dev/null) || {
+        echo "project state invalid: active project marker unreadable" >&2
+        return 1
+    }
+    case "$project_id" in
+        *[!0-9A-Fa-f-]*|'')
+            echo "project state invalid: unsafe project id" >&2
+            return 1
+            ;;
+    esac
+    project_directory="$projects/$project_id"
+    [ -d "$project_directory" ] && [ ! -L "$project_directory" ] || {
+        echo "project state invalid: unsafe project directory" >&2
+        return 1
+    }
+    manifest="$project_directory/project.json"
+    [ -f "$manifest" ] && [ ! -L "$manifest" ] || {
+        echo "project state invalid: manifest missing" >&2
+        return 1
+    }
+    manifest_id=$(plutil -extract id.rawValue raw -o - "$manifest" 2>/dev/null) || return 1
+    [ "$manifest_id" = "$project_id" ] || {
+        echo "project state invalid: active id does not match manifest" >&2
+        return 1
+    }
+    document_count=$(plutil -extract documents raw -o - "$manifest" 2>/dev/null) || return 1
+    [ "$document_count" -gt 0 ] 2>/dev/null || {
+        echo "project state invalid: no documents" >&2
+        return 1
+    }
+
+    found=""
+    document_index=0
+    while [ "$document_index" -lt "$document_count" ]; do
+        document_id=$(plutil -extract "documents.$document_index.id.rawValue" raw -o - "$manifest" 2>/dev/null) || return 1
+        document_kind=$(plutil -extract "documents.$document_index.kind" raw -o - "$manifest" 2>/dev/null) || return 1
+        relative_path=$(plutil -extract "documents.$document_index.relativePath" raw -o - "$manifest" 2>/dev/null) || return 1
+        expected_hash=$(plutil -extract "documents.$document_index.contentHash" raw -o - "$manifest" 2>/dev/null) || return 1
+        case "$document_kind" in
+            note) document_folder=Notes ;;
+            manuscript|reference) document_folder=Documents ;;
+            *)
+                echo "project state invalid: unknown document kind" >&2
+                return 1
+                ;;
+        esac
+        canonical_document_id=$(printf '%s' "$document_id" | tr '[:lower:]' '[:upper:]')
+        canonical_relative_path="$document_folder/$canonical_document_id/$expected_hash.md"
+        [ "$relative_path" = "$canonical_relative_path" ] || {
+            echo "project state invalid: noncanonical document path" >&2
+            return 1
+        }
+        case "/$relative_path/" in
+            //*|*/../*|*/./*)
+                echo "project state invalid: unsafe document path" >&2
+                return 1
+                ;;
+        esac
+        content="$project_directory/$relative_path"
+        [ -f "$content" ] && [ ! -L "$content" ] || {
+            echo "project state invalid: referenced content missing" >&2
+            return 1
+        }
+        resolved_parent=$(cd "$(dirname "$content")" && pwd -P) || return 1
+        resolved_project=$(cd "$project_directory" && pwd -P) || return 1
+        case "$resolved_parent/" in
+            "$resolved_project"/*) ;;
+            *)
+                echo "project state invalid: content escaped project" >&2
+                return 1
+                ;;
+        esac
+        actual_hash=$(shasum -a 256 "$content" | awk '{print $1}') || return 1
+        [ "$actual_hash" = "$expected_hash" ] || {
+            echo "project state invalid: content hash mismatch" >&2
+            return 1
+        }
+        if printf '%s' "$expected_body" | cmp -s - "$content"; then found=1; fi
+        document_index=$((document_index + 1))
+    done
+    [ -n "$found" ] || {
+        echo "project state invalid: expected body absent" >&2
+        return 1
+    }
+    [ ! -e "$library/entries.json" ] && [ ! -L "$library/entries.json" ] || {
+        echo "project state invalid: normal mode created entries.json" >&2
+        return 1
+    }
+    echo "project state verified"
+}
+
+if [ "${1:-}" = "--verify-project-state" ]; then
+    [ "$#" -eq 3 ] || {
+        echo "usage: $0 --verify-project-state LIBRARY EXPECTED_BODY" >&2
+        exit 64
+    }
+    verify_project_state "$2" "$3"
+    exit
+fi
+
 SOURCE_APP="$PWD/build/MINT.app"
-[ -x "$SOURCE_APP/Contents/MacOS/MINT" ] || { echo "✗ 먼저 앱 번들을 빌드하세요" >&2; exit 1; }
+[ -x "$SOURCE_APP/Contents/MacOS/MINT" ] || {
+    echo "✗ 먼저 앱 번들을 빌드하세요" >&2
+    exit 1
+}
+
 REAL_ENTRIES="$HOME/Documents/MINT/entries.json"
-real_hash() {
-    if [ -e "$REAL_ENTRIES" ] || [ -L "$REAL_ENTRIES" ]; then
-        hash_result=$(shasum -a 256 "$REAL_ENTRIES") || return 1
-        printf '%s\n' "$hash_result" | awk '{print $1}'
+REAL_ACTIVE="$HOME/Documents/MINT/Projects/active-project.json"
+file_hash() {
+    if [ -e "$1" ] || [ -L "$1" ]; then
+        shasum -a 256 "$1" | awk '{print $1}'
     else
         echo absent
     fi
 }
-REAL_HASH=$(real_hash)
+REAL_ENTRIES_HASH=$(file_hash "$REAL_ENTRIES")
+REAL_ACTIVE_HASH=$(file_hash "$REAL_ACTIVE")
+
 SMOKE_ROOT=$(mktemp -d /tmp/mint-ui-smoke.XXXXXX)
 SMOKE_ROOT=$(cd "$SMOKE_ROOT" && pwd -P)
 SMOKE_HOME="$SMOKE_ROOT/home"
 APP="$SMOKE_ROOT/MINT.app"
-BIN="$APP/Contents/MacOS/MINT"
-PID=""; PASSED=""; PREFERENCES_OWNED=""; SMOKE_BUNDLE_ID=""
+SMOKE_EXECUTABLE="MINTUISmoke$(uuidgen | tr -d '-')"
+BIN="$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
+PID=""
+PASSED=""
+SMOKE_BUNDLE_ID=""
+PREFERENCES_OWNED=""
+
 fail() { echo "✗ $1" >&2; exit 1; }
-owned_pid() { [ -n "$PID" ] && [ "$(ps -p "$PID" -o comm= 2>/dev/null)" = "$BIN" ]; }
-find_pid() { ps -axo pid=,comm= | awk -v bin="$BIN" '$2 == bin {print $1}'; }
-check_original() { [ "$(real_hash)" = "$REAL_HASH" ] || fail "실제 원고 해시가 달라졌습니다. 격리 검증 실패"; }
+owned_pid() {
+    [ -n "$PID" ] && [ "$(ps -p "$PID" -o comm= 2>/dev/null)" = "$BIN" ]
+}
+find_pid() {
+    ps -axo pid=,comm= | awk -v bin="$BIN" '$2 == bin {print $1}'
+}
+check_original() {
+    [ "$(file_hash "$REAL_ENTRIES")" = "$REAL_ENTRIES_HASH" ] \
+        || fail "실제 entries.json 해시가 달라졌습니다"
+    [ "$(file_hash "$REAL_ACTIVE")" = "$REAL_ACTIVE_HASH" ] \
+        || fail "실제 활성 프로젝트 표식 해시가 달라졌습니다"
+}
 cleanup() {
     status=$?
     trap - 0
     [ -n "$PID" ] || PID=$(find_pid)
     if owned_pid; then kill -9 "$PID" 2>/dev/null || true; fi
-    if [ -n "$PREFERENCES_OWNED" ]; then defaults delete "$SMOKE_BUNDLE_ID" >/dev/null 2>&1 || true; fi
-    if [ "$(real_hash)" != "$REAL_HASH" ]; then
-        echo "✗ 실제 원고 해시가 달라졌습니다" >&2
-        status=1; PASSED=""
+    if [ -n "$PREFERENCES_OWNED" ]; then
+        defaults delete "$SMOKE_BUNDLE_ID" >/dev/null 2>&1 || true
     fi
-    if [ -n "$PASSED" ]; then rm -rf "$SMOKE_ROOT"; else echo "▸ 실패 자료 보존: $SMOKE_ROOT" >&2; fi
+    if [ "$(file_hash "$REAL_ENTRIES")" != "$REAL_ENTRIES_HASH" ] \
+        || [ "$(file_hash "$REAL_ACTIVE")" != "$REAL_ACTIVE_HASH" ]; then
+        echo "✗ 실제 사용자 저장소 해시가 달라졌습니다" >&2
+        status=1
+        PASSED=""
+    fi
+    if [ -n "$PASSED" ]; then
+        rm -rf "$SMOKE_ROOT"
+    else
+        echo "▸ 실패 자료 보존: $SMOKE_ROOT" >&2
+    fi
     exit "$status"
 }
 trap cleanup 0
 trap 'exit 1' HUP INT TERM
-mkdir -p "$SMOKE_HOME/Documents/MINT"
+
+mkdir -p "$SMOKE_HOME/Documents" "$SMOKE_HOME/Library/Logs/DiagnosticReports"
 ditto "$SOURCE_APP" "$APP"
+mv "$APP/Contents/MacOS/MINT" "$BIN"
 BUNDLE_ID=$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")
 SMOKE_BUNDLE_ID="$BUNDLE_ID.ui-smoke.$(uuidgen)"
-if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then fail "격리 설정 식별자가 이미 존재합니다"; fi
+if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then
+    fail "격리 설정 식별자가 이미 존재합니다"
+fi
 plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
-# System Events converts PID queries into name-based object references. A unique
-# executable name prevents those references from resolving to another running MINT.
-SMOKE_EXECUTABLE="MINTUISmoke-${SMOKE_BUNDLE_ID##*.}"
-mv "$BIN" "$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
-BIN="$APP/Contents/MacOS/$SMOKE_EXECUTABLE"
 plutil -replace CFBundleExecutable -string "$SMOKE_EXECUTABLE" "$APP/Contents/Info.plist"
 plutil -replace CFBundleName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 plutil -insert CFBundleDisplayName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 PREFERENCES_OWNED=1
-defaults import "$SMOKE_BUNDLE_ID" scripts/fixtures/smoke-preferences.plist
+# Exercise the retired-tool fallback without preconfiguring a model or AI consent.
 defaults write "$SMOKE_BUNDLE_ID" mint.sidebarSection -string margin
-[ "$(defaults read "$SMOKE_BUNDLE_ID" mint.initialModelConfirmed)" = 1 ] || fail "격리 초기 설정 실패"
-[ "$(defaults read "$SMOKE_BUNDLE_ID" completion.enabled)" = 0 ] || fail "모델 없는 집필 설정 실패"
 
-# 고유 합성 원고가 실제 에디터에 나타나야 입력을 허용한다. 사용자 원고는 읽지 않는다.
 TOKEN="smoke$(uuidgen | tr -d '-')"
 PROJECT_ID="33333333-3333-3333-3333-333333333333"
-PROJECT_DOCUMENT_ID="44444444-4444-4444-4444-444444444444"
-PROJECT_BODY="project$TOKEN"
+DOCUMENT_ID="44444444-4444-4444-4444-444444444444"
+PROJECT_BODY="project-$TOKEN"
+EDITED_BODY="edited-$TOKEN"
+NEW_BODY="new-$TOKEN"
+PERSISTED_BODY="$EDITED_BODY$PROJECT_BODY"
 PROJECT_HASH=$(printf '%s' "$PROJECT_BODY" | shasum -a 256 | awk '{print $1}')
 PROJECT_ROOT="$SMOKE_HOME/Documents/MINT/Projects"
 PROJECT_DIRECTORY="$PROJECT_ROOT/$PROJECT_ID"
-PROJECT_DOCUMENT_PATH="Documents/$PROJECT_DOCUMENT_ID/$PROJECT_HASH.md"
-mkdir -p "$PROJECT_DIRECTORY/Documents/$PROJECT_DOCUMENT_ID"
+PROJECT_DOCUMENT_PATH="Documents/$DOCUMENT_ID/$PROJECT_HASH.md"
+mkdir -p "$PROJECT_DIRECTORY/Documents/$DOCUMENT_ID"
 printf '%s' "$PROJECT_BODY" > "$PROJECT_DIRECTORY/$PROJECT_DOCUMENT_PATH"
-cat > "$PROJECT_DIRECTORY/project.json" <<JSON
-{"schemaVersion":1,"id":{"rawValue":"$PROJECT_ID"},"title":"격리 프로젝트","mode":"general","documents":[{"id":{"rawValue":"$PROJECT_DOCUMENT_ID"},"title":"격리 원고","kind":"manuscript","relativePath":"$PROJECT_DOCUMENT_PATH","contentHash":"$PROJECT_HASH"}],"assets":[]}
-JSON
-cat > "$PROJECT_ROOT/active-project.json" <<JSON
-{"rawValue":"$PROJECT_ID"}
-JSON
-cat > "$SMOKE_HOME/Documents/MINT/entries.json" <<JSON
-{"entries":[{"id":"11111111-1111-1111-1111-111111111111","title":"격리 소설","createdAt":"2026-01-01T00:00:00Z","body":"$TOKEN","kind":"novel","titleIsCustom":true},{"id":"22222222-2222-2222-2222-222222222222","title":"격리 저널","createdAt":"2026-01-02T00:00:00Z","body":"second$TOKEN","titleIsCustom":true}],"activeID":"11111111-1111-1111-1111-111111111111"}
-JSON
+printf '%s' "{\"schemaVersion\":1,\"id\":{\"rawValue\":\"$PROJECT_ID\"},\"title\":\"Isolated Project\",\"mode\":\"fiction\",\"documents\":[{\"id\":{\"rawValue\":\"$DOCUMENT_ID\"},\"title\":\"Isolated Manuscript\",\"kind\":\"manuscript\",\"relativePath\":\"$PROJECT_DOCUMENT_PATH\",\"contentHash\":\"$PROJECT_HASH\"}],\"trashedDocumentIDs\":[],\"assets\":[]}" \
+    > "$PROJECT_DIRECTORY/project.json"
+printf '%s' "{\"rawValue\":\"$PROJECT_ID\"}" > "$PROJECT_ROOT/active-project.json"
+
 cat > "$SMOKE_ROOT/ui.applescript" <<'AS'
--- 고정된 뷰 계층 대신 접근성 식별자·레이블을 재귀 검색한다.
 on findElement(rootElement, attributeName, expectedValue, remainingDepth)
     tell application "System Events"
         try
@@ -97,6 +232,7 @@ on findElement(rootElement, attributeName, expectedValue, remainingDepth)
     end tell
     return missing value
 end findElement
+
 on findElementContaining(rootElement, attributeName, expectedValue, remainingDepth)
     tell application "System Events"
         try
@@ -144,8 +280,7 @@ on run argv
             set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
             if editor is missing value then error "에디터 없음"
             if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 유실"
-        else if operation is "new" then
-            click menu item "새 저널" of menu "파일" of menu bar item "파일" of menu bar 1 of targetProcess
+
         else
             set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
             if editor is missing value then error "에디터 없음"
@@ -156,41 +291,36 @@ on run argv
                 if not (frontmost of targetProcess) then error "격리 앱 포커스 없음"
                 if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 없음"
                 tell targetProcess to keystroke expectedValue
-                delay 0.5
-                -- The first edit updates the new journal title and sidebar, so SwiftUI may
-                -- replace the accessibility tree. Reacquire the editor instead of using a stale reference.
-                set rootElement to window 1 of targetProcess
-                set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+                delay 0.6
+                -- Editing can replace the SwiftUI accessibility tree.
+                set editor to my findElement(window 1 of targetProcess, "AXIdentifier", "mint.editor", 30)
                 if editor is missing value then error "입력 후 에디터 없음"
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
-            end if
-            if operation is "empty" then
-                if (value of editor as text) is not "" then error "새 저널이 비어 있지 않음"
-            else if (value of editor as text) does not contain expectedValue then
-                error "에디터 본문 검증 실패"
+            else if operation is "equals" then
+                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+            else
+                error "알 수 없는 UI 작업: " & operation
             end if
         end if
     end tell
 end run
 AS
-ui() {
-    owned_pid || fail "격리 실행 파일 PID 확인 실패"
-    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
-    case "$1" in press|new|resize) sleep 0.3 ;; esac
-}
+
 launch() {
     check_original
-    open -n --env "CFFIXED_USER_HOME=$SMOKE_HOME" "$APP"
+    open -n --env "CFFIXED_USER_HOME=$SMOKE_HOME" \
+        --env "HF_HOME=$SMOKE_HOME/ModelDownloads" "$APP"
     PID=""
-    for i in $(seq 1 10); do
+    for _ in $(seq 1 15); do
         sleep 1
         PID=$(find_pid)
         [ -n "$PID" ] && break
     done
     owned_pid || fail "격리 앱 실행 실패"
-    sleep 3
+    sleep 8
     check_original
 }
+
 terminate() {
     owned_pid || fail "종료 대상 PID 확인 실패"
     osascript -l JavaScript - "$PID" <<'JXA' >/dev/null
@@ -200,23 +330,49 @@ function run(argv) {
     if (!app.terminate) throw new Error('정상 종료 요청 거절');
 }
 JXA
-    for i in $(seq 1 30); do
+    for _ in $(seq 1 40); do
         kill -0 "$PID" 2>/dev/null || { PID=""; return; }
         sleep 0.5
     done
     fail "정상 종료 시간 초과"
 }
+
+ui() {
+    owned_pid || fail "격리 실행 파일 PID 확인 실패"
+    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
+    case "$1" in press|resize) sleep 0.3 ;; esac
+}
+
+wait_ui() {
+    operation=$1
+    expected=$2
+    for _ in $(seq 1 40); do
+        if osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$operation" "$expected" >/dev/null 2>&1; then
+            return
+        fi
+        sleep 0.25
+    done
+    ui "$operation" "$expected"
+}
+
+assert_isolated_project_mode() {
+    [ ! -e "$SMOKE_HOME/Documents/MINT/entries.json" ] \
+        && [ ! -L "$SMOKE_HOME/Documents/MINT/entries.json" ] \
+        || fail "정상 프로젝트 모드가 entries.json을 만들었습니다"
+    [ ! -e "$SMOKE_HOME/ModelDownloads" ] \
+        || fail "명시적 허가 없이 모델 다운로드 디렉터리가 생겼습니다"
+}
+
 launch
-ui verify "$TOKEN"
-ui navigator
-ui type "typed$TOKEN"
-echo "✓ 격리 원고 확인 · 에디터 입력 왕복"
+wait_ui equals "$PROJECT_BODY"
+ui type "$EDITED_BODY"
+wait_ui equals "$PERSISTED_BODY"
 ui absent "mint.workspace-mode"
 ui absent "리빙 마진"
 ui absent "문서로 돌아가기"
 ui absent "mint.ghost-shortcut-hint"
 ui resize 1250
-ui autocomplete
+wait_ui autocomplete ""
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
@@ -224,31 +380,38 @@ ui press "스토리 바이블"
 ui press "문서로 돌아가기"
 ui focused
 ui resize 860
-ui autocomplete
+wait_ui autocomplete ""
 ui press "기타 글 도구"
 ui press "스토리 바이블"
 ui absent "리빙 마진"
 ui press "문서로 돌아가기"
 ui focused
 ui navigator
-ui press "mint.entry.22222222-2222-2222-2222-222222222222"
-ui verify "second$TOKEN"
-ui press "mint.entry.11111111-1111-1111-1111-111111111111"
-ui verify "typed$TOKEN"
-ui press "새로 만들기"
-ui present "새 소설"
-ui present "새 폴더"
-ui press "새 저널"
-sleep 0.5
-ui empty
-ui type "new$TOKEN"
+ui press "새 문서"
+wait_ui equals ""
+ui type "$NEW_BODY"
+wait_ui equals "$NEW_BODY"
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
+# Address the generated document by its persisted identity, not a localized AX label.
+NEW_DOCUMENT_ID=$(plutil -extract documents.1.id.rawValue raw -o - "$PROJECT_DIRECTORY/project.json") \
+    || fail "새 문서 식별자 저장 실패"
+ui press "mint.document.$NEW_DOCUMENT_ID"
+wait_ui equals "$NEW_BODY"
 terminate
-[ -s "$SMOKE_HOME/Documents/MINT/entries.json" ] || fail "격리 원고 저장 없음"
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
+assert_isolated_project_mode
+
 launch
-ui verify "new$TOKEN"
-ui press "mint.entry.11111111-1111-1111-1111-111111111111"
-ui verify "typed$TOKEN"
+wait_ui equals "$NEW_BODY"
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
 terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
+assert_isolated_project_mode
 check_original
+
 PASSED=1
-echo "✓ UI 스모크 통과 — 탐색기 · 문서 전환 · 새 저널 · 재실행 보존 · 실제 원고 해시 불변"
+echo "✓ UI 스모크 통과 — 프로젝트 문서 전환·생성 · 좁은/넓은 창 · 포커스 복원 · 재실행 · manifest 검증"

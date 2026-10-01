@@ -81,4 +81,39 @@ final class ImportProjectCoordinatorTests: XCTestCase {
         let activeAfterFailure = try await store.activeProject()
         XCTAssertEqual(activeAfterFailure?.id, created.projectID)
     }
+
+    /// Protected break: using the activating legacy migration before the cancellation
+    /// checkpoint would replace the durable owner while the session still shows Current.
+    func testCancelledPreparedImportLeavesCurrentSessionAndMarkerUntouched() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let source = try writeLegacyFixture(at: url)
+        let original = try Data(contentsOf: source)
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let store = ProjectStore(root: url.appendingPathComponent("Projects"))
+        let session = ProjectSession(store: store, defaults: defaults)
+        let current = try await ProjectCreationCoordinator(session: session)
+            .createProject(title: "Current", mode: .general)
+        let coordinator = ImportProjectCoordinator(
+            store: store,
+            session: session,
+            cancellationCheckpoint: { throw CancellationError() })
+
+        do {
+            _ = try await coordinator.importLegacy(
+                from: source,
+                mode: .fiction,
+                title: "Import")
+            XCTFail("Cancelled import unexpectedly succeeded")
+        } catch is CancellationError {
+            // Expected at the prepare/commit boundary.
+        }
+
+        let durable = try await store.activeProject()
+        XCTAssertEqual(session.activeProject?.id, current.projectID)
+        XCTAssertEqual(durable?.id, current.projectID)
+        XCTAssertEqual(try Data(contentsOf: source), original)
+    }
 }

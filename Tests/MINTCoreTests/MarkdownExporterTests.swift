@@ -8,6 +8,24 @@ import XCTest
 /// 메타데이터(title·{옵션})가 무손실이고, 충돌 없는 상대경로로 재작성되며,
 /// 원격·차단 소스는 로컬 파일로 오해되지 않는다(#12 정책 승계).
 final class MarkdownExporterTests: XCTestCase {
+    // Catches global-root reads, lost literal markup/newlines, and missing copied project bytes.
+    @MainActor
+    func testProjectResolverExportsImageBytes() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.documents[0].body = "![그림](images/a.png){width=60}\n"
+        try await store.save(project)
+        try await store.addAsset(Data([1, 2, 3]), reference: "images/a.png", to: project.id)
+        let catalog = try await store.assetCatalog(id: project.id)
+        try seedAsset("a.png", Data([9]))
+        let destination = exportDir.appendingPathComponent("project.md")
+        let report = try MarkdownExporter.export(project.documents[0], assets: catalog, to: destination)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "![그림](images/a.png){width=60}\n")
+        XCTAssertEqual(try Data(contentsOf: exportDir.appendingPathComponent("images/a.png")), Data([1, 2, 3]))
+        XCTAssertEqual(report.copiedAssets, 1)
+    }
 
     private var mintRoot: URL!        // MINT 폴더 대역 (override)
     private var exportDir: URL!       // 임의 목적지 대역

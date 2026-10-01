@@ -2,6 +2,23 @@ import XCTest
 @testable import MINTCore
 
 final class LegacyProjectMigrationTests: XCTestCase {
+    func testPreparedMigrationDoesNotReplaceActiveProject() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let source = try writeLegacyFixture(at: root)
+        let store = ProjectStore(root: root.appendingPathComponent("Projects"))
+        let original = projectFixture()
+        try await store.save(original)
+        try await store.activate(id: original.id)
+
+        let prepared = try await store.prepareLegacyMigration(
+            from: source, mode: .fiction, title: "Imported")
+        let active = try await store.activeProject()
+
+        XCTAssertNotEqual(prepared.projectID, original.id)
+        XCTAssertEqual(active, original)
+    }
+
     func testFileMigrationPreservesSourceMetadataAssetsAndEditedProjectOnRetry() async throws {
         let root = try temporaryProjectRoot()
         defer { try? FileManager.default.removeItem(at: root) }

@@ -2,6 +2,23 @@ import XCTest
 import MINTCore
 
 final class WritingProjectTests: XCTestCase {
+    func testMissingTrashFieldDecodesAsEmptyAndRoundTripsTrash() throws {
+        let document = WritingDocument(
+            id: WritingDocumentID(), title: "Draft", body: "body", kind: .manuscript)
+        let legacyJSON = """
+        {"id":{"rawValue":"00000000-0000-0000-0000-000000000001"},"title":"Old","mode":"general","documents":[]}
+        """
+        let decoded = try JSONDecoder().decode(WritingProject.self, from: Data(legacyJSON.utf8))
+        XCTAssertEqual(decoded.trashedDocumentIDs, [])
+
+        let project = WritingProject(
+            id: WritingProjectID(), title: "New", mode: .general,
+            documents: [document], trashedDocumentIDs: [document.id])
+        XCTAssertEqual(
+            try JSONDecoder().decode(WritingProject.self, from: JSONEncoder().encode(project)),
+            project)
+    }
+
     func testBothModesRoundTripOrderedDocumentsWithoutRewritingBodies() throws {
         let bodies = [
             "# 한글\r\n\r\n**강** \u{1100}\u{1161}\u{11BC}\r끝 👩🏽‍💻\n![그림](assets/a.png)\n$E=mc^2$\n",

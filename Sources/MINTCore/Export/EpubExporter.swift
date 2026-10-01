@@ -15,11 +15,14 @@ public enum EpubExporter {
 
     public enum ExportError: LocalizedError {
         case zipFailed(String)
+        case missingAssets([String])
 
         public var errorDescription: String? {
             switch self {
             case .zipFailed(let message):
                 return "EPUB 압축에 실패했어요 — \(message)"
+            case .missingAssets(let references):
+                return "이미지 파일을 찾을 수 없어 내보내지 못했어요: \(references.joined(separator: ", "))"
             }
         }
     }
@@ -71,7 +74,7 @@ public enum EpubExporter {
         _ entry: JournalEntry, to destination: URL, author: String = ""
     ) throws {
         try buildEPUB(
-            entry, assetURLs: resolveAssetURLs(in: entry.body),
+            document(from: entry), assetURLs: resolveAssetURLs(in: entry.body),
             to: destination, author: author)
     }
 
@@ -86,7 +89,7 @@ public enum EpubExporter {
         let assetURLs = resolveAssetURLs(in: entry.body)
         let work = Task.detached(priority: .userInitiated) {
             try Self.buildEPUB(
-                entry, assetURLs: assetURLs, to: destination, author: author,
+                document(from: entry), assetURLs: assetURLs, to: destination, author: author,
                 progress: progress)
         }
         return try await withTaskCancellationHandler(operation: {
@@ -94,6 +97,32 @@ public enum EpubExporter {
         }, onCancel: {
             work.cancel()
         })
+    }
+
+    public static func export(
+        _ document: WritingDocument, assets: ProjectAssetCatalog,
+        to destination: URL, author: String = ""
+    ) throws {
+        try buildEPUB(document, assetURLs: [:], assets: assets, to: destination, author: author)
+    }
+
+    public static func exportAsync(
+        _ document: WritingDocument, assets: ProjectAssetCatalog,
+        to destination: URL, author: String = "",
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) async throws {
+        let work = Task.detached(priority: .userInitiated) {
+            try buildEPUB(document, assetURLs: [:], assets: assets,
+                to: destination, author: author, progress: progress)
+        }
+        try await withTaskCancellationHandler(operation: {
+            try await work.value
+        }, onCancel: { work.cancel() })
+    }
+
+    private static func document(from entry: JournalEntry) -> WritingDocument {
+        WritingDocument(id: WritingDocumentID(rawValue: entry.id),
+            title: entry.title, body: entry.body, kind: .manuscript)
     }
 
     /// 본문의 로컬 이미지 src를 실제 파일 URL로 풀어 둔다 — 메인 격리
@@ -120,9 +149,10 @@ public enum EpubExporter {
     /// EPUB 조립 본체 — 메인 격리 의존이 없다 (자산은 미리 풀어 받는다).
     /// 진행률 콜백과 취소 협조를 갖춘다 (백그라운드 3요건, AGENTS §4).
     private static func buildEPUB(
-        _ entry: JournalEntry, assetURLs: [String: URL], to destination: URL,
+        _ entry: WritingDocument, assetURLs: [String: URL], assets: ProjectAssetCatalog? = nil, to destination: URL,
         author: String, progress: (@Sendable (Double) -> Void)? = nil
     ) throws {
+        let destination = try ExportDestination.validatedFile(destination)
         let fm = FileManager.default
         let staging = fm.temporaryDirectory
             .appendingPathComponent("mint-epub-\(UUID().uuidString)", isDirectory: true)
@@ -145,8 +175,9 @@ public enum EpubExporter {
         var missingAssets: [String] = []
         let chapters = makeChapters(
             from: entry, copyingImagesInto: oebps, collected: &images,
-            missing: &missingAssets, assetURLs: assetURLs,
+            missing: &missingAssets, assetURLs: assetURLs, assets: assets,
             progress: progress)
+        if assets != nil, !missingAssets.isEmpty { throw ExportError.missingAssets(missingAssets) }
         for (index, chapter) in chapters.enumerated() {
             try Task.checkCancellation()
             try chapterXHTML(chapter).write(
@@ -167,8 +198,7 @@ public enum EpubExporter {
         try runZip(["-rX", "book.epub", "META-INF", "OEBPS"], in: staging)
         progress?(0.95)
 
-        if fm.fileExists(atPath: destination.path) { try fm.removeItem(at: destination) }
-        try fm.moveItem(at: staging.appendingPathComponent("book.epub"), to: destination)
+        try ExportDestination.replaceCompletedFile(staging.appendingPathComponent("book.epub"), to: destination)
         progress?(1)
     }
 
@@ -188,6 +218,16 @@ public enum EpubExporter {
         from entry: JournalEntry, copyingImagesInto oebps: URL,
         collected images: inout [String], missing: inout [String],
         assetURLs: [String: URL] = [:],
+        progress: (@Sendable (Double) -> Void)? = nil
+    ) -> [Chapter] {
+        makeChapters(from: document(from: entry), copyingImagesInto: oebps,
+            collected: &images, missing: &missing, assetURLs: assetURLs, progress: progress)
+    }
+
+    private static func makeChapters(
+        from entry: WritingDocument, copyingImagesInto oebps: URL,
+        collected images: inout [String], missing: inout [String],
+        assetURLs: [String: URL], assets: ProjectAssetCatalog? = nil,
         progress: (@Sendable (Double) -> Void)? = nil
     ) -> [Chapter] {
         var chapters: [Chapter] = []
@@ -314,7 +354,7 @@ public enum EpubExporter {
                 from: line.trimmingCharacters(in: .whitespaces)) {
                 closeList()
                 if let relative = copyImage(
-                    attrs.src, into: oebps, missing: &missing, assetURLs: assetURLs)
+                    attrs.src, into: oebps, missing: &missing, assetURLs: assetURLs, assets: assets)
                 {
                     if !images.contains(relative) { images.append(relative) }
                     html += imageTag(src: relative, attrs: attrs)
@@ -403,12 +443,35 @@ public enum EpubExporter {
     /// 로컬 소스는 누락으로 기록한다 (이슈 #15).
     private static func copyImage(
         _ src: String, into oebps: URL, missing: inout [String],
-        assetURLs: [String: URL]
+        assetURLs: [String: URL], assets: ProjectAssetCatalog?
     ) -> String? {
         let kind = ImageReferenceParser.classify(src)
         switch kind {
         case .managedRelative, .externalFile: break
         case .remote, .blocked: return nil
+        }
+        if let assets {
+            guard let bytes = assets.data(for: src) else {
+                if !missing.contains(src) { missing.append(src) }
+                return nil
+            }
+            do {
+                let dir = oebps.appendingPathComponent("images", isDirectory: true)
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let source = URL(fileURLWithPath: src)
+                var name = source.lastPathComponent
+                var suffix = 1
+                while FileManager.default.fileExists(atPath: dir.appendingPathComponent(name).path) {
+                    if try Data(contentsOf: dir.appendingPathComponent(name)) == bytes { return "images/\(name)" }
+                    name = "\(source.deletingPathExtension().lastPathComponent)-\(suffix).\(source.pathExtension)"
+                    suffix += 1
+                }
+                try bytes.write(to: ProjectPaths.checked(name, under: dir), options: .atomic)
+                return "images/\(name)"
+            } catch {
+                if !missing.contains(src) { missing.append(src) }
+                return nil
+            }
         }
         guard let sourceURL = assetURLs[src] else {
             if !missing.contains(src) { missing.append(src) }
@@ -614,6 +677,12 @@ public enum EpubExporter {
     static func packageOPF(
         entry: JournalEntry, chapters: [Chapter], images: [String], author: String = ""
     ) -> String {
+        packageOPF(entry: document(from: entry), chapters: chapters, images: images, author: author)
+    }
+
+    private static func packageOPF(
+        entry: WritingDocument, chapters: [Chapter], images: [String], author: String = ""
+    ) -> String {
         let modified: String = {
             let formatter = ISO8601DateFormatter()
             formatter.formatOptions = [.withInternetDateTime]
@@ -647,7 +716,7 @@ public enum EpubExporter {
             <?xml version="1.0" encoding="UTF-8"?>
             <package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="pub-id" xml:lang="ko">
               <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-                <dc:identifier id="pub-id">urn:uuid:\(entry.id.uuidString.lowercased())</dc:identifier>
+                <dc:identifier id="pub-id">urn:uuid:\(entry.id.rawValue.uuidString.lowercased())</dc:identifier>
                 <dc:title>\(escape(plainTitle(entry.title)))</dc:title>\(creatorXML)
                 <dc:language>ko</dc:language>
                 <meta property="dcterms:modified">\(modified)</meta>

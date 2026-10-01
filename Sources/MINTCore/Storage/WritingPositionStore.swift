@@ -8,18 +8,44 @@ import Foundation
 /// 담는다 — 편집으로 위치가 밀렸을 때 정확한 clamp 대신 앵커로 재안착(re-anchor)
 /// 하기 위해서다. "3장 중간을 고치던 자리"는 문자 오프셋보다 문맥으로 찾는 게 맞다.
 ///
-/// IME 조합(marked text)·임시 선택은 저장하지 않는다 — 확정되지 않은 한글 조합
-/// 중간 위치를 복원하면 깨진 글자 자리로 뛰는 꼴이 된다 (#36 완료 조건 4).
+/// 확정된 선택 범위는 복원하되 IME 조합(marked text) 중 위치는 저장하지 않는다 —
+/// 확정되지 않은 한글 조합 자리를 복원하면 깨진 글자 자리로 뛰는 꼴이 된다.
 @MainActor
 public final class WritingPositionStore {
 
     public struct Position: Codable, Equatable, Sendable {
         /// 커서 UTF-16 위치 — 저장 시점 기준.
         public var location: Int
+        /// 선택 범위 길이. 기존 저장값에는 없으므로 디코드 시 0으로 간주한다.
+        public var selectionLength: Int
         /// 커서 직전 본문 조각(≤24자) — 재안착 키.
         public var before: String
         /// 커서 위치부터의 본문 조각(≤24자) — 재안착 검증.
         public var after: String
+
+        public init(
+            location: Int, selectionLength: Int = 0, before: String, after: String
+        ) {
+            self.location = location
+            self.selectionLength = selectionLength
+            self.before = before
+            self.after = after
+        }
+
+        private enum CodingKeys: String, CodingKey {
+            case location
+            case selectionLength
+            case before
+            case after
+        }
+
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            location = try container.decode(Int.self, forKey: .location)
+            selectionLength = try container.decodeIfPresent(Int.self, forKey: .selectionLength) ?? 0
+            before = try container.decode(String.self, forKey: .before)
+            after = try container.decode(String.self, forKey: .after)
+        }
     }
 
     public static let shared = WritingPositionStore()
@@ -29,22 +55,38 @@ public final class WritingPositionStore {
     private let defaults: UserDefaults
     private let key = "mint.writingPositions"
     private(set) var positions: [UUID: Position] = [:]
+    private var projectPositions: [ProjectDocumentKey: Position] = [:]
     private var persistTask: Task<Void, Never>?
+    private var needsPersistence = false
     /// 디스크 쓰기 디바운스 — 타이핑마다 UserDefaults를 치지 않게.
     private let persistDelay: Duration
 
     init(defaults: UserDefaults = .standard, persistDelay: Duration = .seconds(2)) {
         self.defaults = defaults
         self.persistDelay = persistDelay
-        if let data = defaults.data(forKey: key),
-            let decoded = try? JSONDecoder().decode([UUID: Position].self, from: data)
-        {
-            positions = decoded
+        if let data = defaults.data(forKey: key) {
+            if let decoded = try? JSONDecoder().decode([String: Position].self, from: data) {
+                for (rawKey, position) in decoded {
+                    if let projectKey = Self.projectKey(from: rawKey) {
+                        projectPositions[projectKey] = position
+                    } else if let legacyID = UUID(uuidString: rawKey) {
+                        positions[legacyID] = position
+                    }
+                }
+            } else if let decoded = try? JSONDecoder().decode([UUID: Position].self, from: data) {
+                positions = decoded
+            }
         }
     }
 
     func position(for entryID: UUID) -> Position? {
         positions[entryID]
+    }
+
+    /// 프로젝트 문서는 복합 키를 우선하고, 해당 키가 없을 때만 UUID-only legacy
+    /// 위치를 읽는다. 읽기는 저장 형식을 바꾸거나 legacy 값을 지우지 않는다.
+    func position(for key: ProjectDocumentKey) -> Position? {
+        projectPositions[key] ?? positions[key.documentID.rawValue]
     }
 
     /// 현재 위치를 기록한다. `marked`가 true면(IME 조합 중) 무시한다 (#36).
@@ -53,18 +95,36 @@ public final class WritingPositionStore {
         marked: Bool
     ) {
         guard !marked else { return }
-        // LRU — 오래된 문서부터 잘라 상한 유지 (UserDefaults 비용 보호).
-        if positions[entryID] == nil, positions.count >= Self.maxEntries {
-            // 삽입 순서가 없으므로 가장 단순히 절반을 버린다 — 200건은 수년치다.
-            if positions.count > Self.maxEntries / 2 {
-                let doomed = Array(positions.keys.prefix(positions.count - Self.maxEntries / 2))
-                for id in doomed { positions.removeValue(forKey: id) }
-            }
-        }
+        trimIfNeeded(isNew: positions[entryID] == nil)
         positions[entryID] = Position(
-            location: location,
+            location: location, selectionLength: 0,
             before: String(before.suffix(24)),
             after: String(after.prefix(24)))
+        needsPersistence = true
+        schedulePersist()
+    }
+
+    /// 프로젝트/문서 복합 키로 현재 선택 위치를 기록한다.
+    func record(
+        location: Int, selectionLength: Int, body: String, for key: ProjectDocumentKey,
+        marked: Bool = false
+    ) {
+        guard !marked else { return }
+        trimIfNeeded(isNew: projectPositions[key] == nil)
+        let ns = body as NSString
+        let safeLocation = max(0, min(location, ns.length))
+        let safeSelectionLength = max(0, min(selectionLength, ns.length - safeLocation))
+        let beforeStart = max(0, safeLocation - 24)
+        let selectionEnd = safeLocation + safeSelectionLength
+        let afterEnd = min(ns.length, selectionEnd + 24)
+        projectPositions[key] = Position(
+            location: safeLocation,
+            selectionLength: safeSelectionLength,
+            before: ns.substring(
+                with: NSRange(location: beforeStart, length: safeLocation - beforeStart)),
+            after: ns.substring(
+                with: NSRange(location: selectionEnd, length: afterEnd - selectionEnd)))
+        needsPersistence = true
         schedulePersist()
     }
 
@@ -73,17 +133,39 @@ public final class WritingPositionStore {
     /// 2. 위치가 어긋났으면 `before` 꼬리(최근 12자)를 본문에서 찾아 그 끝으로.
     /// 3. 못 찾으면 nil — 문서 맨 위 규칙(load 기본 동작)을 따른다.
     func resolve(for entryID: UUID, in text: String) -> Int? {
-        guard let p = positions[entryID] else { return nil }
+        guard let position = positions[entryID] else { return nil }
+        return Self.resolve(position, in: text)
+    }
+
+    /// 프로젝트 위치를 현재 본문에 재안착한다. 복합 레코드가 있으면 그것만 사용하고,
+    /// 없을 때에만 동일 UUID의 legacy 레코드를 fallback으로 읽는다.
+    func restore(in text: String, for key: ProjectDocumentKey) -> Position? {
+        guard let stored = projectPositions[key] ?? positions[key.documentID.rawValue],
+            let location = Self.resolve(stored, in: text)
+        else { return nil }
+        let length = (text as NSString).length
+        return Position(
+            location: location,
+            selectionLength: max(
+                0, min(stored.selectionLength, max(0, length - location))),
+            before: stored.before,
+            after: stored.after)
+    }
+
+    private static func resolve(_ p: Position, in text: String) -> Int? {
         let ns = text as NSString
         let length = ns.length
-        if p.location <= length {
+        if p.location >= 0, p.selectionLength >= 0, p.location <= length,
+            p.selectionLength <= length - p.location
+        {
+            let selectionEnd = p.location + p.selectionLength
             let beforeStart = max(0, p.location - p.before.utf16.count)
             let beforeMatches =
                 ns.substring(with: NSRange(location: beforeStart, length: p.location - beforeStart))
                 .hasSuffix(p.before)
-            let afterEnd = min(length, p.location + p.after.utf16.count)
+            let afterEnd = min(length, selectionEnd + p.after.utf16.count)
             let afterMatches =
-                ns.substring(with: NSRange(location: p.location, length: afterEnd - p.location))
+                ns.substring(with: NSRange(location: selectionEnd, length: afterEnd - selectionEnd))
                 .hasPrefix(p.after)
             if beforeMatches && afterMatches { return p.location }
         }
@@ -105,6 +187,44 @@ public final class WritingPositionStore {
         return nil
     }
 
+    private func trimIfNeeded(isNew: Bool) {
+        let totalCount = projectPositions.count + positions.count
+        guard isNew, totalCount >= Self.maxEntries else { return }
+        let targetCount = Self.maxEntries / 2
+        // There is no persisted recency metadata in the legacy schema. Retain the same
+        // proportion of each identity category and choose evictions by stable key order so the
+        // combined cap is deterministic without pretending to provide LRU semantics.
+        let projectTarget = targetCount * projectPositions.count / totalCount
+        let legacyTarget = targetCount - projectTarget
+        let projectRemovalCount = projectPositions.count - projectTarget
+        let legacyRemovalCount = positions.count - legacyTarget
+        let projectKeys = projectPositions.keys.sorted {
+            Self.storageKey(for: $0) < Self.storageKey(for: $1)
+        }
+        let legacyIDs = positions.keys.sorted { $0.uuidString < $1.uuidString }
+        for projectKey in projectKeys.prefix(projectRemovalCount) {
+            projectPositions.removeValue(forKey: projectKey)
+        }
+        for legacyID in legacyIDs.prefix(legacyRemovalCount) {
+            positions.removeValue(forKey: legacyID)
+        }
+    }
+
+    private static func storageKey(for key: ProjectDocumentKey) -> String {
+        "\(key.projectID.rawValue.uuidString)/\(key.documentID.rawValue.uuidString)"
+    }
+
+    private static func projectKey(from rawValue: String) -> ProjectDocumentKey? {
+        let parts = rawValue.split(separator: "/", omittingEmptySubsequences: false)
+        guard parts.count == 2,
+            let projectID = UUID(uuidString: String(parts[0])),
+            let documentID = UUID(uuidString: String(parts[1]))
+        else { return nil }
+        return ProjectDocumentKey(
+            projectID: WritingProjectID(rawValue: projectID),
+            documentID: WritingDocumentID(rawValue: documentID))
+    }
+
     private func schedulePersist() {
         persistTask?.cancel()
         persistTask = Task { [weak self] in
@@ -118,13 +238,25 @@ public final class WritingPositionStore {
     public func persistNow() {
         persistTask?.cancel()
         persistTask = nil
-        guard let data = try? JSONEncoder().encode(positions) else { return }
+        guard needsPersistence else { return }
+        var encoded = Dictionary(uniqueKeysWithValues: positions.map {
+            ($0.key.uuidString, $0.value)
+        })
+        for (projectKey, position) in projectPositions {
+            encoded[Self.storageKey(for: projectKey)] = position
+        }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        guard let data = try? encoder.encode(encoded) else { return }
         defaults.set(data, forKey: key)
+        needsPersistence = false
     }
 
     /// 테스트 격리 — 사용자 실제 UserDefaults를 건드리지 않게.
     func _testReset() {
         positions = [:]
+        projectPositions = [:]
+        needsPersistence = false
         defaults.removeObject(forKey: key)
     }
 }

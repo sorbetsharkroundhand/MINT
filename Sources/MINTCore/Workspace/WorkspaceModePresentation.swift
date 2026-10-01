@@ -31,9 +31,9 @@ enum WorkspaceModeSelection {
     static func select(
         _ mode: WorkspaceMode,
         session: ProjectSession,
-        editorStore: EntryStore
+        requestEditorFocus: () -> Void
     ) {
         session.selectWorkspaceMode(mode)
-        editorStore.requestEditorFocus()
+        requestEditorFocus()
     }
 }

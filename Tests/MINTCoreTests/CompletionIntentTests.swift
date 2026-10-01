@@ -9,8 +9,8 @@ import XCTest
 /// 모델을 바꾼 뒤 이전 모델 결과가 나타났다. 이 테스트는 컨트롤러 의유가
 /// 무효화를 실제로 발화하는지 고정한다.
 ///
-/// 네트워크 안전: 자동완성을 끈 상태로만 시험한다 — preloadEngine은 마스터
-/// 스위치가 꺼진 즉시 반환하므로 테스트가 모델 다운로드를 유발하지 않는다.
+/// 네트워크 안전: 컨트롤러 테스트는 비활성/미구성 상태만 실행한다. 설정에서
+/// enabled 값을 기록하는 테스트는 컨트롤러나 엔진을 만들지 않는다.
 final class CompletionIntentTests: XCTestCase {
 
     private var dir: URL!
@@ -23,6 +23,92 @@ final class CompletionIntentTests: XCTestCase {
 
     override func tearDownWithError() throws {
         try? FileManager.default.removeItem(at: dir)
+    }
+
+    @MainActor
+    func testUnconfirmedInstallStartsWithCompletionDisabled() throws {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removePersistentDomain(forName: suite)
+
+        let settings = CompletionSettings(defaults: defaults)
+
+        XCTAssertFalse(settings.autocompleteEnabled)
+        XCTAssertEqual(settings.authorization, .unconfigured)
+    }
+
+    @MainActor
+    func testPreloadStaysIdleWhenCompletionIsUnconfigured() throws {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.removePersistentDomain(forName: suite)
+        let settings = CompletionSettings(defaults: defaults)
+        let controller = CompletionController(settings: settings)
+
+        controller.preloadEngine()
+
+        XCTAssertEqual(controller.engineState, .idle)
+    }
+
+    @MainActor
+    func testConfirmedInstallMigratesEnabledPreference() throws {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "mint.initialModelConfirmed")
+        defaults.set(true, forKey: "completion.enabled")
+
+        let settings = CompletionSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.authorization, .enabled)
+        XCTAssertTrue(settings.autocompleteEnabled)
+    }
+
+    @MainActor
+    func testConfirmedInstallMigratesDisabledPreference() throws {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(true, forKey: "mint.initialModelConfirmed")
+        defaults.set(false, forKey: "completion.enabled")
+
+        let settings = CompletionSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.authorization, .disabled)
+        XCTAssertFalse(settings.autocompleteEnabled)
+    }
+
+    @MainActor
+    func testUnconfirmedMigrationDoesNotErasePriorPreference() {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        defaults.set(false, forKey: "mint.initialModelConfirmed")
+        defaults.set(true, forKey: "completion.enabled")
+
+        let settings = CompletionSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.authorization, .unconfigured)
+        XCTAssertFalse(settings.autocompleteEnabled)
+        XCTAssertEqual(defaults.object(forKey: "completion.enabled") as? Bool, true)
+    }
+
+    @MainActor
+    func testExplicitSettingsChoiceRecordsCompletionAuthorization() {
+        let suite = "MINT.CompletionAuthorizationTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CompletionSettings(defaults: defaults)
+
+        settings.setCompletionEnabled(true)
+        XCTAssertEqual(settings.authorization, .enabled)
+        XCTAssertTrue(settings.autocompleteEnabled)
+
+        settings.setCompletionEnabled(false)
+        XCTAssertEqual(settings.authorization, .disabled)
+        XCTAssertFalse(settings.autocompleteEnabled)
     }
 
     @MainActor

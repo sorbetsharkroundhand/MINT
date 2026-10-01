@@ -27,8 +27,67 @@ public struct ProjectManifest: Codable, Equatable, Sendable {
     public var title: String
     public var mode: WritingMode
     public var documents: [ProjectDocumentRecord]
+    public var trashedDocumentIDs: Set<WritingDocumentID> = []
     public var assets: [ProjectAssetRecord] = []
     public var legacySource: ProjectFileRecord?
+
+    init(
+        schemaVersion: Int = currentSchemaVersion,
+        id: WritingProjectID,
+        title: String,
+        mode: WritingMode,
+        documents: [ProjectDocumentRecord],
+        trashedDocumentIDs: Set<WritingDocumentID> = [],
+        assets: [ProjectAssetRecord] = [],
+        legacySource: ProjectFileRecord? = nil
+    ) {
+        self.schemaVersion = schemaVersion
+        self.id = id
+        self.title = title
+        self.mode = mode
+        self.documents = documents
+        self.trashedDocumentIDs = trashedDocumentIDs
+        self.assets = assets
+        self.legacySource = legacySource
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion
+        case id
+        case title
+        case mode
+        case documents
+        case trashedDocumentIDs
+        case assets
+        case legacySource
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        id = try container.decode(WritingProjectID.self, forKey: .id)
+        title = try container.decode(String.self, forKey: .title)
+        mode = try container.decode(WritingMode.self, forKey: .mode)
+        documents = try container.decode([ProjectDocumentRecord].self, forKey: .documents)
+        trashedDocumentIDs = try container.decodeIfPresent(
+            Set<WritingDocumentID>.self, forKey: .trashedDocumentIDs) ?? []
+        assets = try container.decodeIfPresent([ProjectAssetRecord].self, forKey: .assets) ?? []
+        legacySource = try container.decodeIfPresent(ProjectFileRecord.self, forKey: .legacySource)
+    }
+
+    public func encode(to encoder: any Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(schemaVersion, forKey: .schemaVersion)
+        try container.encode(id, forKey: .id)
+        try container.encode(title, forKey: .title)
+        try container.encode(mode, forKey: .mode)
+        try container.encode(documents, forKey: .documents)
+        try container.encode(
+            trashedDocumentIDs.sorted { $0.rawValue.uuidString < $1.rawValue.uuidString },
+            forKey: .trashedDocumentIDs)
+        try container.encode(assets, forKey: .assets)
+        try container.encodeIfPresent(legacySource, forKey: .legacySource)
+    }
 }
 
 public enum ProjectStoreError: Error, LocalizedError, Sendable {

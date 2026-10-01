@@ -6,6 +6,23 @@ import XCTest
 /// 수식 왕복 무결성 (이슈 #20) — load→edit→serialize→reload에서 source가
 /// 한 글자도 변하지 않는다는 것을 golden으로 고정한다. 직렬화는 저장 경로다.
 final class MathRoundTripTests: XCTestCase {
+    @MainActor
+    func testProjectExportPreservesMathSource() async throws {
+        let root = try temporaryProjectRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.documents[0].body = "![그림](images/a.png){width=60}\n\n$x^2$\n\n$$\ny=2x\n$$\n"
+        try await store.save(project)
+        let catalog = try await store.assetCatalog(id: project.id)
+        let view = makeEditor()
+        view.projectAssetCatalog = catalog
+        view.load(markdown: project.documents[0].body)
+        XCTAssertEqual(view.serialize(), "![그림](images/a.png){width=60}\n\n$x^2$\n\n$$\ny=2x\n$$\n")
+        let destination = root.appendingPathComponent("math.md")
+        try MarkdownExporter.export(project.documents[0], assets: catalog, to: destination)
+        XCTAssertEqual(try String(contentsOf: destination, encoding: .utf8), "![그림](images/a.png){width=60}\n\n$x^2$\n\n$$\ny=2x\n$$\n")
+    }
 
     private var windows: [NSWindow] = []
 

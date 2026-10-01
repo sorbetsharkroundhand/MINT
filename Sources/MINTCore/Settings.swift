@@ -17,6 +17,13 @@ public enum PromptStyle: String, CaseIterable, Codable, Sendable {
     }
 }
 
+/// Whether the writer has explicitly chosen to allow local completion work.
+public enum CompletionAuthorization: String, Codable, Sendable {
+    case unconfigured
+    case disabled
+    case enabled
+}
+
 /// 모델 프리셋 (PLAN §3).
 public enum ModelPresets {
     /// **MINT** — Ternary-Bonsai-27B (Qwen3.5-27B dense, 2비트 삼진 ~1.71bpw), ~8.5GB.
@@ -210,6 +217,7 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
 
     private enum Keys {
         static let enabled = "completion.enabled"
+        static let authorization = "completion.authorization"
         static let modelID = "completion.modelID"
         static let promptStyle = "completion.promptStyle"
         static let debounceMilliseconds = "completion.debounceMilliseconds"
@@ -225,8 +233,7 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
         /// 아닌 앱 전역 이름공간(`mint.*`)에 둔다 — 예측 파라미터 스냅샷
         /// (`CompletionParameters`)에도 들어가지 않는다.
         static let authorName = "mint.authorName"
-        /// 첫 실행 모델 선택 확인 (#40) — 기본 Basil(16.9GB)의 자동 다운로드 전에
-        /// 사용자가 크기를 보고 골랐는지. true가 되면 시작 preload가 허용된다.
+        /// Legacy first-model confirmation marker, read once when migrating authorization.
         static let initialModelConfirmed = "mint.initialModelConfirmed"
     }
 
@@ -235,6 +242,9 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
     /// 자동완성 마스터 스위치 — 끄면 제안 트리거·모델 로드를 모두 멈춘다.
     @Published public var autocompleteEnabled: Bool {
         didSet { defaults.set(autocompleteEnabled, forKey: Keys.enabled) }
+    }
+    @Published public private(set) var authorization: CompletionAuthorization {
+        didSet { defaults.set(authorization.rawValue, forKey: Keys.authorization) }
     }
     @Published public var modelID: String {
         didSet { defaults.set(modelID, forKey: Keys.modelID) }
@@ -282,16 +292,27 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
             defaults.set(editorFontSize, forKey: Keys.fontSize)
         }
     }
-    /// 첫 실행 모델 선택 확인 (#40) — false면 ContentView가 선택 시트를 띄우고
-    /// 시작 preload를 보류한다. 사용자가 고르거나 "나중에"를 누르면 true.
-    @Published public var initialModelConfirmed: Bool {
-        didSet { defaults.set(initialModelConfirmed, forKey: Keys.initialModelConfirmed) }
-    }
-
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         let base = CompletionParameters()
-        self.autocompleteEnabled = defaults.object(forKey: Keys.enabled) as? Bool ?? true
+        let storedAutocomplete = defaults.object(forKey: Keys.enabled) as? Bool
+        let storedAuthorization = defaults.string(forKey: Keys.authorization)
+            .flatMap(CompletionAuthorization.init(rawValue:))
+        let legacyConfirmed = defaults.object(forKey: Keys.initialModelConfirmed) as? Bool
+        if let storedAuthorization {
+            self.authorization = storedAuthorization
+            self.autocompleteEnabled = storedAuthorization == .enabled
+        } else if legacyConfirmed == true {
+            let enabled = storedAutocomplete ?? true
+            let authorization: CompletionAuthorization = enabled ? .enabled : .disabled
+            self.authorization = authorization
+            self.autocompleteEnabled = enabled
+            defaults.set(authorization.rawValue, forKey: Keys.authorization)
+        } else {
+            self.authorization = .unconfigured
+            self.autocompleteEnabled = false
+            defaults.set(CompletionAuthorization.unconfigured.rawValue, forKey: Keys.authorization)
+        }
         // 기존 보호 규칙 — 저장된 modelID가 있으면 그대로 존중한다. 신규 사용자만
         // 새 기본(Basil)으로 시작한다 (#40).
         self.modelID = defaults.string(forKey: Keys.modelID) ?? base.modelID
@@ -320,17 +341,12 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
             defaults.object(forKey: Keys.fontSize) as? Double
             ?? Self.defaultFontSize
         self.authorName = defaults.string(forKey: Keys.authorName) ?? ""
-        // 첫 실행 모델 선택 확인 (#40). 플래그가 전혀 없을 때의 판별:
-        // - 모델 ID 저장 이력이 있는 사람 = 업데이트로 들어온 **기존 사용자** —
-        //   자기 모델을 이미 알고 있다. 시트 없이 통과시킨다.
-        // - 그 외 = **신규 설치** — Basil(16.9GB) 자동 다운로드 전에 선택 시트.
-        if let confirmed = defaults.object(forKey: Keys.initialModelConfirmed) as? Bool {
-            self.initialModelConfirmed = confirmed
-        } else {
-            let isExistingUser = defaults.string(forKey: Keys.modelID) != nil
-            self.initialModelConfirmed = isExistingUser
-            defaults.set(isExistingUser, forKey: Keys.initialModelConfirmed)
-        }
+    }
+
+    /// Records a deliberate Settings choice and keeps the legacy Boolean in sync.
+    public func setCompletionEnabled(_ enabled: Bool) {
+        authorization = enabled ? .enabled : .disabled
+        autocompleteEnabled = enabled
     }
 
     /// 추론 엔진으로 넘기는 값 스냅샷.

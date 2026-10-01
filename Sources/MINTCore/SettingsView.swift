@@ -397,7 +397,7 @@ public struct SettingsView: View {
             get: { settings.autocompleteEnabled },
             set: { enabled in
                 guard let completion else {
-                    settings.autocompleteEnabled = enabled
+                    settings.setCompletionEnabled(enabled)
                     return
                 }
                 completion.setAutocompleteEnabled(enabled)
