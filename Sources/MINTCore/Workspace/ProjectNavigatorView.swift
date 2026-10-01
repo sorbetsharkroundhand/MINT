@@ -269,6 +269,14 @@ struct ProjectNavigatorView: View {
             session.selectDocument(document.id)
             editorRequests.focusEditor()
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("mint.document.\(document.id.rawValue.uuidString)")
+        .accessibilityLabel(Text(document.title))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            session.selectDocument(document.id)
+            editorRequests.focusEditor()
+        }
         .contextMenu {
             Button("이름 바꾸기") { startRename(document) }
             Button("휴지통으로 이동", role: .destructive) {

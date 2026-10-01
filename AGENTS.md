@@ -8,6 +8,7 @@ Local macOS writing app, Fiction First; General writing and AI-disabled editing 
 - Read [release epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) when deciding scope/dependencies; [gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) for RC work.
 - Use `PLAN.md` as an optional code/document index. Search paths/symbols, then read relevant sections.
 - Historical specs, plans, benchmarks and README vision are not current implementation contracts. Read them only to answer a concrete question.
+- Old inline `CLAUDE.md §N` / `PLAN §N` citations are historical references, not live requirements. Verify any relevant invariant against this guide and the current issue; update stale citations opportunistically when touching that code, not through a bulk comment rewrite.
 - Do not routinely fetch all open issues, unrelated PRs, or every plan/skill. Follow applicable higher-priority skill requirements; repository guidance cannot disable them.
 - If sources conflict, report the specific conflict before coding. Current issue contracts take precedence over historical repo plans; user instructions remain authoritative.
 

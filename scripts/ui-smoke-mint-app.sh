@@ -194,14 +194,19 @@ if defaults read "$SMOKE_BUNDLE_ID" >/dev/null 2>&1; then
 fi
 plutil -replace CFBundleIdentifier -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 plutil -replace CFBundleExecutable -string "$SMOKE_EXECUTABLE" "$APP/Contents/Info.plist"
+plutil -replace CFBundleName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
+plutil -insert CFBundleDisplayName -string "$SMOKE_BUNDLE_ID" "$APP/Contents/Info.plist"
 codesign --force --deep -s - "$APP"
 PREFERENCES_OWNED=1
+# Exercise the retired-tool fallback without preconfiguring a model or AI consent.
+defaults write "$SMOKE_BUNDLE_ID" mint.sidebarSection -string margin
 
 TOKEN="smoke$(uuidgen | tr -d '-')"
 PROJECT_ID="33333333-3333-3333-3333-333333333333"
 DOCUMENT_ID="44444444-4444-4444-4444-444444444444"
 PROJECT_BODY="project-$TOKEN"
 EDITED_BODY="edited-$TOKEN"
+NEW_BODY="new-$TOKEN"
 PERSISTED_BODY="$EDITED_BODY$PROJECT_BODY"
 PROJECT_HASH=$(printf '%s' "$PROJECT_BODY" | shasum -a 256 | awk '{print $1}')
 PROJECT_ROOT="$SMOKE_HOME/Documents/MINT/Projects"
@@ -228,25 +233,74 @@ on findElement(rootElement, attributeName, expectedValue, remainingDepth)
     return missing value
 end findElement
 
+on findElementContaining(rootElement, attributeName, expectedValue, remainingDepth)
+    tell application "System Events"
+        try
+            if (value of attribute attributeName of rootElement as text) contains expectedValue then return rootElement
+        end try
+        if remainingDepth ≤ 0 then return missing value
+        repeat with childElement in UI elements of rootElement
+            set matchedElement to my findElementContaining(childElement, attributeName, expectedValue, remainingDepth - 1)
+            if matchedElement is not missing value then return matchedElement
+        end repeat
+    end tell
+    return missing value
+end findElementContaining
 on run argv
     set targetPID to (item 1 of argv) as integer
     set operation to item 2 of argv
     set expectedValue to item 3 of argv
     tell application "System Events"
         set targetProcess to first application process whose unix id is targetPID
+        if unix id of targetProcess is not targetPID then error "Accessibility process resolved to another app"
         if not (exists window 1 of targetProcess) then error "메인 창 없음"
-        set editor to my findElement(window 1 of targetProcess, "AXIdentifier", "mint.editor", 30)
-        if editor is missing value then error "에디터 없음"
-        if operation is "type" then
-            set frontmost of targetProcess to true
-            set value of attribute "AXFocused" of editor to true
-            delay 0.2
-            tell targetProcess to keystroke expectedValue
-            delay 0.6
-        else if operation is "equals" then
-            if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+        set rootElement to window 1 of targetProcess
+        if operation is "press" or operation is "present" or operation is "absent" then
+            set targetElement to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElementContaining(rootElement, "AXHelp", expectedValue, 30)
+            if operation is "absent" then
+                if targetElement is not missing value then error "숨겨야 할 컨트롤이 표시됨: " & expectedValue
+            else
+                if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
+                if operation is "press" then click targetElement
+            end if
+        else if operation is "resize" then
+            set size of rootElement to {expectedValue as integer, 700}
+        else if operation is "autocomplete" then
+            set autocompleteControl to my findElement(rootElement, "AXDescription", "자동완성", 30)
+            -- Newer macOS versions expose SwiftUI labels as AXAttributedDescription.
+            if autocompleteControl is missing value then set autocompleteControl to my findElementContaining(rootElement, "AXHelp", "자동완성 ·", 30)
+            if autocompleteControl is missing value then error "자동완성 컨트롤 없음"
+            if (value of attribute "AXValue" of autocompleteControl as text) is not "자동완성 꺼짐" then error "자동완성 접근성 상태 유실"
+        else if operation is "navigator" then
+            if my findElement(rootElement, "AXIdentifier", "mint.navigator", 30) is missing value then error "탐색기 없음"
+        else if operation is "focused" then
+            set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+            if editor is missing value then error "에디터 없음"
+            if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 유실"
+
         else
-            error "알 수 없는 UI 작업: " & operation
+            set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
+            if editor is missing value then error "에디터 없음"
+            if operation is "type" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                delay 0.2
+                if not (frontmost of targetProcess) then error "격리 앱 포커스 없음"
+                if not (value of attribute "AXFocused" of editor) then error "에디터 포커스 없음"
+                tell targetProcess to keystroke expectedValue
+                delay 0.6
+                -- Editing can replace the SwiftUI accessibility tree.
+                set editor to my findElement(window 1 of targetProcess, "AXIdentifier", "mint.editor", 30)
+                if editor is missing value then error "입력 후 에디터 없음"
+                if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
+            else if operation is "equals" then
+                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+            else
+                error "알 수 없는 UI 작업: " & operation
+            end if
         end if
     end tell
 end run
@@ -285,7 +339,8 @@ JXA
 
 ui() {
     owned_pid || fail "격리 실행 파일 PID 확인 실패"
-    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "$2" >/dev/null
+    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
+    case "$1" in press|resize) sleep 0.3 ;; esac
 }
 
 wait_ui() {
@@ -312,16 +367,51 @@ launch
 wait_ui equals "$PROJECT_BODY"
 ui type "$EDITED_BODY"
 wait_ui equals "$PERSISTED_BODY"
+ui absent "mint.workspace-mode"
+ui absent "리빙 마진"
+ui absent "문서로 돌아가기"
+ui absent "mint.ghost-shortcut-hint"
+ui resize 1250
+wait_ui autocomplete ""
+ui press "파일 목록 숨기기"
+ui press "파일 목록 보이기"
+ui navigator
+ui press "스토리 바이블"
+ui press "문서로 돌아가기"
+ui focused
+ui resize 860
+wait_ui autocomplete ""
+ui press "기타 글 도구"
+ui press "스토리 바이블"
+ui absent "리빙 마진"
+ui press "문서로 돌아가기"
+ui focused
+ui navigator
+ui press "새 문서"
+wait_ui equals ""
+ui type "$NEW_BODY"
+wait_ui equals "$NEW_BODY"
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
+# Address the generated document by its persisted identity, not a localized AX label.
+NEW_DOCUMENT_ID=$(plutil -extract documents.1.id.rawValue raw -o - "$PROJECT_DIRECTORY/project.json") \
+    || fail "새 문서 식별자 저장 실패"
+ui press "mint.document.$NEW_DOCUMENT_ID"
+wait_ui equals "$NEW_BODY"
 terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
 assert_isolated_project_mode
 
 launch
+wait_ui equals "$NEW_BODY"
+ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
 assert_isolated_project_mode
 check_original
 
 PASSED=1
-echo "✓ UI 스모크 통과 — 실제 프로젝트 본문 편집 · 정상 종료 저장 · 재실행 · manifest 검증"
+echo "✓ UI 스모크 통과 — 프로젝트 문서 전환·생성 · 좁은/넓은 창 · 포커스 복원 · 재실행 · manifest 검증"

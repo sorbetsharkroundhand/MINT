@@ -8,8 +8,7 @@ import ImageIO
 ///   남겨, MINT 폴더를 통째로 옮겨도 참조가 깨지지 않는다.
 /// - 렌더 이미지는 경로별로 캐시한다 (편집·드로잉 모두 메인 스레드).
 ///
-/// 저장 위치 규칙은 `EntryStore.storageDirectory()`와 같은 `~/Documents/MINT/`를
-/// 공유한다 — 여기서 다시 계산하는 이유는 파일 관심사를 분리하기 위해서다.
+/// Default paths come from MintStorageLocation; the existing test override remains supported.
 /// 캐시의 "메인 전용" 불변식은 주석이 아니라 격리로 강제한다 (이슈 #45) —
 /// 호출부(BlockTextView·EpubExporter.export·테스트)는 모두 MainActor 맥락이다.
 @MainActor
@@ -41,17 +40,16 @@ public enum MintImageStore {
     /// `~/Documents/MINT/` — 없으면 만든다.
     private static func mintDirectory() -> URL {
         if let override = directoryOverride { return override }
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = base.appendingPathComponent("MINT", isDirectory: true)
+        let dir = MintStorageLocation.standard.rootDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
 
     /// `~/Documents/MINT/images/` — 없으면 만든다.
-    private static func imagesDirectory() -> URL {
-        let dir = mintDirectory().appendingPathComponent("images", isDirectory: true)
+    private static func imagesDirectory() -> URL? {
+        guard let dir = try? ProjectPaths.checked("images", under: mintDirectory()) else {
+            return nil
+        }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -62,7 +60,8 @@ public enum MintImageStore {
     public static func save(_ data: Data, ext rawExt: String) -> String? {
         let ext = normalizedExtension(rawExt)
         let name = "\(UUID().uuidString).\(ext)"
-        let url = imagesDirectory().appendingPathComponent(name, isDirectory: false)
+        guard let directory = imagesDirectory() else { return nil }
+        let url = directory.appendingPathComponent(name, isDirectory: false)
         do {
             try data.write(to: url, options: .atomic)
             let relative = "images/\(name)"
@@ -73,41 +72,42 @@ public enum MintImageStore {
         }
     }
 
-    /// 상대경로(또는 절대경로)를 MINT 폴더 기준 파일 URL로 해석한다.
-    /// 테스트 격리(directoryOverride)를 존중한다 — 앱·테스트의 정상 통로.
-    public static func url(for relativePath: String) -> URL {
-        if relativePath.hasPrefix("/") {
-            return URL(fileURLWithPath: relativePath)
-        }
-        return mintDirectory().appendingPathComponent(relativePath, isDirectory: false)
+    /// Resolve local references, rejecting unsafe managed paths and symlinks.
+    /// Explicit external files remain supported; the test override is respected.
+    public static func url(for reference: String) -> URL? {
+        resolveURL(for: reference, under: mintDirectory())
     }
 
-    /// 격리 밖 해석기 — 오버라이드 없는 기본 위치만 계산하는 순수 함수.
-    /// **백그라운드 내보내기(EpubExporter) 전용** (#33): 메인 hop 없이 자산
-    /// 후보 위치를 알아야 하기 때문이다. 테스트가 자산을 심는 경로는 반드시
-    /// MainActor `url(for:)`/`resolveAssetURLs`를 거친다 — 이 함수는 폴백일 뿐.
-    public nonisolated static func resolveURL(for relativePath: String) -> URL {
-        if relativePath.hasPrefix("/") {
-            return URL(fileURLWithPath: relativePath)
+    /// Resolve against the default store without a main-actor hop or test override.
+    /// Both entry points share the same syntax and filesystem safety checks.
+    public nonisolated static func resolveURL(for reference: String) -> URL? {
+        resolveURL(for: reference, under: MintStorageLocation.standard.rootDirectory)
+    }
+
+    nonisolated static func resolveURL(for reference: String, under root: URL) -> URL? {
+        switch ImageReferenceParser.classify(reference) {
+        case .managedRelative(let path):
+            guard let url = try? ProjectPaths.checked(path, under: root) else { return nil }
+            // Image references must not trigger recursive directory copies (which
+            // could contain unchecked links). Missing files still resolve for recovery.
+            if let type = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.type]
+                as? FileAttributeType, type != .typeRegular {
+                return nil
+            }
+            return url
+        case .externalFile(let path):
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath)
+        case .remote, .blocked:
+            return nil
         }
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return base
-            .appendingPathComponent("MINT", isDirectory: true)
-            .appendingPathComponent(relativePath, isDirectory: false)
     }
 
     /// 상대경로의 이미지를 로드한다 (경로별 캐시). 없거나 못 읽으면 nil.
     /// 원격·차단 소스는 로컬 파일로 오해하지 않고 nil — 완전 로컬 원칙 (이슈 #12).
     public static func image(for relativePath: String) -> NSImage? {
-        switch ImageReferenceParser.classify(relativePath) {
-        case .managedRelative, .externalFile: break
-        case .remote, .blocked: return nil
-        }
+        guard let fileURL = url(for: relativePath) else { return nil }
         let key = "F|\(relativePath)"
         if let hit = cache.find(key) { return hit }
-        let fileURL = url(for: relativePath)
         guard let image = NSImage(contentsOf: fileURL), image.size.width > 0 else {
             return nil
         }
@@ -127,14 +127,10 @@ public enum MintImageStore {
     public static func displayImage(
         for relativePath: String, maxPixelWidth: CGFloat
     ) -> NSImage? {
-        switch ImageReferenceParser.classify(relativePath) {
-        case .managedRelative, .externalFile: break
-        case .remote, .blocked: return nil
-        }
+        guard let fileURL = url(for: relativePath) else { return nil }
         let width = max(64, min(Int(maxPixelWidth), 4096))
         let key = "D|\(width)|\(relativePath)"
         if let hit = cache.find(key) { return hit }
-        let fileURL = url(for: relativePath)
         guard let source = CGImageSourceCreateWithURL(fileURL as CFURL, nil),
             let cg = CGImageSourceCreateThumbnailAtIndex(
                 source, 0,

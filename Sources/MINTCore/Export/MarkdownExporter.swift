@@ -41,7 +41,8 @@ public enum MarkdownExporter {
         _ entry: JournalEntry, to destination: URL
     ) throws -> Report {
         try exportBody(entry.body, to: destination) { reference in
-            try? Data(contentsOf: MintImageStore.url(for: reference))
+            guard let url = MintImageStore.url(for: reference) else { return nil }
+            return try? Data(contentsOf: url)
         }
     }
 

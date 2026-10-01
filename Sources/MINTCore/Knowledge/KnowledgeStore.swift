@@ -139,25 +139,22 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     // MARK: - 디스크 IO (인덱서 전용)
 
     /// `~/Documents/MINT/knowledge/` — 없으면 만든다.
-    static func directory() -> URL {
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = base.appendingPathComponent("MINT/knowledge", isDirectory: true)
+    static func directory(storageLocation: MintStorageLocation = .standard) -> URL {
+        let dir = storageLocation.knowledgeDirectory
         try? FileManager.default.createDirectory(
             at: dir, withIntermediateDirectories: true)
         return dir
     }
 
-    static func fileURL(for entryID: UUID) -> URL {
-        directory().appendingPathComponent("\(entryID.uuidString).json")
+    static func fileURL(for entryID: UUID, storageLocation: MintStorageLocation = .standard) -> URL {
+        directory(storageLocation: storageLocation).appendingPathComponent("\(entryID.uuidString).json")
     }
 
     /// 로드 — 파일이 없거나, 못 읽거나, **스키마 버전이 다르면** 빈 사이드카.
     /// 파생 캐시라 버리는 것이 곧 복구다 (CLAUDE.md §5-5).
-    public static func load(entryID: UUID) -> KnowledgeSidecar {
+    public static func load(entryID: UUID, storageLocation: MintStorageLocation = .standard) -> KnowledgeSidecar {
         let scope = StoryMemoryScope.legacy(documentID: WritingDocumentID(rawValue: entryID))
-        let url = fileURL(for: entryID)
+        let url = fileURL(for: entryID, storageLocation: storageLocation)
         guard let data = try? Data(contentsOf: url) else {
             return KnowledgeSidecar(scope: scope)
         }
@@ -188,9 +185,9 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     /// 사건에는 이 정리가 곧 PLAN §8의 **톰스톤**이다: 블록이 수정되면 씬 해시가
     /// 바뀌어 그 씬의 사건이 고아가 되고, 여기서 사라진 뒤 다음 깊은 패스가
     /// 새 해시로 재추출한다. 무효화 전용 코드가 따로 없는 이유다.
-    public func save(pruningTo liveHashes: Set<String>? = nil) {
+    public func save(pruningTo liveHashes: Set<String>? = nil, storageLocation: MintStorageLocation = .standard) {
         guard case .legacy = scope, let data = try? encoded(pruningTo: liveHashes) else { return }
-        try? data.write(to: Self.fileURL(for: entryID), options: .atomic)
+        try? data.write(to: Self.fileURL(for: entryID, storageLocation: storageLocation), options: .atomic)
     }
 
     func encoded(pruningTo liveHashes: Set<String>? = nil) throws -> Data {
@@ -210,8 +207,8 @@ public struct KnowledgeSidecar: Codable, Equatable, Sendable {
     }
 
     /// 저널 삭제 시 사이드카도 지운다 (원문이 사라지면 파생물도 무의미).
-    public static func remove(entryID: UUID) {
-        try? FileManager.default.removeItem(at: fileURL(for: entryID))
+    public static func remove(entryID: UUID, storageLocation: MintStorageLocation = .standard) {
+        try? FileManager.default.removeItem(at: fileURL(for: entryID, storageLocation: storageLocation))
     }
 }
 

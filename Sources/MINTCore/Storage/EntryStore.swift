@@ -521,8 +521,11 @@ public final class EntryStore: ObservableObject {
         var expandedFolderIDs: [UUID]? = nil
     }
 
-    public convenience init(autosaveDelay: Duration = .milliseconds(800)) {
-        self.init(directory: Self.storageDirectory(), autosaveDelay: autosaveDelay)
+    public convenience init(
+        autosaveDelay: Duration = .milliseconds(800),
+        storageLocation: MintStorageLocation = .standard
+    ) {
+        self.init(directory: Self.storageDirectory(at: storageLocation), autosaveDelay: autosaveDelay)
     }
 
     /// 저장 위치를 지정하는 내부 초기자 — 테스트가 임시 디렉터리로 격리하기 위함.
@@ -601,21 +604,19 @@ public final class EntryStore: ObservableObject {
         // 고아 asset 청소 — 장부에 유예 중인 후보가 있을 때만 실제로 돈다.
         // 시작 직후 한 번, 메인 액터 상속 Task라 편집 경로와 겹치지 않는다 (이슈 #17).
         let bodies = entries.map(\.body)
-        if !AssetJanitor.hasPendingCandidates() {
+        let storageLocation = MintStorageLocation(rootDirectory: directory)
+        if !AssetJanitor.hasPendingCandidates(storageLocation: storageLocation) {
             // 장부가 비었으면 파일 접근조차 하지 않는다.
         } else {
-            Task(priority: .utility) { [bodies] in
-                _ = AssetJanitor.sweepAll(bodies: bodies)
+            Task(priority: .utility) { [bodies, storageLocation] in
+                _ = AssetJanitor.sweepAll(bodies: bodies, storageLocation: storageLocation)
             }
         }
     }
 
     /// `~/Documents/MINT/` 경로. 디렉터리가 없으면 만든다.
-    private static func storageDirectory() -> URL {
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = base.appendingPathComponent("MINT", isDirectory: true)
+    private static func storageDirectory(at location: MintStorageLocation) -> URL {
+        let dir = location.rootDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }

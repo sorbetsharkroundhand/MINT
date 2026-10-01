@@ -138,20 +138,12 @@ public struct CharacterLexicon: Sendable {
 /// 한 줄에 한 낱말, `#` 이후는 주석. mtime 캐시로 편집을 재빌드 없이 반영한다.
 enum UserStopwords {
     private static let lock = NSLock()
-    nonisolated(unsafe) private static var cached: (mtime: Date, words: Set<String>)?
+    nonisolated(unsafe) private static var cached: (url: URL, mtime: Date, words: Set<String>)?
 
-    static var fileURL: URL {
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return base.appendingPathComponent(
-            "MINT/character-stopwords.txt", isDirectory: false)
-    }
-
-    static func load() -> Set<String> {
+    static func load(storageLocation: MintStorageLocation = .standard) -> Set<String> {
         lock.lock()
         defer { lock.unlock() }
-        let url = fileURL
+        let url = storageLocation.stopwordsFileURL
         guard
             let mtime = (try? FileManager.default.attributesOfItem(atPath: url.path))?[
                 .modificationDate] as? Date
@@ -159,7 +151,7 @@ enum UserStopwords {
             cached = nil
             return []
         }
-        if let cached, cached.mtime == mtime { return cached.words }
+        if let cached, cached.url == url, cached.mtime == mtime { return cached.words }
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return [] }
         let words = Set(
             text.split(separator: "\n")
@@ -168,7 +160,7 @@ enum UserStopwords {
                     return noComment.trimmingCharacters(in: .whitespaces)
                 }
                 .filter { !$0.isEmpty })
-        cached = (mtime, words)
+        cached = (url, mtime, words)
         return words
     }
 }
