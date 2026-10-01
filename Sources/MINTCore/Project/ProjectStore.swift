@@ -244,11 +244,7 @@ public actor ProjectStore {
     }
 
     func userDataPath(key: String, hash: String) throws -> String {
-        guard !key.isEmpty, key.utf8.count <= 128, key != ".", key != "..",
-              key.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0)
-                  || (97...122).contains($0) || [45, 46, 95].contains($0) }) else {
-            throw ProjectStoreError.unsafePath(key)
-        }
+        try ProjectUserDataKey.validate(key)
         guard ProjectDigest.isValid(hash) else { throw ProjectStoreError.invalidManifest }
         return "UserData/records/\(ProjectDigest.hash(Data(key.utf8)))/\(hash).data"
     }

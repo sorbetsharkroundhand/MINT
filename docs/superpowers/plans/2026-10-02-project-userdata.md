@@ -29,6 +29,7 @@ Interfaces: WritingProject.userData: [String: Data] (default empty); ProjectMani
 - [x] Run focused/full tests, Swift/bench builds; author review, commit/push stacked Draft PR on #206.
 
 ## Task 2: Scoped writer state and migration
+- [x] Generic session/snapshot boundary delivered separately with stale-runtime and in-flight flush coverage.
 Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, LegacyEntryAdapter.swift, MINTApp.swift, writer tests.
 Interfaces: updateUserData(_ data: Data?, for key: String, identity: ProjectRuntimeIdentity) throws; WriterDocumentData codec/key(documentID:); injected pre-adoption preparation closure returning verified WritingProject.
 - [ ] Add failing session generation/flush/relaunch/stale-A/B and typed legacy migration fixtures.

@@ -7,15 +7,17 @@ public struct ProjectDocumentSnapshot: Equatable, Sendable {
     public let body: String
     public let kind: WritingDocument.Kind
     public let mode: WritingMode
+    public let userData: [String: Data]
 
     public init(
         identity: ProjectRuntimeIdentity, title: String, body: String,
-        kind: WritingDocument.Kind, mode: WritingMode
+        kind: WritingDocument.Kind, mode: WritingMode, userData: [String: Data] = [:]
     ) {
         self.identity = identity
         self.title = title
         self.body = body
         self.kind = kind
         self.mode = mode
+        self.userData = userData
     }
 }

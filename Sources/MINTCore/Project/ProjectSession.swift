@@ -60,7 +60,8 @@ public final class ProjectSession: ObservableObject {
         guard let runtimeIdentity, let selectedDocument, let activeProject else { return nil }
         return ProjectDocumentSnapshot(
             identity: runtimeIdentity, title: selectedDocument.title,
-            body: selectedDocument.body, kind: selectedDocument.kind, mode: activeProject.mode)
+            body: selectedDocument.body, kind: selectedDocument.kind, mode: activeProject.mode,
+            userData: activeProject.userData)
     }
 
     /// Derived memory stays unscoped until active-project lookup has completed. Once
@@ -255,6 +256,18 @@ public final class ProjectSession: ObservableObject {
         else { return }
 
         project.documents[index].body = body
+        activeProject = project
+        noteDocumentChange()
+        markDirty()
+    }
+
+    /// Captured ownership gates writer edits exactly like other project-scoped work.
+    public func updateUserData(_ data: Data?, for key: String, identity: ProjectRuntimeIdentity) throws {
+        guard phase == .ready, !isTransitioning, runtimeIdentity == identity,
+              var project = activeProject else { throw ProjectSessionError.staleRuntime }
+        try ProjectUserDataKey.validate(key)
+        guard project.userData[key] != data else { return }
+        project.userData[key] = data
         activeProject = project
         noteDocumentChange()
         markDirty()
