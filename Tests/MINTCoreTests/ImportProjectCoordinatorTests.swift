@@ -26,6 +26,104 @@ final class ImportProjectCoordinatorTests: XCTestCase {
         return source
     }
 
+    private func writeModernFixture(at root: URL) async throws -> (URL, WritingProject) {
+        let store = ProjectStore(root: root)
+        var project = projectFixture()
+        project.mode = .fiction
+        try await store.save(project)
+        try await store.addAsset(Data([1, 2, 3]), reference: "images/a.png", to: project.id)
+        return (root.appendingPathComponent(project.id.rawValue.uuidString), project)
+    }
+
+    func testModernFolderActivatesManifestModeAndVerifiedAssets() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (source, project) = try await writeModernFixture(at: url.appendingPathComponent("development"))
+        try Data("invalid legacy archive".utf8).write(to: source.appendingPathComponent("entries.json"))
+        let original = try Data(contentsOf: source.appendingPathComponent("project.json"))
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url.appendingPathComponent("container"))
+        let session = ProjectSession(store: store, defaults: defaults)
+        let id = try await ImportProjectCoordinator(store: store, session: session)
+            .importFolder(from: source, legacyMode: .general)
+        XCTAssertEqual(id, project.id)
+        XCTAssertEqual(session.activeProject, project)
+        XCTAssertEqual(session.assetCatalog?.data(for: "images/a.png"), Data([1, 2, 3]))
+        XCTAssertEqual(try Data(contentsOf: source.appendingPathComponent("project.json")), original)
+    }
+
+    func testLegacyFolderRetainsSourceAndImages() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let source = try writeLegacyFixture(at: url.appendingPathComponent("development"))
+        let original = try Data(contentsOf: source)
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url.appendingPathComponent("container"))
+        let session = ProjectSession(store: store, defaults: defaults)
+        let id = try await ImportProjectCoordinator(store: store, session: session)
+            .importFolder(from: source.deletingLastPathComponent(), legacyMode: .general)
+        XCTAssertEqual(session.activeProject?.id, id)
+        XCTAssertEqual(session.activeProject?.mode, .general)
+        XCTAssertEqual(session.assetCatalog?.data(for: "images/a.png"), Data([1, 2, 3]))
+        XCTAssertEqual(try Data(contentsOf: source), original)
+        XCTAssertEqual(try Data(contentsOf: source.deletingLastPathComponent().appendingPathComponent("images/a.png")), Data([1, 2, 3]))
+    }
+
+    func testModernCancellationAndActivationFailureKeepCurrentOwner() async throws {
+        for failure in ["cancel", "activate"] {
+            let url = root()
+            defer { try? FileManager.default.removeItem(at: url) }
+            let (source, imported) = try await writeModernFixture(at: url.appendingPathComponent("development"))
+            let original = try Data(contentsOf: source.appendingPathComponent("project.json"))
+            let (defaults, suite) = defaults()
+            defer { defaults.removePersistentDomain(forName: suite) }
+            let target = url.appendingPathComponent("container")
+            let normal = ProjectStore(root: target)
+            let current = projectFixture()
+            try await normal.save(current)
+            try await normal.activate(id: current.id)
+            let marker = target.appendingPathComponent("active-project.json")
+            let markerBytes = try Data(contentsOf: marker)
+            let store = failure == "activate" ? ProjectStore(root: target,
+                fileSystem: FailingProjectFiles(fragment: "active-project.json")) : normal
+            let session = ProjectSession(store: store, defaults: defaults)
+            try await session.bootstrap()
+            let identity = session.runtimeIdentity
+            let coordinator = ImportProjectCoordinator(store: store, session: session,
+                cancellationCheckpoint: { if failure == "cancel" { throw CancellationError() } })
+            do { _ = try await coordinator.importProject(from: source); XCTFail("Failed handoff accepted") }
+            catch { if failure == "cancel" { XCTAssertTrue(error is CancellationError) } }
+            XCTAssertEqual(session.activeProject, current)
+            XCTAssertEqual(session.runtimeIdentity, identity)
+            XCTAssertEqual(try Data(contentsOf: marker), markerBytes)
+            XCTAssertEqual(try Data(contentsOf: source.appendingPathComponent("project.json")), original)
+            let prepared = try await normal.load(id: imported.id)
+            XCTAssertEqual(prepared, imported)
+        }
+    }
+
+    func testDamagedModernFolderDoesNotFallBackToLegacyEntries() async throws {
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (source, _) = try await writeModernFixture(at: url.appendingPathComponent("development"))
+        _ = try writeLegacyFixture(at: source)
+        try Data("damaged manifest".utf8).write(to: source.appendingPathComponent("project.json"))
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url.appendingPathComponent("container"))
+        let session = ProjectSession(store: store, defaults: defaults)
+        do {
+            _ = try await ImportProjectCoordinator(store: store, session: session)
+                .importFolder(from: source, legacyMode: .general)
+            XCTFail("Damaged modern manifest imported as legacy")
+        } catch {}
+        XCTAssertNil(session.activeProject)
+        let active = try await store.activeProject()
+        XCTAssertNil(active)
+    }
+
     func testImportPreservesSourceAndPublishesVerifiedProject() async throws {
         let url = root()
         defer { try? FileManager.default.removeItem(at: url) }

@@ -92,7 +92,7 @@ public struct MintCommands: Commands {
             Button("새 General 프로젝트…") { presentNewProject(mode: .general) }
                 .keyboardShortcut("n", modifiers: [.command, .option])
                 .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
-            Button("레거시 라이브러리 가져오기…") { presentLegacyImport() }
+            Button("프로젝트 가져오기…") { presentFolderImport() }
                 .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Divider()
             Button(legacyWorkspace.mode == .legacy ? "프로젝트로 돌아가기" : "레거시 라이브러리 열기") {
@@ -293,30 +293,12 @@ public struct MintCommands: Commands {
         }
     }
 
-    private func presentLegacyImport() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "가져올 레거시 entries.json을 선택하세요. 원본은 변경되지 않습니다."
-        guard panel.runModal() == .OK, let sourceURL = panel.url else { return }
-
-        let modeAlert = NSAlert()
-        modeAlert.messageText = "가져올 프로젝트 종류"
-        modeAlert.informativeText = "원고에 맞는 작업 공간을 선택하세요."
-        modeAlert.addButton(withTitle: "Fiction")
-        modeAlert.addButton(withTitle: "General")
-        modeAlert.addButton(withTitle: "취소")
-        let response = modeAlert.runModal()
-        guard response != .alertThirdButtonReturn else { return }
-        let mode: WritingMode = response == .alertFirstButtonReturn ? .fiction : .general
-        let sourceTitle = sourceURL.deletingPathExtension().lastPathComponent
-        let title = sourceTitle == "entries" ? "Imported Project" : sourceTitle
-
+    private func presentFolderImport() {
+        guard let selection = ProjectImportPanel.select() else { return }
         Task { @MainActor in
             do {
                 try await ImportProjectCoordinator(store: projectStore, session: session)
-                    .importLegacy(from: sourceURL, mode: mode, title: title)
+                    .importFolder(from: selection.directory, legacyMode: selection.legacyMode)
                 editorRequests.focusEditor()
             } catch {
                 presentError(title: "가져오지 못했습니다", error: error)

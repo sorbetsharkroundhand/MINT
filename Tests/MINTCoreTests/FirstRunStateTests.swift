@@ -91,7 +91,7 @@ final class FirstRunStateTests: XCTestCase {
         XCTAssertEqual(ContentViewRoute.resolve(session.phase), .workspace)
     }
 
-    func testCancelledLegacyPanelHasNoCoordinatorSideEffect() async throws {
+    func testCancelledProjectFolderPanelHasNoCoordinatorSideEffect() async throws {
         let url = root()
         defer { try? FileManager.default.removeItem(at: url) }
         let (defaults, suite) = defaults()
@@ -104,7 +104,7 @@ final class FirstRunStateTests: XCTestCase {
             store: store,
             editorRequests: ProjectEditorRequests())
 
-        try await flow.importLegacy(selection: nil)
+        try await flow.importFolder(selection: nil)
 
         XCTAssertEqual(session.phase, .needsProject)
         XCTAssertNil(session.activeProject)
