@@ -95,7 +95,7 @@ public final class ModelDownloadManager: ObservableObject {
     }
     private static func presentation(_ state: ModelInstallationStore.State) -> State {
         switch state {
-        case .missing: .notDownloaded
+        case .missing, .removing: .notDownloaded
         case .ready: .downloaded
         case .downloading: .downloading(0)
         case .verifying: .verifying
