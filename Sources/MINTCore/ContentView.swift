@@ -164,7 +164,7 @@ public struct ContentView: View {
         }
     }
 
-    private static func connectProjectConsumers(
+    static func connectProjectConsumers(
         session: ProjectSession, completion: CompletionController, indexer: BackgroundIndexer
     ) {
         completion.documentContextProvider = nil
@@ -175,8 +175,16 @@ public struct ContentView: View {
                 indexer?.snapshotRuntimeIdentity == identity else { return nil }
             return indexer?.snapshot
         }
-        completion.onRecordConversation = nil
-        completion.recordedConversationHashesProvider = { [] }
+        completion.onRecordConversation = { [weak session] record in
+            guard let session, let identity = session.runtimeIdentity else { return }
+            try? ProjectWriterEditing.perform(.record(record), in: session, identity: identity)
+        }
+        var writerReader = WriterDocumentReader()
+        completion.recordedConversationHashesProvider = { [weak session] in
+            guard let snapshot = session?.selectedDocumentSnapshot,
+                let writer = try? writerReader.read(snapshot) else { return [] }
+            return Set(writer.recordedConversations.map(\.contentHash))
+        }
     }
 
     private var preferredScheme: ColorScheme? {
