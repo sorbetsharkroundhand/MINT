@@ -30,6 +30,6 @@ Interfaces: BenchmarkContamination.count(_:); ReleaseBenchmarkSample(coldText:wa
 ## Task 2: Engine observation and CLI
 Files: CompletionEngine.swift, Sources/MINTBench/main.swift, benchmark observer tests.
 Interfaces: benchmark SPI rawText on Completion preserving consumed chunks before cuts; MLX peak snapshot; explicit CLI candidate budget/report options, injected metadata to Task 1 report.
-- [ ] Add failing raw-before-sanitization and option/path validation regression coverage.
-- [ ] Capture raw decoded text without changing displayed behavior; report fixture/toolchain/hardware/peak metadata and all required metrics from replay.
-- [ ] Run focused/full isolated tests, Swift/bench builds and no-load CLI smokes; review inline, commit and stacked Draft PR. No CI wait.
+- [x] Add failing raw-before-sanitization and option/path validation regression coverage.
+- [x] Capture raw decoded text without changing displayed behavior; report fixture/toolchain/hardware/peak metadata and all required metrics from replay.
+- [x] Run focused/full isolated tests, Swift/bench builds and no-load CLI smokes; review inline, commit and stacked Draft PR. No CI wait.

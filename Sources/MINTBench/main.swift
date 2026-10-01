@@ -1,4 +1,7 @@
 import Foundation
+import CryptoKit
+import Darwin
+import Metal
 @_spi(Benchmark) import MINTCore
 
 // MINT M2 — 추론 리스크 선검증 CLI (PLAN §6 M2, docs/m2-inference.md)
@@ -20,6 +23,8 @@ struct BenchOptions {
     var prompt = "오늘은 오랜만에 한강을 따라 오래 걸었다. 바람이 차가웠지만 기분이 좋았고,"
     // 리플레이 벤치 (PLAN §13) — 실제 원고를 컷포인트에서 잘라 제안 품질·지연 측정.
     var replayPath: String?
+    var releaseReportPath: String?
+    var candidateMemoryBudget: UInt64?
     var cuts = 12
     var truthChars = 40
     var contextChars = CompletionSettings.defaultNovelContextCharacters
@@ -50,6 +55,12 @@ struct BenchOptions {
             case "--model":
                 guard let value = iterator.next() else { return .failure("--model 값 누락") }
                 options.modelID = value
+            case "--release-report":
+                guard let value = iterator.next(), !value.isEmpty else { return .failure("--release-report requires a new JSON path") }
+                options.releaseReportPath = value
+            case "--candidate-memory-budget-bytes":
+                guard let value = iterator.next(), let bytes = UInt64(value), bytes > 0 else { return .failure("--candidate-memory-budget-bytes requires a positive integer") }
+                options.candidateMemoryBudget = bytes
             case "--style":
                 guard let value = iterator.next() else { return .failure("--style 값 누락") }
                 switch value {
@@ -136,6 +147,9 @@ struct BenchOptions {
           --prompt <text>      이어쓸 한국어 앞부분 (하드코딩 기본값 있음)
           --help               이 도움말
 
+          --release-report <new.json>  Export release metrics; requires --replay
+          --candidate-memory-budget-bytes <bytes>  Explicit bounded candidate evaluation
+
         리플레이 벤치 (PLAN §13 — 실제 원고로 수락 프록시·TTFC·KV 효과 측정):
           --replay <파일>      원고 텍스트 파일 — 문장 경계 컷포인트마다 제안을
                                생성해 정답(이어지는 원문)과 비교. 컷마다 2회 실행:
@@ -180,14 +194,25 @@ func format(_ interval: TimeInterval?) -> String {
 }
 
 /// 두 텍스트가 2자 이상 어절(문장부호 제거)을 공유하는가 — 리플레이 보조 지표.
-func sharesWord(_ a: String, _ b: String) -> Bool {
-    func words(_ text: String) -> Set<String> {
-        Set(
-            text.split(whereSeparator: { $0.isWhitespace || $0.isNewline })
-                .map { $0.trimmingCharacters(in: .punctuationCharacters) }
-                .filter { $0.count >= 2 })
+func sharesWord(_ a: String, _ b: String) -> Bool { ReleaseBenchmarkReport.sharesEojeol(a, b) }
+
+func readBenchmarkToolchain() -> String? {
+    let process = Process(), pipe = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun"); process.arguments = ["swift", "--version"]
+    process.standardOutput = pipe; process.standardError = FileHandle.nullDevice
+    do {
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile(); process.waitUntilExit()
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines)
+    } catch { return nil }
+}
+func processPeakPhysicalBytes() -> UInt64? {
+    var info = rusage_info_v4()
+    let status = withUnsafeMutablePointer(to: &info) {
+        $0.withMemoryRebound(to: Optional<UnsafeMutableRawPointer>.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
     }
-    return !words(a).isDisjoint(with: words(b))
+    return status == 0 ? info.ri_lifetime_max_phys_footprint : nil
 }
 
 // MARK: - 실행
@@ -207,6 +232,20 @@ case .options(let parsed):
 }
 
 // 인물 감지 정밀도 점검 — 모델 로드 없이 감지기만 (결정적이라 GPU 불필요, PLAN §7).
+if options.releaseReportPath != nil, options.detectOnly || options.cancellationStressRuns != nil {
+    print("A release report requires the replay path without detect-only/cancellation stress."); exit(1)
+}
+let reportToolchain = options.releaseReportPath == nil ? nil : readBenchmarkToolchain()
+if options.releaseReportPath != nil, reportToolchain == nil { print("Cannot record the Swift toolchain."); exit(1) }
+if !options.detectOnly {
+    do {
+        try ReleaseBenchmarkPreflight.validate(modelID: options.modelID,
+            fixture: options.replayPath.map { URL(fileURLWithPath: $0) },
+            output: options.releaseReportPath.map { URL(fileURLWithPath: $0) },
+            candidateBudget: options.candidateMemoryBudget, temperature: options.temperature)
+    } catch { print(error.localizedDescription); exit(1) }
+}
+
 if options.detectOnly {
     guard let replayPath = options.replayPath,
         let raw = try? String(contentsOfFile: replayPath, encoding: .utf8)
@@ -246,7 +285,8 @@ print("토큰 상한: \(options.maxTokens) · 온도: \(options.temperature) · 
 print("프롬프트 : \(options.prompt)")
 print("")
 
-let engine = CompletionEngine()
+let policy = options.candidateMemoryBudget.map { ModelMemoryPolicy.current.evaluatingCandidates(peakBytes: $0) } ?? .current
+let engine = CompletionEngine(memoryPolicy: policy)
 let reporter = ProgressReporter()
 let loadStart = Date()
 do {
@@ -345,7 +385,8 @@ print("""
 /// 1회차는 콜드(캐시 무관), 2회차는 같은 프롬프트라 KV 프리필 재사용이
 /// 일어나야 정상 — 웜 TTFC가 콜드보다 눈에 띄게 짧으면 PLAN §12가 작동하는 것.
 func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) async -> Bool {
-    guard let raw = try? String(contentsOfFile: path, encoding: .utf8),
+    guard let fixtureData = try? Data(contentsOf: URL(fileURLWithPath: path)),
+        let raw = String(data: fixtureData, encoding: .utf8),
         !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else {
         print("❌ 리플레이 파일을 읽을 수 없음: \(path)")
@@ -465,6 +506,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         let warmReused: Int
     }
     var rows: [Row] = []
+    var releaseSamples: [ReleaseBenchmarkSample] = []
 
     for (index, cut) in cuts.enumerated() {
         let contextStart = max(0, cut - options.contextChars)
@@ -482,6 +524,11 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
             await engine.resetPromptCache()
             let cold = try await engine.complete(prompt: prompt, parameters: parameters)
             let warm = try await engine.complete(prompt: prompt, parameters: parameters)
+            if options.releaseReportPath != nil {
+                releaseSamples.append(.init(coldText: cold.text, warmText: warm.text, rawColdText: cold.rawText, rawWarmText: warm.rawText,
+                    truth: truth, coldTTFC: cold.timeToFirstChunk, warmTTFC: warm.timeToFirstChunk,
+                    warmPromptTokens: warm.promptTokenCount, warmReusedTokens: warm.reusedPromptTokens))
+            }
             // 수락 프록시: 제안과 정답의 문자 단위 공통 접두 길이.
             var accepted = 0
             for (a, b) in zip(cold.text, truth) {
@@ -511,6 +558,25 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         }
     }
 
+    if let reportPath = options.releaseReportPath {
+        guard let manifest = PinnedModelCatalog.manifest(for: options.modelID), let toolchain = reportToolchain else { return false }
+        let hardware = HardwareMemory.current
+        var metadata = ReleaseBenchmarkReport.Metadata(modelID: manifest.id, revision: manifest.revision,
+            fixtureSHA256: SHA256.hash(data: fixtureData).map { String(format: "%02x", $0) }.joined(),
+            physicalMemoryBytes: hardware.physicalBytes, recommendedWorkingSetBytes: hardware.recommendedWorkingSetBytes,
+            device: MTLCreateSystemDefaultDevice()?.name ?? "unavailable", os: ProcessInfo.processInfo.operatingSystemVersionString,
+            toolchain: toolchain, style: style, maxTokens: parameters.maxTokens, temperature: parameters.temperature,
+            contextCharacters: options.contextChars, declaredPeakBudgetBytes: options.candidateMemoryBudget)
+        metadata.topP = parameters.topP; metadata.maxPromptTokens = parameters.maxPromptTokens
+        metadata.kvCacheEnabled = parameters.kvCacheEnabled; metadata.truthCharacters = options.truthChars
+        metadata.knowledgeEnabled = options.knowledge; metadata.title = options.title; metadata.genre = options.genre
+        do {
+            let report = try ReleaseBenchmarkReport(metadata: metadata, samples: releaseSamples, attempted: cuts.count,
+                mlxPeakBytes: CompletionEngine.benchmarkMLXPeakBytes, processPeakBytes: processPeakPhysicalBytes())
+            try report.write(to: URL(fileURLWithPath: reportPath))
+            print("Release report: \(reportPath) · complete \(report.completedSamples) / failed \(report.failedSamples)")
+        } catch { print("Report export failed: \(error.localizedDescription)"); return false }
+    }
     guard !rows.isEmpty else {
         print("측정 결과 없음 — 생성이 모두 실패했습니다.")
         return false
@@ -535,7 +601,7 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     if meanReused < 1 {
         print("⚠️ 웜 재사용 0 — KV 캐시(PLAN §12)가 작동하지 않고 있다. kvCache 설정·trim 경로 확인.")
     }
-    return true
+    return options.releaseReportPath == nil || releaseSamples.count == cuts.count
 }
 
 /// 조기 종료한 내부 token loop가 완전히 끝난 뒤에만 다음 생성을 시작하는지 실제

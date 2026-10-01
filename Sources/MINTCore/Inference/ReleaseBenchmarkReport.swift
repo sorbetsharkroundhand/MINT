@@ -64,6 +64,13 @@ public struct ReleaseBenchmarkReport: Codable, Sendable {
         public var temperature: Double
         public var contextCharacters: Int
         public var declaredPeakBudgetBytes: UInt64?
+        public var topP = 0.9
+        public var maxPromptTokens = 3_072
+        public var kvCacheEnabled = true
+        public var truthCharacters = 40
+        public var knowledgeEnabled = false
+        public var title = ""
+        public var genre = ""
         public init(modelID: String, revision: String, fixtureSHA256: String, physicalMemoryBytes: UInt64,
                     recommendedWorkingSetBytes: UInt64, device: String, os: String, toolchain: String, style: PromptStyle,
                     maxTokens: Int, temperature: Double, contextCharacters: Int, declaredPeakBudgetBytes: UInt64?) {
