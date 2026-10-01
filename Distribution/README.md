@@ -15,6 +15,7 @@ swift package resolve
 scripts/archive-mint-app.sh
 scripts/test-mint-archive-validation.sh
 scripts/test-mint-sandbox-storage.sh
+scripts/test-mint-sandbox-mlx.sh
 ```
 
 The result is `build/MINT.xcarchive`. `scripts/validate-mint-archive.sh` checks
@@ -51,8 +52,32 @@ preserves the source and current project. A copy verified before a failed handof
 may remain inactive. Global legacy settings/trash and whole-library migration
 are outside this per-project import; their originals remain available.
 
-No Apple account or Store upload is involved. #175 owns sandboxed MLX loading;
-#150 Phase B owns signing/distribution proof and representative-install checks.
+MLX initialization validates the developer-colocated library or the native
+`mlx-swift_Cmlx.bundle` library through bundle URLs before model loading or MLX
+memory configuration. Missing, empty, escaping or corrupt resources produce an
+actionable local error while writing remains available. Initialization runs once
+at first model load and checks a small GPU operation through MLX's throwing error
+boundary; it does not scan manuscripts or download a model.
+
+The MLX smoke script copies the actual native archive, applies the existing
+sandbox entitlements, and invokes the app's explicit archive diagnostic. It
+requires GPU result 42 from packaged resources, tests missing/corrupt libraries,
+checks process survival and normal termination, and rejects model downloads.
+Every copy has a unique identity/container and CFFIXED_USER_HOME; the original
+archive and real manuscripts are untouched. The diagnostic is enabled only by
+`MINT_VERIFY_MLX_RESOURCES=1`, writes its result inside standard storage, and does
+not select a model or authorize AI.
+
+The default smoke requires a Metal-capable Mac and never skips GPU validation.
+Standard archive CI runs `scripts/test-mint-sandbox-mlx.sh --resource-errors-only`
+to exercise missing/empty resources and editor survival before Metal is touched.
+This mode does not prove GPU initialization. GitHub's [standard macOS runner
+specification](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+does not guarantee GPU acceleration; the full smoke must run on actual supported
+hardware. The existing archive, storage, build and test gates remain required.
+
+No Apple account or Store upload is involved. #150 Phase B owns signed Store
+distribution proof; the real-device owner check in #175 remains separate.
 The initial version fields match the current developer bundle and do not
 declare a release version. Existing SwiftPM builds/tests and developer-bundle
 smoke remain in CI.
