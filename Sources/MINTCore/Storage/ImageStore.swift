@@ -8,8 +8,7 @@ import ImageIO
 ///   남겨, MINT 폴더를 통째로 옮겨도 참조가 깨지지 않는다.
 /// - 렌더 이미지는 경로별로 캐시한다 (편집·드로잉 모두 메인 스레드).
 ///
-/// 저장 위치 규칙은 `EntryStore.storageDirectory()`와 같은 `~/Documents/MINT/`를
-/// 공유한다 — 여기서 다시 계산하는 이유는 파일 관심사를 분리하기 위해서다.
+/// Default paths come from MintStorageLocation; the existing test override remains supported.
 /// 캐시의 "메인 전용" 불변식은 주석이 아니라 격리로 강제한다 (이슈 #45) —
 /// 호출부(BlockTextView·EpubExporter.export·테스트)는 모두 MainActor 맥락이다.
 @MainActor
@@ -41,10 +40,7 @@ public enum MintImageStore {
     /// `~/Documents/MINT/` — 없으면 만든다.
     private static func mintDirectory() -> URL {
         if let override = directoryOverride { return override }
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        let dir = base.appendingPathComponent("MINT", isDirectory: true)
+        let dir = MintStorageLocation.standard.rootDirectory
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -85,10 +81,7 @@ public enum MintImageStore {
     /// Resolve against the default store without a main-actor hop or test override.
     /// Both entry points share the same syntax and filesystem safety checks.
     public nonisolated static func resolveURL(for reference: String) -> URL? {
-        let base = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)
-            .first ?? FileManager.default.homeDirectoryForCurrentUser
-        return resolveURL(for: reference, under: base.appendingPathComponent("MINT", isDirectory: true))
+        resolveURL(for: reference, under: MintStorageLocation.standard.rootDirectory)
     }
 
     nonisolated static func resolveURL(for reference: String, under root: URL) -> URL? {

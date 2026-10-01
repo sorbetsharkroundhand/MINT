@@ -20,28 +20,30 @@ public enum AssetJanitor {
         var candidates: [String: Date] = [:]
     }
 
-    /// 장부 파일 — images 폴더 안 점파일. MintImageStore override(테스트)를 따른다.
-    public static func ledgerURL() -> URL? {
-        MintImageStore.url(for: "images/.mint-janitor.json")
+    /// Use the explicit root when supplied; otherwise preserve the image-store test override.
+    public static func ledgerURL(storageLocation: MintStorageLocation? = nil) -> URL? {
+        url(for: "images/.mint-janitor.json", storageLocation: storageLocation)
     }
 
     /// 장부에 유예 중인 후보가 있는가 — 시작 청소의 조기 탈출용.
-    public static func hasPendingCandidates() -> Bool {
-        !load().candidates.isEmpty
+    public static func hasPendingCandidates(storageLocation: MintStorageLocation? = nil) -> Bool {
+        !load(storageLocation: storageLocation).candidates.isEmpty
     }
 
     // MARK: 등록
 
     /// asset 저장 시 후보 등록. 같은 키 재등록은 최초 시각을 유지한다 —
     /// 잦은 저장이 유예를 무한 리셋하지 않게. `at`은 회귀 테스트의 시간 주입용.
-    public static func record(_ relativePath: String, at date: Date = .now) {
+    public static func record(
+        _ relativePath: String, at date: Date = .now, storageLocation: MintStorageLocation? = nil
+    ) {
         guard relativePath.hasPrefix("images/"),
             case .managedRelative = ImageReferenceParser.classify(relativePath)
         else { return }
-        var ledger = load()
+        var ledger = load(storageLocation: storageLocation)
         guard ledger.candidates[relativePath] == nil else { return }
         ledger.candidates[relativePath] = date
-        save(ledger)
+        save(ledger, storageLocation: storageLocation)
     }
 
     // MARK: 청소
@@ -53,10 +55,11 @@ public enum AssetJanitor {
     @discardableResult
     public static func sweep(
         now: Date = .now,
+        storageLocation: MintStorageLocation? = nil,
         isReferenced: (String) -> Bool,
         performDelete: (String) -> Void
     ) -> [String] {
-        var ledger = load()
+        var ledger = load(storageLocation: storageLocation)
         var removed: [String] = []
         for (path, registeredAt) in ledger.candidates.sorted(by: { $0.value < $1.value }) {
             if Task.isCancelled { break }
@@ -66,23 +69,25 @@ public enum AssetJanitor {
             performDelete(path)
             removed.append(path)
         }
-        save(ledger)
+        save(ledger, storageLocation: storageLocation)
         return removed
     }
 
     /// 앱 시작 청소 — 모든 저널 본문에서 참조 집합을 만들어 한 번 튼다.
     /// 저전력·과열에선 다음 시작으로 미룬다 (백그라운드 3요건).
     @discardableResult
-    public static func sweepAll(bodies: [String], now: Date = .now) -> [String] {
+    public static func sweepAll(
+        bodies: [String], now: Date = .now, storageLocation: MintStorageLocation? = nil
+    ) -> [String] {
         let info = ProcessInfo.processInfo
         guard info.thermalState != .critical, !info.isLowPowerModeEnabled else { return [] }
         let referenced = collectReferenced(in: bodies)
-        return sweep(now: now) { path in
+        return sweep(now: now, storageLocation: storageLocation) { path in
             referenced.contains(path)
         } performDelete: { path in
             guard path.hasPrefix("images/"),
                 case .managedRelative = ImageReferenceParser.classify(path),
-                let url = MintImageStore.url(for: path)
+                let url = url(for: path, storageLocation: storageLocation)
             else { return }
             try? FileManager.default.removeItem(at: url)
         }
@@ -132,15 +137,22 @@ public enum AssetJanitor {
 
     // MARK: 장부 입출력 — 깨지면 버리고 새로 시작하는 캐시다.
 
-    private static func load() -> Ledger {
-        guard let url = ledgerURL(), let data = try? Data(contentsOf: url),
+    private static func url(for path: String, storageLocation: MintStorageLocation?) -> URL? {
+        if let storageLocation {
+            return MintImageStore.resolveURL(for: path, under: storageLocation.rootDirectory)
+        }
+        return MintImageStore.url(for: path)
+    }
+
+    private static func load(storageLocation: MintStorageLocation?) -> Ledger {
+        guard let url = ledgerURL(storageLocation: storageLocation), let data = try? Data(contentsOf: url),
             let ledger = try? JSONDecoder().decode(Ledger.self, from: data)
         else { return Ledger() }
         return ledger
     }
 
-    private static func save(_ ledger: Ledger) {
-        guard let url = ledgerURL(), let data = try? JSONEncoder().encode(ledger) else { return }
+    private static func save(_ ledger: Ledger, storageLocation: MintStorageLocation?) {
+        guard let url = ledgerURL(storageLocation: storageLocation), let data = try? JSONEncoder().encode(ledger) else { return }
         try? data.write(to: url, options: .atomic)
     }
 }
