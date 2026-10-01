@@ -13,7 +13,7 @@ struct ModelChip: View {
     @State private var hoveredID: String?
     @State private var chipHovered = false
     /// 모델 가중치 프리페치 — 드롭다운 행의 다운로드 버튼·진행률 담당.
-    @StateObject private var downloads = ModelDownloadManager()
+    @StateObject private var downloads = ModelDownloadManager.shared
 
     var body: some View {
         Button {
@@ -100,6 +100,10 @@ struct ModelChip: View {
                 Text("사용 가능한 모델이 없습니다. 원고 편집은 계속할 수 있습니다.")
                     .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
                     .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            if let error = completion.modelOperationError {
+                Text(error).font(MintFonts.uiFont(11)).foregroundStyle(theme.dangerC)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
             }
             downloadFailureFooter
             theme.sepC.frame(height: 1)
@@ -363,8 +367,7 @@ struct ModelChip: View {
     private func pick(_ id: String) {
         menuOpen = false
         guard id != settings.modelID, ModelChoice.all.contains(where: { $0.id == id }) else { return }
-        settings.modelID = id
-        completion.modelDidChange()
+        Task { try? await completion.replaceModel(with: id) }
     }
 
     private var statusLabel: String {
@@ -372,6 +375,7 @@ struct ModelChip: View {
     }
 
     private var stateText: String {
+        if completion.isManagingModel { return "모델 변경 중" }
         if !settings.autocompleteEnabled { return "꺼짐" }
         if completion.isPredicting { return "예측 중" }
         switch completion.engineState {
