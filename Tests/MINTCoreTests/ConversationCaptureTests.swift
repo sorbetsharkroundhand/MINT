@@ -163,8 +163,12 @@ final class ConversationCaptureTests: XCTestCase {
     func test기록핸들러를제거하면기존대화제안도즉시비활성화된다() async throws {
         var recorded: [RecordedConversation] = []
         let completion = makeNovelController { recorded.append($0) }
+        let published = expectation(description: "Conversation suggestion published")
+        completion.conversationSuggestionDidChange = { block in
+            if block != nil { published.fulfill() }
+        }
         typeDialogue(into: completion)
-        try await Task.sleep(for: CompletionController.conversationIdle + .milliseconds(100))
+        await fulfillment(of: [published], timeout: 5)
         XCTAssertTrue(
             completion.hasConversationSuggestion,
             "대화 캡처는 자동완성 마스터 스위치와 독립적이어야 한다")
@@ -180,9 +184,13 @@ final class ConversationCaptureTests: XCTestCase {
     func test기록핸들러가있으면자동완성이꺼져도대화를승인해기록한다() async throws {
         var recorded: [RecordedConversation] = []
         let completion = makeNovelController { recorded.append($0) }
+        let published = expectation(description: "Conversation suggestion published")
+        completion.conversationSuggestionDidChange = { block in
+            if block != nil { published.fulfill() }
+        }
 
         typeDialogue(into: completion)
-        try await Task.sleep(for: CompletionController.conversationIdle + .milliseconds(100))
+        await fulfillment(of: [published], timeout: 5)
 
         XCTAssertTrue(completion.acceptConversationSuggestion())
         XCTAssertEqual(recorded.count, 1)
