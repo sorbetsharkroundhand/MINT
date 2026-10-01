@@ -1,12 +1,5 @@
 import AppKit
 import SwiftUI
-import UniformTypeIdentifiers
-
-struct FirstRunLegacySelection {
-    let sourceURL: URL
-    let mode: WritingMode
-    let title: String
-}
 
 /// Onboarding actions stay on the verified ProjectSession/ProjectStore coordinator path.
 @MainActor
@@ -30,13 +23,11 @@ public struct FirstRunFlow {
         editorRequests.focusEditor()
     }
 
-    func importLegacy(selection: FirstRunLegacySelection?) async throws {
+    func importFolder(selection: ProjectFolderSelection?) async throws {
         // NSOpenPanel cancellation ends here, before migration or activation begins.
         guard let selection else { return }
-        try await importCoordinator.importLegacy(
-            from: selection.sourceURL,
-            mode: selection.mode,
-            title: selection.title)
+        try await importCoordinator.importFolder(
+            from: selection.directory, legacyMode: selection.legacyMode)
         editorRequests.focusEditor()
     }
 }
@@ -46,7 +37,7 @@ public struct FirstRunView: View {
     private enum Operation: Equatable {
         case fiction
         case general
-        case legacyImport
+        case folderImport
     }
 
     private let flow: FirstRunFlow
@@ -91,9 +82,9 @@ public struct FirstRunView: View {
                 }
 
                 Button {
-                    guard let selection = Self.selectLegacyProject() else { return }
-                    perform(.legacyImport) {
-                        try await flow.importLegacy(selection: selection)
+                    guard let selection = ProjectImportPanel.select() else { return }
+                    perform(.folderImport) {
+                        try await flow.importFolder(selection: selection)
                     }
                 } label: {
                     Label("기존 MINT 원고 가져오기…", systemImage: "square.and.arrow.down")
@@ -191,27 +182,4 @@ public struct FirstRunView: View {
         }
     }
 
-    private static func selectLegacyProject() -> FirstRunLegacySelection? {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.json]
-        panel.allowsMultipleSelection = false
-        panel.canChooseDirectories = false
-        panel.message = "가져올 레거시 entries.json을 선택하세요. 원본은 변경되지 않습니다."
-        guard panel.runModal() == .OK, let sourceURL = panel.url else { return nil }
-
-        let modeAlert = NSAlert()
-        modeAlert.messageText = "가져올 프로젝트 종류"
-        modeAlert.informativeText = "원고에 맞는 작업 공간을 선택하세요."
-        modeAlert.addButton(withTitle: "Fiction")
-        modeAlert.addButton(withTitle: "General")
-        modeAlert.addButton(withTitle: "취소")
-        let response = modeAlert.runModal()
-        guard response != .alertThirdButtonReturn else { return nil }
-        let mode: WritingMode = response == .alertFirstButtonReturn ? .fiction : .general
-        let sourceTitle = sourceURL.deletingPathExtension().lastPathComponent
-        return FirstRunLegacySelection(
-            sourceURL: sourceURL,
-            mode: mode,
-            title: sourceTitle == "entries" ? "Imported Project" : sourceTitle)
-    }
 }

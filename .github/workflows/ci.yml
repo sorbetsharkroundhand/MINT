@@ -121,6 +121,9 @@ jobs:
       - name: Verify archive validation regressions
         run: scripts/test-mint-archive-validation.sh
 
+      - name: Verify sandbox container storage
+        run: scripts/test-mint-sandbox-storage.sh
+
       - name: Package inspectable archive
         run: ditto -c -k --sequesterRsrc --keepParent build/MINT.xcarchive build/MINT.xcarchive.zip
 
