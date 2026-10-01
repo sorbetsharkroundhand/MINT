@@ -108,9 +108,9 @@ final class WorkspaceShellModeTests: XCTestCase {
     }
 
     func testModelChoicesUseWriterFacingSummaries() {
-        XCTAssertEqual(ModelChip.userFacingSummary(for: .mint), "8.5GB · 실험적")
-        XCTAssertEqual(ModelChip.userFacingSummary(for: .basil), "16.9GB · 기본")
-        XCTAssertEqual(ModelChip.userFacingSummary(for: .peppermint), "20GB · 큰 모델")
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .mint), "검증 대기")
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .basil), "검증 대기")
+        XCTAssertEqual(ModelChip.userFacingSummary(for: .peppermint), "검증 대기")
         XCTAssertEqual(ModelChip.displayName("custom/model"), "사용자 지정 모델")
     }
 
