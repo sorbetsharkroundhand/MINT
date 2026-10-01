@@ -549,7 +549,7 @@ public actor CompletionEngine {
         modelID: String,
         onProgress: (@Sendable (Double) -> Void)?
     ) async throws -> ModelContainer {
-        _ = Self.mlxConfigured
+        try Self.mlxConfigured.get()
         let configuration = ModelConfiguration(id: modelID)
         // 허브 다운로드(캐시됨) + 토크나이저 로드 + 가중치 로드.
         return try await #huggingFaceLoadModelContainer(
@@ -559,11 +559,11 @@ public actor CompletionEngine {
             })
     }
 
-    /// MLX GPU 캐시 상한 — 타이핑마다 생성이 반복되므로 캐시가 무한히
-    /// 자라지 않게 1회 설정한다.
-    private static let mlxConfigured: Void = {
+    /// Validate and initialize once at model load, before configuring MLX memory.
+    private static let mlxConfigured: Result<Void, Error> = Result {
+        try MLXRuntimeResources.initialize()
         Memory.cacheLimit = 256 * 1024 * 1024
-    }()
+    }
 
     // MARK: - 생성
 

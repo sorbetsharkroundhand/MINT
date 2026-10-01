@@ -124,6 +124,9 @@ jobs:
       - name: Verify sandbox container storage
         run: scripts/test-mint-sandbox-storage.sh
 
+      - name: Verify sandboxed MLX resource errors (no GPU required)
+        run: scripts/test-mint-sandbox-mlx.sh --resource-errors-only
+
       - name: Package inspectable archive
         run: ditto -c -k --sequesterRsrc --keepParent build/MINT.xcarchive build/MINT.xcarchive.zip
 
