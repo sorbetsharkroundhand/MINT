@@ -6,19 +6,23 @@ public struct WritingProject: Codable, Equatable, Sendable, Identifiable {
     public var mode: WritingMode
     public var documents: [WritingDocument]
     public var trashedDocumentIDs: Set<WritingDocumentID>
+    /// Opaque writer-owned records; their domain-specific codecs live outside project storage.
+    public var userData: [String: Data]
 
     public init(
         id: WritingProjectID,
         title: String,
         mode: WritingMode,
         documents: [WritingDocument],
-        trashedDocumentIDs: Set<WritingDocumentID> = []
+        trashedDocumentIDs: Set<WritingDocumentID> = [],
+        userData: [String: Data] = [:]
     ) {
         self.id = id
         self.title = title
         self.mode = mode
         self.documents = documents
         self.trashedDocumentIDs = trashedDocumentIDs
+        self.userData = userData
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -27,6 +31,7 @@ public struct WritingProject: Codable, Equatable, Sendable, Identifiable {
         case mode
         case documents
         case trashedDocumentIDs
+        case userData
     }
 
     public init(from decoder: any Decoder) throws {
@@ -37,6 +42,7 @@ public struct WritingProject: Codable, Equatable, Sendable, Identifiable {
         documents = try container.decode([WritingDocument].self, forKey: .documents)
         trashedDocumentIDs = try container.decodeIfPresent(
             Set<WritingDocumentID>.self, forKey: .trashedDocumentIDs) ?? []
+        userData = try container.decodeIfPresent([String: Data].self, forKey: .userData) ?? [:]
     }
 
     public func encode(to encoder: any Encoder) throws {
@@ -46,5 +52,6 @@ public struct WritingProject: Codable, Equatable, Sendable, Identifiable {
         try container.encode(mode, forKey: .mode)
         try container.encode(documents, forKey: .documents)
         try container.encode(trashedDocumentIDs, forKey: .trashedDocumentIDs)
+        try container.encode(userData, forKey: .userData)
     }
 }
