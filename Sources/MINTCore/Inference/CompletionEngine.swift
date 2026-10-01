@@ -235,12 +235,29 @@ public actor CompletionEngine {
     private var loadingModelID: String?
     /// `loadedContainer` 반환과 `container.perform` 시작 사이의 actor 재진입까지
     /// 포함해 모델 교체와 기존 생성의 수명을 직렬화한다 (PLAN §12).
-    private let modelLifetime = ModelLifetimeCoordinator()
+    private let modelLifetime: ModelLifetimeCoordinator
     /// 이어쓰기 프리필 KV 재사용 (PLAN §12). 모델 교체 시 폐기.
     private let promptCache = PromptCacheBox()
 
     private let memoryPolicy: ModelMemoryPolicy
-    public init(memoryPolicy: ModelMemoryPolicy = .current) { self.memoryPolicy = memoryPolicy }
+    public init(memoryPolicy: ModelMemoryPolicy = .current) {
+        self.memoryPolicy = memoryPolicy; self.modelLifetime = ModelLifetimeCoordinator()
+    }
+    init(memoryPolicy: ModelMemoryPolicy, modelLifetime: ModelLifetimeCoordinator) {
+        self.memoryPolicy = memoryPolicy; self.modelLifetime = modelLifetime
+    }
+    /// Drain every operation before retiring model identity and its KV context.
+    public func unload() async throws {
+        loadTask?.cancel()
+        _ = try await modelLifetime.acquire(modelID: "unload/" + UUID().uuidString, reservingOperation: false)
+        let retiringLoad = loadTask, retiringContainer = container
+        loadTask = nil; loadingModelID = nil; container = nil; loadedModelID = nil
+        promptCache.invalidate()
+        retiringLoad?.cancel()
+        if let retiringLoad { _ = try? await retiringLoad.value }
+        if let retiringContainer { await retiringContainer.perform { _ in () } }
+        await modelLifetime.finishSwitch(to: "", succeeded: false, reservingOperation: false)
+    }
 
     /// 모델을 미리 로드한다(앱 시작 시 호출 — 첫 제안 지연 방지).
     /// 이미 같은 모델이 로드돼 있으면 즉시 반환.

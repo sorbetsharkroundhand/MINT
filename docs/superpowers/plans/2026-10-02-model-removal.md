@@ -29,6 +29,6 @@ Interfaces: remove(_ id: String) async throws; replace(_ id: String, with: Model
 ## Task 2: Runtime and Settings
 Files: CompletionEngine.swift, CompletionController.swift, SettingsView.swift, ModelLifecycleIntegrationTests.swift.
 Interfaces: unload() async throws; controller removeModel(_:store:) async throws and replaceModel(with:) async throws, joined load cancellation and generation-bound callbacks; Settings model inventory/removal feedback.
-- [ ] Add failing tests for active selection/report/authorization cleanup, preserved unrelated preferences, failed removal coherence and stale publication guards.
-- [ ] Drain/unload engine, guard concurrent lifecycle requests, commit selection only after verified operation, expose Settings controls.
-- [ ] Run focused/full isolated suite, Swift/bench builds and native archive/sandbox smoke; review inline, commit and stacked Draft PR. No CI wait.
+- [x] Add failing tests for active selection/report/authorization cleanup, preserved unrelated preferences, failed removal coherence and stale publication guards.
+- [x] Drain/unload engine, guard concurrent lifecycle requests, commit selection only after verified operation, expose Settings controls.
+- [x] Run focused/full isolated suite, Swift/bench builds and native archive/sandbox smoke; review inline, commit and stacked Draft PR. No CI wait.

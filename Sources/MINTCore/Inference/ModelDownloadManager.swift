@@ -9,6 +9,7 @@ public final class ModelDownloadManager: ObservableObject {
         case downloading(Double)
         case failed(String)
     }
+    public static let shared = ModelDownloadManager()
     @Published public private(set) var states: [String: State] = [:]
     private let store: ModelInstallationStore
     private let manifestForID: @Sendable (String) -> ModelInstallManifest?
@@ -80,6 +81,10 @@ public final class ModelDownloadManager: ObservableObject {
             await store.cancel(id)
             if let previous { await previous.value }
         }
+    }
+    public func cancelAndWait(_ id: String) async {
+        cancel(id)
+        await retiring[id]?.value
     }
     private func finish(_ id: String, token: UUID, state: State) {
         guard tokens[id] == token else { return }
