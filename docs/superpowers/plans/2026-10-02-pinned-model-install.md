@@ -35,6 +35,6 @@ Interfaces: Task 1's manifest; ModelInstallationStore(root:), state(for:), insta
 ## Task 3: Real download and inference integration
 Files: ModelDownloadManager.swift, CompletionEngine.swift, ModelChip.swift and focused lifecycle tests.
 Interfaces: Task 2's actor; pinned HubClient.downloadFile(at:from:to:revision:); MLX local loadModelContainer(from:using:).
-- [ ] Write failing manager tests for partial/corrupt interruption, retry and late cancellation results using only a fixture-file downloader.
-- [ ] Replace heuristic readiness and mutable remote loads; show verification state and actionable metadata failures.
-- [ ] Run focused/full isolated tests, Swift/bench builds and a native archive build. Review inline, commit and open a stacked Draft PR. Record unavailable real-model evidence honestly; do not wait for CI.
+- [x] Write failing manager tests for partial/corrupt interruption, retry and late cancellation results using only a fixture-file downloader.
+- [x] Replace heuristic readiness and mutable remote loads; show verification state and actionable metadata failures.
+- [x] Run focused/full isolated tests, Swift/bench builds and a native archive build. Review inline, commit and open a stacked Draft PR. Record unavailable real-model evidence honestly; do not wait for CI.
