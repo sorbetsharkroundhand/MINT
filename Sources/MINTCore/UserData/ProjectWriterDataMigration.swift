@@ -9,7 +9,7 @@ public enum ProjectWriterDataMigration {
     public static func prepare(_ project: WritingProject, store: ProjectStore) async throws -> WritingProject {
         try Task.checkCancellation()
         let current = try await store.load(id: project.id)
-        guard current == project else { throw ProjectStoreError.invalidManifest }
+        guard current == project else { throw ProjectStoreError.changedDuringSave }
         for document in project.documents {
             _ = try WriterDocumentData.decode(project.userData[WriterDocumentData.key(for: document.id)], documentID: document.id)
         }
