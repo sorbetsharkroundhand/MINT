@@ -94,3 +94,40 @@ jobs:
           path: build/smoke-diagnostics/
           if-no-files-found: ignore
           retention-days: 7
+
+  archive:
+    name: App / Unsigned Xcode Archive
+    runs-on: macos-15
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Toolchain info
+        run: |
+          uname -m
+          swift --version
+          xcodebuild -version
+
+      - name: Resolve locked dependencies
+        run: |
+          swift package resolve
+          git diff --exit-code -- Package.resolved
+
+      - name: Build and validate unsigned archive
+        run: scripts/archive-mint-app.sh
+
+      - name: Verify archive validation regressions
+        run: scripts/test-mint-archive-validation.sh
+
+      - name: Package inspectable archive
+        run: ditto -c -k --sequesterRsrc --keepParent build/MINT.xcarchive build/MINT.xcarchive.zip
+
+      - name: Upload unsigned archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: MINT-unsigned-xcarchive
+          path: build/MINT.xcarchive.zip
+          if-no-files-found: error
+          retention-days: 14

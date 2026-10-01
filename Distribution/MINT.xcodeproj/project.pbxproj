@@ -1,0 +1,185 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A17300000000000000000001 /* MINTApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17300000000000000000002 /* MINTApp.swift */; };
+		A17300000000000000000003 /* MINTCore in Frameworks */ = {isa = PBXBuildFile; productRef = A17300000000000000000004 /* MINTCore */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A17300000000000000000002 /* MINTApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Sources/MINT/MINTApp.swift; sourceTree = SOURCE_ROOT; };
+		A17300000000000000000005 /* MINT.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = MINT.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A17300000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A17300000000000000000003 /* MINTCore in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A17300000000000000000007 = {
+			isa = PBXGroup;
+			children = (A17300000000000000000002 /* MINTApp.swift */, A17300000000000000000008 /* Products */,);
+			sourceTree = "<group>";
+		};
+		A17300000000000000000008 /* Products */ = {
+			isa = PBXGroup;
+			children = (A17300000000000000000005 /* MINT.app */,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A17300000000000000000009 /* MINT */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1730000000000000000000A /* Target configurations */;
+			buildPhases = (A1730000000000000000000B /* Sources */, A17300000000000000000006 /* Frameworks */, A1730000000000000000000C /* Resources */,);
+			buildRules = ();
+			dependencies = ();
+			name = MINT;
+			packageProductDependencies = (A17300000000000000000004 /* MINTCore */,);
+			productName = MINT;
+			productReference = A17300000000000000000005 /* MINT.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1730000000000000000000D /* Project object */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 1600; };
+			buildConfigurationList = A1730000000000000000000E /* Project configurations */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = ko;
+			hasScannedForEncodings = 0;
+			knownRegions = (ko, en, Base,);
+			mainGroup = A17300000000000000000007;
+			packageReferences = (A1730000000000000000000F /* Local MINT package */,);
+			productRefGroup = A17300000000000000000008 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A17300000000000000000009 /* MINT */,);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1730000000000000000000C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = ();
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1730000000000000000000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A17300000000000000000001 /* MINTApp.swift in Sources */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A17300000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A17300000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A17300000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHighResolutionCapable = YES;
+				INSTALL_PATH = "$(LOCAL_APPS_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.mint.MINT;
+				PRODUCT_NAME = MINT;
+				SKIP_INSTALL = NO;
+			};
+			name = Debug;
+		};
+		A17300000000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
+				INFOPLIST_KEY_NSHighResolutionCapable = YES;
+				INSTALL_PATH = "$(LOCAL_APPS_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.mint.MINT;
+				PRODUCT_NAME = MINT;
+				SKIP_INSTALL = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1730000000000000000000A /* Target configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A17300000000000000000012 /* Debug */, A17300000000000000000013 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1730000000000000000000E /* Project configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A17300000000000000000010 /* Debug */, A17300000000000000000011 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1730000000000000000000F /* Local MINT package */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A17300000000000000000004 /* MINTCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MINTCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A1730000000000000000000D /* Project object */;
+}

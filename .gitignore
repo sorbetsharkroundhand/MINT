@@ -4,6 +4,7 @@
 # Swift Package Manager
 .build/
 .swiftpm/
+build/
 # (Package.resolved는 앱이므로 커밋 권장 — 무시하지 않음)
 
 # 격리 개발 작업 트리
@@ -15,6 +16,8 @@ DerivedData/
 xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
+# The archive script seeds this generated workspace from the root lockfile.
+Distribution/MINT.xcodeproj/project.xcworkspace/
 
 # 로컬 모델 캐시 (Hugging Face 다운로드 등, 실수 커밋 방지)
 *.safetensors
