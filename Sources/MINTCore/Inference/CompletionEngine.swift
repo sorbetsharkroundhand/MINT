@@ -199,6 +199,18 @@ public actor CompletionEngine {
         }
     }
 
+    struct TextObservation {
+        private(set) var text = ""
+        private(set) var rawText = ""
+        mutating func append(_ chunk: String, stopAtUtteranceEnd: Bool) -> Bool {
+            rawText += chunk; text += chunk
+            let cut = stopAtUtteranceEnd ? CompletionEngine.cutAtUtteranceEnd(text) : CompletionEngine.cutAtSentenceBoundary(text)
+            if let cut { text = cut; return true }
+            return false
+        }
+        func displayed(style: PromptStyle) -> String { CompletionEngine.postProcess(text, style: style) }
+    }
+
     /// 한 번의 자동완성 결과 + 지연 측정치(M2 로그·상태 바 표시용).
     public struct Completion: Sendable {
         /// 고스트로 띄울 제안 텍스트(후처리 완료). 비어 있으면 "제안 없음".
@@ -216,6 +228,7 @@ public actor CompletionEngine {
         public let promptTokenCount: Int
         /// KV 재사용으로 프리필을 건너뛴 토큰 수 (PLAN §12 효과 측정).
         public let reusedPromptTokens: Int
+        @_spi(Benchmark) public var rawText = ""
 
         static let empty = Completion(
             text: "",
@@ -578,6 +591,8 @@ public actor CompletionEngine {
         return try await loadModelContainer(from: directory, using: #huggingFaceTokenizerLoader())
     }
 
+    @_spi(Benchmark) public nonisolated static var benchmarkMLXPeakBytes: UInt64 { UInt64(Memory.peakMemory) }
+
     /// Validate and initialize once at model load, before configuring MLX memory.
     private static let mlxConfigured: Result<Void, Error> = Result {
         try MLXRuntimeResources.initialize()
@@ -652,7 +667,7 @@ public actor CompletionEngine {
             do {
                 try Task.checkCancellation()
 
-                var text = ""
+                var observation = TextObservation()
                 var timeToFirstChunk: TimeInterval?
                 var info: GenerateCompletionInfo?
                 var stoppedAtBoundary = false
@@ -669,17 +684,8 @@ public actor CompletionEngine {
                         if timeToFirstChunk == nil {
                             timeToFirstChunk = Date().timeIntervalSince(start)
                         }
-                        text += chunk
+                        stoppedAtBoundary = observation.append(chunk, stopAtUtteranceEnd: parameters.stopAtUtteranceEnd)
                         if stopAfterFirstChunk { stoppedAfterFirstChunk = true }
-                        // 정지 사다리 (PLAN §10): 기본 = 문장 경계, 대화 모드 =
-                        // 발화 끝(닫는 따옴표) — 대사 중간의 마침표에서 끊지 않는다.
-                        let cut =
-                            parameters.stopAtUtteranceEnd
-                            ? cutAtUtteranceEnd(text) : cutAtSentenceBoundary(text)
-                        if let cut {
-                            text = cut
-                            stoppedAtBoundary = true
-                        }
                     case .info(let generationInfo):
                         info = generationInfo
                     case .toolCall:
@@ -702,14 +708,15 @@ public actor CompletionEngine {
                 try Task.checkCancellation()
 
                 return Completion(
-                    text: postProcess(text, style: style),
+                    text: observation.displayed(style: style),
                     timeToFirstChunk: timeToFirstChunk,
                     totalTime: Date().timeIntervalSince(start),
                     promptTokensPerSecond: info?.promptTokensPerSecond,
                     generationTokensPerSecond: info?.tokensPerSecond,
                     stoppedAtSentenceBoundary: stoppedAtBoundary,
                     promptTokenCount: promptTokenCount,
-                    reusedPromptTokens: reusedPromptTokens
+                    reusedPromptTokens: reusedPromptTokens,
+                    rawText: observation.rawText
                 )
             } catch {
                 // 협조 취소는 문장 경계 조기 종료와 같은 그림이다 — 스트림을 중간에
