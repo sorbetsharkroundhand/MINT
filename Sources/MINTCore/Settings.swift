@@ -64,19 +64,7 @@ public enum ModelPresets {
     ]
 }
 
-/// 툴바 모델 스위처에 보여줄 MINT 이름의 프리셋 (에디터 v3 · 라인업 v2).
-///
-/// 실제 가중치는 `ModelPresets`의 Hugging Face 저장소를 쓰고, UI에는 허브 이름
-/// (mint/basil/peppermint)으로 노출한다.
-///
-/// **왜 nano/air/pro를 버렸나**: 그 이름은 *체급 사다리*(작다→크다 = 빠르다→좋다)를
-/// 약속한다. 새 라인업은 8.5·16.9·20GB로 체급이 좁고, 셋 다 27~35B급 이해를 쓴다 —
-/// 다른 것은 크기가 아니라 **성격**이다. 특히 MINT는 파일이 가장 작지만 밀집
-/// 모델이라 디코딩이 가장 느릴 수 있어, "nano = 가장 빠름"은 사실과 어긋난다.
-/// 이름이 거짓 약속을 하지 않도록 사다리를 버리고 허브 이름을 쓴다.
-///
-/// ⚠️ `detail`은 **아키텍처에서 곧바로 따라오는 사실**만 적는다. 품질·지연 서열은
-/// MINTBench 수치가 나오기 전엔 쓰지 않는다 (CLAUDE.md §2-7 측정 없이 튜닝 없음).
+/// Release choices come from approved policy data; historical names identify saved selections.
 public struct ModelChoice: Identifiable, Sendable {
     /// Hugging Face 저장소 id — `CompletionSettings.modelID`와 일치.
     public let id: String
@@ -86,37 +74,21 @@ public struct ModelChoice: Identifiable, Sendable {
     /// 드롭다운 우측의 대략적 지연 표기 (디자인 v3).
     public let latencyLabel: String
 
-    public static let mint = ModelChoice(
-        id: ModelPresets.ternaryBonsai27B, name: "MINT", sizeLabel: "27B·2bit",
-        // 2026-08-22 리플레이 벤치(docs/model-lineup-bench.md) — 웜 KV 재사용 0,
-        // 웜 TTFC 4.24s, 어절 적중 8%, 제안에 중국자 유입. 기본 부적합 판정 (#40).
-        detail: "27B 밀집 · 가장 작은 설치(8.5GB)", latencyLabel: "부적합 판정")
-    public static let basil = ModelChoice(
-        id: ModelPresets.glm4_7_flash, name: "Basil", sizeLabel: "30B·A3B",
-        // 벤치 실측 — 웜 KV 재사용 884/885 tok, 콜드→웜 TTFC 2.34s→0.05s,
-        // 어절 적중 25%. MINT 대비 지연·재사용·오염 전 항목 우위 (#40).
-        detail: "MoE · 활성 3B · 웜 첫 글자 ~0.05s", latencyLabel: "~50ms 웜")
-    public static let peppermint = ModelChoice(
-        id: ModelPresets.qwen3_6_35B_A3B, name: "Peppermint", sizeLabel: "35B·A3B",
-        detail: "MoE · 가장 큰 이해(20GB)", latencyLabel: "~420ms")
-
-    public static let all: [ModelChoice] = [mint, basil, peppermint]
-
+    public static let mint = ModelChoice(id: ModelPresets.ternaryBonsai27B, name: "MINT", sizeLabel: "", detail: "검증 대기", latencyLabel: "")
+    public static let basil = ModelChoice(id: ModelPresets.glm4_7_flash, name: "Basil", sizeLabel: "", detail: "검증 대기", latencyLabel: "")
+    public static let peppermint = ModelChoice(id: ModelPresets.qwen3_6_35B_A3B, name: "Peppermint", sizeLabel: "", detail: "검증 대기", latencyLabel: "")
+    public static let all = available(using: .current)
+    public static func available(using policy: ModelMemoryPolicy) -> [ModelChoice] {
+        policy.availableEntries.map {
+            .init(id: $0.id, name: $0.name, sizeLabel: "", detail: "이 Mac에서 사용 가능", latencyLabel: "")
+        }
+    }
     public static func matching(_ modelID: String) -> ModelChoice? {
-        all.first(where: { $0.id == modelID })
+        (all + [mint, basil, peppermint]).first { $0.id == modelID }
     }
 }
 
-/// 추론 엔진(actor)에 넘기는 값 스냅샷.
-/// MainActor의 `CompletionSettings`에서 복사해 격리 경계를 넘긴다.
-///
-/// 기본 모델은 **Basil**(~16.9GB)이다 (#40, 2026-08-22 리플레이 벤치 판정).
-/// MINT(8.5GB)는 웜 KV 재사용이 구조적으로 불가(Qwen3.5 하이브리드 MambaCache,
-/// PLAN §12)해 웜 TTFC 4.24s — 지연 예산의 ~9배 초과 + 제안에 중국자 유입 +
-/// 어절 적중 8%로 기본 부적합이 실측됐다. Basil은 웜 0.05s·재사용 884/885로
-/// §12 전략이 온전히 유효하다. 첫 실행 다운로드 부담은 **첫 실행 모델 선택
-/// 흐름**(ContentView 시트)으로 완화한다 — 자동 다운로드 전에 사용자가 크기를
-/// 보고 고른다 (메타 이슈 #65 Phase 4 #40 결정안 2).
+/// Immutable inference settings. New selections use the approved hardware policy default.
 public struct CompletionParameters: Sendable, Equatable {
     public var modelID: String
     public var promptStyle: PromptStyle
@@ -137,7 +109,7 @@ public struct CompletionParameters: Sendable, Equatable {
     public var stopAtUtteranceEnd: Bool
 
     public init(
-        modelID: String = ModelPresets.glm4_7_flash,
+        modelID: String = ModelMemoryPolicy.current.defaultModelID ?? "",
         promptStyle: PromptStyle = .continuation,
         maxTokens: Int = 12,
         temperature: Double = 0.3,
@@ -292,7 +264,7 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
             defaults.set(editorFontSize, forKey: Keys.fontSize)
         }
     }
-    public init(defaults: UserDefaults = .standard) {
+    public init(defaults: UserDefaults = .standard, memoryPolicy: ModelMemoryPolicy = .current) {
         self.defaults = defaults
         let base = CompletionParameters()
         let storedAutocomplete = defaults.object(forKey: Keys.enabled) as? Bool
@@ -313,9 +285,8 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
             self.autocompleteEnabled = false
             defaults.set(CompletionAuthorization.unconfigured.rawValue, forKey: Keys.authorization)
         }
-        // 기존 보호 규칙 — 저장된 modelID가 있으면 그대로 존중한다. 신규 사용자만
-        // 새 기본(Basil)으로 시작한다 (#40).
-        self.modelID = defaults.string(forKey: Keys.modelID) ?? base.modelID
+        // Preserve saved selections even if policy now refuses their use.
+        self.modelID = defaults.string(forKey: Keys.modelID) ?? memoryPolicy.defaultModelID ?? ""
         self.promptStyle =
             defaults.string(forKey: Keys.promptStyle)
             .flatMap(PromptStyle.init(rawValue:)) ?? base.promptStyle

@@ -239,7 +239,8 @@ public actor CompletionEngine {
     /// 이어쓰기 프리필 KV 재사용 (PLAN §12). 모델 교체 시 폐기.
     private let promptCache = PromptCacheBox()
 
-    public init() {}
+    private let memoryPolicy: ModelMemoryPolicy
+    public init(memoryPolicy: ModelMemoryPolicy = .current) { self.memoryPolicy = memoryPolicy }
 
     /// 모델을 미리 로드한다(앱 시작 시 호출 — 첫 제안 지연 방지).
     /// 이미 같은 모델이 로드돼 있으면 즉시 반환.
@@ -483,6 +484,8 @@ public actor CompletionEngine {
         onProgress: (@Sendable (Double) -> Void)?,
         reservingOperation: Bool
     ) async throws -> ModelContainer {
+        guard let manifest = PinnedModelCatalog.manifest(for: modelID) else { throw ModelInstallError.metadata }
+        try memoryPolicy.requireLoad(manifest: manifest)
         let admission = try await modelLifetime.acquire(
             modelID: modelID, reservingOperation: reservingOperation)
         do {
