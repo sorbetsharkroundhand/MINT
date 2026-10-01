@@ -15,6 +15,16 @@ public actor ProjectStore {
         try withStoreLock { try saveUnlocked(project) }
     }
 
+    /// A preparation task must not replace a newer durable owner snapshot.
+    public func save(_ project: WritingProject, replacing expected: WritingProject) throws {
+        try withStoreLock {
+            guard project.id == expected.id, try loadUnlocked(id: project.id) == expected else {
+                throw ProjectStoreError.changedDuringSave
+            }
+            try saveUnlocked(project)
+        }
+    }
+
     public func load(id: WritingProjectID) throws -> WritingProject {
         try withStoreLock { try loadUnlocked(id: id) }
     }
