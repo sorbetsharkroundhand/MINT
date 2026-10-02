@@ -981,6 +981,10 @@ final class BlockTextView: NSTextView {
 
     /// 마커 소비/스타일 적용 중 재진입 방지.
     private var isTransforming = false
+    var mediaParagraphIndex: ParagraphRenderIndex?
+    var mediaDirtyRanges: [NSRange] = []
+    var mediaIndexBuildCount = 0
+    var lastMediaIndexUpdateParagraphs = 0
 
     /// 수식 렌더 폰트 크기 — 본문 크기와 맞춘다.
     var mathFontSize: CGFloat { baseFontSize }
@@ -1182,6 +1186,7 @@ final class BlockTextView: NSTextView {
     /// 마크다운을 파싱해 storage를 블록 문서로 채운다 (buildDOM).
     func load(markdown: String) {
         guard let storage = textStorage else { return }
+        invalidateMediaIndex()
         isTransforming = true
         let result = NSMutableAttributedString()
         var inCode = false
@@ -5312,6 +5317,7 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
+        updateMediaRenderIndex(mask: editedMask, range: editedRange, delta: delta)
         // 직렬화 증분 캐시 판정 — 모든 편집에 대해 먼저(마커 조기 반환에 가리지 않게).
         updateSerialCacheState(editedMask: editedMask, editedRange: editedRange, delta: delta)
 
