@@ -216,6 +216,56 @@ public final class ProjectSession: ObservableObject {
         }
     }
 
+    /// Preview is read-only, including after an initial open of a damaged current manifest.
+    func backupForRecovery() async throws -> ProjectBackupPreview {
+        let id = try await recoveryProjectID()
+        return try await store.previousBackup(id: id)
+    }
+
+    /// Explicit restore adopts only a verified independent copy through the existing owner.
+    func restoreBackup(_ preview: ProjectBackupPreview) async throws {
+        guard try await recoveryProjectID() == preview.project.id else { throw ProjectSessionError.staleRuntime }
+        try beginTransition()
+        defer { finishTransition() }
+        cancelAutosave()
+        do {
+            try await flush()
+            phase = .loading
+            let copy = try await store.prepareBackupRestore(preview, title: preview.project.title + " (복구)")
+            let expected = try await preparedForAdoption(copy)
+            let catalog = try await store.assetCatalog(id: copy.id)
+            let verified = try await store.activateAndLoad(id: copy.id, expected: expected)
+            // All fallible work precedes the durable marker; adoption has no cancellation point.
+            assetCatalog = catalog
+            adopt(verified)
+            hasLoadedActiveProject = true
+            phase = .ready
+            savePhase = .saved
+            lastErrorMessage = nil
+            recordRecent(verified)
+            mergeRecentSummary(verified)
+        } catch {
+            phase = activeProject == nil ? .failed : .ready
+            lastErrorMessage = error.localizedDescription
+            if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
+            throw error
+        }
+    }
+
+    private func recoveryProjectID() async throws -> WritingProjectID {
+        guard !isTransitioning, phase == .ready || phase == .failed else {
+            throw ProjectSessionError.transitionInProgress
+        }
+        if let activeProject { return activeProject.id }
+        let stored = try await store.activeProjectID()
+        guard !isTransitioning, phase == .ready || phase == .failed else {
+            throw ProjectSessionError.transitionInProgress
+        }
+        if let activeProject { return activeProject.id }
+        guard let stored else { throw CocoaError(.fileReadNoSuchFile) }
+        return stored
+    }
+
     /// Optional domain preparation must finish durably before a mutable owner is adopted.
     private func preparedForAdoption(_ project: WritingProject?) async throws -> WritingProject? {
         guard let project, let prepareProject else { return project }

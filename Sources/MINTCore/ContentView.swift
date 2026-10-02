@@ -105,6 +105,13 @@ public struct ContentView: View {
                     Button("다시 시도") {
                         Task { try? await projectSession.bootstrap() }
                     }
+                    Button("이전 저장본 확인…") {
+                        Task {
+                            if await ProjectRecoveryPanel.present(session: projectSession) { editorRequests.focusEditor() }
+                        }
+                    }
+                    .disabled(projectSession.isTransitioning)
+                    .accessibilityIdentifier("mint.recovery.preview")
                 }
                 .padding(32)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
