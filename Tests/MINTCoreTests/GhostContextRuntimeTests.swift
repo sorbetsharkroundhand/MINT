@@ -82,6 +82,7 @@ final class GhostContextRuntimeTests: XCTestCase {
         let suite = "mint.context.\(UUID())", defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
         let settings = CompletionSettings(defaults: defaults)
+        settings.modelID = "fixture/model"
         let controller = CompletionController(settings: settings)
         controller.documentContextProvider = { .init(title: "Draft", kind: .novel) }
         XCTAssertEqual(settings.ghostContextMode, .current)
@@ -92,6 +93,9 @@ final class GhostContextRuntimeTests: XCTestCase {
         XCTAssertEqual(controller.effectiveContextCharacters, settings.novelContextCharacters)
         controller.rememberTokenCounter(TokenCounter { $0.count }, for: settings.modelID)
         XCTAssertEqual(controller.effectiveContextCharacters, 8_000)
+        controller.publishCompletion(.empty, caretLocation: 0, mode: "story", contextMode: .raw,
+            modelID: settings.modelID)
+        XCTAssertEqual(controller.effectiveContextCharacters, 8_000, "A completed request must retain its selected tokenizer")
         settings.ghostContextMode = .current
         XCTAssertEqual(snapshot.ghostContextMode, .raw)
         XCTAssertEqual(controller.effectiveContextCharacters, settings.novelContextCharacters)
