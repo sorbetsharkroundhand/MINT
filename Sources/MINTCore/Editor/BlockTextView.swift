@@ -52,6 +52,7 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let assetCatalog: ProjectAssetCatalog?
     private let assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)?
     private let onEditorWindowChange: ((NSTextView) -> Void)?
+    private let onSourceNavigation: ((Bool, EditorSearchJump) -> Void)?
     private let isEditable: Bool
 
     public init(
@@ -67,7 +68,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         searchJump: EditorSearchJump? = nil,
         assetCatalog: ProjectAssetCatalog? = nil,
         assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)? = nil,
-        onEditorWindowChange: ((NSTextView) -> Void)? = nil
+        onEditorWindowChange: ((NSTextView) -> Void)? = nil,
+        onSourceNavigation: ((Bool, EditorSearchJump) -> Void)? = nil
     ) {
         self._text = text
         self.controller = controller
@@ -81,6 +83,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.assetCatalog = assetCatalog
         self.assetImporter = assetImporter
         self.onEditorWindowChange = onEditorWindowChange
+        self.onSourceNavigation = onSourceNavigation
         self.isEditable = isEditable
     }
 
@@ -317,7 +320,9 @@ public struct MintBlockEditor: NSViewRepresentable {
             DispatchQueue.main.async { [weak textView, weak coordinator = context.coordinator] in
                 guard coordinator?.ownsCallback(requestedIdentity, epoch: requestedEpoch) == true
                 else { return }
-                textView?.revealMatch(of: jump.query)
+                if let source = jump.source, let textView {
+                    coordinator?.parent.onSourceNavigation?(textView.applySourceNavigation(source), jump)
+                } else { textView?.revealMatch(of: jump.query) }
             }
         }
     }
@@ -372,6 +377,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
         ) -> EditorSearchJump? {
             guard let jump, jump.documentID == identity.documentID else { return nil }
+            if let source = jump.source, identity != .project(source.key) { return nil }
             guard lastConsumedSearchJumpByDocument[identity] != jump.sequence else { return nil }
             lastConsumedSearchJumpByDocument[identity] = jump.sequence
             return jump
@@ -1425,6 +1431,58 @@ final class BlockTextView: NSTextView {
             applyFastSerialUpdate()
         }
         return assembleSerialized(serialLines)
+    }
+
+    /// Explicit inspection maps the native caret to original Markdown coordinates.
+    /// Consumed block markers and code fences contribute only to source coordinates.
+    func sourceCursorOffset() -> Int {
+        let ns = string as NSString, caret = min(selectedRange().location, ns.length)
+        var nativeOffset = 0, sourceOffset = 0, inCode = false
+        repeat {
+            let para = ns.paragraphRange(for: NSRange(location: nativeOffset, length: 0))
+            let line = serializedLine(of: para)
+            if line.isCode != inCode { sourceOffset += 4; inCode = line.isCode }
+            if caret < NSMaxRange(para) || NSMaxRange(para) == ns.length {
+                let info = storageBlockInfo(in: para), plain = paragraphContent(para)
+                let length = min(max(0, caret - para.location), plain.utf16.count)
+                let blockPrefix: Int
+                switch info.block {
+                case .h1, .quote, .bullet: blockPrefix = 2
+                case .h2: blockPrefix = 3
+                case .h3: blockPrefix = 4
+                case .number: blockPrefix = (info.marker ?? "1.").utf16.count + 1
+                case .todo: blockPrefix = 6
+                case .math:
+                    let content = serializedContent(of: para, block: info.block)
+                    blockPrefix = line.text == content ? 0 : 2
+                default:
+                    if let align = alignValue(at: para), info.block == .p {
+                        blockPrefix = "<p align=\"\(align)\">".utf16.count
+                    } else { blockPrefix = 0 }
+                }
+                guard let storage = textStorage,
+                    ![MintBlock.code, .math, .divider, .image].contains(info.block) else {
+                    return sourceOffset + blockPrefix + length
+                }
+                var prefixLength = InlineMarkdown.serialize(storage,
+                    in: NSRange(location: para.location, length: length)).utf16.count
+                if length > 0 {
+                    var run = NSRange()
+                    let attrs = storage.attributes(at: para.location + length - 1, effectiveRange: &run)
+                    if NSMaxRange(run) > para.location + length,
+                        !(attrs[.attachment] is MathAtomAttachment) {
+                        if attrs[.mintCode] as? Bool == true { prefixLength -= 1 }
+                        else { prefixLength -= (attrs[.mintBold] as? Bool == true ? 2 : 0)
+                            + (attrs[.mintItalic] as? Bool == true ? 1 : 0) }
+                        if attrs[.mintColor] != nil || attrs[.mintFontSize] != nil { prefixLength -= 7 }
+                    }
+                }
+                return sourceOffset + blockPrefix + max(0, prefixLength)
+            }
+            sourceOffset += line.text.utf16.count + 1
+            nativeOffset = NSMaxRange(para)
+        } while nativeOffset < ns.length
+        return sourceOffset
     }
 
     /// 문단 하나가 직렬화에 기여하는 줄과 코드 여부. 전체 재구축·증분 갱신이

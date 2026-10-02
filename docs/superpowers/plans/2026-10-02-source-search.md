@@ -37,8 +37,8 @@ SourceAnchor.exactRange(for:in:revision:) -> NSRange?.
 Files: create Editor/SourceNavigation.swift and SourceNavigationTests.swift;
 modify EditorSearchJump/ProjectNavigatorView/ContentView/BlockTextView as needed.
 Consumes Task 1 hits and exact resolution. Produces native capture/jump/return routes for #112.
-- [ ] RED native selection/scroll return, source duplicates/edits, wrong project,
+- [x] RED native selection/scroll return, source duplicates/edits, wrong project,
   A→B→A stale callbacks, IME and same-document undo preservation.
-- [ ] Run isolated focused tests; implement minimal editor request bridge.
-- [ ] Focused/full tests, app/bench build, release developer bundle and isolated smoke.
-- [ ] Inline whole-issue review, commit/push attached Draft PR; save handoff.
+- [x] Run isolated focused tests; implement minimal editor request bridge.
+- [x] Focused/full tests, app/bench build, release developer bundle and isolated smoke.
+- [x] Inline whole-issue review, commit/push attached Draft PR; save handoff.
