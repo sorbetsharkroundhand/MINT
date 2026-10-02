@@ -323,6 +323,16 @@ struct EditorPane: View {
                         .padding(.bottom, 20)
                 }
             }
+            .overlay(alignment: .bottomLeading) {
+                if let message = editorRequests.sourceNavigationError {
+                    HStack {
+                        Text(message).font(MintFonts.uiFont(11))
+                        Button("닫기") { editorRequests.sourceNavigationError = nil }
+                    }
+                    .padding(8).background(theme.editorSurfaceC)
+                    .accessibilityIdentifier("mint.source-navigation.status")
+                }
+            }
     }
 
     private var bodyBinding: Binding<String> {

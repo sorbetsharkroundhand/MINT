@@ -33,7 +33,7 @@ search(query:scope:), dismiss(), hits/isSearching/isInvalidated and change callb
 Files: create Workspace/SourceSearchPanel.swift and SourceSearchPanelTests.swift;
 modify AppCommands.swift and ContentView.swift.
 Consumes Task 1 controller and #108 native navigation requests.
-- [ ] RED native open/close, keys/composition, result activation, ownership invalidation.
-- [ ] Implement native panel, Command-K, source-return and visible stale status.
-- [ ] Focused/full tests, app/bench builds, bundle and isolated launch/quit smoke.
-- [ ] Inline whole-issue review, commit/push/attach Draft; owner checks stay pending.
+- [x] RED native open/close, keys/composition, result activation, ownership invalidation.
+- [x] Implement native panel, Command-K, source-return and visible stale status.
+- [x] Focused/full tests, app/bench builds, bundle and isolated launch/quit smoke.
+- [x] Inline whole-issue review, commit/push/attach Draft; owner checks stay pending.
