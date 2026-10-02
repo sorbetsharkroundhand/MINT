@@ -63,6 +63,10 @@ public struct ReleaseBenchmarkReport: Codable, Sendable {
         public var maxTokens: Int
         public var temperature: Double
         public var contextCharacters: Int
+        /// Absent on historical reports; do not infer their strategy.
+        public var ghostContextMode: GhostContextMode?
+        public var originalAnchorNames: [String]?
+        public var originalAnchorOpportunities: Int?
         public var declaredPeakBudgetBytes: UInt64?
         public var topP = 0.9
         public var maxPromptTokens = 3_072

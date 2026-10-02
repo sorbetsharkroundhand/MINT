@@ -2,6 +2,24 @@ import XCTest
 @testable import MINTCore
 
 final class ReleaseBenchmarkReportTests: XCTestCase {
+    func testContextStrategyMetadataRoundTripAndLegacyAbsence() throws {
+        var current = metadata
+        current.ghostContextMode = .rawWithNameAnchor
+        current.originalAnchorNames = ["유정", "서연"]
+        current.originalAnchorOpportunities = 42
+        let encoded = try JSONEncoder().encode(current)
+        let decoded = try JSONDecoder().decode(ReleaseBenchmarkReport.Metadata.self, from: encoded)
+        XCTAssertEqual(decoded.ghostContextMode, .rawWithNameAnchor)
+        XCTAssertEqual(decoded.originalAnchorNames, ["유정", "서연"])
+        XCTAssertEqual(decoded.originalAnchorOpportunities, 42)
+        var old = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        for key in ["ghostContextMode", "originalAnchorNames", "originalAnchorOpportunities"] { old.removeValue(forKey: key) }
+        let legacy = try JSONDecoder().decode(ReleaseBenchmarkReport.Metadata.self, from: JSONSerialization.data(withJSONObject: old))
+        XCTAssertNil(legacy.ghostContextMode)
+        XCTAssertNil(legacy.originalAnchorNames)
+        XCTAssertNil(legacy.originalAnchorOpportunities)
+    }
+
     private var metadata: ReleaseBenchmarkReport.Metadata {
         .init(modelID: "fixture/model", revision: String(repeating: "a", count: 40), fixtureSHA256: String(repeating: "b", count: 64),
               physicalMemoryBytes: 16 << 30, recommendedWorkingSetBytes: 12 << 30, device: "Fixture Mac", os: "Fixture OS", toolchain: "Fixture Swift",

@@ -14,12 +14,23 @@ FIXTURE="Fixtures/replay-novel-ko-v1.txt"
 "$BENCH_BIN" --help > "$BENCH_CLI_ROOT/help.log"
 grep -F -- '--release-report' "$BENCH_CLI_ROOT/help.log" >/dev/null
 grep -F -- '--candidate-memory-budget-bytes' "$BENCH_CLI_ROOT/help.log" >/dev/null
+grep -F -- '--context-mode' "$BENCH_CLI_ROOT/help.log" >/dev/null
+grep -F -- '--anchor-names' "$BENCH_CLI_ROOT/help.log" >/dev/null
 expect_failure() {
     if "$BENCH_BIN" "$@" > "$BENCH_CLI_ROOT/result.log" 2>&1; then
         echo "Invalid benchmark request succeeded: $*" >&2; exit 1
     fi
 }
 expect_failure --model unregistered/model --replay "$FIXTURE" --release-report "$BENCH_CLI_ROOT/new.json"
+expect_failure --context-mode invalid
+grep -F -- '--context-mode requires A, B or C' "$BENCH_CLI_ROOT/result.log" >/dev/null
+expect_failure --context-mode B --replay "$FIXTURE"
+grep -F -- 'B requires --replay and --anchor-names' "$BENCH_CLI_ROOT/result.log" >/dev/null
+expect_failure --context-mode A --knowledge
+grep -F -- '--knowledge requires context mode C' "$BENCH_CLI_ROOT/result.log" >/dev/null
+for strategy in A B C; do
+    "$BENCH_BIN" --context-mode "$strategy" --anchor-names '유정,서연' --replay "$FIXTURE" --detect-only > "$BENCH_CLI_ROOT/valid.log"
+done
 expect_failure --model "$MODEL" --release-report "$BENCH_CLI_ROOT/new.json"
 expect_failure --model "$MODEL" --replay "$FIXTURE" --candidate-memory-budget-bytes 0
 expect_failure --model "$MODEL" --replay "$FIXTURE" --release-report "$BENCH_CLI_ROOT/new.json" --cancellation-stress 1

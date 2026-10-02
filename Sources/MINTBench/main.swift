@@ -28,6 +28,8 @@ struct BenchOptions {
     var cuts = 12
     var truthChars = 40
     var contextChars = CompletionSettings.defaultNovelContextCharacters
+    var contextMode: GhostContextMode = .current
+    var anchorNames: [String] = []
     var title = ""
     var genre = ""
     /// 리플레이 전에 원고 전체를 요약(씬→장→작품)해 B 블록으로 주입 (M6, PLAN §11).
@@ -112,6 +114,14 @@ struct BenchOptions {
                     return .failure("--context 는 양의 정수여야 함")
                 }
                 options.contextChars = parsed
+            case "--context-mode":
+                guard let value = iterator.next(), let mode = GhostContextMode(rawValue: value) else {
+                    return .failure("--context-mode requires A, B or C")
+                }
+                options.contextMode = mode
+            case "--anchor-names":
+                guard let value = iterator.next() else { return .failure("--anchor-names requires registered names") }
+                options.anchorNames = value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
             case "--title":
                 guard let value = iterator.next() else { return .failure("--title 값 누락") }
                 options.title = value
@@ -133,6 +143,12 @@ struct BenchOptions {
             default:
                 return .failure("알 수 없는 옵션: \(flag)")
             }
+        }
+        if options.contextMode == .rawWithNameAnchor, options.replayPath == nil || options.anchorNames.isEmpty {
+            return .failure("B requires --replay and --anchor-names")
+        }
+        if options.knowledge, options.contextMode != .current {
+            return .failure("--knowledge requires context mode C")
         }
         return .options(options)
     }
@@ -157,6 +173,8 @@ struct BenchOptions {
           --cuts <n>           컷포인트 수 (기본: 12)
           --truth-chars <n>    정답으로 비교할 이어지는 원문 길이 (기본: 40자)
           --context <n>        컷 앞에서 읽는 컨텍스트 길이 (기본: 4000자)
+          --context-mode <A|B|C>  Ghost strategy (default C; same-model comparisons)
+          --anchor-names <names>  Explicit registered names, comma separated; required for B
           --title <text>       작품 제목 — 지정 시 소설 헤더(A)를 조립에 포함
           --genre <text>       작품 장르 — 위와 동일
           --knowledge          리플레이 전에 원고를 요약(씬→장→작품)해 B 블록으로
@@ -281,6 +299,7 @@ if options.detectOnly {
 print("== MINT M2 추론 선검증 ==")
 print("모델     : \(options.modelID)")
 print("스타일   : \(options.styles.map(\.rawValue).joined(separator: ", "))")
+print("문맥     : \(options.contextMode.label)")
 print("토큰 상한: \(options.maxTokens) · 온도: \(options.temperature) · 반복: \(options.runs)")
 print("프롬프트 : \(options.prompt)")
 print("")
@@ -328,12 +347,16 @@ for style in options.styles {
         modelID: options.modelID,
         promptStyle: style,
         maxTokens: options.maxTokens,
-        temperature: options.temperature
+        temperature: options.temperature,
+        ghostContextMode: options.contextMode
     )
     for run in 1...options.runs {
         do {
-            let completion = try await engine.complete(
-                prefix: options.prompt, parameters: parameters)
+            let counter = options.contextMode == .current ? nil : await engine.makeTokenCounter(expectedModelID: options.modelID)
+            let prompt = ContextAssembler.assembleWithReport(prefix: options.prompt, document: nil,
+                style: style, tokenCounter: counter, tokenBudget: parameters.maxPromptTokens,
+                contextMode: options.contextMode).prompt
+            let completion = try await engine.complete(prompt: prompt, parameters: parameters)
             records.append(RunRecord(style: style, run: run, completion: completion))
             let tps = completion.generationTokensPerSecond.map {
                 String(format: "%.1f tok/s", $0)
@@ -422,12 +445,15 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     }
 
     // 소설 헤더(A) — 제목·장르가 주어졌을 때만 (없으면 Fast 모드 그대로).
+    let documentID = UUID()
+    let characters = Array(Set(options.anchorNames)).sorted().map { CharacterCard(name: $0) }
     let document: DocumentContext? =
-        (options.title.isEmpty && options.genre.isEmpty)
+        (options.title.isEmpty && options.genre.isEmpty && characters.isEmpty)
         ? nil
         : DocumentContext(
             title: options.title, kind: .novel,
-            genre: options.genre.isEmpty ? nil : options.genre)
+            genre: options.genre.isEmpty ? nil : options.genre,
+            characters: characters, entryID: documentID)
     // 리플레이 기본은 이어쓰기 — --style 로 하나만 고르면 그 스타일.
     let style: PromptStyle = options.styles.count == 1 ? options.styles[0] : .continuation
     var parameters = CompletionParameters()
@@ -435,6 +461,14 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
     parameters.promptStyle = style
     parameters.maxTokens = options.maxTokens
     parameters.temperature = options.temperature
+    parameters.ghostContextMode = options.contextMode
+    let originalNames: OriginalNameAnchorIndex?
+    do {
+        originalNames = options.contextMode == .rawWithNameAnchor
+            ? try OriginalNameAnchorIndex.make(body: raw, documentID: documentID, characters: characters) : nil
+    } catch { print("Original name preparation failed: \(error.localizedDescription)"); return false }
+    let counter = options.contextMode == .current ? nil : await engine.makeTokenCounter(expectedModelID: options.modelID)
+    var anchorOpportunities = 0
 
     // B 블록 지식 (M6) — 인덱서와 같은 프롬프트·규격으로 사전 요약해 스냅샷을
     // 만든다. 출력을 그대로 찍는다 — 요약 품질 수동 검수가 M6 선결정 사항.
@@ -514,10 +548,12 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         let truth = String(text[cut..<(cut + options.truthChars)])
         // B의 시점 차단 기준 — C 창이 시작하는 본문 위치 (utf16, 조립기 규격).
         let prefixStartUTF16 = String(text[0..<contextStart]).utf16.count
-        let prompt = ContextAssembler.assemble(
+        let (prompt, report) = ContextAssembler.assembleWithReport(
             prefix: context, document: document,
             knowledge: knowledge, prefixStartUTF16: prefixStartUTF16,
-            style: style)
+            style: style, tokenCounter: counter, tokenBudget: parameters.maxPromptTokens,
+            contextMode: options.contextMode, originalNameAnchors: originalNames)
+        if report.items.contains(where: { $0.kind == .originalNameAnchor }) { anchorOpportunities += 1 }
         do {
             // 콜드 기준선을 진짜 콜드로 — 같은 원고라 컷 사이 공통 접두가 길어
             // 캐시가 살아 있으면 두 번째 컷부터 "콜드"가 사실상 웜이 된다.
@@ -570,6 +606,9 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
         metadata.topP = parameters.topP; metadata.maxPromptTokens = parameters.maxPromptTokens
         metadata.kvCacheEnabled = parameters.kvCacheEnabled; metadata.truthCharacters = options.truthChars
         metadata.knowledgeEnabled = options.knowledge; metadata.title = options.title; metadata.genre = options.genre
+        metadata.ghostContextMode = options.contextMode
+        metadata.originalAnchorNames = options.anchorNames
+        metadata.originalAnchorOpportunities = anchorOpportunities
         do {
             let report = try ReleaseBenchmarkReport(metadata: metadata, samples: releaseSamples, attempted: cuts.count,
                 mlxPeakBytes: CompletionEngine.benchmarkMLXPeakBytes, processPeakBytes: processPeakPhysicalBytes())

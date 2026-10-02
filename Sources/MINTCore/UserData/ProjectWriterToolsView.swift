@@ -116,8 +116,8 @@ struct ProjectWriterToolsView: View {
     }
 
     @ViewBuilder private func context(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {
-        if let report = completion.lastContextReport, report.runtimeIdentity == snapshot.identity, !report.items.isEmpty {
-            Text("최근 제안이 실제로 참고한 정보예요.").foregroundStyle(theme.ink3C)
+        if let report = completion.lastContextReport, report.runtimeIdentity == snapshot.identity {
+            Text("\(report.contextMode.label) · 최근 제안이 실제로 참고한 정보예요. 커서 앞 원문을 함께 읽어요.").foregroundStyle(theme.ink3C)
             ForEach(Array(report.items.enumerated()), id: \.offset) { _, item in
                 VStack(alignment: .leading, spacing: 6) {
                     Text(item.text).textSelection(.enabled)
@@ -135,7 +135,9 @@ struct ProjectWriterToolsView: View {
                             }
                         }
                     }
-                    if let quote = item.jumpQuery {
+                    if let anchor = item.evidence {
+                        evidence(anchor, snapshot)
+                    } else if let quote = item.jumpQuery {
                         evidence(EvidenceAnchor(documentID: writer.documentID, quote: quote), snapshot)
                     } else if let offset = item.jumpUTF16,
                         let quote = NarrativeView.jumpSnippet(in: snapshot.body, atUTF16: offset) {
