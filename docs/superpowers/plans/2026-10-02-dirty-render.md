@@ -6,7 +6,7 @@ Spec: [Bounded dirty render design](../specs/2026-10-02-dirty-render-design.md).
   boundaries. RED/GREEN semantic splice/query and long-document bounded-work tests.
 - [x] 2. Wire index and dirty scopes to authoritative editor storage, including
   attributes, structural edits, programmatic load and undo. Reject stale assumptions.
-- [ ] 3. Bound ordinary render, inline folding, marker tracking and group cleanup to
+- [x] 3. Bound ordinary render, inline folding, marker tracking and group cleanup to
   dirty/visible/selected/group neighbors. Preserve existing round-trip/render tests.
 - [ ] 4. Record focused 300k/100-media typing/scroll/memory evidence, full/build/bench
   and developer-bundle smoke; defer owner native feel/IME and continue #183.

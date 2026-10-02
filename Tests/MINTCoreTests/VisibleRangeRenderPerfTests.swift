@@ -73,7 +73,7 @@ final class VisibleRangeRenderPerfTests: XCTestCase {
         var best = Double.greatestFiniteMagnitude
         for _ in 0..<3 {
             let start = CFAbsoluteTimeGetCurrent()
-            pair.textView.refreshRenderedBlocks()
+            pair.textView.refreshRenderedBlocks(forceRender: true)
             best = min(best, CFAbsoluteTimeGetCurrent() - start)
         }
         return best * 1000
