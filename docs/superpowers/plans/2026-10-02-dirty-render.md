@@ -4,7 +4,7 @@ Spec: [Bounded dirty render design](../specs/2026-10-02-dirty-render-design.md).
 
 - [x] 1. Pure paragraph index with UTF-16 range lookup/local replacement and math-run
   boundaries. RED/GREEN semantic splice/query and long-document bounded-work tests.
-- [ ] 2. Wire index and dirty scopes to authoritative editor storage, including
+- [x] 2. Wire index and dirty scopes to authoritative editor storage, including
   attributes, structural edits, programmatic load and undo. Reject stale assumptions.
 - [ ] 3. Bound ordinary render, inline folding, marker tracking and group cleanup to
   dirty/visible/selected/group neighbors. Preserve existing round-trip/render tests.
