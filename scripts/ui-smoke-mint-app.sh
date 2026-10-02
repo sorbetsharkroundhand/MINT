@@ -386,6 +386,11 @@ wait_ui() {
     ui "$operation" "$expected"
 }
 
+open_writer_information() {
+    ui press "mint.writer-tools.compatibility"
+    ui press "인물과 작품 정보"
+}
+
 assert_isolated_project_mode() {
     [ ! -e "$SMOKE_HOME/Documents/MINT/entries.json" ] \
         && [ ! -L "$SMOKE_HOME/Documents/MINT/entries.json" ] \
@@ -407,7 +412,7 @@ wait_ui autocomplete ""
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
-ui press "스토리 바이블"
+open_writer_information
 ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
 ui field-set "mint.writer.character.name." "$WRITER_NAME"
@@ -416,8 +421,7 @@ ui press "문서로 돌아가기"
 ui focused
 ui resize 860
 wait_ui autocomplete ""
-ui press "기타 글 도구"
-ui press "스토리 바이블"
+open_writer_information
 ui absent "리빙 마진"
 ui press "문서로 돌아가기"
 ui focused
@@ -426,7 +430,7 @@ ui press "새 문서"
 wait_ui equals ""
 ui type "$NEW_BODY"
 wait_ui equals "$NEW_BODY"
-ui press "스토리 바이블"
+open_writer_information
 ui field-equals "mint.writer.genre" ""
 ui field-absent "mint.writer.character.name."
 ui press "문서로 돌아가기"
@@ -458,7 +462,7 @@ launch
 wait_ui equals "$NEW_BODY"
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
-ui press "스토리 바이블"
+open_writer_information
 ui field-equals "mint.writer.genre" "$WRITER_GENRE"
 ui field-equals "mint.writer.character.name." "$WRITER_NAME"
 ui field-equals "mint.writer.character.note." "$WRITER_NOTE"

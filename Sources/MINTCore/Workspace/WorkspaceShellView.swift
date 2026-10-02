@@ -480,18 +480,18 @@ enum WorkspaceToolPresentation {
                 systemImage: "sparkles")
         case .bible:
             WorkspaceToolDescriptor(
-                title: "스토리 바이블",
-                subtitle: "인물과 작품 정보",
+                title: "인물과 작품 정보",
+                subtitle: "저장된 장르와 인물 설정",
                 systemImage: "book.closed")
         case .narrative:
             WorkspaceToolDescriptor(
-                title: "서사",
-                subtitle: "작품의 흐름과 관계",
+                title: "작가 수정과 기록",
+                subtitle: "저장된 판정과 대화 기록",
                 systemImage: "arrow.triangle.branch")
         case .context:
             WorkspaceToolDescriptor(
-                title: "AI 컨텍스트",
-                subtitle: "현재 제안에 쓰인 맥락",
+                title: "제안에 쓰인 내용",
+                subtitle: "참조한 원문과 저장된 선택",
                 systemImage: "text.magnifyingglass")
         case .files, .none:
             WorkspaceToolDescriptor(

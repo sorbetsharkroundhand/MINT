@@ -350,11 +350,9 @@ struct EditorPane: View {
     }
 }
 
-// MARK: - 툴바 (사이드바 · 소설 배지 · 모델 스위처)
+// MARK: - Writing toolbar
 
-/// 상단바는 **글을 쓰는 동안 필요한 것**만 남긴다 — 날짜·다크 모드·도움말·이미지
-/// 삽입은 한 번 정하면 잘 바뀌지 않거나 단축키/메뉴로 이미 닿을 수 있어 설정(⌘,)과
-/// 메뉴로 옮겼다 (CLAUDE.md §3 "고스트는 조용히"의 연장 — 화면의 소음을 줄인다).
+/// Original search is primary; saved author information stays in a secondary menu.
 struct EditorToolbar: View {
     @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -404,31 +402,6 @@ struct EditorToolbar: View {
                     .accessibilityLabel("작업 공간")
                 }
             }
-            // 소설 저널이면 종류 배지 = 스토리 바이블 입구 (PLAN §7).
-            // 문서 목록을 유지한 채 바이블 도구를 연다 (PLAN §5.4).
-            if density == .standard, projectSession.activeProject?.mode == .fiction {
-                Button {
-                    sidebarSection = SidebarSection.bible.rawValue
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "book.closed.fill")
-                            .font(.system(size: 9))
-                        Text("소설")
-                            .font(MintFonts.serifUI(11, .semibold))
-                    }
-                    .foregroundStyle(theme.novelC)
-                    .padding(.vertical, 3)
-                    .padding(.horizontal, 8)
-                    .background(Capsule().fill(theme.novelBgC))
-                    .contentShape(Capsule())
-                }
-                .buttonStyle(.plain)
-                .help("스토리 바이블 — 장르·인물·자동 이해")
-                .accessibilityLabel(Text("스토리 바이블"))
-                // 색점 없이도 후보 대기를 알 수 있게 (#59-3).
-                .accessibilityValue(Text("프로젝트 지식 기능 준비 중"))
-            }
-
             // 긴 문단 표시 (docs/editor-paragraph-split.md) — 대상이 있을 때만
             // 조용히 나타난다. 누르면 설명·확인. 원문 수정은 사용자 확인이 필수.
             if completion.longParagraph.count > 0 {
@@ -461,30 +434,10 @@ struct EditorToolbar: View {
                 }
             }
             Spacer(minLength: 8)
-            Menu {
-                if projectSession.activeProject?.mode == .fiction {
-                    Button("스토리 바이블") {
-                        sidebarSection = SidebarSection.bible.rawValue
-                    }
-                    Divider()
-                }
-                Button("서사") {
-                    sidebarSection = SidebarSection.narrative.rawValue
-                }
-                Button("AI 컨텍스트") {
-                    sidebarSection = SidebarSection.context.rawValue
-                }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.ink3C)
-                    .frame(width: 26, height: 28)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .fixedSize()
-            .accessibilityLabel("기타 글 도구")
-            .help("기타 글 도구")
+            SourceSearchToolbarButton(session: projectSession, requests: editorRequests,
+                compact: density == .compact)
+                .frame(width: density == .compact ? 26 : 80, height: 28)
+            WriterCompatibilityMenu(section: $sidebarSection).frame(width: 26, height: 28)
             ModelChip(completion: completion, settings: settings, theme: theme, compact: density == .compact)
             settingsButton
         }
