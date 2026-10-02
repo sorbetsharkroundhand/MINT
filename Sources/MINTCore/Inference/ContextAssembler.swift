@@ -109,17 +109,23 @@ public struct ContextReport: Sendable, Equatable {
     /// 조립 시점의 예측 세대 — 문서 전환·편집으로 무효화됐는지 판정용 (이슈 #8).
     public var generation: Int
     public var runtimeIdentity: ProjectRuntimeIdentity?
+    public var contextMode: GhostContextMode
+    /// Actual retained manuscript range, without added instructions or evidence.
+    public var rawUTF16Range: Range<Int>?
 
     public init(
         items: [Item], assembledAt: Date = .now,
         entryID: UUID? = nil, generation: Int = 0,
-        runtimeIdentity: ProjectRuntimeIdentity? = nil
+        runtimeIdentity: ProjectRuntimeIdentity? = nil,
+        contextMode: GhostContextMode = .current, rawUTF16Range: Range<Int>? = nil
     ) {
         self.items = items
         self.assembledAt = assembledAt
         self.entryID = entryID
         self.generation = generation
         self.runtimeIdentity = runtimeIdentity
+        self.contextMode = contextMode
+        self.rawUTF16Range = rawUTF16Range
     }
 
     public static let empty = ContextReport(items: [])
@@ -188,11 +194,12 @@ public enum ContextAssembler {
         document: DocumentContext?,
         knowledge: KnowledgeSnapshot? = nil,
         prefixStartUTF16: Int = 0,
-        style: PromptStyle
+        style: PromptStyle,
+        contextMode: GhostContextMode = .current
     ) -> AssembledPrompt {
         assembleWithReport(
             prefix: prefix, document: document, knowledge: knowledge,
-            prefixStartUTF16: prefixStartUTF16, style: style
+            prefixStartUTF16: prefixStartUTF16, style: style, contextMode: contextMode
         ).prompt
     }
 
@@ -229,8 +236,13 @@ public enum ContextAssembler {
         prefixStartUTF16: Int = 0,
         style: PromptStyle,
         tokenCounter: TokenCounter? = nil,
-        tokenBudget: Int? = nil
+        tokenBudget: Int? = nil,
+        contextMode: GhostContextMode = .current
     ) -> (prompt: AssembledPrompt, report: ContextReport) {
+        if contextMode != .current {
+            return assembleRaw(prefix: prefix, prefixStartUTF16: prefixStartUTF16,
+                style: style, mode: contextMode, counter: tokenCounter, budget: tokenBudget)
+        }
         guard let counter = tokenCounter else {
             // 현행 문자 예산 경로 — 동작 불변 (#43).
             return assembleCore(
