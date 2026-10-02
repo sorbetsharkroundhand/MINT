@@ -39,11 +39,13 @@ struct ProjectWriterToolsView: View {
     }
 
     @ViewBuilder private func bible(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {
-        if snapshot.mode == .fiction {
+        // Mode changes do not erase the author's existing settings or their edit route.
+        if snapshot.mode == .fiction || !(writer.genre ?? "").isEmpty
+            || !writer.characters.isEmpty || !writer.rejectedCharacterNames.isEmpty {
             TextField("장르 (예: 판타지 · 로맨스 · 추리)", text: binding(
                 writer.genre ?? "", snapshot: snapshot, get: { $0.genre ?? "" }, edit: { .genre($0) }))
                 .textFieldStyle(.roundedBorder).accessibilityIdentifier("mint.writer.genre")
-            Text("직접 적은 설정은 다시 분석해도 유지돼요.")
+            Text("직접 적은 설정은 이 문서에 저장돼요.")
                 .foregroundStyle(theme.ink3C)
             ForEach(writer.characters) { card in
                 CharacterCardRow(card: binding(card, snapshot: snapshot,
@@ -51,8 +53,10 @@ struct ProjectWriterToolsView: View {
                     theme: theme, understanding: [], chronicle: [], knowledge: [], relations: [], conversations: [],
                     onDelete: { apply(.removeCharacter(card.id), identity: snapshot.identity) })
             }
-            Button("인물 추가") { apply(.character(CharacterCard()), identity: snapshot.identity) }
-                .accessibilityIdentifier("mint.writer.add-character")
+            if snapshot.mode == .fiction {
+                Button("인물 추가") { apply(.character(CharacterCard()), identity: snapshot.identity) }
+                    .accessibilityIdentifier("mint.writer.add-character")
+            }
             if !writer.rejectedCharacterNames.isEmpty {
                 Divider(); Text("거부한 인물 후보")
                 ForEach(Array(writer.rejectedCharacterNames.enumerated()), id: \.offset) { _, name in
@@ -62,7 +66,7 @@ struct ProjectWriterToolsView: View {
                     }
                 }
             }
-        } else { Text("스토리 바이블은 소설 프로젝트에서 사용할 수 있어요.") }
+        } else { Text("아직 저장된 인물이나 작품 정보가 없어요.") }
     }
 
     @ViewBuilder private func records(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {

@@ -95,7 +95,13 @@ final class WorkspaceShellModeTests: XCTestCase {
                 systemImage: "sparkles"))
         XCTAssertEqual(
             WorkspaceToolPresentation.descriptor(for: SidebarSection.bible.rawValue).title,
-            "스토리 바이블")
+            "인물과 작품 정보")
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: SidebarSection.narrative.rawValue).title,
+            "작가 수정과 기록")
+        XCTAssertEqual(
+            WorkspaceToolPresentation.descriptor(for: SidebarSection.context.rawValue).title,
+            "제안에 쓰인 내용")
     }
 
     func testReleaseHidesStoredEmptyMarginButPreservesExistingDataTools() {
