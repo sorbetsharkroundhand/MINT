@@ -135,6 +135,30 @@ public final class BackgroundIndexer: ObservableObject {
     /// One active project's already-loaded derived values. Edits revalidate them against
     /// the new body in background without adding sidecar reads to the typing path.
     private var preparedProjectSidecar: KnowledgeSidecar?
+    let originalNamePreparation = OriginalNameAnchorPreparation()
+    public var originalNameAnchorsEnabled = false {
+        didSet {
+            guard originalNameAnchorsEnabled != oldValue else { return }
+            prepareOriginalNameAnchors()
+        }
+    }
+    public var originalNameAnchors: OriginalNameAnchorIndex? {
+        guard let document = currentDocument(),
+            originalNamePreparation.scope == document.scope,
+            originalNamePreparation.runtimeIdentity == document.runtimeIdentity else { return nil }
+        return originalNamePreparation.index
+    }
+    public func setForegroundCompletionBusy(_ busy: Bool) {
+        originalNamePreparation.setForegroundBusy(busy)
+    }
+    private func prepareOriginalNameAnchors() {
+        guard originalNameAnchorsEnabled, let document = currentDocument(), document.isFiction else {
+            originalNamePreparation.shutdown()
+            return
+        }
+        originalNamePreparation.prepare(body: document.body, documentID: document.id,
+            scope: document.scope, runtimeIdentity: document.runtimeIdentity, characters: document.characters)
+    }
 
     /// Knowledge-specific metadata stays in the reader adapter, outside ProjectSession.
     private struct DocumentInput {
@@ -329,6 +353,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 종료 시점의
     /// 백그라운드 이해는 어차피 버려질 결과다 — 원문은 flush로 이미 안전하다.
     public func shutdown() {
+        originalNamePreparation.shutdown()
         passGeneration += 1
         hydrateGeneration += 1
         fastTimer?.cancel()
@@ -358,6 +383,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 본문 편집·문서 전환 알림 (EntryStore 훅) — 진행 중 패스를 선점하고
     /// 유휴 타이머를 다시 감는다.
     public func noteChange(entryID: UUID) {
+        prepareOriginalNameAnchors()
         // 선점: 백그라운드 생성은 예측(그리고 그 앞의 타이핑)에 항상 진다 (CLAUDE.md §2-6).
         // 세대를 먼저 올린다 — 취소가 늦게 끝난 이전 작업의 모든 발행/정리를 무효화 (#82).
         passGeneration += 1
@@ -404,11 +430,13 @@ public final class BackgroundIndexer: ObservableObject {
     /// did not emit a change notification.
     public func noteScopeChange(entryID: UUID) {
         prepareForProjectTransition()
+        prepareOriginalNameAnchors()
         hydrateIfNeeded(entryID: entryID)
     }
 
     /// Cancels old ownership without reading the session before its next publication.
     public func prepareForProjectTransition() {
+        originalNamePreparation.shutdown()
         passGeneration += 1
         passEntryID = nil
         passBodyHash = nil
