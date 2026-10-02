@@ -57,11 +57,11 @@ final class MemoryPressureCoordinatorTests: XCTestCase {
     }
 
     func testNormalCannotUnblockCompletionUntilReleaseFinishes() async {
-        var paused = false, releaseCount = 0
+        var paused = false, backgroundPaused = false, releaseCount = 0
         let started = expectation(description: "Release suspended")
         let barrier = MemoryReleaseBarrier(started: started)
         let resumed = expectation(description: "Normal permits completion after drain")
-        let coordinator = MemoryPressureCoordinator(backgroundPause: { _ in },
+        let coordinator = MemoryPressureCoordinator(backgroundPause: { backgroundPaused = $0 },
             completionPause: { paused = $0; if !$0 { resumed.fulfill() } },
             releaseModel: { releaseCount += 1; await barrier.wait() })
         coordinator.handle(.critical)
@@ -69,10 +69,12 @@ final class MemoryPressureCoordinatorTests: XCTestCase {
         coordinator.handle(.critical)
         coordinator.handle(.normal)
         XCTAssertTrue(paused)
+        XCTAssertTrue(backgroundPaused, "Normal cannot admit background loads during release")
         XCTAssertEqual(releaseCount, 1)
         await barrier.release()
         await fulfillment(of: [resumed], timeout: 1)
         XCTAssertFalse(paused)
+        XCTAssertFalse(backgroundPaused)
         XCTAssertEqual(releaseCount, 1)
     }
 
