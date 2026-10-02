@@ -242,13 +242,23 @@ public final class CompletionController: ObservableObject {
     /// 지식 스냅샷 공급자 (M6, PLAN §11) — 인덱서가 발행한 인메모리 값만 pull.
     /// 활성 문서와의 일치 확인은 배선부(ContentView)의 몫이다.
     public var knowledgeProvider: (() -> KnowledgeSnapshot?)?
+    public var originalNameAnchorsProvider: (() -> OriginalNameAnchorIndex?)?
+    public var contextConfigurationDidChange: (() -> Void)?
+    public var foregroundCompletionDidChange: ((Bool) -> Void)?
+    public var usesOriginalNameAnchors: Bool {
+        settings.authorization == .enabled && settings.autocompleteEnabled
+            && settings.ghostContextMode == .rawWithNameAnchor
+    }
 
     /// 종류별 컨텍스트 창 상한 — 소설은 넓게 (PLAN §10 Smart/Story 예산).
     /// 에디터(BlockTextView)가 prefix 추출 한도로 읽는다.
     public var effectiveContextCharacters: Int {
-        currentDocumentContext()?.kind == .novel
+        let current = currentDocumentContext()?.kind == .novel
             ? settings.novelContextCharacters
             : settings.contextCharacters
+        guard settings.ghostContextMode != .current, cachedCounter != nil,
+            cachedCounterModelID == settings.modelID else { return current }
+        return min(12_000, max(current, 8_000))
     }
     private var pendingTask: Task<Void, Never>?
     /// 편집/커서 이벤트마다 증가 — 뒤늦게 도착한 stale 응답을 버리는 기준.
@@ -269,6 +279,8 @@ public final class CompletionController: ObservableObject {
     /// 현재 고스트가 만들어진 모드 (fast/smart/story[-dialogue]) — 수락률
     /// 로그의 축 (M7, PLAN §13). 제안과 함께 세팅·소멸한다.
     private var currentSuggestionMode: String?
+    private var currentOpportunity: AcceptanceMetrics.Opportunity?
+    private let metricsStorageLocation: MintStorageLocation
     /// 수락이 곧 invalidate를 부르므로, 그 invalidate가 "거절"로 기록되지
     /// 않게 하는 1회용 플래그.
     private var suppressDismissLog = false
@@ -315,10 +327,12 @@ public final class CompletionController: ObservableObject {
 
     public init(
         settings: CompletionSettings = .shared,
-        engine: CompletionEngine = CompletionEngine()
+        engine: CompletionEngine = CompletionEngine(),
+        metricsStorageLocation: MintStorageLocation = .standard
     ) {
         self.settings = settings
         self.engine = engine
+        self.metricsStorageLocation = metricsStorageLocation
         Self.current = self
     }
 
@@ -440,6 +454,14 @@ public final class CompletionController: ObservableObject {
         modelDidChange()
     }
 
+    public func changeContextMode(to mode: GhostContextMode) {
+        guard mode != settings.ghostContextMode else { return }
+        invalidate()
+        lastContextReport = nil
+        settings.ghostContextMode = mode
+        contextConfigurationDidChange?()
+    }
+
     /// 자동완성 마스터 스위치 토글. 이 사용자 조작이 명시적 허용 상태를 기록한다.
     /// 끄면 진행 중인 제안까지 즉시 폐기하고, 켜면 모델을 로드한다.
     public func setAutocompleteEnabled(_ enabled: Bool) {
@@ -449,6 +471,7 @@ public final class CompletionController: ObservableObject {
             || settings.autocompleteEnabled != enabled
         else { return }
         settings.setCompletionEnabled(enabled)
+        contextConfigurationDidChange?()
         if enabled {
             preloadEngine()
         } else {
@@ -491,11 +514,15 @@ public final class CompletionController: ObservableObject {
     private var cachedCounterModelID: String?
 
     private func tokenCounter(for modelID: String) async -> TokenCounter? {
-        if cachedCounterModelID == modelID { return cachedCounter }
-        let counter = await engine.makeTokenCounter()
+        if cachedCounterModelID == modelID, let cachedCounter { return cachedCounter }
+        let counter = await engine.makeTokenCounter(expectedModelID: modelID)
+        rememberTokenCounter(counter, for: modelID)
+        return counter
+    }
+    func rememberTokenCounter(_ counter: TokenCounter?, for modelID: String) {
+        guard modelID == settings.modelID else { return }
         cachedCounter = counter
         cachedCounterModelID = modelID
-        return counter
     }
 
     private func markEngineFailed(_ error: Error, modelID: String) {
@@ -597,7 +624,7 @@ public final class CompletionController: ObservableObject {
     /// `Tab` 수락 — 뷰가 본문에 삽입할 텍스트를 반환. 제안이 없으면 nil.
     public func acceptSuggestion() -> String? {
         guard let text = suggestion, !text.isEmpty else { return nil }
-        AcceptanceMetrics.log(.acceptedFull, mode: currentSuggestionMode ?? "?")
+        logSuggestion(.acceptedFull)
         suppressDismissLog = true
         invalidate()
         return text
@@ -621,7 +648,7 @@ public final class CompletionController: ObservableObject {
             rest = rest.dropFirst()
         }
         guard !word.isEmpty else { return nil }
-        AcceptanceMetrics.log(.acceptedWord, mode: currentSuggestionMode ?? "?")
+        logSuggestion(.acceptedWord)
 
         let remainder = String(rest)
         retainSuggestionOnNextEdit = true
@@ -734,6 +761,7 @@ public final class CompletionController: ObservableObject {
         generation += 1
         pendingTask?.cancel()
         pendingTask = nil
+        foregroundCompletionDidChange?(false)
         pendingCaret = nil
         if isPredicting { isPredicting = false }
         guard !preservingSuggestion else { return }
@@ -741,13 +769,14 @@ public final class CompletionController: ObservableObject {
         if suggestion != nil {
             // 수락 경로가 아니면 이 소멸은 거절이다 (편집·Esc·커서 이동).
             if !suppressDismissLog {
-                AcceptanceMetrics.log(.dismissed, mode: currentSuggestionMode ?? "?")
+                logSuggestion(.dismissed)
             }
             suggestion = nil
             suggestionDidChange?(nil)
         }
         suppressDismissLog = false
         currentSuggestionMode = nil
+        currentOpportunity = nil
     }
 
     private func runCompletion(
@@ -757,12 +786,20 @@ public final class CompletionController: ObservableObject {
         expected: Int
     ) async {
         // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
-        defer { if expected == generation, isPredicting { isPredicting = false } }
+        foregroundCompletionDidChange?(true)
+        defer {
+            if expected == generation {
+                if isPredicting { isPredicting = false }
+                foregroundCompletionDidChange?(false)
+            }
+        }
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을
         // 얹기만 하고, 지식 계산은 전부 백그라운드의 몫이다 (CLAUDE.md §2-2).
         let capturedIdentity = projectDocumentProvider?()?.identity
         let document = currentDocumentContext()
         let knowledge = knowledgeProvider?()
+        let originalNameAnchors = parameters.ghostContextMode == .rawWithNameAnchor
+            ? originalNameAnchorsProvider?() : nil
         // 토큰 카운터 (#43) — 로드된 모델이 있으면 예산을 토큰으로 접고, 없으면
         // 조립기가 현행 문자 상수를 쓴다 (동작 불변).
         let counter = await tokenCounter(for: parameters.modelID)
@@ -778,7 +815,9 @@ public final class CompletionController: ObservableObject {
             prefixStartUTF16: max(0, caretLocation - (prefix as NSString).length),
             style: parameters.promptStyle,
             tokenCounter: counter,
-            tokenBudget: parameters.maxPromptTokens
+            tokenBudget: parameters.maxPromptTokens,
+            contextMode: parameters.ghostContextMode,
+            originalNameAnchors: originalNameAnchors
         )
         // 인스펙터 갱신 — 이 요청이 실제로 쓰는 컨텍스트다 (생성 성패와 무관:
         // 무엇이 주입됐는지가 관심사다). 소속 문서·세대를 찍어 다른 작품 화면에서
@@ -810,7 +849,8 @@ public final class CompletionController: ObservableObject {
             guard expected == generation,
                 capturedIdentity == projectDocumentProvider?()?.identity
             else { return }
-            publishCompletion(completion, caretLocation: caretLocation, mode: mode)
+            publishCompletion(completion, caretLocation: caretLocation, mode: mode,
+                contextMode: parameters.ghostContextMode, modelID: parameters.modelID)
         } catch is CancellationError {
             // 새 입력으로 취소됨 — 정상 흐름.
         } catch {
@@ -823,7 +863,8 @@ public final class CompletionController: ObservableObject {
 
     /// Commit an owned engine result to the editor's acceptance lifecycle.
     func publishCompletion(
-        _ completion: CompletionEngine.Completion, caretLocation: Int, mode: String
+        _ completion: CompletionEngine.Completion, caretLocation: Int, mode: String,
+        contextMode: GhostContextMode = .current, modelID: String? = nil
     ) {
         markEngineReady()
         lastLatency = completion.totalTime
@@ -831,9 +872,17 @@ public final class CompletionController: ObservableObject {
         suggestion = completion.text
         suggestionAnchor = caretLocation
         currentSuggestionMode = mode
-        AcceptanceMetrics.log(
-            .shown, mode: mode,
-            latencyMs: Int(completion.totalTime * 1000))
+        currentOpportunity = AcceptanceMetrics.Opportunity(mode: mode, contextMode: contextMode,
+            latencyMs: Int(completion.totalTime * 1000),
+            firstChunkMs: completion.timeToFirstChunk.map { Int($0 * 1000) }, modelID: modelID)
+        logSuggestion(.shown)
         suggestionDidChange?(completion.text)
+    }
+    private func logSuggestion(_ event: AcceptanceMetrics.Event) {
+        if let currentOpportunity {
+            AcceptanceMetrics.log(event, opportunity: currentOpportunity, storageLocation: metricsStorageLocation)
+        } else {
+            AcceptanceMetrics.log(event, mode: currentSuggestionMode ?? "?", storageLocation: metricsStorageLocation)
+        }
     }
 }

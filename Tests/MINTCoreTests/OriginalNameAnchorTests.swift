@@ -2,6 +2,13 @@ import XCTest
 @testable import MINTCore
 
 final class OriginalNameAnchorTests: XCTestCase {
+    func testOversizedLatestOccurrenceCannotFallBackToAnOlderClaim() throws {
+        let id = UUID(), card = CharacterCard(name: "유정")
+        let body = "유정은 열쇠를 받았다.\n유정은 " + String(repeating: "긴 이야기 ", count: 90) + "끝났다.\n유정은"
+        let index = try OriginalNameAnchorIndex.make(body: body, documentID: id, characters: [card])
+        XCTAssertNil(index.latest(in: "유정은", startingAt: body.utf16.count - 3))
+    }
+
     func testLatestPriorOriginalSentenceIsExactAndCursorBounded() throws {
         let id = UUID(), card = CharacterCard(name: "유정")
         let body = "👩🏽‍💻 유정은 열쇠를 받았다. 유정에게 문을 맡겼다.\n유정은 기다린다.\n유정은 미래의 비밀을 안다."

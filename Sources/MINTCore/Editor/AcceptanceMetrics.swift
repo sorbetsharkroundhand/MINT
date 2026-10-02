@@ -12,7 +12,7 @@ import Foundation
 /// 아니다. 그래도 파일 IO는 전용 직렬 큐로 보내 메인을 안 막는다.
 public enum AcceptanceMetrics {
 
-    public enum Event: String, Sendable {
+    public enum Event: String, Codable, Sendable {
         case shown  // 고스트가 화면에 나타남
         case acceptedFull = "accepted_full"  // Tab 전체 수락
         case acceptedWord = "accepted_word"  // → 한 단어 수락 (단어마다 1건)
@@ -22,20 +22,52 @@ public enum AcceptanceMetrics {
     private static let queue = DispatchQueue(
         label: "mint.metrics", qos: .utility)
 
+    /// One displayed suggestion; decisions keep its original measured strategy.
+    public struct Opportunity: Sendable {
+        public let id = UUID()
+        public let mode: String
+        public let contextMode: GhostContextMode
+        public let latencyMs: Int
+        public let firstChunkMs: Int?
+        public let modelID: String?
+        public init(mode: String, contextMode: GhostContextMode, latencyMs: Int,
+                    firstChunkMs: Int?, modelID: String?) {
+            self.mode = mode; self.contextMode = contextMode; self.latencyMs = latencyMs
+            self.firstChunkMs = firstChunkMs; self.modelID = modelID
+        }
+    }
+    private struct Record: Encodable {
+        let ts: String
+        let event: Event
+        let mode: String
+        let latencyMs: Int?
+        let contextMode: GhostContextMode?
+        let opportunityID: UUID?
+        let firstChunkMs: Int?
+        let modelID: String?
+    }
+    public static func log(_ event: Event, opportunity: Opportunity,
+                           storageLocation: MintStorageLocation = .standard) {
+        append(Record(ts: ISO8601DateFormatter().string(from: .now), event: event,
+            mode: opportunity.mode, latencyMs: opportunity.latencyMs,
+            contextMode: opportunity.contextMode, opportunityID: opportunity.id,
+            firstChunkMs: opportunity.firstChunkMs, modelID: opportunity.modelID), to: storageLocation)
+    }
+
     /// 사건 한 줄 append — 실패는 조용히 버린다 (지표가 글쓰기를 방해하면 본말전도).
     public static func log(
         _ event: Event, mode: String, latencyMs: Int? = nil,
         storageLocation: MintStorageLocation = .standard
     ) {
-        let timestamp = ISO8601DateFormatter().string(from: .now)
-        var line = #"{"ts":"\#(timestamp)","event":"\#(event.rawValue)","mode":"\#(mode)""#
-        if let latencyMs { line += #","latencyMs":\#(latencyMs)"# }
-        line += "}\n"
-        // 비동기 블록엔 값 스냅샷을 넘긴다 — var 캡처는 동시성 검사의 경고 대상.
-        let payload = line
+        append(Record(ts: ISO8601DateFormatter().string(from: .now), event: event,
+            mode: mode, latencyMs: latencyMs, contextMode: nil, opportunityID: nil,
+            firstChunkMs: nil, modelID: nil), to: storageLocation)
+    }
+    private static func append(_ record: Record, to storageLocation: MintStorageLocation) {
         let url = storageLocation.metricsFileURL
         queue.async {
-            guard let data = payload.data(using: .utf8) else { return }
+            guard var data = try? JSONEncoder().encode(record) else { return }
+            data.append(0x0A)
             if !FileManager.default.fileExists(atPath: url.path) {
                 try? FileManager.default.createDirectory(
                     at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -49,6 +81,13 @@ public enum AcceptanceMetrics {
         }
     }
 
+    /// Finish queued local writes before a deterministic read/export.
+    public static func flush() async {
+        await withCheckedContinuation { continuation in
+            queue.async { continuation.resume() }
+        }
+    }
+
     // MARK: - 열람·삭제 (Settings, PLAN §13 "열람·삭제 가능")
 
     public struct Summary: Equatable, Sendable {
@@ -58,6 +97,7 @@ public enum AcceptanceMetrics {
         public var dismissed = 0
         /// 모드별 (노출, 전체 수락) — story가 fast보다 나은지가 M6→M7 이관 질문.
         public var byMode: [String: (shown: Int, accepted: Int)] = [:]
+        public var byContextMode: [GhostContextMode: ContextStats] = [:]
 
         /// 전체 수락률 (%) — 노출 대비 Tab 수락. 단어 수락은 부분 신호라 따로 본다.
         public var acceptanceRate: Int {
@@ -68,6 +108,27 @@ public enum AcceptanceMetrics {
             lhs.shown == rhs.shown && lhs.acceptedFull == rhs.acceptedFull
                 && lhs.acceptedWord == rhs.acceptedWord && lhs.dismissed == rhs.dismissed
                 && lhs.byMode.keys.sorted() == rhs.byMode.keys.sorted()
+                && lhs.byContextMode == rhs.byContextMode
+        }
+    }
+
+    public struct ContextStats: Equatable, Sendable {
+        public var shown = 0, acceptedFull = 0, acceptedWord = 0, dismissed = 0
+        private var latencies: [Int] = []
+        public var latencyP50Ms: Int? {
+            guard !latencies.isEmpty else { return nil }
+            let values = latencies.sorted()
+            return values[(values.count - 1) / 2]
+        }
+        fileprivate mutating func note(_ event: Event, latency: Int?) {
+            switch event {
+            case .shown:
+                shown += 1
+                if let latency, latency >= 0 { latencies.append(latency) }
+            case .acceptedFull: acceptedFull += 1
+            case .acceptedWord: acceptedWord += 1
+            case .dismissed: dismissed += 1
+            }
         }
     }
 
@@ -97,6 +158,11 @@ public enum AcceptanceMetrics {
             case .dismissed: summary.dismissed += 1
             }
             summary.byMode[mode] = modeStats
+            if let raw = json["contextMode"] as? String, let contextMode = GhostContextMode(rawValue: raw) {
+                var stats = summary.byContextMode[contextMode] ?? ContextStats()
+                stats.note(event, latency: json["latencyMs"] as? Int)
+                summary.byContextMode[contextMode] = stats
+            }
         }
         return summary
     }

@@ -170,6 +170,7 @@ public struct ContentView: View {
         completion.documentContextProvider = nil
         completion.projectDocumentProvider = { [weak session] in session?.selectedDocumentSnapshot }
         indexer.attach(documentProvider: { [weak session] in session?.selectedDocumentSnapshot })
+        connectGhostContext(completion: completion, indexer: indexer)
         completion.knowledgeProvider = { [weak session, weak indexer] in
             guard let identity = session?.runtimeIdentity,
                 indexer?.snapshotRuntimeIdentity == identity else { return nil }
@@ -185,6 +186,17 @@ public struct ContentView: View {
                 let writer = try? writerReader.read(snapshot) else { return [] }
             return Set(writer.recordedConversations.map(\.contentHash))
         }
+    }
+
+    static func connectGhostContext(completion: CompletionController, indexer: BackgroundIndexer) {
+        completion.originalNameAnchorsProvider = { [weak indexer] in indexer?.originalNameAnchors }
+        completion.foregroundCompletionDidChange = { [weak indexer] busy in
+            indexer?.setForegroundCompletionBusy(busy)
+        }
+        completion.contextConfigurationDidChange = { [weak completion, weak indexer] in
+            indexer?.originalNameAnchorsEnabled = completion?.usesOriginalNameAnchors ?? false
+        }
+        completion.contextConfigurationDidChange?()
     }
 
     private var preferredScheme: ColorScheme? {
