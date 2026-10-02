@@ -8,7 +8,9 @@ struct MINTApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     // Completion, background preparation and pressure release own this same engine.
     static let sharedEngine = CompletionEngine()
-    @StateObject private var completion = CompletionController(engine: MINTApp.sharedEngine)
+    // Swift 6.1 crashes when lowering these defaults inside StateObject's autoclosure.
+    @StateObject private var completion = CompletionController(
+        settings: .shared, engine: MINTApp.sharedEngine, metricsStorageLocation: .standard)
     @StateObject private var livingMargin = LivingMarginModel()
     private static let projectStore = ProjectStore(root: MintStorageLocation.standard.projectsDirectory)
     private static let knowledgeSidecars = KnowledgeSidecarRepository(
