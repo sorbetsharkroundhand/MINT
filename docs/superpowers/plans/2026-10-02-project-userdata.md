@@ -31,7 +31,7 @@ Interfaces: WritingProject.userData: [String: Data] (default empty); ProjectMani
 ## Task 2: Scoped writer state and migration
 - [x] Generic session/snapshot boundary delivered separately with stale-runtime and in-flight flush coverage.
 - [x] Domain codec and archived-source migration delivered separately; pre-adoption app wiring follows.
-Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, LegacyEntryAdapter.swift, MINTApp.swift, writer tests.
+Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, MINTApp.swift, writer tests.
 Interfaces: updateUserData(_ data: Data?, for key: String, identity: ProjectRuntimeIdentity) throws; WriterDocumentData codec/key(documentID:); injected pre-adoption preparation closure returning verified WritingProject.
 - [x] Add failing session generation/flush/relaunch/stale-A/B and typed legacy migration fixtures.
 - [x] Implement scoped in-memory mutations and writer codec; migrate archived known fields only for absent records with a durable migration marker so deletes stay deleted.
@@ -41,7 +41,9 @@ Interfaces: updateUserData(_ data: Data?, for key: String, identity: ProjectRunt
 ## Task 3: Prepared consumers and existing tools
 Files: project snapshot, CompletionController/BackgroundIndexer adapters, ContentView, WorkspaceShellView, minimal project writer tool and tests.
 Interfaces: WriterDocumentData loaded from snapshot opaque bytes; writer mutations use captured runtime identity and existing session flush.
-- [ ] Add failing prepared-context/character editing/context control/durable action isolation tests.
-- [ ] Connect genre/cards/overrides/rejected names/recorded conversations to project readers, without disk reads or LLM calls in hot paths.
-- [ ] Expose minimal editing/access in existing tool locations; keep legacy persistence unchanged and style separate.
-- [ ] Run full/build/bench and applicable native app smokes; review, push/attach Draft PRs and record remaining owner/#151 evidence.
+- [x] Add failing prepared-context/character editing/context control/durable action isolation tests.
+- [x] Connect genre/cards/overrides/rejected names/recorded conversations to project readers, without disk reads or LLM calls in hot paths.
+- [x] Expose minimal editing/access in existing tool locations; keep legacy persistence unchanged and style separate.
+- [x] Run full/build/bench and applicable native app smokes; review, push/attach Draft PRs and record remaining owner/#151 evidence.
+
+**Deferred evidence:** Native UI smoke requires an unlocked macOS session and was not verified here. The user authorized later batch testing. #151 backup/restore integration follows its #183/#184 children; owner meaning checks and CI remain pending. New schema-2 writes intentionally reject older schema-1 apps.

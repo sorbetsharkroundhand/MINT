@@ -118,6 +118,11 @@ if [ "${1:-}" = "--verify-project-state" ]; then
     exit
 fi
 
+if /usr/sbin/ioreg -n Root -d1 | /usr/bin/grep -q '"CGSSessionScreenIsLocked"=Yes'; then
+    echo "UI smoke requires an unlocked macOS session; no UI verification performed." >&2
+    exit 1
+fi
+
 SOURCE_APP="$PWD/build/MINT.app"
 [ -x "$SOURCE_APP/Contents/MacOS/MINT" ] || {
     echo "✗ 먼저 앱 번들을 빌드하세요" >&2
@@ -208,6 +213,9 @@ PROJECT_BODY="project-$TOKEN"
 EDITED_BODY="edited-$TOKEN"
 NEW_BODY="new-$TOKEN"
 PERSISTED_BODY="$EDITED_BODY$PROJECT_BODY"
+WRITER_GENRE="FixtureGenre-$TOKEN"
+WRITER_NAME="FixtureCharacter-$TOKEN"
+WRITER_NOTE="FixtureNote-$TOKEN"
 PROJECT_HASH=$(printf '%s' "$PROJECT_BODY" | shasum -a 256 | awk '{print $1}')
 PROJECT_ROOT="$SMOKE_HOME/Documents/MINT/Projects"
 PROJECT_DIRECTORY="$PROJECT_ROOT/$PROJECT_ID"
@@ -255,7 +263,30 @@ on run argv
         if unix id of targetProcess is not targetPID then error "Accessibility process resolved to another app"
         if not (exists window 1 of targetProcess) then error "메인 창 없음"
         set rootElement to window 1 of targetProcess
-        if operation is "press" or operation is "present" or operation is "absent" then
+        if operation is "field-set" or operation is "field-equals" or operation is "field-absent" then
+            set targetElement to my findElementContaining(rootElement, "AXIdentifier", expectedValue, 30)
+            if operation is "field-absent" then
+                if targetElement is not missing value then error "Unexpected writer field: " & expectedValue
+            else
+                if targetElement is missing value then error "Writer field missing: " & expectedValue
+                set fieldValue to item 4 of argv
+                if operation is "field-set" then
+                    set frontmost of targetProcess to true
+                    set value of attribute "AXFocused" of targetElement to true
+                    tell targetProcess
+                        keystroke "a" using command down
+                        if fieldValue is "" then
+                            key code 51
+                        else
+                            keystroke fieldValue
+                        end if
+                    end tell
+                    delay 0.6
+                else if (value of targetElement as text) is not fieldValue then
+                    error "Writer field mismatch: " & expectedValue
+                end if
+            end if
+        else if operation is "press" or operation is "present" or operation is "absent" then
             set targetElement to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
             if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
@@ -339,7 +370,7 @@ JXA
 
 ui() {
     owned_pid || fail "격리 실행 파일 PID 확인 실패"
-    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" >/dev/null
+    osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" "${3:-}" >/dev/null
     case "$1" in press|resize) sleep 0.3 ;; esac
 }
 
@@ -377,6 +408,10 @@ ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
 ui press "스토리 바이블"
+ui field-set "mint.writer.genre" "$WRITER_GENRE"
+ui press "mint.writer.add-character"
+ui field-set "mint.writer.character.name." "$WRITER_NAME"
+ui field-set "mint.writer.character.note." "$WRITER_NOTE"
 ui press "문서로 돌아가기"
 ui focused
 ui resize 860
@@ -391,6 +426,10 @@ ui press "새 문서"
 wait_ui equals ""
 ui type "$NEW_BODY"
 wait_ui equals "$NEW_BODY"
+ui press "스토리 바이블"
+ui field-equals "mint.writer.genre" ""
+ui field-absent "mint.writer.character.name."
+ui press "문서로 돌아가기"
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 # Address the generated document by its persisted identity, not a localized AX label.
@@ -403,15 +442,39 @@ verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
 assert_isolated_project_mode
 
+writer_record_path() {
+    writer_key="writer-$(printf '%s' "$DOCUMENT_ID" | tr '[:upper:]' '[:lower:]')"
+    relative=$(plutil -extract "userData.$writer_key.relativePath" raw -o - "$PROJECT_DIRECTORY/project.json") \
+        || fail "Writer record missing from project manifest"
+    case "$relative" in UserData/records/*/*.data) ;; *) fail "Writer record outside UserData" ;; esac
+    printf '%s/%s' "$PROJECT_DIRECTORY" "$relative"
+}
+WRITER_RECORD=$(writer_record_path)
+[ "$(plutil -extract genre raw -o - "$WRITER_RECORD")" = "$WRITER_GENRE" ] || fail "Writer genre was not persisted"
+[ "$(plutil -extract characters.0.name raw -o - "$WRITER_RECORD")" = "$WRITER_NAME" ] || fail "Writer character was not persisted"
+[ "$(plutil -extract characters.0.note raw -o - "$WRITER_RECORD")" = "$WRITER_NOTE" ] || fail "Writer note was not persisted"
+
 launch
 wait_ui equals "$NEW_BODY"
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
+ui press "스토리 바이블"
+ui field-equals "mint.writer.genre" "$WRITER_GENRE"
+ui field-equals "mint.writer.character.name." "$WRITER_NAME"
+ui field-equals "mint.writer.character.note." "$WRITER_NOTE"
+ui press "인물 삭제"
+ui field-absent "mint.writer.character.name."
+ui field-set "mint.writer.genre" ""
+ui press "문서로 돌아가기"
+ui focused
 terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
 assert_isolated_project_mode
 check_original
+WRITER_RECORD=$(writer_record_path)
+if plutil -extract characters.0 json -o - "$WRITER_RECORD" >/dev/null 2>&1; then fail "Deleted character survived"; fi
+if plutil -extract genre raw -o - "$WRITER_RECORD" >/dev/null 2>&1; then fail "Cleared genre survived"; fi
 
 PASSED=1
-echo "✓ UI 스모크 통과 — 프로젝트 문서 전환·생성 · 좁은/넓은 창 · 포커스 복원 · 재실행 · manifest 검증"
+echo "✓ UI 스모크 통과 — 문서 전환·생성 · 작가 설정 편집·삭제·재실행 · 포커스 복원 · manifest 검증"

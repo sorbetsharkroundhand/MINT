@@ -420,6 +420,11 @@ struct WorkspaceSurface: View {
                                 query: jump.query)
                         },
                         onAction: nil)
+                } else if let selectedSection = SidebarSection(rawValue: section),
+                    [.bible, .narrative, .context].contains(selectedSection) {
+                    ProjectWriterToolsView(session: projectSession, completion: completion,
+                        editorRequests: editorRequests, section: selectedSection, theme: theme)
+                        .id(projectSession.runtimeIdentity?.key)
                 } else {
                     ProjectToolUnavailableView(theme: theme)
                 }
