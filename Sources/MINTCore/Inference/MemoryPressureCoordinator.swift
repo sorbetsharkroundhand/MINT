@@ -72,10 +72,13 @@ public final class MemoryPressureCoordinator {
         // Allow an admitted unload to drain. Stopped finalizers cannot reopen work.
     }
 
+    /// Termination may stop event delivery, but must still drain an admitted release.
+    public func waitForRelease() async { await releaseTask?.value }
+
     public func handle(_ next: MemoryPressureLevel) {
         guard active, next != level else { return }
         level = next
-        backgroundPause(next != .normal)
+        backgroundPause(next != .normal || releaseTask != nil)
         if next == .critical {
             setCompletionPaused(true)
             guard releaseTask == nil else { return }
@@ -85,6 +88,7 @@ public final class MemoryPressureCoordinator {
                 catch { if self.active { self.releaseFailed(error) } }
                 self.releaseTask = nil
                 guard self.active else { return }
+                if self.level == .normal { self.backgroundPause(false) }
                 self.setCompletionPaused(self.level == .critical)
             }
         } else {

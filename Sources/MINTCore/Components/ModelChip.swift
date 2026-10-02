@@ -88,6 +88,7 @@ struct ModelChip: View {
                 if case .failed = completion.engineState {
                     theme.sepC.frame(height: 1).padding(.vertical, 4)
                     Button("모델 다시 로드") { completion.retryEngineLoad() }
+                        .disabled(completion.isMemoryPressurePaused)
                         .buttonStyle(.plain)
                         .font(MintFonts.uiFont(12, .medium))
                         .foregroundStyle(theme.blueC)
@@ -100,6 +101,11 @@ struct ModelChip: View {
                 Text("사용 가능한 모델이 없습니다. 원고 편집은 계속할 수 있습니다.")
                     .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
                     .padding(.horizontal, 16).padding(.vertical, 10)
+            }
+            if completion.isMemoryPressurePaused {
+                Text(CompletionController.memoryPressureMessage)
+                    .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
+                    .padding(.horizontal, 16).padding(.vertical, 8)
             }
             if let error = completion.modelOperationError {
                 Text(error).font(MintFonts.uiFont(11)).foregroundStyle(theme.dangerC)
@@ -375,6 +381,7 @@ struct ModelChip: View {
     }
 
     private var stateText: String {
+        if completion.isMemoryPressurePaused { return "메모리 부족" }
         if completion.isManagingModel { return "모델 변경 중" }
         if !settings.autocompleteEnabled { return "꺼짐" }
         if completion.isPredicting { return "예측 중" }
@@ -388,6 +395,7 @@ struct ModelChip: View {
     }
 
     private var dotColor: Color {
+        if completion.isMemoryPressurePaused { return theme.warningC }
         if !settings.autocompleteEnabled { return theme.ink3C }
         return switch completion.engineState {
         case .idle: theme.ink3C
@@ -399,6 +407,7 @@ struct ModelChip: View {
 
     /// 상태점의 의미를 텍스트로 — 색만 보고 판단하지 않게 (#59-3).
     fileprivate var engineStateAXValue: String {
+        if completion.isMemoryPressurePaused { return CompletionController.memoryPressureMessage }
         if !settings.autocompleteEnabled { return "자동완성 꺼짐" }
         switch completion.engineState {
         case .idle: return "대기"

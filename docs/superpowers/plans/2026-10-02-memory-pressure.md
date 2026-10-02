@@ -9,7 +9,7 @@ Inline execution and author review follow the user's no-subagent instruction.
 - [x] 2. Wire background pause gates and completion cancellation/release lifecycle.
   Cover current ownership, no automatic retry/reload, preference/data retention,
   source preparation and load refusal. Reuse #177 policy; keep editor/session generic.
-- [ ] 3. Start/stop the monitor with the real app runtime and expose temporary state.
+- [x] 3. Start/stop the monitor with the real app runtime and expose temporary state.
   Verify integrated local build/full suite/bench and appropriate isolated launch;
   defer real-device pressure/CI/owner evidence, then continue #18.
 
