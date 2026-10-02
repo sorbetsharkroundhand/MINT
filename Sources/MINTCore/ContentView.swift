@@ -280,15 +280,21 @@ struct EditorPane: View {
                         guard let catalog = projectSession.assetCatalog else { throw ProjectSessionError.staleRuntime }
                         return catalog
                     },
-                    onEditorWindowChange: { [weak projectSession, weak editorBridge] view in
+                    onEditorWindowChange: { [weak projectSession, weak editorBridge, weak editorRequests] view in
                         guard let editor = view as? BlockTextView else { return }
                         if view.window != nil {
                             editorBridge?.editor = editor
+                            editorRequests?.nativeEditor = editor
+                            editorRequests?.nativeEditorKey = projectSession?.runtimeIdentity?.key
                             // Read the live gate even if this representable update was queued earlier.
                             editor.isEditable = projectSession?.isEditorEditable == true
                         } else if editorBridge?.editor === editor {
                             editorBridge?.editor = nil
+                            if editorRequests?.nativeEditor === editor { editorRequests?.nativeEditor = nil }
                         }
+                    },
+                    onSourceNavigation: { [weak editorRequests] succeeded, jump in
+                        editorRequests?.didNavigateSource(succeeded, jump: jump)
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
