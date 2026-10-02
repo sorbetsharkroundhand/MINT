@@ -33,14 +33,24 @@ public struct DocumentContext: Sendable, Equatable {
 /// 전제로 한다 (swift-transformers PreTrainedTokenizer의 불변 어휘 구조).
 public struct TokenCounter: @unchecked Sendable {
     private let impl: @Sendable (String) -> Int
+    private let promptCost: (@Sendable (AssembledPrompt) -> Int)?
 
-    public init(_ impl: @escaping @Sendable (String) -> Int) {
+    public init(_ impl: @escaping @Sendable (String) -> Int,
+                promptCost: (@Sendable (AssembledPrompt) -> Int)? = nil) {
         self.impl = impl
+        self.promptCost = promptCost
     }
 
     /// 문자열의 모델 토큰 수.
     public func count(_ text: String) -> Int {
         impl(text)
+    }
+    public func count(_ prompt: AssembledPrompt) -> Int {
+        if let promptCost { return promptCost(prompt) }
+        switch prompt {
+        case .continuation(let text): return impl(text)
+        case .instruct(let system, let user): return impl(system) + impl(user)
+        }
     }
 }
 

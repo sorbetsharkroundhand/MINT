@@ -90,7 +90,8 @@ public struct OriginalNameAnchorIndex: Sendable, Equatable {
         guard low > 0 else { return nil }
         let last = candidates[low - 1]
         // Never substitute an older sentence when the latest mention overlaps C.
-        return last.utf16Range.upperBound <= windowStart ? last : nil
+        return last.utf16Range.upperBound <= windowStart && last.evidence.quote.utf16.count <= 500
+            && !last.evidence.quote.hasPrefix("#") ? last : nil
     }
 
     private static func extract(_ text: Substring, names: [Name]) throws -> [Relative] {
@@ -99,7 +100,7 @@ public struct OriginalNameAnchorIndex: Sendable, Equatable {
             try Task.checkCancellation()
             let raw = text[piece]
             let quote = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !quote.isEmpty, !quote.hasPrefix("#"), quote.utf16.count <= 500,
+            guard !quote.isEmpty,
                 let range = raw.range(of: quote) else { continue }
             let offset = text[..<range.lowerBound].utf16.count
             for match in matches(quote, names: names) {

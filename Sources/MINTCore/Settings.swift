@@ -92,6 +92,7 @@ public struct ModelChoice: Identifiable, Sendable {
 public struct CompletionParameters: Sendable, Equatable {
     public var modelID: String
     public var promptStyle: PromptStyle
+    public var ghostContextMode: GhostContextMode
     /// 생성 토큰 상한 — 단어/구 단위 제안 + 저지연 (PLAN §10, ~8–16).
     public var maxTokens: Int
     /// 낮을수록 결정적 — 자동완성은 일관성이 중요.
@@ -116,10 +117,12 @@ public struct CompletionParameters: Sendable, Equatable {
         topP: Double = 0.9,
         maxPromptTokens: Int = 3_072,
         kvCacheEnabled: Bool = true,
-        stopAtUtteranceEnd: Bool = false
+        stopAtUtteranceEnd: Bool = false,
+        ghostContextMode: GhostContextMode = .current
     ) {
         self.modelID = modelID
         self.promptStyle = promptStyle
+        self.ghostContextMode = ghostContextMode
         self.maxTokens = maxTokens
         self.temperature = temperature
         self.topP = topP
@@ -192,6 +195,7 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
         static let authorization = "completion.authorization"
         static let modelID = "completion.modelID"
         static let promptStyle = "completion.promptStyle"
+        static let ghostContextMode = "completion.ghostContextMode"
         static let debounceMilliseconds = "completion.debounceMilliseconds"
         static let maxTokens = "completion.maxTokens"
         static let temperature = "completion.temperature"
@@ -243,6 +247,9 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
     @Published public var novelContextCharacters: Int {
         didSet { defaults.set(novelContextCharacters, forKey: Keys.novelContextCharacters) }
     }
+    @Published public var ghostContextMode: GhostContextMode {
+        didSet { defaults.set(ghostContextMode.rawValue, forKey: Keys.ghostContextMode) }
+    }
     /// KV 프리필 재사용 (PLAN §12) — 이상 동작 시 사용자가 끌 수 있는 킬 스위치.
     @Published public var kvCacheEnabled: Bool {
         didSet { defaults.set(kvCacheEnabled, forKey: Keys.kvCache) }
@@ -290,6 +297,8 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
         self.promptStyle =
             defaults.string(forKey: Keys.promptStyle)
             .flatMap(PromptStyle.init(rawValue:)) ?? base.promptStyle
+        self.ghostContextMode = defaults.string(forKey: Keys.ghostContextMode)
+            .flatMap(GhostContextMode.init(rawValue:)) ?? .current
         self.debounceMilliseconds =
             defaults.object(forKey: Keys.debounceMilliseconds) as? Int
             ?? Self.defaultDebounceMilliseconds
@@ -328,7 +337,8 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
             maxTokens: maxTokens,
             temperature: temperature,
             topP: topP,
-            kvCacheEnabled: kvCacheEnabled
+            kvCacheEnabled: kvCacheEnabled,
+            ghostContextMode: ghostContextMode
         )
     }
 }
