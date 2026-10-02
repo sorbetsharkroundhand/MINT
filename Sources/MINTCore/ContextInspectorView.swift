@@ -34,11 +34,10 @@ struct ContextInspectorView: View {
             }
             Divider()
             if let report = completion.lastContextReport,
-                !report.items.isEmpty,
                 report.entryID == nil || report.entryID == store.activeID {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("최근 예측이 참고한 정보예요. 최근 원문(C 창)은 항상 함께 실려요.")
+                        Text("\(report.contextMode.label) · 최근 제안이 참고한 정보예요. 커서 앞 원문을 함께 읽어요.")
                             .font(MintFonts.uiFont(10))
                             .foregroundStyle(theme.ink3C)
                             .fixedSize(horizontal: false, vertical: true)

@@ -61,6 +61,7 @@ public struct SettingsView: View {
         // 프리셋 적용 등 외부 경로로 모델이 바뀌면 초안·오류를 따라 맞춘다.
         .onChange(of: settings.modelID) { _, _ in syncModelIDDraft() }
         .task {
+            await AcceptanceMetrics.flush()
             // 파일 집계는 백그라운드에서 — 설정 창이 뜨는 프레임을 안 막는다.
             metrics = await Task.detached(priority: .utility) {
                 AcceptanceMetrics.summarize()
@@ -318,6 +319,15 @@ public struct SettingsView: View {
             }
 
             Section("이해 범위") {
+                Picker("제안 문맥 비교", selection: Binding(get: { settings.ghostContextMode }, set: { mode in
+                    if let completion { completion.changeContextMode(to: mode) }
+                    else { settings.ghostContextMode = mode }
+                })) {
+                    ForEach(GhostContextMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                caption("A/B는 요약을 넣지 않아요. 모델이 준비되면 원문 범위를 넓히되, 모델의 한도 안에서 읽어요. 기본은 C예요.")
                 Stepper(
                     "소설 컨텍스트: \(settings.novelContextCharacters)자",
                     value: $settings.novelContextCharacters,
@@ -391,6 +401,14 @@ public struct SettingsView: View {
                             value: "노출 \(stats.shown) · 수락 \(stats.accepted)")
                         .font(.caption)
                     }
+                    ForEach(GhostContextMode.allCases.filter { metrics.byContextMode[$0] != nil }, id: \.self) { mode in
+                        let stats = metrics.byContextMode[mode]!
+                        LabeledContent(mode.label, value: "노출 \(stats.shown) · 수락 \(stats.acceptedFull) · 거절 \(stats.dismissed)")
+                        if let latency = stats.latencyP50Ms {
+                            LabeledContent("생성 지연 중위값", value: "\(latency)ms").font(.caption)
+                        }
+                    }
+                    caption("수락과 지연을 함께 살펴보세요. 같은 모델의 결과끼리 비교해야 해요. 예전 기록에는 A/B/C 구분이 없어요.")
                 }
                 Button("지표 삭제") {
                     AcceptanceMetrics.reset()
