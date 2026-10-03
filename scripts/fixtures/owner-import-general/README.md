@@ -20,8 +20,7 @@ When preparing an owner test kit, copy this `entries.json` verbatim into its
 Refresh the kit's fixture hash after copying. An existing developer app containing
 the import coordinator can use the corrected fixture without rebuilding.
 
-For the later editing-position test, click inside existing text without editing,
-switch documents and reopen normally; separately repeat with a text selection.
-Saving a position must not require Backspace, an inserted/deleted character, or
-forcing an IME composition to finish. Report composition and position restoration
-as separate observations.
+The next owner check concerns typing Undo granularity (#191), not persisted caret
+position. Type the sample normally, then inspect one Undo and one Redo. Do not use
+Backspace to force a typing boundary. Whole-sequence deletion is a reported UX
+failure; this fixture repair does not change editor Undo behavior.
