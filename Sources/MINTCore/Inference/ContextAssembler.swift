@@ -72,6 +72,7 @@ public struct ContextReport: Sendable, Equatable {
             case flowEvent = "흐름 사건"
             case dialogue = "대화 모드"
             case relation = "관계"
+            case originalNameAnchor = "이전 원문"
         }
 
         public var kind: Kind
@@ -86,10 +87,11 @@ public struct ContextReport: Sendable, Equatable {
         public var stableKey: String
         /// 사용자가 고정(Pin)한 항목인가 — 인스펙터 표시용.
         public var pinned: Bool
+        public var evidence: EvidenceAnchor?
 
         public init(
             kind: Kind, text: String, jumpQuery: String? = nil, jumpUTF16: Int? = nil,
-            stableKey: String = "", pinned: Bool = false
+            stableKey: String = "", pinned: Bool = false, evidence: EvidenceAnchor? = nil
         ) {
             self.kind = kind
             self.text = text
@@ -97,6 +99,7 @@ public struct ContextReport: Sendable, Equatable {
             self.jumpUTF16 = jumpUTF16
             self.stableKey = stableKey
             self.pinned = pinned
+            self.evidence = evidence
         }
     }
 
@@ -195,11 +198,13 @@ public enum ContextAssembler {
         knowledge: KnowledgeSnapshot? = nil,
         prefixStartUTF16: Int = 0,
         style: PromptStyle,
-        contextMode: GhostContextMode = .current
+        contextMode: GhostContextMode = .current,
+        originalNameAnchors: OriginalNameAnchorIndex? = nil
     ) -> AssembledPrompt {
         assembleWithReport(
             prefix: prefix, document: document, knowledge: knowledge,
-            prefixStartUTF16: prefixStartUTF16, style: style, contextMode: contextMode
+            prefixStartUTF16: prefixStartUTF16, style: style, contextMode: contextMode,
+            originalNameAnchors: originalNameAnchors
         ).prompt
     }
 
@@ -237,11 +242,13 @@ public enum ContextAssembler {
         style: PromptStyle,
         tokenCounter: TokenCounter? = nil,
         tokenBudget: Int? = nil,
-        contextMode: GhostContextMode = .current
+        contextMode: GhostContextMode = .current,
+        originalNameAnchors: OriginalNameAnchorIndex? = nil
     ) -> (prompt: AssembledPrompt, report: ContextReport) {
         if contextMode != .current {
             return assembleRaw(prefix: prefix, prefixStartUTF16: prefixStartUTF16,
-                style: style, mode: contextMode, counter: tokenCounter, budget: tokenBudget)
+                style: style, mode: contextMode, counter: tokenCounter, budget: tokenBudget,
+                document: document, knowledge: knowledge, originalNameAnchors: originalNameAnchors)
         }
         guard let counter = tokenCounter else {
             // 현행 문자 예산 경로 — 동작 불변 (#43).
