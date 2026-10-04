@@ -2676,10 +2676,18 @@ final class BlockTextView: NSTextView {
 
     // MARK: 이미지 삽입 (붙여넣기 · 드롭 · 파일 선택)
 
-    /// 클립보드에 이미지가 있으면 이미지 블록으로 붙여넣고, 아니면 기본 붙여넣기.
-    override func paste(_ sender: Any?) {
-        if insertImages(from: NSPasteboard.general) { return }
-        super.paste(sender)
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        // Plain-text NSTextView otherwise disables Paste for bitmap-only clipboards
+        // before our managed-image paste handler can run.
+        [.mintImageObject, .png, .tiff, .init(UTType.jpeg.identifier)] + super.readablePasteboardTypes
+    }
+
+    /// Native Paste and pasteboard reads share the managed image path. Plain text
+    /// still uses NSTextView's normal insertion and undo behavior.
+    override func readSelection(from pasteboard: NSPasteboard) -> Bool {
+        guard isEditable else { return false }
+        if insertImages(from: pasteboard) { return true }
+        return super.readSelection(from: pasteboard)
     }
 
     /// 툴바 버튼용 — 리스폰더 체인(NSApp.sendAction)으로 도달한다.

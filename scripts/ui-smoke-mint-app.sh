@@ -151,6 +151,15 @@ PID=""
 PASSED=""
 SMOKE_BUNDLE_ID=""
 PREFERENCES_OWNED=""
+CLIPBOARD_PID=""
+
+restore_clipboard() {
+    if [ -n "$CLIPBOARD_PID" ]; then
+        kill -TERM "$CLIPBOARD_PID" 2>/dev/null || true
+        wait "$CLIPBOARD_PID" 2>/dev/null || true
+        CLIPBOARD_PID=""
+    fi
+}
 
 fail() { echo "✗ $1" >&2; exit 1; }
 owned_pid() {
@@ -168,6 +177,7 @@ check_original() {
 cleanup() {
     status=$?
     trap - 0
+    restore_clipboard
     [ -n "$PID" ] || PID=$(find_pid)
     if owned_pid; then kill -9 "$PID" 2>/dev/null || true; fi
     if [ -n "$PREFERENCES_OWNED" ]; then
@@ -329,6 +339,14 @@ on run argv
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             else if operation is "equals" then
                 if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+            else if operation is "image-body" then
+                set imageBody to value of editor as text
+                if imageBody does not start with "![](images/" then error "Managed image missing"
+                return imageBody & "|"
+            else if operation is "paste" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                tell targetProcess to keystroke "v" using command down
             else if operation is "undo" or operation is "redo" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
@@ -492,5 +510,39 @@ WRITER_RECORD=$(writer_record_path)
 if plutil -extract characters.0 json -o - "$WRITER_RECORD" >/dev/null 2>&1; then fail "Deleted character survived"; fi
 if plutil -extract genre raw -o - "$WRITER_RECORD" >/dev/null 2>&1; then fail "Cleared genre survived"; fi
 
+# A PNG-only system clipboard must enable the standard Paste command. No image
+# file URL or text flavor is offered, and the original clipboard stays in memory.
+launch
+ui press "새 문서"
+wait_ui equals ""
+swift scripts/fixtures/clipboard-image.swift "$SMOKE_ROOT/clipboard-ready" > "$SMOKE_ROOT/clipboard.log" 2>&1 &
+CLIPBOARD_PID=$!
+for attempt in $(seq 1 30); do
+    [ -f "$SMOKE_ROOT/clipboard-ready" ] && break
+    kill -0 "$CLIPBOARD_PID" 2>/dev/null || fail "Clipboard fixture failed"
+    sleep 0.5
+done
+[ -f "$SMOKE_ROOT/clipboard-ready" ] || fail "Clipboard fixture did not start"
+ui paste ""
+wait_ui image-body "" >/dev/null
+restore_clipboard
+IMAGE_BODY=$(ui image-body "")
+IMAGE_BODY=${IMAGE_BODY%|}
+ui undo ""
+wait_ui equals ""
+ui redo ""
+wait_ui equals "$IMAGE_BODY"
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
+ASSET_PATH=$(plutil -extract assets.0.file.relativePath raw -o - "$PROJECT_DIRECTORY/project.json")
+ASSET_HASH=$(plutil -extract assets.0.file.contentHash raw -o - "$PROJECT_DIRECTORY/project.json")
+case "$ASSET_PATH" in Assets/*) ;; *) fail "Image was not stored as a managed asset" ;; esac
+[ "$(file_hash "$PROJECT_DIRECTORY/$ASSET_PATH")" = "$ASSET_HASH" ] || fail "Pasted image hash mismatch"
+launch
+wait_ui equals "$IMAGE_BODY"
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
+check_original
+
 PASSED=1
-echo "✓ UI 스모크 통과 — 문서 전환·생성 · 작가 설정 편집·삭제·재실행 · 포커스 복원 · manifest 검증"
+echo "✓ UI 스모크 통과 — 문서 전환·생성 · 작가 설정 · PNG 붙여넣기·Undo·Redo·재실행 · 포커스 · manifest 검증"
