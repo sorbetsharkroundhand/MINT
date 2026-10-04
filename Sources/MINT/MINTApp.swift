@@ -95,6 +95,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
+        // Explicit archive smoke only; no model selection, download or AI authorization.
+        if ProcessInfo.processInfo.environment["MINT_VERIFY_MLX_RESOURCES"] == "1" {
+            let root = MintStorageLocation.standard.rootDirectory
+            Task.detached(priority: .utility) {
+                let result: String
+                do {
+                    let library = try MLXRuntimeResources.initialize()
+                    result = "PASS\n\(library.path)\nMLX GPU result: 42\n"
+                } catch { result = "FAIL\n\(error.localizedDescription)\n" }
+                do {
+                    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+                    try Data(result.utf8).write(to: root.appendingPathComponent("mlx-runtime-verification.txt"), options: .atomic)
+                } catch { NSLog("MLX archive diagnostic could not save its result: %@", error.localizedDescription) }
+            }
+        }
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
