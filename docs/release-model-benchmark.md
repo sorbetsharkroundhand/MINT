@@ -20,4 +20,14 @@ Empty/missing measurements encode JSON null, not a perfect zero. Invalid/nonfini
 
 Contamination is a fixed pattern counter, not language identification. `hanCharacters` counts scalars in U+3400–4DBF, U+4E00–9FFF, U+F900–FAFF, U+20000–2FA1F and U+30000–323AF. Intentional Han text also counts; the counter does not distinguish Korean Hanja from Chinese/Japanese text. `reasoningTags` counts case-insensitive opening/closing `think`, `analysis`, `reasoning` tags. `chatBoilerplate` counts nonoverlapping, case-insensitive occurrences of `<|im_start|>assistant`, `<|assistant|>`, `### assistant`, `assistant:`, `답변:`, and `다음은 이어지는`. Unit fixtures include positive mixed Han/reasoning/chat examples and negative clean Korean/ordinary prose; zero counts do not prove absence of every possible contamination pattern.
 
-The CLI adapter follows in the next PR. Its explicit candidate budget is subject to #177's memory preflight and never creates a normal app release choice. Physical model/hardware measurements still must be run by the owner; fixture/unit evidence alone does not prove model quality or fit.
+Run from the repository root after preparing the bundled MLX runtime (`scripts/prepare-metallib.sh` when needed):
+
+```sh
+swift run --disable-automatic-resolution -c release MINTBench \
+  --model mlx-community/Qwen2.5-1.5B-Instruct-4bit \
+  --candidate-memory-budget-bytes 2147483648 \
+  --replay Fixtures/replay-novel-ko-v1.txt --style continuation \
+  --temperature 0 --cuts 12 --release-report ./new-release-report.json
+```
+
+This is a measurement example, not a lineup recommendation. Supply a declared peak budget appropriate for the candidate; #177 enforces both its pinned weight-size lower bound and this Mac's available working-set cap before installation/allocation. The explicit candidate policy never creates a normal app release choice. Without that opt-in, the normal approved release policy applies. The report also records top-p, prompt-token limit, KV setting, truth-window size, knowledge flag and optional title/genre so prompt preparation can be reproduced. A report cannot be combined with detect-only or cancellation stress. Partial cut failures write an incomplete report and exit nonzero; load/fixture failures produce no comparison artifact. Help and invalid-option/path smoke need no model or MLX setup. Physical model/hardware measurements still must be run by the owner; fixture/unit evidence alone does not prove model quality or fit.

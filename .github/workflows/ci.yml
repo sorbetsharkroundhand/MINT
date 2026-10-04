@@ -44,6 +44,9 @@ jobs:
       - name: Build MINTBench
         run: swift build --product MINTBench
 
+      - name: Benchmark CLI preflight smoke (no model required)
+        run: scripts/test-mint-bench-cli.sh
+
   app:
     name: App / Release Bundle & Smoke
     runs-on: macos-15
