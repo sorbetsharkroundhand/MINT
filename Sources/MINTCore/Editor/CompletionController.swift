@@ -140,6 +140,7 @@ public final class CompletionController: ObservableObject {
     nonisolated static let conversationIdle: Duration = .milliseconds(1_500)
 
     private var conversationTask: Task<Void, Never>?
+    private var conversationSuggestionIdentity: ProjectRuntimeIdentity?
     /// 닫힌(Esc·계속 입력) 블록 해시 — 같은 내용을 다시 묻지 않는다. 대화가
     /// 이어져 내용이 바뀌면 해시가 바뀌어 다시 제안된다.
     private var dismissedConversationHashes: Set<String> = []
@@ -153,9 +154,11 @@ public final class CompletionController: ObservableObject {
         guard onRecordConversation != nil,
             currentDocumentContext()?.kind == .novel
         else { return }
+        let capturedIdentity = projectDocumentProvider?()?.identity
         conversationTask = Task { [weak self] in
             try? await Task.sleep(for: Self.conversationIdle)
-            guard !Task.isCancelled, let self, self.onRecordConversation != nil else { return }
+            guard !Task.isCancelled, let self, self.onRecordConversation != nil,
+                capturedIdentity == self.projectDocumentProvider?()?.identity else { return }
             let text = prefix as NSString
             guard var block = ConversationDetector.blockEnding(at: text.length, in: text)
             else { return }
@@ -166,6 +169,7 @@ public final class CompletionController: ObservableObject {
             guard !self.dismissedConversationHashes.contains(block.contentHash),
                 self.recordedConversationHashesProvider?().contains(block.contentHash) != true
             else { return }
+            self.conversationSuggestionIdentity = capturedIdentity
             self.conversationSuggestion = block
             self.conversationSuggestionDidChange?(block)
         }
@@ -178,6 +182,11 @@ public final class CompletionController: ObservableObject {
         guard let block = conversationSuggestion,
             let onRecordConversation
         else { return false }
+        if let provider = projectDocumentProvider,
+            provider()?.identity == nil || provider()?.identity != conversationSuggestionIdentity {
+            clearConversationSuggestion()
+            return false
+        }
         clearConversationSuggestion()
         // 기록 승인 = 사용자 결정 — 참여자 귀속·주제는 백그라운드가 보완한다.
         onRecordConversation(ConversationDetector.record(from: block, utterances: []))
@@ -197,6 +206,7 @@ public final class CompletionController: ObservableObject {
     public var hasConversationSuggestion: Bool { conversationSuggestion != nil }
 
     private func clearConversationSuggestion() {
+        conversationSuggestionIdentity = nil
         guard conversationSuggestion != nil else { return }
         conversationSuggestion = nil
         conversationSuggestionDidChange?(nil)
