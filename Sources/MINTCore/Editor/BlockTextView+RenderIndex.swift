@@ -3,11 +3,13 @@ import AppKit
 extension BlockTextView {
     func invalidateMediaIndex() {
         mediaParagraphIndex = nil
+        mediaLastSelectionRange = nil
         mediaDirtyRanges = [NSRange(location: 0, length: textStorage?.length ?? 0)]
     }
 
     func indexedMediaParagraphs(in range: NSRange) -> [ParagraphRenderIndex.Paragraph] {
         guard let storage = textStorage else { return [] }
+        if storage.delegate == nil { storage.delegate = self }
         if mediaParagraphIndex?.utf16Length != storage.length {
             mediaParagraphIndex = ParagraphRenderIndex(records: mediaRecords(in: NSRange(location: 0, length: storage.length)))
             mediaIndexBuildCount += 1
@@ -47,6 +49,7 @@ extension BlockTextView {
         if !charactersChanged, index.paragraphs(in: oldRange).map(\.record) == records { return }
         guard index.replace(oldRange, with: records), index.utf16Length == ns.length else { invalidateMediaIndex(); return }
         if charactersChanged {
+            rebaseRenderedMedia(replacing: oldEdit, withLength: edited.length)
             mediaDirtyRanges = mediaDirtyRanges.map { rebaseMediaRange($0, replacing: oldEdit, withLength: edited.length) }
         }
         mediaDirtyRanges = mergedMediaRanges(mediaDirtyRanges + [newRange])
