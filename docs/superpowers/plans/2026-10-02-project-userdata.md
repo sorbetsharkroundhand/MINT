@@ -33,10 +33,10 @@ Interfaces: WritingProject.userData: [String: Data] (default empty); ProjectMani
 - [x] Domain codec and archived-source migration delivered separately; pre-adoption app wiring follows.
 Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, LegacyEntryAdapter.swift, MINTApp.swift, writer tests.
 Interfaces: updateUserData(_ data: Data?, for key: String, identity: ProjectRuntimeIdentity) throws; WriterDocumentData codec/key(documentID:); injected pre-adoption preparation closure returning verified WritingProject.
-- [ ] Add failing session generation/flush/relaunch/stale-A/B and typed legacy migration fixtures.
-- [ ] Implement scoped in-memory mutations and writer codec; migrate archived known fields only for absent records with a durable migration marker so deletes stay deleted.
-- [ ] Test migration failures/cancellation before activation, and stale-anchor/explicit action round-trip without a model.
-- [ ] Run required checks, review and deliver bounded stacked slices.
+- [x] Add failing session generation/flush/relaunch/stale-A/B and typed legacy migration fixtures.
+- [x] Implement scoped in-memory mutations and writer codec; migrate archived known fields only for absent records with a durable migration marker so deletes stay deleted.
+- [x] Test migration failures/cancellation before activation, and stale-anchor/explicit action round-trip without a model.
+- [x] Run required checks, review and deliver bounded stacked slices.
 
 ## Task 3: Prepared consumers and existing tools
 Files: project snapshot, CompletionController/BackgroundIndexer adapters, ContentView, WorkspaceShellView, minimal project writer tool and tests.

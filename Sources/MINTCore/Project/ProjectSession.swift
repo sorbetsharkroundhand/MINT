@@ -27,6 +27,7 @@ public final class ProjectSession: ObservableObject {
     private let store: ProjectStore
     private let defaults: UserDefaults
     private let autosaveDelay: Duration
+    private let prepareProject: (@Sendable (WritingProject, ProjectStore) async throws -> WritingProject)?
     private var generation: UInt64 = 0
     private var dirtyGeneration: UInt64?
     private var saveTask: Task<Void, Never>?
@@ -35,11 +36,13 @@ public final class ProjectSession: ObservableObject {
     public init(
         store: ProjectStore,
         defaults: UserDefaults = .standard,
-        autosaveDelay: Duration = .milliseconds(800)
+        autosaveDelay: Duration = .milliseconds(800),
+        prepareProject: (@Sendable (WritingProject, ProjectStore) async throws -> WritingProject)? = nil
     ) {
         self.store = store
         self.defaults = defaults
         self.autosaveDelay = autosaveDelay
+        self.prepareProject = prepareProject
     }
 
     public var availableWorkspaceModes: [WorkspaceMode] {
@@ -72,7 +75,7 @@ public final class ProjectSession: ObservableObject {
             activeProject: activeProject, entryID: entryID)
     }
 
-    /// Load the verified active project without creating or migrating anything.
+    /// Load and prepare the verified active project before adoption.
     public func loadActiveProject() async throws {
         try await bootstrap()
     }
@@ -85,7 +88,7 @@ public final class ProjectSession: ObservableObject {
         phase = .loading
         lastErrorMessage = nil
         do {
-            let project = try await store.activeProject()
+            let project = try await preparedForAdoption(store.activeProject())
             let catalog: ProjectAssetCatalog?
             if let project { catalog = try await store.assetCatalog(id: project.id) }
             else { catalog = nil }
@@ -110,8 +113,9 @@ public final class ProjectSession: ObservableObject {
         do {
             try await flush()
             phase = .loading
+            let expected = prepareProject == nil ? nil : try await preparedForAdoption(store.load(id: id))
             let catalog = try await store.assetCatalog(id: id)
-            let project = try await store.activateAndLoad(id: id)
+            let project = try await store.activateAndLoad(id: id, expected: expected)
             // Activation has committed. Adoption intentionally has no cancellation point.
             assetCatalog = catalog
             adopt(project)
@@ -166,7 +170,7 @@ public final class ProjectSession: ObservableObject {
         isTransitioning = true
         defer { finishTransition() }
         do {
-            let project = try await store.activeProject()
+            let project = try await preparedForAdoption(store.activeProject())
             let catalog: ProjectAssetCatalog?
             if let project { catalog = try await store.assetCatalog(id: project.id) }
             else { catalog = nil }
@@ -192,8 +196,9 @@ public final class ProjectSession: ObservableObject {
         do {
             try await flush()
             try await store.save(project)
+            let expected = prepareProject == nil ? nil : try await preparedForAdoption(store.load(id: project.id))
             let catalog = try await store.assetCatalog(id: project.id)
-            let verified = try await store.activateAndLoad(id: project.id)
+            let verified = try await store.activateAndLoad(id: project.id, expected: expected)
             // Activation has committed. Adoption intentionally has no cancellation point.
             assetCatalog = catalog
             adopt(verified)
@@ -209,6 +214,17 @@ public final class ProjectSession: ObservableObject {
             if let snapshot = selectedDocumentSnapshot { documentDidChange?(snapshot) }
             throw error
         }
+    }
+
+    /// Optional domain preparation must finish durably before a mutable owner is adopted.
+    private func preparedForAdoption(_ project: WritingProject?) async throws -> WritingProject? {
+        guard let project, let prepareProject else { return project }
+        let prepared = try await prepareProject(project, store)
+        guard prepared.id == project.id else { throw ProjectStoreError.invalidManifest }
+        let verified = try await store.load(id: project.id)
+        guard prepared == verified else { throw ProjectStoreError.changedDuringSave }
+        try Task.checkCancellation()
+        return verified
     }
 
     public func selectDocument(_ id: WritingDocumentID?) {

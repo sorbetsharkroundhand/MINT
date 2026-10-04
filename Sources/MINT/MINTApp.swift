@@ -24,7 +24,9 @@ struct MINTApp: App {
     @StateObject private var editorRequests = ProjectEditorRequests()
 
     init() {
-        let session = ProjectSession(store: Self.projectStore)
+        let session = ProjectSession(store: Self.projectStore, prepareProject: { project, store in
+            try await ProjectWriterDataMigration.prepare(project, store: store)
+        })
         _projectSession = StateObject(wrappedValue: session)
         _legacyWorkspace = StateObject(wrappedValue: LegacyWorkspaceController(session: session))
     }
