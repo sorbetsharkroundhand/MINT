@@ -162,7 +162,7 @@ public actor ProjectStore {
 
     func readManifest(id: WritingProjectID, name: String = "project.json") throws -> ProjectManifest {
         let manifest = try JSONDecoder().decode(ProjectManifest.self, from: files.read(projectURL(id, name)))
-        guard manifest.schemaVersion == ProjectManifest.currentSchemaVersion else {
+        guard ProjectManifest.supportsSchema(manifest.schemaVersion) else {
             throw ProjectStoreError.unsupportedSchema(manifest.schemaVersion)
         }
         let documentIDs = Set(manifest.documents.map(\.id))
@@ -185,6 +185,11 @@ public actor ProjectStore {
         if let source = manifest.legacySource,
             source.relativePath != "UserData/legacy-\(source.contentHash).json" {
             throw ProjectStoreError.invalidManifest
+        }
+        for (key, record) in manifest.userData {
+            guard record.relativePath == (try userDataPath(key: key, hash: record.contentHash)) else {
+                throw ProjectStoreError.invalidManifest
+            }
         }
         return manifest
     }
@@ -214,12 +219,18 @@ public actor ProjectStore {
             _ = try verified(record.file, in: manifest.id)
         }
         if let source = manifest.legacySource { _ = try verified(source, in: manifest.id) }
+        var userData: [String: Data] = [:]
+        for (key, record) in manifest.userData {
+            try Task.checkCancellation()
+            userData[key] = try verified(record, in: manifest.id)
+        }
         return WritingProject(
             id: manifest.id,
             title: manifest.title,
             mode: manifest.mode,
             documents: documents,
-            trashedDocumentIDs: manifest.trashedDocumentIDs)
+            trashedDocumentIDs: manifest.trashedDocumentIDs,
+            userData: userData)
     }
 
     func loadUnlocked(id: WritingProjectID) throws -> WritingProject { try materialize(readManifest(id: id)) }
@@ -230,6 +241,16 @@ public actor ProjectStore {
 
     func intelligencePath(_ documentID: WritingDocumentID) -> String {
         "Intelligence/\(documentID.rawValue.uuidString).knowledge.json"
+    }
+
+    func userDataPath(key: String, hash: String) throws -> String {
+        guard !key.isEmpty, key.utf8.count <= 128, key != ".", key != "..",
+              key.utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0)
+                  || (97...122).contains($0) || [45, 46, 95].contains($0) }) else {
+            throw ProjectStoreError.unsafePath(key)
+        }
+        guard ProjectDigest.isValid(hash) else { throw ProjectStoreError.invalidManifest }
+        return "UserData/records/\(ProjectDigest.hash(Data(key.utf8)))/\(hash).data"
     }
 
     private func validateDocument(_ documentID: WritingDocumentID, in projectID: WritingProjectID) throws {
@@ -273,6 +294,12 @@ public actor ProjectStore {
             trashedDocumentIDs: project.trashedDocumentIDs)
         manifest.assets = old?.assets ?? []
         manifest.legacySource = old?.legacySource
+        for (key, data) in project.userData.sorted(by: { $0.key < $1.key }) {
+            let hash = ProjectDigest.hash(data)
+            let path = try userDataPath(key: key, hash: hash)
+            try writeImmutable(data, path: path, id: project.id)
+            manifest.userData[key] = ProjectFileRecord(relativePath: path, contentHash: hash)
+        }
         for document in project.documents {
             let data = Data(document.body.utf8)
             let hash = ProjectDigest.hash(data)
