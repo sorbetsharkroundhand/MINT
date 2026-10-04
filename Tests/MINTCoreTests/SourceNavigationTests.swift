@@ -125,7 +125,7 @@ final class SourceNavigationTests: XCTestCase {
 }
 
 @MainActor
-private final class SourceNavigationHarness {
+final class SourceNavigationHarness {
     let fixture: LegacyBoundaryFixture
     let requests = ProjectEditorRequests()
     let window: LegacyUndoWindow
