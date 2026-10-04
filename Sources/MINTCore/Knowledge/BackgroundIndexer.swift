@@ -1,24 +1,8 @@
 import AppKit
 import Foundation
 
-/// 백그라운드 이해 파이프라인 (M6, PLAN §9) — 유휴 시간에 씬 요약을 만들고
-/// 요약 피라미드를 상향 전파해, 예측이 조립만 하면 되는 지식을 준비한다
-/// (CLAUDE.md §2-2 "백그라운드가 이해를 준비하고, 예측은 조립만 한다").
-///
-/// **트리거 2단** (PLAN §9): 타이핑 유휴 ~5s → 빠른 패스(더티 씬 요약,
-/// LLM ≤ 2회) · 장기 유휴 ~60s 또는 앱 비활성 → 깊은 패스(남은 씬 전부 +
-/// 장·작품 요약 전파).
-///
-/// **백그라운드 3요건** (CLAUDE.md §4):
-/// - 선점: 키 입력(`noteChange`)마다 진행 중 패스를 즉시 취소한다. 생성 스트림은
-///   다음 청크에서 협조 종료하고, 미발행 candidate는 버린 뒤 다음 유휴에 다시 돈다.
-/// - 게이트: 열 상태 `.serious` 이상이면 모든 패스 보류, 저전력 모드면 깊은
-///   패스만 보류 (PLAN §9 시민의식).
-/// - 메모: 요약 키는 씬 콘텐츠 해시 — 같은 입력은 절대 재요약하지 않는다.
-///   메모 자체가 사이드카 파일(`KnowledgeSidecar`)이다.
-///
-/// 예측 경로와의 계약: 이 클래스는 패스가 끝날 때마다 `snapshot`(값 복사)을
-/// 발행하고, 예측은 그것만 읽는다 — 예측 시점 디스크·LLM 접근 금지.
+/// Prepares derived story memory outside prediction. Work is scoped, cancellable,
+/// incremental and subordinate to foreground editing, power and memory pressure.
 @MainActor
 public final class BackgroundIndexer: ObservableObject {
 
@@ -123,6 +107,32 @@ public final class BackgroundIndexer: ObservableObject {
     /// (docs/m6-scene-split.md §5 — 분할 설계의 일부).
     public var caretProvider: (() -> Int?)?
 
+    private var memoryPressurePaused = false
+    private var profileTasks: [UUID: Task<Void, Never>] = [:]
+    private var profileGeneration = 0
+    private static let memoryPressureReason = "메모리가 부족해 읽기를 쉬고 있어요 — 여유가 생기면 다시 시도해 주세요"
+
+    /// Recovery only admits a later edit or explicit request; it never reloads a model.
+    public func setMemoryPressurePaused(_ paused: Bool) {
+        guard memoryPressurePaused != paused else { return }
+        memoryPressurePaused = paused
+        if paused {
+            let hadManualWork = manualPassToken != nil
+            shutdown()
+            manualPassToken = nil
+            transientClearTask?.cancel()
+            manualPhase = hadManualWork ? .blocked(reason: Self.memoryPressureReason) : .idle
+        } else if case .blocked(let reason) = manualPhase, reason == Self.memoryPressureReason {
+            manualPhase = .idle
+        }
+    }
+
+    private func cancelProfiles() {
+        profileGeneration += 1
+        for task in profileTasks.values { task.cancel() }
+        profileTasks.removeAll()
+    }
+
     private let engine: CompletionEngine
     private let settings: CompletionSettings
     private let sidecarPersistence: any KnowledgeSidecarPersisting
@@ -152,7 +162,7 @@ public final class BackgroundIndexer: ObservableObject {
         originalNamePreparation.setForegroundBusy(busy)
     }
     private func prepareOriginalNameAnchors() {
-        guard originalNameAnchorsEnabled, let document = currentDocument(), document.isFiction else {
+        guard !memoryPressurePaused, originalNameAnchorsEnabled, let document = currentDocument(), document.isFiction else {
             originalNamePreparation.shutdown()
             return
         }
@@ -353,6 +363,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 종료 시점의
     /// 백그라운드 이해는 어차피 버려질 결과다 — 원문은 flush로 이미 안전하다.
     public func shutdown() {
+        cancelProfiles()
         originalNamePreparation.shutdown()
         passGeneration += 1
         hydrateGeneration += 1
@@ -383,6 +394,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 본문 편집·문서 전환 알림 (EntryStore 훅) — 진행 중 패스를 선점하고
     /// 유휴 타이머를 다시 감는다.
     public func noteChange(entryID: UUID) {
+        guard !memoryPressurePaused else { return }
         prepareOriginalNameAnchors()
         // 선점: 백그라운드 생성은 예측(그리고 그 앞의 타이핑)에 항상 진다 (CLAUDE.md §2-6).
         // 세대를 먼저 올린다 — 취소가 늦게 끝난 이전 작업의 모든 발행/정리를 무효화 (#82).
@@ -436,6 +448,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// Cancels old ownership without reading the session before its next publication.
     public func prepareForProjectTransition() {
+        cancelProfiles()
         originalNamePreparation.shutdown()
         passGeneration += 1
         passEntryID = nil
@@ -488,6 +501,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// `force`: 사용자 수정(오버라이드) 변경 시 — 이미 스냅샷이 있어도 다시
     /// 조립해 수정이 즉시 보이게 한다 (LLM 없음, 결정적 재조립).
     private func hydrateIfNeeded(entryID: UUID, force: Bool = false) {
+        guard !memoryPressurePaused else { return }
         guard let entry = currentDocument(), entry.id == entryID else { return }
         let scope = entry.scope
         let runtimeIdentity = entry.runtimeIdentity
@@ -586,6 +600,10 @@ public final class BackgroundIndexer: ObservableObject {
     /// **증분이다** — 해시 메모에 없는(바뀐·새) 씬만 읽는다. 전부 최신이면
     /// 즉시 끝난다. 이미 분석된 문서를 강제로 다시 읽으려면 `requestFullPass`.
     public func requestPass() {
+        guard !memoryPressurePaused else {
+            manualPhase = .blocked(reason: Self.memoryPressureReason)
+            return
+        }
         // 자동 패스가 이미 돌고 있으면 그걸로 충분하다 — 중복 금지.
         guard passTask == nil, resetTask == nil else { return }
         beginManualPhase()
@@ -664,6 +682,10 @@ public final class BackgroundIndexer: ObservableObject {
     /// 안전하다** — 오버라이드는 entries.json에 살고, 여기서 지우는 것은
     /// 파생 캐시뿐이다 (CLAUDE.md §5-5: 실패해도 원문이 안전).
     public func requestFullPass() {
+        guard !memoryPressurePaused else {
+            manualPhase = .blocked(reason: Self.memoryPressureReason)
+            return
+        }
         guard let entry = currentDocument(), entry.isFiction else { return }
         let scope = entry.scope
         let runtimeIdentity = entry.runtimeIdentity
@@ -720,6 +742,7 @@ public final class BackgroundIndexer: ObservableObject {
     }
 
     private func startPass(deep: Bool, userInitiated: Bool = false) {
+        guard !memoryPressurePaused else { return }
         guard passTask == nil else { return }  // 이미 도는 중 — 중복 금지
         // 자동완성이 꺼져 있으면 지식도 만들지 않는다 — 백그라운드 이해가
         // 대용량 모델 다운로드를 유발해서는 안 된다 (폴더 명명과 같은 규칙).
@@ -920,14 +943,19 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// 카드 프로파일링 공용 경로 — 등록(수동·자동·별칭) 직후 소개를 채운다.
     private func profileInBackground(card: CharacterCard, name: String, entry: JournalEntry) {
+        guard !memoryPressurePaused else { return }
         let body = entry.body
         let parameters = settings.parameters
         let entryID = entry.id
-        Task { [engine, weak store = legacyStore, weak self] in
+        let token = UUID(), generation = profileGeneration
+        profileTasks[token] = Task { [engine, weak store = legacyStore, weak self] in
+            defer { self?.profileTasks[token] = nil }
+            guard !Task.isCancelled else { return }
             let note = await Self.profileCharacter(
                 named: name, in: body,
                 engine: engine, parameters: parameters)
-            guard let note, let store, let self,
+            guard !Task.isCancelled, let note, let store, let self,
+                !self.memoryPressurePaused, self.profileGeneration == generation,
                 self.documentProvider == nil, self.legacyStore === store
             else { return }
             // 그 사이 사용자가 직접 소개를 썼거나 카드를 잠갔다면 그쪽이 이긴다
