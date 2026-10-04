@@ -549,14 +549,13 @@ public actor CompletionEngine {
         modelID: String,
         onProgress: (@Sendable (Double) -> Void)?
     ) async throws -> ModelContainer {
+        guard let manifest = PinnedModelCatalog.manifest(for: modelID) else { throw ModelInstallError.metadata }
         try Self.mlxConfigured.get()
-        let configuration = ModelConfiguration(id: modelID)
-        // 허브 다운로드(캐시됨) + 토크나이저 로드 + 가중치 로드.
-        return try await #huggingFaceLoadModelContainer(
-            configuration: configuration,
-            progressHandler: { progress in
-                onProgress?(progress.fractionCompleted)
-            })
+        let directory = try await ModelInstallationStore.shared.install(manifest, download: ModelDownloadManager.transfer) { _, fraction in
+            onProgress?(fraction)
+        }
+        try Task.checkCancellation()
+        return try await loadModelContainer(from: directory, using: #huggingFaceTokenizerLoader())
     }
 
     /// Validate and initialize once at model load, before configuring MLX memory.

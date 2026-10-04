@@ -259,6 +259,13 @@ struct ModelChip: View {
     @ViewBuilder
     private func downloadAccessory(_ choice: ModelChoice) -> some View {
         switch downloads.states[choice.id] {
+        case .verifying:
+            Button { downloads.cancel(choice.id) } label: {
+                ProgressView().controlSize(.small)
+            }
+            .buttonStyle(.plain)
+            .help("모델 파일 확인 중 — 누르면 취소")
+            .accessibilityLabel(Text("모델 파일 확인 취소"))
         case .downloading(let fraction):
             Button {
                 downloads.cancel(choice.id)
