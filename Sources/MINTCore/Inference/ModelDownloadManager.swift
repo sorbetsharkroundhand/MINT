@@ -14,6 +14,7 @@ public final class ModelDownloadManager: ObservableObject {
     private let manifestForID: @Sendable (String) -> ModelInstallManifest?
     private let fileDownload: ModelInstallationStore.Download
     private let startBlock: @Sendable () -> String?
+    private let admit: @Sendable (ModelInstallManifest) throws -> Void
     private var tasks: [String: Task<Void, Never>] = [:]
     private var retiring: [String: Task<Void, Never>] = [:]
     private var tokens: [String: UUID] = [:]
@@ -21,14 +22,16 @@ public final class ModelDownloadManager: ObservableObject {
 
     public convenience init() {
         self.init(store: .shared, manifestForID: { PinnedModelCatalog.manifest(for: $0) },
-                  download: Self.transfer, startBlock: Self.currentStartBlock)
+                  download: Self.transfer, startBlock: Self.currentStartBlock,
+                  admit: { try ModelMemoryPolicy.current.requireLoad(manifest: $0) })
     }
     init(store: ModelInstallationStore,
          manifestForID: @Sendable @escaping (String) -> ModelInstallManifest?,
          download: @escaping ModelInstallationStore.Download,
-         startBlock: @Sendable @escaping () -> String?) {
+         startBlock: @Sendable @escaping () -> String?,
+         admit: @Sendable @escaping (ModelInstallManifest) throws -> Void = { _ in }) {
         self.store = store; self.manifestForID = manifestForID
-        self.fileDownload = download; self.startBlock = startBlock
+        self.fileDownload = download; self.startBlock = startBlock; self.admit = admit
     }
     deinit { for task in tasks.values { task.cancel() } }
 
@@ -49,6 +52,7 @@ public final class ModelDownloadManager: ObservableObject {
         guard tasks[id] == nil else { return }
         guard let pin = manifestForID(id) else { states[id] = .failed(ModelInstallError.metadata.localizedDescription); return }
         if let reason = startBlock() { states[id] = .failed(reason); return }
+        do { try admit(pin) } catch { states[id] = .failed(error.localizedDescription); return }
         let token = UUID(), previous = retiring[id]
         tokens[id] = token; states[id] = .downloading(0); progressGates[id] = ProgressCoalescer()
         tasks[id] = Task(priority: .utility) { [weak self, store, fileDownload] in

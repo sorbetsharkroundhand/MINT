@@ -173,10 +173,12 @@ public struct SettingsView: View {
                     ForEach(ModelChoice.all) { choice in
                         Text(choice.name).tag(choice.id)
                     }
-                    if ModelChoice.matching(settings.modelID) == nil {
-                        Text("사용자 지정").tag(settings.modelID)
+                    if !ModelChoice.all.contains(where: { $0.id == settings.modelID }) {
+                        Text(settings.modelID.isEmpty ? "사용 가능한 모델 없음" : "사용 불가 · 보관된 선택")
+                            .tag(settings.modelID).disabled(true)
                     }
                 }
+                .disabled(ModelChoice.all.isEmpty)
                 caption(modelSelectionCaption)
 
                 Stepper(
@@ -212,12 +214,13 @@ public struct SettingsView: View {
                             }
                             HStack {
                                 Menu("저장소 프리셋") {
-                                    ForEach(ModelPresets.all, id: \.self) { preset in
-                                        Button(ModelChip.shortID(preset)) {
-                                            changeModel(preset)
+                                    ForEach(ModelChoice.all) { choice in
+                                        Button(choice.name) {
+                                            changeModel(choice.id)
                                         }
                                     }
                                 }
+                                .disabled(ModelChoice.all.isEmpty)
                                 Spacer()
                                 Button("적용", action: commitModelIDDraft)
                                     .disabled(
@@ -278,11 +281,12 @@ public struct SettingsView: View {
     }
 
     private var modelSelectionCaption: String {
-        guard let choice = ModelChoice.matching(settings.modelID) else {
-            return "사용자 지정 모델 · 세부 저장소 ID는 고급 설정에서 관리해요."
+        if ModelChoice.all.isEmpty { return "사용 가능한 모델이 없습니다. 원고 편집은 계속할 수 있습니다." }
+        guard ModelChoice.all.contains(where: { $0.id == settings.modelID }),
+              let choice = ModelChoice.matching(settings.modelID) else {
+            return "보관된 선택은 이 Mac에서 사용할 수 없습니다. 다른 모델을 선택하세요."
         }
-        return ModelChip.userFacingSummary(for: choice)
-            + " · 새 모델은 처음 사용할 때 내려받아요."
+        return ModelChip.userFacingSummary(for: choice) + " · 처음 사용할 때 내려받아요."
     }
 
     // MARK: - 소설 (작품 메타데이터·이해 범위)
@@ -385,6 +389,10 @@ public struct SettingsView: View {
 
     /// 컨트롤러가 있으면 의유 API로, 없으면(프리뷰) 직접 쓴다.
     private func changeModel(_ id: String) {
+        do {
+            guard let manifest = PinnedModelCatalog.manifest(for: id) else { throw ModelInstallError.metadata }
+            try ModelMemoryPolicy.current.requireLoad(manifest: manifest)
+        } catch { modelIDError = error.localizedDescription; return }
         guard let completion else {
             settings.modelID = id
             return

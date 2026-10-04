@@ -82,7 +82,7 @@ struct ModelChip: View {
                 ForEach(ModelChoice.all) { choice in
                     row(choice)
                 }
-                if ModelChoice.matching(settings.modelID) == nil {
+                if !settings.modelID.isEmpty, !ModelChoice.all.contains(where: { $0.id == settings.modelID }) {
                     customRow
                 }
                 if case .failed = completion.engineState {
@@ -96,6 +96,11 @@ struct ModelChip: View {
                 }
             }
             .padding(6)
+            if ModelChoice.all.isEmpty {
+                Text("사용 가능한 모델이 없습니다. 원고 편집은 계속할 수 있습니다.")
+                    .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+            }
             downloadFailureFooter
             theme.sepC.frame(height: 1)
             autocompleteToggle
@@ -309,14 +314,14 @@ struct ModelChip: View {
         }
     }
 
-    /// Keep repository IDs in advanced Settings while preserving custom-model access.
+    /// Preserve visibility of a saved selection without offering an unsupported switch.
     private var customRow: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("사용자 지정 모델")
+                Text("보관된 모델 선택")
                     .font(MintFonts.uiFont(12, .semibold))
                     .foregroundStyle(theme.inkC)
-                Text("고급 설정에서 관리")
+                Text("이 Mac에서 사용할 수 없음 · 설정에서 관리")
                     .font(MintFonts.uiFont(10.5))
                     .foregroundStyle(theme.ink3C)
             }
@@ -357,7 +362,7 @@ struct ModelChip: View {
 
     private func pick(_ id: String) {
         menuOpen = false
-        guard id != settings.modelID else { return }
+        guard id != settings.modelID, ModelChoice.all.contains(where: { $0.id == id }) else { return }
         settings.modelID = id
         completion.modelDidChange()
     }
@@ -402,16 +407,7 @@ struct ModelChip: View {
     }
 
     static func userFacingSummary(for choice: ModelChoice) -> String {
-        switch choice.id {
-        case ModelPresets.ternaryBonsai27B:
-            "8.5GB · 실험적"
-        case ModelPresets.glm4_7_flash:
-            "16.9GB · 기본"
-        case ModelPresets.qwen3_6_35B_A3B:
-            "20GB · 큰 모델"
-        default:
-            "로컬 모델"
-        }
+        choice.detail
     }
 
     static func displayName(_ modelID: String) -> String {

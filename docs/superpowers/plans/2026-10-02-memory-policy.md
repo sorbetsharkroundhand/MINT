@@ -29,6 +29,6 @@ Interfaces: HardwareMemory(physicalBytes:recommendedWorkingSetBytes:hasUnifiedMe
 ## Task 2: Runtime and selection integration
 Files: CompletionEngine.swift, ModelDownloadManager.swift, Settings.swift, SettingsView.swift, Components/ModelChip.swift; focused integration tests.
 Interfaces: Task 1's policy; engine accepts immutable policy defaulting to current; same requireLoad guard before install/resource initialization. ModelChoice.all derives from policy entries; new default ID derives from policy. Existing IDs are preserved.
-- [ ] Write failing tests for unsupported engine preflight, blocked download without creating files, data-driven default, durable saved settings and changed model authorization.
-- [ ] Guard engine/download/manual selection; expose available choices and a concise pending/unavailable explanation.
-- [ ] Run focused/full isolated tests and Swift/bench builds; review inline, commit and stacked Draft PR. No CI wait.
+- [x] Write failing tests for unsupported engine preflight, blocked download without creating files, data-driven default, durable saved settings and changed model authorization.
+- [x] Guard engine/download/manual selection; expose available choices and a concise pending/unavailable explanation.
+- [x] Run focused/full isolated tests and Swift/bench builds; review inline, commit and stacked Draft PR. No CI wait.
