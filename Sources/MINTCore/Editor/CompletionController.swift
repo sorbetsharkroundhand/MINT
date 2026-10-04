@@ -215,12 +215,15 @@ public final class CompletionController: ObservableObject {
     /// pull인 이유: 본문이 큰 저널에서 매 키 입력마다 Equatable 비교를 하지 않는다.
     public var documentContextProvider: (() -> DocumentContext?)?
     public var projectDocumentProvider: (() -> ProjectDocumentSnapshot?)?
+    private var writerReader = WriterDocumentReader()
 
-    private func currentDocumentContext() -> DocumentContext? {
+    func currentDocumentContext() -> DocumentContext? {
         if let projectDocumentProvider {
-            guard let snapshot = projectDocumentProvider() else { return nil }
+            guard let snapshot = projectDocumentProvider(),
+                let writer = try? writerReader.read(snapshot) else { return nil }
             return DocumentContext(
                 title: snapshot.title, kind: snapshot.mode == .fiction ? .novel : .journal,
+                genre: writer.genre, characters: writer.characters,
                 entryID: snapshot.identity.key.documentID.rawValue)
         }
         return documentContextProvider?()

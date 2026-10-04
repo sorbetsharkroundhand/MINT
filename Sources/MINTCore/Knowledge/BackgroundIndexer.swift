@@ -129,6 +129,7 @@ public final class BackgroundIndexer: ObservableObject {
     private weak var legacyStore: EntryStore?
     private var legacyScopeProvider: ((UUID) -> StoryMemoryScope?)?
     private var documentProvider: (() -> ProjectDocumentSnapshot?)?
+    private var writerReader = WriterDocumentReader()
     private var observedRuntimeIdentity: ProjectRuntimeIdentity?
     public private(set) var snapshotRuntimeIdentity: ProjectRuntimeIdentity?
     /// One active project's already-loaded derived values. Edits revalidate them against
@@ -150,14 +151,16 @@ public final class BackgroundIndexer: ObservableObject {
 
     private func currentDocument() -> DocumentInput? {
         if let documentProvider {
-            guard let document = documentProvider() else { return nil }
+            guard let document = documentProvider(),
+                let writer = try? writerReader.read(document) else { return nil }
             let key = document.identity.key
             return DocumentInput(
                 id: key.documentID.rawValue,
                 scope: .project(projectID: key.projectID, documentID: key.documentID),
                 runtimeIdentity: document.identity, body: document.body,
                 isFiction: document.mode == .fiction,
-                characters: [], overrides: [], recorded: [], rejectedNames: [])
+                characters: writer.characters, overrides: writer.narrativeOverrides,
+                recorded: writer.recordedConversations, rejectedNames: writer.rejectedCharacterNames)
         }
         guard let entry = legacyStore?.activeEntry,
             let scope = legacyScopeProvider?(entry.id)
