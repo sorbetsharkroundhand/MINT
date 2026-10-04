@@ -309,18 +309,68 @@ public final class CompletionController: ObservableObject {
         Self.current = self
     }
 
+    @Published public private(set) var isManagingModel = false
+    @Published public private(set) var modelOperationError: String?
+    private var preloadToken: UUID?
+
+    public func removeModel(_ id: String, store: ModelInstallationStore = .shared) async throws {
+        guard !isManagingModel else { throw ModelInstallError.busy }
+        isManagingModel = true; modelOperationError = nil
+        defer { isManagingModel = false }
+        let active = settings.modelID == id, resume = settings.autocompleteEnabled
+        do {
+            try await suspendModelWork()
+            await ModelDownloadManager.shared.cancelAndWait(id)
+            try await store.remove(id)
+            if active { settings.modelID = "" }
+            isManagingModel = false
+            if !active, resume { setAutocompleteEnabled(true) }
+        } catch { modelOperationError = error.localizedDescription; throw error }
+    }
+    public func replaceModel(with id: String) async throws {
+        guard let manifest = PinnedModelCatalog.manifest(for: id) else { throw ModelInstallError.metadata }
+        try ModelMemoryPolicy.current.requireLoad(manifest: manifest)
+        try await replaceModel(manifest: manifest, store: .shared, download: ModelDownloadManager.transfer)
+    }
+    /// The public entry point validates release policy before this owned-install handoff.
+    func replaceModel(manifest: ModelInstallManifest, store: ModelInstallationStore, download: @escaping ModelInstallationStore.Download) async throws {
+        guard !isManagingModel else { throw ModelInstallError.busy }
+        isManagingModel = true; modelOperationError = nil
+        defer { isManagingModel = false }
+        let previous = settings.modelID, resume = settings.autocompleteEnabled
+        do {
+            try await suspendModelWork()
+            await ModelDownloadManager.shared.cancelAndWait(previous)
+            if previous.isEmpty { _ = try await store.install(manifest, download: download) }
+            else { _ = try await store.replace(previous, with: manifest, download: download) }
+            settings.modelID = manifest.id
+            isManagingModel = false
+            if resume { setAutocompleteEnabled(true) }
+        } catch { modelOperationError = error.localizedDescription; throw error }
+    }
+    private func suspendModelWork() async throws {
+        let previous = preloadTask
+        preloadToken = nil; previous?.cancel(); preloadTask = nil
+        setAutocompleteEnabled(false)
+        shutdown(); lastContextReport = nil
+        cachedCounter = nil; cachedCounterModelID = nil; failedModelID = nil; engineState = .idle
+        if let previous { await previous.value }
+        try await engine.unload()
+    }
+
     // MARK: - 엔진 로드
 
     /// 앱 시작 시 모델을 미리 로드해 모델 상주(PLAN §9-2)로 첫 제안 지연을 지킨다.
     /// 설정에서 자동완성을 명시적으로 허용한 뒤에만 모델을 로드한다.
     public func preloadEngine() {
-        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
+        guard !isManagingModel, settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         switch engineState {
         case .idle, .failed: break
         default: return
         }
         engineState = .downloading(0)
-        let parameters = settings.parameters
+        let parameters = settings.parameters, token = UUID()
+        preloadToken = token
         // 진행률 coalescing — 허브 로더는 초당 수십 번 부르지만 UI 갱신은
         // 250ms면 충분하다. 틱마다 MainActor 태스크를 스폰하던 낭비 제거 (이슈 #46).
         let throttle = ProgressCoalescer()
@@ -332,13 +382,16 @@ public final class CompletionController: ObservableObject {
                 try await engine.preload(parameters: parameters) { fraction in
                     guard throttle.shouldEmit(fraction) else { return }
                     Task { @MainActor [weak self] in
-                        self?.noteLoadProgress(fraction)
+                        self?.noteLoadProgress(fraction, modelID: parameters.modelID, token: token)
                     }
                 }
+                guard self.preloadToken == token, !Task.isCancelled, !self.isManagingModel,
+                      self.settings.autocompleteEnabled, self.settings.modelID == parameters.modelID else { return }
                 self.markEngineReady()
             } catch is CancellationError {
                 // 모델 교체·스위치 OFF로 이 로드가 취소됨 — 상태는 요청자가 정리한다.
             } catch {
+                guard self.preloadToken == token, !self.isManagingModel, self.settings.autocompleteEnabled else { return }
                 self.markEngineFailed(error, modelID: parameters.modelID)
             }
         }
@@ -356,6 +409,8 @@ public final class CompletionController: ObservableObject {
     /// 인스펙터 리포트도 함께 폐기한다 — 이전 모델이 참고한 맥락이 새 모델
     /// 상태 표시 옆에 남으면 사용자를 오도한다 (이슈 #11).
     public func modelDidChange() {
+        guard !isManagingModel else { return }
+        preloadToken = nil
         invalidate()
         lastContextReport = nil
         engineState = .idle
@@ -367,7 +422,7 @@ public final class CompletionController: ObservableObject {
     /// settings.modelID를 직접 고치면 이 무효화를 우회해 이전 모델 결과가
     /// 나타날 수 있었다. 같은 id면 아무 일도 일어나지 않는다.
     public func changeModel(to id: String) {
-        guard id != settings.modelID else { return }
+        guard !isManagingModel, id != settings.modelID else { return }
         settings.modelID = id
         modelDidChange()
     }
@@ -375,6 +430,7 @@ public final class CompletionController: ObservableObject {
     /// 자동완성 마스터 스위치 토글. 이 사용자 조작이 명시적 허용 상태를 기록한다.
     /// 끄면 진행 중인 제안까지 즉시 폐기하고, 켜면 모델을 로드한다.
     public func setAutocompleteEnabled(_ enabled: Bool) {
+        guard !enabled || !isManagingModel else { return }
         let authorization: CompletionAuthorization = enabled ? .enabled : .disabled
         guard settings.authorization != authorization
             || settings.autocompleteEnabled != enabled
@@ -386,8 +442,10 @@ public final class CompletionController: ObservableObject {
             invalidate()
             // 진행 중 모델 로드(다운로드)도 함께 접는다 — 이게 없으면 OFF 후에도
             // 수 GB 전송이 계속된다 (이슈 #46).
+            preloadToken = nil
             preloadTask?.cancel()
             preloadTask = nil
+            engineState = .idle
             // 꺼진 순간 마지막 리포트도 과거의 것이다 — 남겨두면 꺼져 있는데
             // 컨텍스트 화면이 살아 있는 모순이 생긴다 (이슈 #11).
             lastContextReport = nil
@@ -396,7 +454,10 @@ public final class CompletionController: ObservableObject {
         }
     }
 
-    private func noteLoadProgress(_ fraction: Double) {
+    func noteLoadProgress(_ fraction: Double, modelID: String, token: UUID? = nil, expectedGeneration: Int? = nil) {
+        guard !isManagingModel, settings.autocompleteEnabled, settings.modelID == modelID,
+              token == nil || token == preloadToken,
+              expectedGeneration == nil || expectedGeneration == generation else { return }
         switch engineState {
         case .ready: return
         default: engineState = fraction >= 1 ? .loading : .downloading(fraction)
@@ -725,11 +786,12 @@ public final class CompletionController: ObservableObject {
             let base = knowledge != nil ? "story" : "smart"
             return parameters.stopAtUtteranceEnd ? base + "-dialogue" : base
         }()
+        let requestModelID = parameters.modelID
         do {
             let completion = try await engine.complete(prompt: prompt, parameters: parameters) {
                 fraction in
                 Task { @MainActor [weak self] in
-                    self?.noteLoadProgress(fraction)
+                    self?.noteLoadProgress(fraction, modelID: requestModelID, expectedGeneration: expected)
                 }
             }
             guard expected == generation,

@@ -30,6 +30,8 @@ public struct SettingsView: View {
     @State private var modelIDDraft = ""
     /// 초안 검증 실패 문구 — nil이면 오류 없음.
     @State private var modelIDError: String?
+    @State private var ownedModelIDs: [String] = []
+    @State private var isChangingModel = false
 
     public init(
         settings: CompletionSettings = .shared,
@@ -64,6 +66,7 @@ public struct SettingsView: View {
                 AcceptanceMetrics.summarize()
             }.value
             guard !Task.isCancelled else { return }  // stale 결과 할당 금지 (#60)
+            ownedModelIDs = await ModelInstallationStore.shared.ownedModelIDs()
         }
     }
 
@@ -178,7 +181,7 @@ public struct SettingsView: View {
                             .tag(settings.modelID).disabled(true)
                     }
                 }
-                .disabled(ModelChoice.all.isEmpty)
+                .disabled(isChangingModel || ModelChoice.all.isEmpty)
                 caption(modelSelectionCaption)
 
                 Stepper(
@@ -188,6 +191,20 @@ public struct SettingsView: View {
                     step: 2
                 )
                 caption("한 번에 보여줄 제안의 최대 길이예요.")
+            }
+
+            Section("모델 파일") {
+                if isChangingModel { ProgressView("모델 파일 정리 중…") }
+                ForEach(Array(Set(ownedModelIDs + [settings.modelID]).filter { !$0.isEmpty }).sorted(), id: \.self) { id in
+                    HStack {
+                        Text(ModelChoice.matching(id)?.name ?? ModelChip.shortID(id))
+                        Spacer()
+                        Button("파일 삭제", role: .destructive) { removeModelFiles(id) }
+                            .disabled(isChangingModel || completion == nil)
+                    }
+                }
+                caption("모델 파일만 삭제합니다. 원고와 작품 정보는 그대로 유지합니다.")
+                if let modelIDError { Text(modelIDError).foregroundStyle(.red).font(.caption) }
             }
 
             Section {
@@ -224,7 +241,7 @@ public struct SettingsView: View {
                                 Spacer()
                                 Button("적용", action: commitModelIDDraft)
                                     .disabled(
-                                        modelIDDraft.trimmingCharacters(in: .whitespaces)
+                                        isChangingModel || modelIDDraft.trimmingCharacters(in: .whitespaces)
                                             == settings.modelID
                                     )
                             }
@@ -397,7 +414,24 @@ public struct SettingsView: View {
             settings.modelID = id
             return
         }
-        completion.changeModel(to: id)
+        guard !isChangingModel else { return }
+        isChangingModel = true
+        Task {
+            do { try await completion.replaceModel(with: id); modelIDError = nil }
+            catch { modelIDError = error.localizedDescription }
+            ownedModelIDs = await ModelInstallationStore.shared.ownedModelIDs()
+            isChangingModel = false
+        }
+    }
+    private func removeModelFiles(_ id: String) {
+        guard let completion, !isChangingModel else { return }
+        isChangingModel = true
+        Task {
+            do { try await completion.removeModel(id); modelIDError = nil }
+            catch { modelIDError = error.localizedDescription }
+            ownedModelIDs = await ModelInstallationStore.shared.ownedModelIDs()
+            isChangingModel = false
+        }
     }
 
     private var autocompleteBinding: Binding<Bool> {
