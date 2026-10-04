@@ -246,7 +246,7 @@ public final class CompletionController: ObservableObject {
     public var contextConfigurationDidChange: (() -> Void)?
     public var foregroundCompletionDidChange: ((Bool) -> Void)?
     public var usesOriginalNameAnchors: Bool {
-        settings.authorization == .enabled && settings.autocompleteEnabled
+        !isMemoryPressurePaused && settings.authorization == .enabled && settings.autocompleteEnabled
             && settings.ghostContextMode == .rawWithNameAnchor
     }
 
@@ -339,9 +339,41 @@ public final class CompletionController: ObservableObject {
     @Published public private(set) var isManagingModel = false
     @Published public private(set) var modelOperationError: String?
     private var preloadToken: UUID?
+    @Published public private(set) var isMemoryPressurePaused = false
+    public static let memoryPressureMessage = "메모리가 부족해 자동완성을 쉬고 있어요. 원고 편집은 계속할 수 있습니다. 여유가 생기면 다시 시도해 주세요."
+    private var pressurePriorFailure: (state: EngineState, modelID: String)?
+
+    /// Temporary admission only: do not change durable AI consent or model selection.
+    /// The pressure coordinator keeps this closed until the engine unload drains.
+    public func setMemoryPressurePaused(_ paused: Bool) {
+        guard isMemoryPressurePaused != paused else { return }
+        isMemoryPressurePaused = paused
+        if paused {
+            if case .failed = engineState, let modelID = failedModelID {
+                pressurePriorFailure = (engineState, modelID)
+            } else { pressurePriorFailure = nil }
+            preloadToken = nil
+            preloadTask?.cancel(); preloadTask = nil
+            shutdown()
+            conversationTask?.cancel(); conversationTask = nil
+            lastContextReport = nil
+            cachedCounter = nil; cachedCounterModelID = nil
+            engineState = .failed(Self.memoryPressureMessage)
+        } else {
+            if let prior = pressurePriorFailure, prior.modelID == settings.modelID {
+                engineState = prior.state; failedModelID = prior.modelID
+            } else { engineState = .idle; failedModelID = nil }
+            pressurePriorFailure = nil
+        }
+        contextConfigurationDidChange?()
+    }
+
+    public func noteMemoryReleaseFailure(_ error: Error) {
+        modelOperationError = error.localizedDescription
+    }
 
     public func removeModel(_ id: String, store: ModelInstallationStore = .shared) async throws {
-        guard !isManagingModel else { throw ModelInstallError.busy }
+        guard !isMemoryPressurePaused, !isManagingModel else { throw ModelInstallError.busy }
         isManagingModel = true; modelOperationError = nil
         defer { isManagingModel = false }
         let active = settings.modelID == id, resume = settings.autocompleteEnabled
@@ -361,7 +393,7 @@ public final class CompletionController: ObservableObject {
     }
     /// The public entry point validates release policy before this owned-install handoff.
     func replaceModel(manifest: ModelInstallManifest, store: ModelInstallationStore, download: @escaping ModelInstallationStore.Download) async throws {
-        guard !isManagingModel else { throw ModelInstallError.busy }
+        guard !isMemoryPressurePaused, !isManagingModel else { throw ModelInstallError.busy }
         isManagingModel = true; modelOperationError = nil
         defer { isManagingModel = false }
         let previous = settings.modelID, resume = settings.autocompleteEnabled
@@ -390,7 +422,7 @@ public final class CompletionController: ObservableObject {
     /// 앱 시작 시 모델을 미리 로드해 모델 상주(PLAN §9-2)로 첫 제안 지연을 지킨다.
     /// 설정에서 자동완성을 명시적으로 허용한 뒤에만 모델을 로드한다.
     public func preloadEngine() {
-        guard !isManagingModel, settings.authorization == .enabled, settings.autocompleteEnabled else { return }
+        guard !isMemoryPressurePaused, !isManagingModel, settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         switch engineState {
         case .idle, .failed: break
         default: return
@@ -427,6 +459,7 @@ public final class CompletionController: ObservableObject {
 
     /// 로드 실패 후 재시도 (모델 id를 바꾼 뒤 등).
     public func retryEngineLoad() {
+        guard !isMemoryPressurePaused else { return }
         engineState = .idle
         failedModelID = nil
         preloadEngine()
@@ -436,6 +469,7 @@ public final class CompletionController: ObservableObject {
     /// 인스펙터 리포트도 함께 폐기한다 — 이전 모델이 참고한 맥락이 새 모델
     /// 상태 표시 옆에 남으면 사용자를 오도한다 (이슈 #11).
     public func modelDidChange() {
+        guard !isMemoryPressurePaused else { return }
         guard !isManagingModel else { return }
         preloadToken = nil
         invalidate()
@@ -481,7 +515,7 @@ public final class CompletionController: ObservableObject {
             preloadToken = nil
             preloadTask?.cancel()
             preloadTask = nil
-            engineState = .idle
+            if !isMemoryPressurePaused { engineState = .idle }
             // 꺼진 순간 마지막 리포트도 과거의 것이다 — 남겨두면 꺼져 있는데
             // 컨텍스트 화면이 살아 있는 모순이 생긴다 (이슈 #11).
             lastContextReport = nil
@@ -491,7 +525,7 @@ public final class CompletionController: ObservableObject {
     }
 
     func noteLoadProgress(_ fraction: Double, modelID: String, token: UUID? = nil, expectedGeneration: Int? = nil) {
-        guard !isManagingModel, settings.autocompleteEnabled, settings.modelID == modelID,
+        guard !isMemoryPressurePaused, !isManagingModel, settings.autocompleteEnabled, settings.modelID == modelID,
               token == nil || token == preloadToken,
               expectedGeneration == nil || expectedGeneration == generation else { return }
         switch engineState {
@@ -522,7 +556,7 @@ public final class CompletionController: ObservableObject {
         return counter
     }
     func rememberTokenCounter(_ counter: TokenCounter?, for modelID: String) {
-        guard modelID == settings.modelID else { return }
+        guard !isMemoryPressurePaused, modelID == settings.modelID else { return }
         cachedCounter = counter
         cachedCounterModelID = modelID
     }
@@ -563,11 +597,11 @@ public final class CompletionController: ObservableObject {
         // 다시 감지한다 (요구사항 §20 "일반 문자 입력: 제안을 닫고 정상 입력 계속").
         // 결정적·LLM 없음이라 자동완성 마스터 스위치와 무관하다.
         if conversationSuggestion != nil { dismissConversationSuggestion(remember: true) }
-        if !isComposing {
+        if !isComposing, !isMemoryPressurePaused {
             scheduleConversationDetection(prefix: prefix, caretLocation: caretLocation)
         }
 
-        guard settings.authorization == .enabled,
+        guard !isMemoryPressurePaused, settings.authorization == .enabled,
             settings.autocompleteEnabled
         else { return }  // 명시적 허용 전이거나 마스터 스위치 꺼짐
         guard !isComposing else { return }  // 한글 IME 조합 중 — 트리거 금지 (PLAN §2)
@@ -687,7 +721,7 @@ public final class CompletionController: ObservableObject {
     /// 같은 폴백. 고스트 자동완성의 generation/suggestion에는 손대지 않으므로
     /// 타이핑 중 제안 흐름과 간섭하지 않는다 (엔진 actor가 순차 처리).
     public func requestFolderName(for folderID: UUID, in store: EntryStore) {
-        guard settings.authorization == .enabled, settings.autocompleteEnabled else { return }
+        guard !isMemoryPressurePaused, settings.authorization == .enabled, settings.autocompleteEnabled else { return }
         if case .failed = engineState { return }
         guard !namingFolderIDs.contains(folderID) else { return }
         let content = store.folderNamingContext(
@@ -868,6 +902,7 @@ public final class CompletionController: ObservableObject {
         _ completion: CompletionEngine.Completion, caretLocation: Int, mode: String,
         contextMode: GhostContextMode = .current, modelID: String? = nil
     ) {
+        guard !isMemoryPressurePaused else { return }
         markEngineReady()
         lastLatency = completion.totalTime
         guard !completion.text.isEmpty else { return }
