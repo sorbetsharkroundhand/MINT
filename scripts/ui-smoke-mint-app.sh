@@ -271,8 +271,9 @@ on run argv
     tell application "System Events"
         set targetProcess to first application process whose unix id is targetPID
         if unix id of targetProcess is not targetPID then error "Accessibility process resolved to another app"
-        if not (exists window 1 of targetProcess) then error "메인 창 없음"
-        set rootElement to window 1 of targetProcess
+        -- System Writing Tools can put a floating window ahead of the editor.
+        set rootElement to my findElement(targetProcess, "AXIdentifier", "main", 1)
+        if rootElement is missing value then error "메인 창 없음"
         if operation is "field-set" or operation is "field-equals" or operation is "field-absent" then
             set targetElement to my findElementContaining(rootElement, "AXIdentifier", expectedValue, 30)
             if operation is "field-absent" then
@@ -334,7 +335,8 @@ on run argv
                 tell targetProcess to keystroke expectedValue
                 delay 0.6
                 -- Editing can replace the SwiftUI accessibility tree.
-                set editor to my findElement(window 1 of targetProcess, "AXIdentifier", "mint.editor", 30)
+                set rootElement to my findElement(targetProcess, "AXIdentifier", "main", 1)
+                set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
                 if editor is missing value then error "입력 후 에디터 없음"
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             else if operation is "equals" then
@@ -414,6 +416,7 @@ wait_ui() {
 
 open_writer_information() {
     ui press "mint.writer-tools.compatibility"
+    wait_ui present "인물과 작품 정보"
     ui press "인물과 작품 정보"
 }
 
@@ -526,7 +529,7 @@ done
 ui paste ""
 wait_ui image-body "" >/dev/null
 restore_clipboard
-IMAGE_BODY=$(ui image-body "")
+IMAGE_BODY=$(osascript "$SMOKE_ROOT/ui.applescript" "$PID" image-body "")
 IMAGE_BODY=${IMAGE_BODY%|}
 ui undo ""
 wait_ui equals ""
