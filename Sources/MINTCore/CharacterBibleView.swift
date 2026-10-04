@@ -312,7 +312,7 @@ private struct CandidateReviewList: View {
 
 /// 인물 카드 한 장 — 이름·별칭·소개(편집 가능) + 자동 이해(열람 전용) + 잠금 +
 /// 연대기(M7 — 사건·상태 변화 담화 순서 열람).
-private struct CharacterCardRow: View {
+struct CharacterCardRow: View {
     @Binding var card: CharacterCard
     let theme: MintTheme
     /// 백그라운드가 이해한 것 — 읽기 전용 표시 (빈 배열이면 숨김).
@@ -338,6 +338,7 @@ private struct CharacterCardRow: View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 TextField("이름", text: $card.name)
+                    .accessibilityIdentifier("mint.writer.character.name.\(card.id)")
                     .textFieldStyle(.roundedBorder)
                     .font(MintFonts.uiFont(12))
                     .frame(width: 110)
@@ -382,6 +383,7 @@ private struct CharacterCardRow: View {
             }
             TextField("성격·말투·관계 — 짧게 (예: 신중하고 직설적. 반말, \"…거든\" 버릇)",
                 text: $card.note, axis: .vertical)
+                .accessibilityIdentifier("mint.writer.character.note.\(card.id)")
                 .textFieldStyle(.roundedBorder)
                 .font(MintFonts.uiFont(12))
                 .lineLimit(2...4)

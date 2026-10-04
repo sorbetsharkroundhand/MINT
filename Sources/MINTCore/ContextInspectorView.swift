@@ -186,7 +186,7 @@ struct ContextInspectorView: View {
     }
 
     /// 제외 키 → 사람이 읽을 수 있는 한 줄 ("장면(해시 앞 6자)") (#38).
-    fileprivate static func readableExclusion(_ key: String) -> String {
+    static func readableExclusion(_ key: String) -> String {
         let parts = key.split(separator: "|").map(String.init)
         let kindLabel =
             parts.first.map { kind -> String in
