@@ -9,14 +9,20 @@ Inline execution and author review follow the user's no-subagent instruction.
   Test ambiguity, Korean boundaries, latest prior selection, UTF-16 ranges,
   exclusions, budget pressure and stale scope/body. Integrate background ownership.
   Original extraction/selection delivered first; background ownership follows.
-- [ ] 3. Wire immutable settings/controller parameters, expanded tokenizer-budgeted
+- [x] 3. Wire immutable settings/controller parameters, expanded tokenizer-budgeted
   windows and opportunity-linked local strategy/latency metrics. Test changes during
   asynchronous prediction and partial acceptance; expose replay/settings/report UI.
   Runtime settings, app preparation callbacks and local opportunity metrics are
   implemented. Settings/report UI and explicit replay controls follow separately.
-- [ ] 4. Review integration and deliver a batch handoff. Run necessary local build,
+- [x] 4. Review integration and deliver a batch handoff. Run necessary local build,
   full tests and bench compile per final slice. Keep owner A/B/C, CI, model/license
   and unlocked native UI evidence explicitly deferred.
 
 Do not repeat native dependency archives per slice or wait for remote CI. Continue
 to #182 after implementation is delivered, independent of GitHub merge status.
+
+Implementation/local verification is complete. C remains the default. CI,
+unlocked native settings/editor interaction, real-model tokenizer/quality tests,
+same-model hundreds-of-opportunities owner comparison and release decisions remain
+pending; no owner checkbox is checked. Benchmark JSON records the strategy,
+explicit registered names and opportunities that actually received an anchor.
