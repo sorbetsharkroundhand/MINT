@@ -7,7 +7,11 @@ public final class ProjectEditorRequests: ObservableObject {
     @Published public private(set) var editorFocusRequest = 0
     @Published public private(set) var searchFocusRequest = 0
     @Published public private(set) var renameRequest = 0
-    @Published public private(set) var searchJump: EditorSearchJump?
+    @Published public internal(set) var searchJump: EditorSearchJump?
+    @Published internal var sourceReturnPoint: SourceWritingPosition?
+    @Published internal var sourceNavigationError: String?
+    weak var nativeEditor: BlockTextView?
+    var nativeEditorKey: ProjectDocumentKey?
 
     public init() {}
 
