@@ -2,6 +2,18 @@ import XCTest
 @testable import MINTCore
 
 final class GhostContextModeTests: XCTestCase {
+    func testRawInstructBudgetIncludesSelectedChatTemplateOverhead() {
+        let counter = TokenCounter({ $0.count }, promptCost: { prompt in
+            switch prompt {
+            case .continuation(let text): return text.count
+            case .instruct(let system, let user): return system.count + user.count + 90
+            }
+        })
+        let result = ContextAssembler.assembleWithReport(prefix: String(repeating: "원문 ", count: 100),
+            document: nil, style: .instruct, tokenCounter: counter, tokenBudget: 260, contextMode: .raw)
+        XCTAssertLessThanOrEqual(counter.count(result.prompt), 260)
+    }
+
     func testRawModesExcludeAllDerivedHeadersAndCurrentRemainsDefault() {
         let document = DocumentContext(title: "Secret title", kind: .novel,
             genre: "Secret genre", characters: [CharacterCard(name: "유정", note: "Secret note")])

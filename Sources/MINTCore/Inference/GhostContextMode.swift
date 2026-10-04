@@ -31,10 +31,7 @@ extension ContextAssembler {
             }
         }
         func cost(_ text: String, counter: TokenCounter, quote: String? = nil) -> Int {
-            switch prompt(text, quote: quote) {
-            case .continuation(let text): counter.count(text)
-            case .instruct(let system, let user): counter.count(system) + counter.count(user)
-            }
+            counter.count(prompt(text, quote: quote))
         }
         if let counter {
             let limit = max(0, budget ?? defaultPromptTokenBudget)

@@ -102,6 +102,7 @@ struct LegacyWorkspaceView: View {
             Set(store?.activeEntry?.recordedConversations?.map(\.contentHash) ?? [])
         }
         indexer.attachLegacy(store: store)
+        ContentView.connectGhostContext(completion: completion, indexer: indexer)
         var observedID = store.activeID
         store.documentDidChange = { [weak store, weak completion, weak indexer] id in
             guard store != nil else { return }

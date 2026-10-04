@@ -189,13 +189,28 @@ public actor CompletionEngine {
     /// 판정하는 데 쓴다. **원시 토크나이저는 경계를 넘지 않는다**: 카운트 클로저만
     /// Sendable 값으로 통과한다 (메타 이슈 #65 Phase 4 — "토큰 카운터 스냅샷 주입").
     /// 모델이 로드 전이면 nil — 호출부는 현행 문자 상수를 쓴다 (동작 불변).
-    public func makeTokenCounter() async -> TokenCounter? {
-        guard let container else { return nil }
+    public func makeTokenCounter(expectedModelID: String? = nil) async -> TokenCounter? {
+        guard let container, expectedModelID == nil || expectedModelID == loadedModelID else { return nil }
         return await container.perform { context in
             let tokenizer = context.tokenizer
-            return TokenCounter { text in
-                tokenizer.encode(text: text).count
-            }
+            return TokenCounter({ tokenizer.encode(text: $0).count }, promptCost: { prompt in
+                switch prompt {
+                case .continuation(let text): return tokenizer.encode(text: text).count
+                case .instruct(let system, let user):
+                    do {
+                        return try tokenizer.applyChatTemplate(messages: [
+                            ["role": "system", "content": system], ["role": "user", "content": user]
+                        ], tools: nil, additionalContext: ["enable_thinking": false]).count
+                    } catch let error as Tokenizers.TokenizerError {
+                        switch error {
+                        case .missingChatTemplate:
+                            // Match the loaded dependency's LLMUserInputProcessor fallback.
+                            return tokenizer.encode(text: system + "\n\n" + user).count
+                        default: return .max
+                        }
+                    } catch { return .max }
+                }
+            })
         }
     }
 
