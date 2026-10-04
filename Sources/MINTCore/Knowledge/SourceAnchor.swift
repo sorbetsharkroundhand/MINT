@@ -11,6 +11,24 @@ import Foundation
 /// (요구사항 §28). 호출부는 nil이면 점프를 포기하거나 씬 시작으로 폴백한다.
 public enum SourceAnchor {
 
+    /// Exact original evidence only. Offsets disambiguate solely on the captured revision;
+    /// edited duplicate quotes remain stale instead of silently choosing the first match.
+    public static func exactRange(for anchor: EvidenceAnchor, in body: String, revision: String) -> NSRange? {
+        let ns = body as NSString, quote = anchor.quote as NSString
+        guard quote.length > 0 else { return nil }
+        if DocumentOutline.stableHash(body) == revision, let hint = anchor.utf16Hint,
+            hint >= 0, hint <= ns.length, quote.length <= ns.length - hint,
+            ns.substring(with: NSRange(location: hint, length: quote.length)) == anchor.quote {
+            return NSRange(location: hint, length: quote.length)
+        }
+        let first = ns.range(of: anchor.quote)
+        guard first.location != NSNotFound else { return nil }
+        let remaining = first.location + 1
+        guard ns.range(of: anchor.quote, range: NSRange(location: remaining,
+            length: ns.length - remaining)).location == NSNotFound else { return nil }
+        return first
+    }
+
     /// 인용 → 에디터 점프에 쓸 검색 질의. 원문에 exact가 있으면 인용 그대로,
     /// 소폭 수정됐으면 재앵커된 줄의 앞부분(본문 부분 문자열이라 exact 검색
     /// 가능)을 돌려준다. 실패는 nil.
