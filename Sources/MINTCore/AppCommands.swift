@@ -94,6 +94,13 @@ public struct MintCommands: Commands {
                 .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("프로젝트 가져오기…") { presentFolderImport() }
                 .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
+            Button("이전 저장본에서 복구…") {
+                Task {
+                    if await ProjectRecoveryPanel.present(session: session) { editorRequests.focusEditor() }
+                }
+            }
+            .disabled(legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning
+                || session.isTransitioning || (session.phase != .ready && session.phase != .failed))
             Divider()
             Button(legacyWorkspace.mode == .legacy ? "프로젝트로 돌아가기" : "레거시 라이브러리 열기") {
                 Task {
