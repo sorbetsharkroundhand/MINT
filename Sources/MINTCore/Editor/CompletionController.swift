@@ -503,13 +503,15 @@ public final class CompletionController: ObservableObject {
     private func markEngineReady() {
         engineState = .ready
         failedModelID = nil
-        // 모델이 새로 로드됐을 수 있다 — 토큰 카운터 캐시를 무효화해 다음 예측이
-        // 최신 스냅샷을 뽑게 한다 (#43).
-        cachedCounterModelID = nil
+        // A pinned model's tokenizer stays valid across completed requests. Only a
+        // different selected model invalidates its cached budget/window eligibility.
+        if cachedCounterModelID != settings.modelID {
+            cachedCounter = nil
+            cachedCounterModelID = nil
+        }
     }
 
-    /// 토큰 카운터 캐시 (#43) — 모델당 한 번만 액터 hop한다. nil도 "로드 전"이라는
-    /// 유효한 결과라 모델ID와 함께 기록한다 (매 키 입력마다 hop 금지).
+    /// Reuse the selected loaded tokenizer; retry a missing snapshot after load.
     private var cachedCounter: TokenCounter?
     private var cachedCounterModelID: String?
 
