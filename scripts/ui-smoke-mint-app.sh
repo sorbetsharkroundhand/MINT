@@ -211,7 +211,7 @@ PROJECT_ID="33333333-3333-3333-3333-333333333333"
 DOCUMENT_ID="44444444-4444-4444-4444-444444444444"
 PROJECT_BODY="project-$TOKEN"
 EDITED_BODY="edited-$TOKEN"
-NEW_BODY="new-$TOKEN"
+NEW_BODY="new-$TOKEN final"
 PERSISTED_BODY="$EDITED_BODY$PROJECT_BODY"
 WRITER_GENRE="FixtureGenre-$TOKEN"
 WRITER_NAME="FixtureCharacter-$TOKEN"
@@ -329,6 +329,14 @@ on run argv
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             else if operation is "equals" then
                 if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+            else if operation is "undo" or operation is "redo" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                if operation is "undo" then
+                    tell targetProcess to keystroke "z" using command down
+                else
+                    tell targetProcess to keystroke "z" using {command down, shift down}
+                end if
             else
                 error "알 수 없는 UI 작업: " & operation
             end if
@@ -429,6 +437,10 @@ ui navigator
 ui press "새 문서"
 wait_ui equals ""
 ui type "$NEW_BODY"
+wait_ui equals "$NEW_BODY"
+ui undo ""
+wait_ui equals "new-$TOKEN "
+ui redo ""
 wait_ui equals "$NEW_BODY"
 open_writer_information
 ui field-equals "mint.writer.genre" ""

@@ -1194,6 +1194,7 @@ final class BlockTextView: NSTextView {
     /// 마크다운을 파싱해 storage를 블록 문서로 채운다 (buildDOM).
     func load(markdown: String) {
         guard let storage = textStorage else { return }
+        lastTypingKeyTimestamp = nil
         invalidateMediaIndex()
         isTransforming = true
         let result = NSMutableAttributedString()
@@ -2299,6 +2300,7 @@ final class BlockTextView: NSTextView {
             return
         }
         guard !hasMarkedText() else { return super.insertNewline(sender) }
+        defer { breakUndoCoalescing() }
         let sel = selectedRange()
         let ns = string as NSString
         let para = ns.paragraphRange(for: sel)
@@ -2526,9 +2528,18 @@ final class BlockTextView: NSTextView {
         return true
     }
 
+    private var lastTypingKeyTimestamp: TimeInterval?
+
     override func keyDown(with event: NSEvent) {
         if selectedImageLocation != nil, handleObjectKey(event) { return }
         if handleMathEditingKey(event) { return }
+        // AppKit coalesces adjacent typing even across idle time and event groups.
+        // A new burst must not undo earlier writing; never split a live IME session.
+        if !hasMarkedText(), let previous = lastTypingKeyTimestamp,
+           event.timestamp - previous >= 2 {
+            breakUndoCoalescing()
+        }
+        lastTypingKeyTimestamp = event.timestamp
         super.keyDown(with: event)
     }
 
@@ -2891,6 +2902,12 @@ final class BlockTextView: NSTextView {
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         guard selectedImageLocation == nil else { return }
         super.insertText(insertString, replacementRange: replacementRange)
+        let committed = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
+        // Keep each word and its trailing whitespace together. Only committed text
+        // ends a typing unit, so Hangul marked-text updates remain AppKit-owned.
+        if !hasMarkedText(), committed?.last?.isWhitespace == true {
+            breakUndoCoalescing()
+        }
     }
 
     /// 이미지 객체 선택 중 Esc — 선택만 해제한다 (그림 블럭 완성도).
