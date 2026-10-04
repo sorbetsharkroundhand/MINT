@@ -71,6 +71,39 @@ final class ImportProjectCoordinatorTests: XCTestCase {
         XCTAssertEqual(try Data(contentsOf: source.deletingLastPathComponent().appendingPathComponent("images/a.png")), Data([1, 2, 3]))
     }
 
+    // Import the exact shipped manual-test archive, rather than constructing a
+    // different valid archive that could hide a broken owner fixture.
+    func testOwnerFixtureImportsAndReopensWithoutChangingSource() async throws {
+        let source = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("scripts/fixtures/owner-import-general")
+        let archive = source.appendingPathComponent("entries.json")
+        let original = try Data(contentsOf: archive)
+        let url = root()
+        defer { try? FileManager.default.removeItem(at: url) }
+        let (defaults, suite) = defaults()
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = ProjectStore(root: url)
+        let session = ProjectSession(store: store, defaults: defaults)
+        let id = try await ImportProjectCoordinator(store: store, session: session)
+            .importFolder(from: source, legacyMode: .general)
+
+        let project = try XCTUnwrap(session.activeProject)
+        XCTAssertEqual(project.id, id)
+        XCTAssertEqual(project.mode, .general)
+        XCTAssertEqual(project.documents.map(\.id.rawValue), [
+            UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+            UUID(uuidString: "10000000-0000-0000-0000-000000000002")!])
+        XCTAssertEqual(project.documents.map(\.title), ["문서 A", "문서 B"])
+        XCTAssertEqual(project.documents.map(\.body), [
+            "# 1장\n\n## 역\n\n### 입구\n\n미나는 푸른 우산을 들었다.\n\n### 승강장\n\n준호도 푸른 우산을 보았다.\n\n# 2장\n\n## 항구\n\n### 부두\n\n상자 안에 푸른 우산이 있었다.\n",
+            "# 문서 B\n\n문서 B에도 푸른 우산이 있다.\n\n문서 B에만 있는 표식: 은빛 열쇠.\n"])
+        let reopened = ProjectSession(store: ProjectStore(root: url), defaults: defaults)
+        try await reopened.bootstrap()
+        XCTAssertEqual(reopened.activeProject, project)
+        XCTAssertEqual(try Data(contentsOf: archive), original)
+    }
+
     func testModernCancellationAndActivationFailureKeepCurrentOwner() async throws {
         for failure in ["cancel", "activate"] {
             let url = root()
