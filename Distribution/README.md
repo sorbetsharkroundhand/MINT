@@ -14,6 +14,7 @@ From the repository root, with full Xcode and its Metal toolchain installed:
 swift package resolve
 scripts/archive-mint-app.sh
 scripts/test-mint-archive-validation.sh
+scripts/test-mint-sandbox-storage.sh
 ```
 
 The result is `build/MINT.xcarchive`. `scripts/validate-mint-archive.sh` checks
@@ -27,9 +28,31 @@ The generated Xcode workspace uses the root `Package.resolved` pins.
 The arm64 linker leaves an intrinsic ad-hoc signature in the executable;
 the archive has no Apple signing identity/team or sealed bundle signature.
 
-This is an unsigned archive, with no Apple account, Store upload, sandbox
-migration, or runtime resource-loading change. #174 owns sandbox storage;
-#175 owns sandboxed MLX loading; #150 Phase B owns signing/distribution proof.
+Both target configurations declare App Sandbox, user-selected file read/write,
+and network-client entitlements (optional model downloads; inference stays local).
+Signing remains disabled for the unsigned archive. The storage regression script
+compiles the production `MintStorageLocation` source into a uniquely identified,
+ad-hoc-signed probe. It checks effective entitlements, container write/reopen, and
+denial of an ungranted external write; an unsandboxed control must fail despite
+its redirected home. Its CFFIXED_USER_HOME and disposable
+container/fixtures are isolated from real manuscripts. All probe data is removed
+afterward; macOS may retain its protected container-manager metadata record.
+This proves the storage resolver boundary, not the full signed app or Store build.
+
+Foundation selects Documents/MINT inside the container for a sandboxed build;
+SwiftPM development builds keep their existing Documents/MINT location. Nothing
+automatically moves development data. Onboarding and File > Import Project use
+explicit folder selection: select a modern UUID folder containing `project.json`,
+or a legacy folder containing `entries.json` and optional `images/`. Legacy import
+asks for the writing mode; modern import preserves its manifest mode. A damaged
+modern manifest cannot fall back to legacy import. Duplicate project IDs are
+rejected. A complete copy is verified before activation; failure or cancellation
+preserves the source and current project. A copy verified before a failed handoff
+may remain inactive. Global legacy settings/trash and whole-library migration
+are outside this per-project import; their originals remain available.
+
+No Apple account or Store upload is involved. #175 owns sandboxed MLX loading;
+#150 Phase B owns signing/distribution proof and representative-install checks.
 The initial version fields match the current developer bundle and do not
 declare a release version. Existing SwiftPM builds/tests and developer-bundle
 smoke remain in CI.

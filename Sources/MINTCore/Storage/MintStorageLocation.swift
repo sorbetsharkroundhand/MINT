@@ -8,7 +8,8 @@ public struct MintStorageLocation: Sendable {
         self.rootDirectory = rootDirectory
     }
 
-    /// Preserve the existing Documents/MINT layout, including the home fallback.
+    /// Foundation maps Documents into the app container when sandboxed; development
+    /// builds retain Documents/MINT. Preserve the existing home fallback.
     public static let standard: MintStorageLocation = {
         let base = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)
             .first ?? FileManager.default.homeDirectoryForCurrentUser
