@@ -129,7 +129,7 @@ final class SourceNavigationHarness {
     let fixture: LegacyBoundaryFixture
     let requests = ProjectEditorRequests()
     let window: LegacyUndoWindow
-    let host: NSHostingView<ContentView>
+    let host: NSView
     let completion: CompletionController
     let indexer: BackgroundIndexer
     init(short: Bool = false) async throws {
@@ -152,7 +152,7 @@ final class SourceNavigationHarness {
             legacyWorkspace: fixture.controller(), editorRequests: requests, completion: completion,
             indexer: indexer, livingMargin: LivingMarginModel(), firstRunFlow: FirstRunFlow(
                 session: fixture.session, store: fixture.store, editorRequests: requests),
-            positionStore: WritingPositionStore(defaults: fixture.defaults)))
+            positionStore: WritingPositionStore(defaults: fixture.defaults)).defaultAppStorage(fixture.defaults))
         window.contentView = host
         await layout()
     }

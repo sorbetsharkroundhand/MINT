@@ -179,12 +179,8 @@ struct SidebarView: View {
             if presentation != .context {
                 sectionTab(.files, icon: "doc.text", help: "문서")
             }
-            sectionTab(.bible, icon: "book.closed", help: "스토리 바이블")
-            sectionTab(
-                .narrative, icon: "arrow.triangle.branch",
-                help: "서사 — 씬·사건·흐름·시간")
-            sectionTab(.context, icon: "eye", help: "AI 컨텍스트 — 예측이 참고한 정보")
             Spacer()
+            WriterCompatibilityMenu(section: $sectionRaw).frame(width: 26, height: 28)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
@@ -204,13 +200,6 @@ struct SidebarView: View {
                     RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
                         .fill(section == target ? theme.novelBgC : .clear)
                 )
-                .overlay(alignment: .topTrailing) {
-                    // 일관성 경고(M7) 점 — 비침습 배지 (CLAUDE.md §3). 관찰
-                    // 서브뷰라 패스가 끝나는 즉시 나타난다.
-                    if target == .narrative, let indexer {
-                        WarningDot(indexer: indexer, store: store, theme: theme)
-                    }
-                }
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
