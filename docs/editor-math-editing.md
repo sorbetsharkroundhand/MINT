@@ -24,7 +24,7 @@ checks glyph/caret alignment, retained preview within the source block, prose
 highlight restoration, multiline selection and geometry, tall/invalid math,
 stable entering/exiting layout, native Undo/Redo and cancelled preview work.
 Existing math round-trip and dirty-render tests cover persistence and bounded
-refresh. The packaged UI smoke types a single-line math block, switches away
+refresh. The packaged UI smoke loads a single-line math fixture, switches away
 and back, edits its source, sends Undo/Redo and verifies save/quit/relaunch.
 
 Visual feel and real macOS input remain owner checks: edit `E=mc^2`, a fraction,

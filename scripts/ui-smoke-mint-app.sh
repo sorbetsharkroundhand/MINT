@@ -349,6 +349,10 @@ on run argv
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
                 tell targetProcess to key code 9 using command down
+            else if operation is "end" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                tell targetProcess to key code 125 using command down
             else if operation is "undo" or operation is "redo" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
@@ -548,20 +552,35 @@ terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
 check_original
 
-# Exercise native math typing, document transitions, Undo/Redo and persistence.
+# Load an existing math document, then exercise native editing and persistence.
+# Add this fixture only while the isolated app is closed; parsing delimiters
+# under a real input source is a separate typing contract (#241).
+MATH_DOCUMENT_ID=$(python3 - "$PROJECT_DIRECTORY" <<'PY'
+import hashlib, json, pathlib, sys, uuid
+project = pathlib.Path(sys.argv[1])
+manifest = project / "project.json"
+data = json.loads(manifest.read_text())
+document_id = str(uuid.uuid4()).upper()
+body = b"$$E=mc^2$$"
+digest = hashlib.sha256(body).hexdigest()
+relative = f"Documents/{document_id}/{digest}.md"
+content = project / relative
+content.parent.mkdir()
+content.write_bytes(body)
+data["documents"].append({"id": {"rawValue": document_id}, "title": "Math Fixture",
+    "kind": "manuscript", "contentHash": digest, "relativePath": relative})
+manifest.write_text(json.dumps(data))
+print(document_id)
+PY
+)
 launch
-ui press "새 문서"
-wait_ui equals ""
-ui type '$$ '
-wait_ui equals ""
-ui type 'E=mc^2'
+ui press "mint.document.$MATH_DOCUMENT_ID"
 wait_ui equals 'E=mc^2'
-MATH_DOCUMENT_INDEX=$(($(plutil -extract documents raw -o - "$PROJECT_DIRECTORY/project.json") - 1))
-MATH_DOCUMENT_ID=$(plutil -extract "documents.$MATH_DOCUMENT_INDEX.id.rawValue" raw -o - "$PROJECT_DIRECTORY/project.json")
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 ui press "mint.document.$MATH_DOCUMENT_ID"
 wait_ui equals 'E=mc^2'
+ui end ""
 ui type "x"
 wait_ui equals 'E=mc^2x'
 ui undo ""
