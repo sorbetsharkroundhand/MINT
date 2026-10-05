@@ -285,7 +285,7 @@ on run argv
                     set frontmost of targetProcess to true
                     set value of attribute "AXFocused" of targetElement to true
                     tell targetProcess
-                        keystroke "a" using command down
+                        key code 0 using command down
                         if fieldValue is "" then
                             key code 51
                         else
@@ -348,14 +348,15 @@ on run argv
             else if operation is "paste" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
-                tell targetProcess to keystroke "v" using command down
+                tell targetProcess to key code 9 using command down
             else if operation is "undo" or operation is "redo" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
+                -- Physical shortcuts also work with the active Hangul input source.
                 if operation is "undo" then
-                    tell targetProcess to keystroke "z" using command down
+                    tell targetProcess to key code 6 using command down
                 else
-                    tell targetProcess to keystroke "z" using {command down, shift down}
+                    tell targetProcess to key code 6 using {command down, shift down}
                 end if
             else
                 error "알 수 없는 UI 작업: " & operation
