@@ -595,5 +595,22 @@ terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
 check_original
 
+# Verify the complete double-dollar typing path, independently of the loaded
+# math fixture. Begin from prose so typing attributes belong to a plain block.
+launch
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
+ui press "새 문서"
+wait_ui equals ""
+ui type '$$E=mc^2$$'
+wait_ui equals 'E=mc^2'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2$$' >/dev/null
+launch
+wait_ui equals 'E=mc^2'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2$$' >/dev/null
+check_original
+
 PASSED=1
 echo "✓ UI 스모크 통과 — 문서 전환 · 작가 설정 · 이미지·수식 편집·Undo·Redo·재실행 · 포커스 · manifest 검증"

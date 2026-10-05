@@ -95,6 +95,34 @@ final class MathScannerTests: XCTestCase {
 
     // MARK: 타이핑 변환 (커서 직전 닫힘)
 
+    func testIncompleteDoubleDollarCandidateDoesNotCloseInlineMath() {
+        for line in ["$$E=mc^2$", "한글 $$x^2$"] {
+            XCTAssertEqual(MathScanner.regions(in: line), [])
+            XCTAssertNil(MathScanner.closingInline(in: line, atCaret: line.utf16.count))
+        }
+        let complete = "$$E=mc^2$$"
+        XCTAssertEqual(kinds(complete), [.displayLine])
+        XCTAssertNil(MathScanner.closingInline(in: complete, atCaret: complete.utf16.count))
+    }
+
+    func testAdjacentInlineFormulasKeepDistinctDelimiterOwnership() {
+        let line = "$x$$y$"
+        XCTAssertEqual(latexes(line), ["x", "y"])
+        XCTAssertEqual(kinds(line), [.inlineText, .inlineText])
+        XCTAssertEqual(MathScanner.closingInline(in: line, atCaret: line.utf16.count)?.latex, "y")
+        XCTAssertEqual(MathScanner.closingInline(in: line, atCaret: 3)?.latex, "x")
+        let afterDisplay = "$$x$$$y$"
+        XCTAssertEqual(latexes(afterDisplay), ["x", "y"])
+        XCTAssertEqual(kinds(afterDisplay), [.displayLine, .inlineText])
+        XCTAssertEqual(MathScanner.closingInline(in: afterDisplay, atCaret: afterDisplay.utf16.count)?.latex, "y")
+    }
+
+    func testEscapedDollarCanPrecedeASeparateInlineFormula() {
+        let line = #"\$$x$"#
+        XCTAssertEqual(latexes(line), ["x"])
+        XCTAssertEqual(MathScanner.closingInline(in: line, atCaret: line.utf16.count)?.latex, "x")
+    }
+
     func test타이핑_방금닫힌쌍만() {
         let line = "전기 $E=mc^2$"
         let caret = (line as NSString).length
