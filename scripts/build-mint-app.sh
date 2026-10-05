@@ -22,10 +22,12 @@ swift build -c release --product MINT
 REL=".build/arm64-apple-macosx/release"
 APP="build/MINT.app"
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$REL/MINT" "$APP/Contents/MacOS/MINT"
 cp "$REL/mlx.metallib" "$APP/Contents/MacOS/mlx.metallib"
+cp Distribution/Resources/PrivacyInfo.xcprivacy "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
+python3 scripts/validate-mint-privacy.py "$APP"
 
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
