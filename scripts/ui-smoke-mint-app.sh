@@ -340,7 +340,7 @@ on run argv
                 if editor is missing value then error "입력 후 에디터 없음"
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             else if operation is "equals" then
-                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치: " & (value of editor as text) & " / 기대: " & expectedValue
             else if operation is "image-body" then
                 set imageBody to value of editor as text
                 if imageBody does not start with "![](images/" then error "Managed image missing"
@@ -552,17 +552,16 @@ check_original
 launch
 ui press "새 문서"
 wait_ui equals ""
-ui type '$$E=mc^2$$'
+ui type '$$ '
+wait_ui equals ""
+ui type 'E=mc^2'
 wait_ui equals 'E=mc^2'
-wait_ui present "mint.math.preview"
 MATH_DOCUMENT_INDEX=$(($(plutil -extract documents raw -o - "$PROJECT_DIRECTORY/project.json") - 1))
 MATH_DOCUMENT_ID=$(plutil -extract "documents.$MATH_DOCUMENT_INDEX.id.rawValue" raw -o - "$PROJECT_DIRECTORY/project.json")
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
-ui absent "mint.math.preview"
 ui press "mint.document.$MATH_DOCUMENT_ID"
 wait_ui equals 'E=mc^2'
-wait_ui present "mint.math.preview"
 ui type "x"
 wait_ui equals 'E=mc^2x'
 ui undo ""

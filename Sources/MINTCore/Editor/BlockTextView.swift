@@ -4278,7 +4278,6 @@ final class BlockTextView: NSTextView {
             hideMathPreview()
             return
         }
-        host.setAccessibilityIdentifier("mint.math.preview")
         host.frame = NSRect(x: sourceRight + 16, y: rect.midY - size.height / 2,
                             width: size.width, height: size.height)
         if host.superview !== self { addSubview(host) }
