@@ -1104,6 +1104,7 @@ final class BlockTextView: NSTextView {
         guard let window, window.firstResponder === self,
             selectedRange().length == 0,
             selectedImageLocation == nil,  // 이미지 객체 선택 중엔 줄 하이라이트 없음
+            !isEditingMath,
             let textContainer, let cr = caretRectInView()
         else { return nil }
         // 캐럿과 **같은 기준**(시스템 캐럿 rect + 폰트 메트릭)에서 만든다.
@@ -1117,6 +1118,13 @@ final class BlockTextView: NSTextView {
         let x = textContainerOrigin.x + textContainer.lineFragmentPadding - 8
         let w = textContainer.size.width - textContainer.lineFragmentPadding * 2 + 16
         return NSRect(x: x, y: top, width: w, height: bottom - top)
+    }
+
+    private var isEditingMath: Bool {
+        guard window?.firstResponder === self else { return false }
+        let ns = string as NSString
+        let location = min(selectedRange().location, ns.length)
+        return blockInfo(in: ns.paragraphRange(for: NSRange(location: location, length: 0))).block == .math
     }
 
     /// 창에 처음 붙을 때 한 번만 자동 포커스 — 앱을 켜면 곧바로 쓸 수 있게.
@@ -3935,7 +3943,14 @@ final class BlockTextView: NSTextView {
             let caretPara = source.paragraphRange(
                 for: NSRange(location: min(selectedRange().location, source.length), length: 0))
             let caretBlock = blockInfo(in: caretPara).block
-            if caretBlock != .math, caretBlock != .image {
+            let previousBlock = mediaLastSelectionRange.map {
+                blockInfo(in: source.paragraphRange(for: NSRange(
+                    location: min($0.location, source.length), length: 0))).block
+            }
+            // Leaving source mode must render the prior math block even after
+            // its consumed markers and temporary graphics have disappeared.
+            if caretBlock != .math, caretBlock != .image, previousBlock != .math {
+                cancelMathPreview()
                 hideMathPreview()
                 _ = takeMediaDirtyRanges()
                 mediaLastSelectionRange = selectedRange()
@@ -3997,7 +4012,7 @@ final class BlockTextView: NSTextView {
             let members = paras.filter {
                 $0.block == .math && NSIntersectionRange($0.range, group).length > 0
             }
-            guard let firstMember = members.first, let lastMember = members.last else {
+            guard let lastMember = members.last else {
                 continue
             }
             // 그룹 문단은 원문($$ 포함)이 저장돼 있다 — 렌더할 LaTeX만 추출한다.
@@ -4021,7 +4036,7 @@ final class BlockTextView: NSTextView {
                     && sel.location <= contentEnd)
                     || (sel.length > 0 && NSIntersectionRange(sel, group).length > 0))
             if editing {
-                editingMath = (firstMember.range, latex)
+                editingMath = (group, latex)
                 continue
             }
             guard let image = MathRenderer.image(
@@ -4166,10 +4181,10 @@ final class BlockTextView: NSTextView {
         if fullRefresh { syncMarkerFlag() }
         mediaLastSelectionRange = selectedRange()
         repositionImageBox()  // 렌더/줄 높이 변화에 박스 위치를 맞춘다.
-        // 수식 편집 중이면 라이브 미리보기를 문단 아래에 띄운다 — 글자당 조판
-        // 대신 150ms 디바운스 (#53): 연속 타이핑 중엔 마지막 소스만 렌더한다.
+        // Keep live preview beside its source inside the same math block. Retain
+        // the existing debounce so typing does not add a render on every key.
         if let (para, source) = editingMath {
-            scheduleMathPreview(source: source, below: para)
+            scheduleMathPreview(source: source, in: para)
         } else {
             cancelMathPreview()
             hideMathPreview()
@@ -4181,7 +4196,7 @@ final class BlockTextView: NSTextView {
 
     // MARK: 수식 라이브 미리보기 (수식 블럭 완성도)
 
-    /// 수식 편집 중 미리보기 패널 — 소스가 바뀔 때마다 refreshRenderedBlocks가 갱신.
+    /// Live preview shares the active source block instead of floating below it.
     private var mathPreviewHost: NSHostingView<MathPreviewView>?
     /// 미리보기 디바운스 (#53) — 글자마다 MTMathList 조판(메인)을 하지 않고
     /// 입력이 150ms 멈췄을 때 마지막 소스만 렌더한다. 대기 중 소스는 계속 갈아끼운다.
@@ -4190,7 +4205,7 @@ final class BlockTextView: NSTextView {
 
     /// 미리보기 렌더 예약 — 이미 예약이 있으면 소스만 교체한다 (타이머 리셋 없음,
     /// 연속 타이핑에서 최대 한 번의 조판).
-    private func scheduleMathPreview(source: String, below para: NSRange) {
+    private func scheduleMathPreview(source: String, in para: NSRange) {
         mathPreviewPending = (source, para)
         guard mathPreviewTask == nil else { return }
         mathPreviewTask = Task { [weak self] in
@@ -4199,7 +4214,7 @@ final class BlockTextView: NSTextView {
             self.mathPreviewTask = nil
             guard let pending = self.mathPreviewPending else { return }
             self.mathPreviewPending = nil
-            self.presentMathPreview(source: pending.source, below: pending.para)
+            self.presentMathPreview(source: pending.source, in: pending.para)
         }
     }
 
@@ -4209,12 +4224,29 @@ final class BlockTextView: NSTextView {
         mathPreviewPending = nil
     }
 
-    /// 편집 중인 수식 문단 아래에 렌더 결과(또는 힌트·오류 안내)를 띄운다.
-    private func presentMathPreview(source: String, below para: NSRange) {
-        guard let rect = paragraphRectInView(para) else {
+    /// Source and preview occupy one block; preview never covers the next prose row.
+    private func presentMathPreview(source: String, in para: NSRange) {
+        guard isEditingMath, let rect = paragraphRectInView(para),
+            let layoutManager, let textContainer else {
             hideMathPreview()
             return
         }
+        layoutManager.ensureLayout(for: textContainer)
+        let ns = string as NSString
+        var sourceRight = rect.midX
+        var location = para.location
+        while location < min(para.upperBound, ns.length) {
+            let member = ns.paragraphRange(for: NSRange(location: location, length: 0))
+            let content = NSRange(location: member.location, length: (paragraphContent(member) as NSString).length)
+            if content.length > 0 {
+                let glyphs = layoutManager.glyphRange(forCharacterRange: content, actualCharacterRange: nil)
+                let bounds = layoutManager.boundingRect(forGlyphRange: glyphs, in: textContainer)
+                sourceRight = max(sourceRight, bounds.maxX + textContainerOrigin.x)
+            }
+            location = member.upperBound
+        }
+        let availableWidth = rect.maxX - sourceRight - 16 - 48
+        guard availableWidth >= 64 else { hideMathPreview(); return }
         let image = source.isEmpty
             ? nil
             : MathRenderer.image(latex: source, color: palette.ink, fontSize: mathFontSize)
@@ -4231,7 +4263,8 @@ final class BlockTextView: NSTextView {
             isError = true
         }
         let view = MathPreviewView(
-            theme: palette, image: image, message: message, isError: isError)
+            theme: palette, image: image, message: message, isError: isError,
+            maxWidth: availableWidth)
         let host: NSHostingView<MathPreviewView>
         if let existing = mathPreviewHost {
             existing.rootView = view
@@ -4241,10 +4274,13 @@ final class BlockTextView: NSTextView {
             mathPreviewHost = host
         }
         let size = host.fittingSize
-        // 문단 아래 중앙 (flipped 좌표) — 좌우는 화면 안쪽으로 클램프.
-        var origin = NSPoint(x: rect.midX - size.width / 2, y: rect.maxY + 8)
-        origin.x = max(8, min(origin.x, bounds.width - size.width - 8))
-        host.frame = NSRect(origin: origin, size: size)
+        guard size.width <= availableWidth, size.height <= rect.height else {
+            hideMathPreview()
+            return
+        }
+        host.setAccessibilityIdentifier("mint.math.preview")
+        host.frame = NSRect(x: sourceRight + 16, y: rect.midY - size.height / 2,
+                            width: size.width, height: size.height)
         if host.superview !== self { addSubview(host) }
     }
 
@@ -4934,7 +4970,9 @@ final class BlockTextView: NSTextView {
             return
         }
         let font = caretLineFont()
-        let baseline = rect.minY + font.ascender
+        let baseline = isEditingMath
+            ? (caretBaselineY() ?? rect.minY + font.ascender)
+            : rect.minY + font.ascender
         let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
         caret.origin.y = baseline - glyphTop

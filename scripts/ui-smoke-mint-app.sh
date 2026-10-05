@@ -547,5 +547,34 @@ terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
 check_original
 
+# Exercise native math typing, document transitions, Undo/Redo and persistence.
+launch
+ui press "새 문서"
+wait_ui equals ""
+ui type '$$E=mc^2$$'
+wait_ui equals 'E=mc^2'
+wait_ui present "mint.math.preview"
+MATH_DOCUMENT_INDEX=$(($(plutil -extract documents raw -o - "$PROJECT_DIRECTORY/project.json") - 1))
+MATH_DOCUMENT_ID=$(plutil -extract "documents.$MATH_DOCUMENT_INDEX.id.rawValue" raw -o - "$PROJECT_DIRECTORY/project.json")
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
+ui absent "mint.math.preview"
+ui press "mint.document.$MATH_DOCUMENT_ID"
+wait_ui equals 'E=mc^2'
+wait_ui present "mint.math.preview"
+ui type "x"
+wait_ui equals 'E=mc^2x'
+ui undo ""
+wait_ui equals 'E=mc^2'
+ui redo ""
+wait_ui equals 'E=mc^2x'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
+launch
+wait_ui equals 'E=mc^2x'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
+check_original
+
 PASSED=1
-echo "✓ UI 스모크 통과 — 문서 전환·생성 · 작가 설정 · PNG 붙여넣기·Undo·Redo·재실행 · 포커스 · manifest 검증"
+echo "✓ UI 스모크 통과 — 문서 전환 · 작가 설정 · 이미지·수식 편집·Undo·Redo·재실행 · 포커스 · manifest 검증"
