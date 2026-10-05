@@ -1,10 +1,7 @@
 import Foundation
 
-/// 마크다운 한 줄 안의 수식 영역을 찾는 결정적 스캐너 (이슈 #20).
-///
-/// LLM 없이 정규 규칙만으로 inline(`$…$`)과 display(`$$…$$`) 구분을 맡는다 —
-/// "결정적 로직 우선" 헌법(AGENTS.md §2.5). 여러 줄 display는 문단 단위
-/// 상태기계가 필요하므로 이 스캐너의 대상이 아니다(에디터 load·EPUB이 담당).
+/// Deterministic single-line inline/display delimiter scanner. No inference or
+/// disk work; multiline display ownership remains with the editor and export.
 ///
 /// 오인 방지 규칙 (Pandoc·cmark-gfm 수식 확장의 관습을 따른다):
 /// - 이스케이프 `\$`는 구분자가 아니다 — 가격 강조 `\~\$5\~` 같은 원문 보존.
@@ -62,6 +59,9 @@ enum MathScanner {
                 if let region = scanDisplay(ns, from: i, skipping: skipRanges) {
                     result.append(region)
                     i = region.range.upperBound - 1  // 루프의 += 1과 합쳐 다음 문자부터
+                } else {
+                    // An incomplete display opener still owns both dollars.
+                    i += 1
                 }
                 continue
             }
@@ -98,6 +98,15 @@ enum MathScanner {
             j -= 1
         }
         guard open >= 0 else { return nil }
+        if open > 0, character(ns, open - 1) == dollar,
+            (open < 2 || character(ns, open - 2) != backslash) {
+            // Adjacent dollars may belong to display or to two inline formulas.
+            // Resolve only this ambiguity with the shared scanner; ordinary
+            // inline typing retains its bounded backward search.
+            return regions(in: line).first {
+                $0.kind == .inlineText && $0.range.upperBound == caret
+            }
+        }
         return scanInline(ns, at: open).flatMap { $0.range.upperBound == caret ? $0 : nil }
     }
 
