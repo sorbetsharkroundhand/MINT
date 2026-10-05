@@ -285,7 +285,7 @@ on run argv
                     set frontmost of targetProcess to true
                     set value of attribute "AXFocused" of targetElement to true
                     tell targetProcess
-                        keystroke "a" using command down
+                        key code 0 using command down
                         if fieldValue is "" then
                             key code 51
                         else
@@ -340,7 +340,7 @@ on run argv
                 if editor is missing value then error "입력 후 에디터 없음"
                 if not (value of attribute "AXFocused" of editor) then error "입력 후 에디터 포커스 유실"
             else if operation is "equals" then
-                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치"
+                if (value of editor as text) is not expectedValue then error "에디터 본문 불일치: " & (value of editor as text) & " / 기대: " & expectedValue
             else if operation is "image-body" then
                 set imageBody to value of editor as text
                 if imageBody does not start with "![](images/" then error "Managed image missing"
@@ -348,14 +348,19 @@ on run argv
             else if operation is "paste" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
-                tell targetProcess to keystroke "v" using command down
+                tell targetProcess to key code 9 using command down
+            else if operation is "end" then
+                set frontmost of targetProcess to true
+                set value of attribute "AXFocused" of editor to true
+                tell targetProcess to key code 125 using command down
             else if operation is "undo" or operation is "redo" then
                 set frontmost of targetProcess to true
                 set value of attribute "AXFocused" of editor to true
+                -- Physical shortcuts also work with the active Hangul input source.
                 if operation is "undo" then
-                    tell targetProcess to keystroke "z" using command down
+                    tell targetProcess to key code 6 using command down
                 else
-                    tell targetProcess to keystroke "z" using {command down, shift down}
+                    tell targetProcess to key code 6 using {command down, shift down}
                 end if
             else
                 error "알 수 없는 UI 작업: " & operation
@@ -547,5 +552,48 @@ terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
 check_original
 
+# Load an existing math document, then exercise native editing and persistence.
+# Add this fixture only while the isolated app is closed; parsing delimiters
+# under a real input source is a separate typing contract (#241).
+MATH_DOCUMENT_ID=$(python3 - "$PROJECT_DIRECTORY" <<'PY'
+import hashlib, json, pathlib, sys, uuid
+project = pathlib.Path(sys.argv[1])
+manifest = project / "project.json"
+data = json.loads(manifest.read_text())
+document_id = str(uuid.uuid4()).upper()
+body = b"$$E=mc^2$$"
+digest = hashlib.sha256(body).hexdigest()
+relative = f"Documents/{document_id}/{digest}.md"
+content = project / relative
+content.parent.mkdir()
+content.write_bytes(body)
+data["documents"].append({"id": {"rawValue": document_id}, "title": "Math Fixture",
+    "kind": "manuscript", "contentHash": digest, "relativePath": relative})
+manifest.write_text(json.dumps(data))
+print(document_id)
+PY
+)
+launch
+ui press "mint.document.$MATH_DOCUMENT_ID"
+wait_ui equals 'E=mc^2'
+ui press "mint.document.$DOCUMENT_ID"
+wait_ui equals "$PERSISTED_BODY"
+ui press "mint.document.$MATH_DOCUMENT_ID"
+wait_ui equals 'E=mc^2'
+ui end ""
+ui type "x"
+wait_ui equals 'E=mc^2x'
+ui undo ""
+wait_ui equals 'E=mc^2'
+ui redo ""
+wait_ui equals 'E=mc^2x'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
+launch
+wait_ui equals 'E=mc^2x'
+terminate
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
+check_original
+
 PASSED=1
-echo "✓ UI 스모크 통과 — 문서 전환·생성 · 작가 설정 · PNG 붙여넣기·Undo·Redo·재실행 · 포커스 · manifest 검증"
+echo "✓ UI 스모크 통과 — 문서 전환 · 작가 설정 · 이미지·수식 편집·Undo·Redo·재실행 · 포커스 · manifest 검증"

@@ -1,0 +1,134 @@
+import AppKit
+import SwiftUI
+import XCTest
+@testable import MINTCore
+
+@MainActor
+final class MathEditGeometryTests: XCTestCase {
+    func testSingleLineMathUsesOneEditingRegionAndActualGlyphCaret() async throws {
+        let h = try await SourceNavigationHarness()
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("$$E=mc^2$$\nAfter")
+        let view = try await h.editor()
+        view.window?.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.refreshRenderedBlocks()
+        let rendered = try XCTUnwrap(view.mathDrawnRect(forParagraphAt: 0))
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.refreshRenderedBlocks()
+        view.refreshActiveLineHighlight()
+        try await Task.sleep(for: .milliseconds(200))
+        let manager = try XCTUnwrap(view.layoutManager), container = try XCTUnwrap(view.textContainer)
+        manager.ensureLayout(for: container)
+        let para = (view.string as NSString).paragraphRange(for: view.selectedRange())
+        let glyphs = manager.glyphRange(forCharacterRange: para, actualCharacterRange: nil)
+        let block = manager.boundingRect(forGlyphRange: glyphs, in: container)
+            .offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
+        let preview = try XCTUnwrap(view.subviews.compactMap { $0 as? NSHostingView<MathPreviewView> }.first)
+        XCTAssertGreaterThanOrEqual(preview.frame.minY, block.minY)
+        XCTAssertLessThanOrEqual(preview.frame.maxY, block.maxY, "Preview must belong to the active math block")
+        let caret = try XCTUnwrap(view.subviews.first {
+            $0.layer?.cornerRadius == 1 && $0.frame.width == 2 && !$0.isHidden
+        })
+        let index = manager.glyphIndexForCharacter(at: view.selectedRange().location)
+        let fragment = manager.lineFragmentRect(forGlyphAt: index, effectiveRange: nil)
+        let baseline = fragment.minY + manager.location(forGlyphAt: index).y + view.textContainerOrigin.y
+        let font = try XCTUnwrap(view.textStorage?.attribute(.font, at: 2, effectiveRange: nil) as? NSFont)
+        XCTAssertEqual(caret.frame.maxY, baseline - font.descender, accuracy: 1,
+                       "Caret must follow the source glyph baseline, including enlarged math line height")
+        XCTAssertNil(view.mathDrawnRect(forParagraphAt: 0))
+        XCTAssertEqual(view.serialize(), "$$E=mc^2$$\nAfter")
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.refreshRenderedBlocks()
+        XCTAssertEqual(view.mathDrawnRect(forParagraphAt: 0), rendered, "Mode changes must not move the rendered math")
+        XCTAssertNil(preview.superview)
+    }
+
+    func testMathEditingSuppressesProseLineHighlight() async throws {
+        let h = try await SourceNavigationHarness()
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("$$E=mc^2$$\nAfter")
+        let view = try await h.editor()
+        view.window?.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.refreshActiveLineHighlight()
+        let band = try XCTUnwrap(view.subviews.first { $0.layer?.cornerRadius == 6 })
+        XCTAssertTrue(band.isHidden)
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.refreshActiveLineHighlight()
+        XCTAssertFalse(band.isHidden)
+    }
+
+    func testMultilinePreviewStaysBesideTheWholeGroupAndPreservesSelection() async throws {
+        let markdown = "$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\nAfter"
+        let h = try await SourceNavigationHarness()
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody(markdown)
+        let view = try await h.editor()
+        view.window?.makeFirstResponder(view)
+        let end = (view.string as NSString).length
+        view.setSelectedRange(NSRange(location: end, length: 0))
+        view.refreshRenderedBlocks()
+        let rendered = try XCTUnwrap(view.mathDrawnRect(forParagraphAt: 0))
+        let group = try XCTUnwrap(view.mathGroup(containing: 0))
+        let selection = NSRange(location: (view.string as NSString).range(of: "a &").location, length: 2)
+        view.setSelectedRange(selection)
+        view.refreshRenderedBlocks()
+        try await Task.sleep(for: .milliseconds(200))
+        let preview = try XCTUnwrap(view.subviews.compactMap { $0 as? NSHostingView<MathPreviewView> }.first)
+        let lm = try XCTUnwrap(view.layoutManager), tc = try XCTUnwrap(view.textContainer)
+        let block = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: group, actualCharacterRange: nil), in: tc)
+            .offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
+        XCTAssertGreaterThanOrEqual(preview.frame.minY, block.minY)
+        XCTAssertLessThanOrEqual(preview.frame.maxY, block.maxY)
+        XCTAssertEqual(view.selectedRange(), selection)
+        XCTAssertEqual(view.serialize(), markdown)
+        view.setSelectedRange(NSRange(location: end, length: 0))
+        view.refreshRenderedBlocks()
+        XCTAssertEqual(view.mathDrawnRect(forParagraphAt: 0), rendered)
+        XCTAssertNil(preview.superview)
+    }
+
+    func testTallAndInvalidMathKeepNativeLayoutAcrossEditingModes() async throws {
+        for latex in ["\\frac{1}{2}", "\\frac{1{"] {
+            let h = try await SourceNavigationHarness()
+            defer { h.close() }
+            h.fixture.session.updateSelectedDocumentBody("$$\(latex)$$\nAfter")
+            let view = try await h.editor()
+            view.window?.makeFirstResponder(view)
+            let end = (view.string as NSString).length
+            view.setSelectedRange(NSRange(location: end, length: 0))
+            view.refreshRenderedBlocks()
+            let before = try XCTUnwrap(view.mathDrawnRect(forParagraphAt: 0))
+            let beforeCaret = view.firstRect(forCharacterRange: NSRange(location: 2, length: 0), actualRange: nil)
+            view.setSelectedRange(NSRange(location: 2, length: 0))
+            view.refreshRenderedBlocks()
+            let afterCaret = view.firstRect(forCharacterRange: view.selectedRange(), actualRange: nil)
+            XCTAssertEqual(beforeCaret.minY, afterCaret.minY, accuracy: 0.5)
+            view.setSelectedRange(NSRange(location: end, length: 0))
+            view.refreshRenderedBlocks()
+            XCTAssertEqual(view.mathDrawnRect(forParagraphAt: 0), before)
+        }
+    }
+
+    func testMathSourceEditUndoRedoAndCancelledPreviewPreserveManuscript() async throws {
+        let h = try await SourceNavigationHarness()
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("$$E=mc^2$$\nAfter")
+        let view = try await h.editor(), manager = try XCTUnwrap(view.undoManager)
+        view.window?.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        manager.beginUndoGrouping()
+        view.insertText("x", replacementRange: view.selectedRange())
+        manager.endUndoGrouping()
+        XCTAssertEqual(view.serialize(), "$$E=xmc^2$$\nAfter")
+        manager.undo()
+        XCTAssertEqual(view.serialize(), "$$E=mc^2$$\nAfter")
+        manager.redo()
+        XCTAssertEqual(view.serialize(), "$$E=xmc^2$$\nAfter")
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.refreshRenderedBlocks()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertFalse(view.subviews.contains { $0 is NSHostingView<MathPreviewView> })
+    }
+}
