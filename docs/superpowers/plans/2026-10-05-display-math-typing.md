@@ -28,8 +28,8 @@
 
 **Interfaces:** Existing `MathScanner.regions(in:skipping:)` and `closingInline(in:atCaret:)` signatures remain unchanged. Native editor uses them as today.
 
-- [ ] Add failing scanner regressions for incomplete `$$E=mc^2$` and real editor per-character typing through `$$E=mc^2$$`; preserve adjacent inline/escape cases.
-- [ ] Run scanner tests (pure Foundation, safe during another isolated UI test). Run native editor tests only after any UI smoke ends; record actual failures before production edits.
-- [ ] Keep both opening dollars owned by display scanning and use scanner output for closing-inline detection; update touched historical guide citation to the current invariant.
+- [x] Add failing scanner regressions for incomplete `$$E=mc^2$` and real editor per-character typing through `$$E=mc^2$$`; preserve adjacent inline/escape cases.
+- [x] Run scanner tests (pure Foundation, safe during another isolated UI test). Run native editor tests only after any UI smoke ends; record actual failures before production edits.
+- [x] Keep both opening dollars owned by display scanning and use scanner output for closing-inline detection; update touched historical guide citation to the current invariant.
 - [ ] Run math scanner/round-trip/native typing/Undo tests, full tests, required builds and packaged typing/save/reopen evidence serially with foreground tests.
 - [ ] Review inline, commit/push/create/attach one bounded PR; merge the exact reviewed latest head after required CI. Leave owner checkboxes untouched.
