@@ -81,3 +81,28 @@ distribution proof; the real-device owner check in #175 remains separate.
 The initial version fields match the current developer bundle and do not
 declare a release version. Existing SwiftPM builds/tests and developer-bundle
 smoke remain in CI.
+
+## Current app privacy declaration (#185)
+
+Both bundle paths copy `Resources/PrivacyInfo.xcprivacy` to the root macOS app's
+`Contents/Resources`. The offline gate rejects missing, malformed, escaping or
+stale declarations and validates the current MINT-owned API reasons. The app CI
+exercises disposable resource failures; archive-copy tests independently remove
+and tamper with the actual native artifact.
+
+The source audit maps app-owned preferences in `CompletionSettings`, theme,
+writing positions and project selection to UserDefaults reason `CA92.1`.
+Container file metadata used by storage/recovery and verified model installs
+uses `C617.1`; explicit user-selected import file metadata uses `3B52.1`.
+MINT has no telemetry, manuscript upload or tracking, so its declaration has no
+collected data or tracking domains. Optional model downloads are distinct from
+local manuscript processing; the current approved model catalog remains empty.
+
+These mappings and the macOS resource location were checked against Apple's
+[manifest guidance](https://developer.apple.com/documentation/bundleresources/adding-a-privacy-manifest-to-your-app-or-third-party-sdk),
+[API reason list](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)
+and [on-device collection definition](https://developer.apple.com/app-store/app-privacy-details/)
+on 2026-10-05. This audit covers MINT-owned code. SDK manifests, resource/license
+notices and the final model host/privacy practices still require the exact
+release dependency/model inventory. #155/#180 own final policy/lineup approval;
+this resource foundation does not complete #185 or prove Store compliance.

@@ -86,6 +86,9 @@ jobs:
           plutil -lint build/MINT.app/Contents/Info.plist
           codesign --verify --deep --strict --verbose=2 build/MINT.app
 
+      - name: Verify privacy manifest packaging and rejection regressions
+        run: python3 scripts/test-mint-privacy.py build/MINT.app
+
       - name: Launch smoke test
         run: scripts/smoke-mint-app.sh
 
