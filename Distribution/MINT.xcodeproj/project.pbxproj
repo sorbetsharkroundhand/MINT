@@ -44,7 +44,7 @@
 		A17300000000000000000009 /* MINT */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = A1730000000000000000000A /* Target configurations */;
-			buildPhases = (A1730000000000000000000B /* Sources */, A17300000000000000000006 /* Frameworks */, A1730000000000000000000C /* Resources */,);
+			buildPhases = (A1730000000000000000000B /* Sources */, A17300000000000000000006 /* Frameworks */, A1730000000000000000000C /* Resources */, A18500000000000000000003 /* Third-party notices */,);
 			buildRules = ();
 			dependencies = ();
 			name = MINT;
@@ -81,6 +81,21 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A18500000000000000000003 /* Third-party notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ("$(SRCROOT)/../Package.resolved", "$(SRCROOT)/../Distribution/Notices/inventory.json", "$(SRCROOT)/../scripts/mint-notices.py",);
+			name = "Third-party notices";
+			outputPaths = ("$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ThirdPartyNotices.json", "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ThirdPartyNotices.txt",);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "sh \"$SRCROOT/../scripts/build-mint-notices.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A1730000000000000000000B /* Sources */ = {

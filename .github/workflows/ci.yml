@@ -89,6 +89,11 @@ jobs:
       - name: Verify privacy manifest packaging and rejection regressions
         run: python3 scripts/test-mint-privacy.py build/MINT.app
 
+      - name: Verify dependency notices and packaged resources without launching the app
+        run: |
+          python3 scripts/test-mint-notices.py
+          python3 scripts/mint-notices.py --checkouts .build/checkouts --validate-app build/MINT.app
+
       - name: Launch smoke test
         run: scripts/smoke-mint-app.sh
 

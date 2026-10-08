@@ -31,6 +31,7 @@ xcrun lipo "$APP/Contents/MacOS/MINT" -verify_arch arm64
 RESOURCES="$APP/Contents/Resources"
 [ -d "$RESOURCES" ] || fail "missing package resources"
 python3 scripts/validate-mint-privacy.py "$APP"
+python3 scripts/mint-notices.py --checkouts .build/archive-dd/SourcePackages/checkouts --validate-app "$APP"
 [ -n "$(find "$RESOURCES" -type f -name default.metallib -size +0c -print -quit)" ] \
     || fail "missing compiled MLX Metal library"
 [ -n "$(find "$RESOURCES" -type f -name latinmodern-math.otf -size +0c -print -quit)" ] \
