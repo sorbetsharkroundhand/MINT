@@ -12,10 +12,16 @@ import tempfile
 from xml.parsers.expat import ExpatError
 
 
+def reject_symlinks(path):
+    # /tmp and /var are standard macOS aliases; reject application-created links.
+    path = path.absolute()
+    if any(part.is_symlink() for part in [path, *path.parents] if part not in {Path("/tmp"), Path("/var")}):
+        raise ValueError("App/report paths must not follow symlinks")
+
+
 def bundle_file(app, relative):
+    reject_symlinks(app)
     path = app
-    if path.is_symlink():
-        raise ValueError("App must not be a symlink")
     for part in relative.split("/"):
         if part in ("", ".", ".."):
             raise ValueError("Noncanonical bundle path")
@@ -100,9 +106,7 @@ def collect(app, model_id=None, model_revision=None, model_state="unknown"):
 
 
 def write_report(output, report):
-    # /tmp and /var are standard macOS aliases; reject application-created links.
-    if any(path.is_symlink() for path in [output, *output.parents] if path not in {Path("/tmp"), Path("/var")}):
-        raise ValueError("Support output must not follow symlinks")
+    reject_symlinks(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=output.parent, delete=False) as staged:
         temporary = Path(staged.name)

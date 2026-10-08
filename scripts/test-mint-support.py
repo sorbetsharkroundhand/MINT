@@ -93,6 +93,12 @@ class SupportReportTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             support.collect(self.app)
 
+    def test_enclosing_app_directory_cannot_redirect_collection(self):
+        selected = self.root / "selected"
+        selected.symlink_to(self.root, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            support.collect(selected / "MINT.app")
+
     def test_report_output_never_follows_a_symlink(self):
         report = support.collect(self.app)
         output = self.root / "report.json"
