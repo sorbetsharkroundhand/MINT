@@ -35,6 +35,9 @@ jobs:
           swift package resolve
           git diff --exit-code -- Package.resolved
 
+      - name: Verify support diagnostics exclude writer data
+        run: python3 scripts/test-mint-support.py
+
       - name: Build MINT
         run: swift build --product MINT
 
@@ -106,6 +109,19 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+      - name: Collect artifact support context
+        if: always()
+        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-app.json
+
+      - name: Upload artifact support context
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: support-app
+          path: build/support-app.json
+          if-no-files-found: error
+          retention-days: 7
+
   archive:
     name: App / Unsigned Xcode Archive
     runs-on: macos-15
@@ -148,3 +164,16 @@ jobs:
           path: build/MINT.xcarchive.zip
           if-no-files-found: error
           retention-days: 14
+
+      - name: Collect archive support context
+        if: always()
+        run: python3 scripts/collect-mint-support.py --app build/MINT.xcarchive/Products/Applications/MINT.app --output build/support-archive.json
+
+      - name: Upload archive support context
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: support-archive
+          path: build/support-archive.json
+          if-no-files-found: error
+          retention-days: 7

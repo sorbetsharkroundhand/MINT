@@ -85,3 +85,16 @@ jobs:
             build/MINT.app.zip.sha256
           if-no-files-found: error
           retention-days: 14
+
+      - name: Collect candidate support context
+        if: always()
+        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-candidate.json
+
+      - name: Upload candidate support context
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: support-candidate
+          path: build/support-candidate.json
+          if-no-files-found: error
+          retention-days: 14
