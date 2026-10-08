@@ -6,14 +6,34 @@ import MLXLLM
 import MLXLMCommon
 import Tokenizers
 
-/// MLX 내부 생성 태스크의 수명주기 짝 — 스트림 소비를 먼저 끝낸 경로도 실제
-/// token loop 종료까지 기다려 다음 Metal 작업과 겹치지 않게 한다 (PLAN §12).
+/// Joins the MLX producer before releasing its cache or model container,
+/// including paths that stop consuming text at a sentence boundary.
 struct GenerationTaskSynchronizer: Sendable {
     let task: Task<Void, Never>
 
     func cancelAndWait() async {
         task.cancel()
         await task.value
+    }
+
+    func cancelAndCollectInfo(from iterator: inout AsyncStream<Generation>.Iterator) async -> GenerateCompletionInfo? {
+        await cancelAndWait()
+        // The producer is finished: only buffered events remain. Ignore text
+        // beyond the consumer's boundary, but retain the final timing evidence.
+        var info: GenerateCompletionInfo?
+        while let generation = await iterator.next() {
+            if case .info(let finalInfo) = generation { info = finalInfo }
+        }
+        return info
+    }
+}
+
+extension GenerateCompletionInfo {
+    var benchmarkTimeToFirstToken: TimeInterval? {
+        // MLX promptTime includes prefill and the first sampled token, before
+        // detokenization. An EOS-only or cancelled-before-token run is missing.
+        guard generationTokenCount > 0, promptTime.isFinite, promptTime >= 0 else { return nil }
+        return promptTime
     }
 }
 
@@ -244,6 +264,7 @@ public actor CompletionEngine {
         /// KV 재사용으로 프리필을 건너뛴 토큰 수 (PLAN §12 효과 측정).
         public let reusedPromptTokens: Int
         @_spi(Benchmark) public var rawText = ""
+        @_spi(Benchmark) public var timeToFirstToken: TimeInterval? = nil
 
         static let empty = Completion(
             text: "",
@@ -692,7 +713,8 @@ public actor CompletionEngine {
                     input: input, cache: kvCache, parameters: generateParameters,
                     context: context)
                 onGenerationStarted?()
-                for await generation in stream {
+                var iterator = stream.makeAsyncIterator()
+                while let generation = await iterator.next() {
                     if Task.isCancelled { break }
                     switch generation {
                     case .chunk(let chunk):
@@ -709,9 +731,9 @@ public actor CompletionEngine {
                     // 루프 이탈 뒤 아래에서 내부 생성 Task를 취소·종료 대기한다.
                     if stoppedAtBoundary || stoppedAfterFirstChunk { break }
                 }
-                // 스트림 소비를 먼저 끝낸 경우에도 내부 token loop와 Metal
-                // command buffer가 끝난 뒤에만 캐시·컨테이너를 넘긴다 (PLAN §12).
-                await synchronizer.cancelAndWait()
+                // Join before handing off the cache/container. Final timing is
+                // retained even when sentence cutting stops text consumption.
+                let finalInfo = await synchronizer.cancelAndCollectInfo(from: &iterator)
                 // 조기 종료·협조 취소여도 캐시엔 "프롬프트 + α"가 앞에서부터 순서대로
                 // 들어가 있다 — 기록해 두면 다음 요청이 LCP까지 재사용한다.
                 if cacheInUse {
@@ -731,7 +753,8 @@ public actor CompletionEngine {
                     stoppedAtSentenceBoundary: stoppedAtBoundary,
                     promptTokenCount: promptTokenCount,
                     reusedPromptTokens: reusedPromptTokens,
-                    rawText: observation.rawText
+                    rawText: observation.rawText,
+                    timeToFirstToken: (info ?? finalInfo)?.benchmarkTimeToFirstToken
                 )
             } catch {
                 // 협조 취소는 문장 경계 조기 종료와 같은 그림이다 — 스트림을 중간에

@@ -40,13 +40,17 @@ public struct ReleaseBenchmarkSample: Sendable {
     public var truth: String
     public var coldTTFC: Double?
     public var warmTTFC: Double?
+    public var coldTTFT: Double?
+    public var warmTTFT: Double?
     public var warmPromptTokens: Int
     public var warmReusedTokens: Int
     public init(coldText: String, warmText: String, rawColdText: String, rawWarmText: String, truth: String,
-                coldTTFC: Double?, warmTTFC: Double?, warmPromptTokens: Int, warmReusedTokens: Int) {
+                coldTTFC: Double?, warmTTFC: Double?, warmPromptTokens: Int, warmReusedTokens: Int,
+                coldTTFT: Double? = nil, warmTTFT: Double? = nil) {
         self.coldText = coldText; self.warmText = warmText; self.rawColdText = rawColdText; self.rawWarmText = rawWarmText
         self.truth = truth; self.coldTTFC = coldTTFC; self.warmTTFC = warmTTFC
         self.warmPromptTokens = warmPromptTokens; self.warmReusedTokens = warmReusedTokens
+        self.coldTTFT = coldTTFT; self.warmTTFT = warmTTFT
     }
 }
 public struct ReleaseBenchmarkReport: Codable, Sendable {
@@ -85,14 +89,18 @@ public struct ReleaseBenchmarkReport: Codable, Sendable {
             self.declaredPeakBudgetBytes = declaredPeakBudgetBytes
         }
     }
-    public var schemaVersion = 1
+    public var schemaVersion = 2
     public var metadata: Metadata
     public var completedSamples = 0
     public var failedSamples = 0
     public var coldLatencySamples = 0
     public var warmLatencySamples = 0
+    public var coldFirstTokenSamples = 0
+    public var warmFirstTokenSamples = 0
     @BenchmarkNullable public var coldTTFCMean: Double?
     @BenchmarkNullable public var warmTTFCMean: Double?
+    @BenchmarkNullable public var coldTTFTMean: Double?
+    @BenchmarkNullable public var warmTTFTMean: Double?
     @BenchmarkNullable public var prefixHitRate: Double?
     @BenchmarkNullable public var eojeolHitRate: Double?
     @BenchmarkNullable public var kvReuseRate: Double?
@@ -104,7 +112,7 @@ public struct ReleaseBenchmarkReport: Codable, Sendable {
         guard attempted >= samples.count, attempted >= 0,
               metadata.maxTokens > 0, metadata.contextCharacters > 0, metadata.temperature.isFinite, metadata.temperature >= 0,
               samples.allSatisfy({ sample in
-                  [sample.coldTTFC, sample.warmTTFC].compactMap { $0 }.allSatisfy { $0.isFinite && $0 >= 0 }
+                  [sample.coldTTFC, sample.warmTTFC, sample.coldTTFT, sample.warmTTFT].compactMap { $0 }.allSatisfy { $0.isFinite && $0 >= 0 }
                   && sample.warmPromptTokens >= 0 && sample.warmReusedTokens >= 0 && sample.warmReusedTokens <= sample.warmPromptTokens
               }) else { throw ReportError.invalid }
         self.metadata = metadata; self.mlxPeakBytes = mlxPeakBytes; self.processPeakBytes = processPeakBytes
@@ -113,12 +121,44 @@ public struct ReleaseBenchmarkReport: Codable, Sendable {
         coldLatencySamples = cold.count; warmLatencySamples = warm.count
         coldTTFCMean = cold.isEmpty ? nil : cold.reduce(0, +) / Double(cold.count)
         warmTTFCMean = warm.isEmpty ? nil : warm.reduce(0, +) / Double(warm.count)
+        let coldTokens = samples.compactMap(\.coldTTFT), warmTokens = samples.compactMap(\.warmTTFT)
+        coldFirstTokenSamples = coldTokens.count; warmFirstTokenSamples = warmTokens.count
+        coldTTFTMean = coldTokens.isEmpty ? nil : coldTokens.reduce(0, +) / Double(coldTokens.count)
+        warmTTFTMean = warmTokens.isEmpty ? nil : warmTokens.reduce(0, +) / Double(warmTokens.count)
         prefixHitRate = samples.isEmpty ? nil : Double(samples.filter { zip($0.coldText, $0.truth).prefix { $0 == $1 }.count >= 2 }.count) / Double(samples.count)
         eojeolHitRate = samples.isEmpty ? nil : Double(samples.filter { Self.sharesEojeol($0.coldText, $0.truth) }.count) / Double(samples.count)
         let prompts = samples.reduce(0.0) { $0 + Double($1.warmPromptTokens) }, reused = samples.reduce(0.0) { $0 + Double($1.warmReusedTokens) }
         kvReuseRate = prompts > 0 ? reused / prompts : nil
         rawContamination = samples.reduce(.init()) { $0.adding(.count($1.rawColdText)).adding(.count($1.rawWarmText)) }
         displayedContamination = samples.reduce(.init()) { $0.adding(.count($1.coldText)).adding(.count($1.warmText)) }
+    }
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, metadata, completedSamples, failedSamples, coldLatencySamples, warmLatencySamples
+        case coldFirstTokenSamples, warmFirstTokenSamples, coldTTFCMean, warmTTFCMean, coldTTFTMean, warmTTFTMean
+        case prefixHitRate, eojeolHitRate, kvReuseRate, rawContamination, displayedContamination, mlxPeakBytes, processPeakBytes
+    }
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try values.decode(Int.self, forKey: .schemaVersion)
+        metadata = try values.decode(Metadata.self, forKey: .metadata)
+        completedSamples = try values.decode(Int.self, forKey: .completedSamples)
+        failedSamples = try values.decode(Int.self, forKey: .failedSamples)
+        coldLatencySamples = try values.decode(Int.self, forKey: .coldLatencySamples)
+        warmLatencySamples = try values.decode(Int.self, forKey: .warmLatencySamples)
+        // Schema 1 recorded chunks only. Missing token timing remains unknown.
+        coldFirstTokenSamples = try values.decodeIfPresent(Int.self, forKey: .coldFirstTokenSamples) ?? 0
+        warmFirstTokenSamples = try values.decodeIfPresent(Int.self, forKey: .warmFirstTokenSamples) ?? 0
+        _coldTTFTMean = try values.decodeIfPresent(BenchmarkNullable<Double>.self, forKey: .coldTTFTMean) ?? .init(wrappedValue: nil)
+        _warmTTFTMean = try values.decodeIfPresent(BenchmarkNullable<Double>.self, forKey: .warmTTFTMean) ?? .init(wrappedValue: nil)
+        _coldTTFCMean = try values.decode(BenchmarkNullable<Double>.self, forKey: .coldTTFCMean)
+        _warmTTFCMean = try values.decode(BenchmarkNullable<Double>.self, forKey: .warmTTFCMean)
+        _prefixHitRate = try values.decode(BenchmarkNullable<Double>.self, forKey: .prefixHitRate)
+        _eojeolHitRate = try values.decode(BenchmarkNullable<Double>.self, forKey: .eojeolHitRate)
+        _kvReuseRate = try values.decode(BenchmarkNullable<Double>.self, forKey: .kvReuseRate)
+        rawContamination = try values.decode(BenchmarkContamination.self, forKey: .rawContamination)
+        displayedContamination = try values.decode(BenchmarkContamination.self, forKey: .displayedContamination)
+        _mlxPeakBytes = try values.decode(BenchmarkNullable<UInt64>.self, forKey: .mlxPeakBytes)
+        _processPeakBytes = try values.decode(BenchmarkNullable<UInt64>.self, forKey: .processPeakBytes)
     }
     public static func sharesEojeol(_ a: String, _ b: String) -> Bool {
         func words(_ text: String) -> Set<String> {

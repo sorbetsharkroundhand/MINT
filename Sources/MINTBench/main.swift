@@ -563,7 +563,8 @@ func runReplay(path: String, engine: CompletionEngine, options: BenchOptions) as
             if options.releaseReportPath != nil {
                 releaseSamples.append(.init(coldText: cold.text, warmText: warm.text, rawColdText: cold.rawText, rawWarmText: warm.rawText,
                     truth: truth, coldTTFC: cold.timeToFirstChunk, warmTTFC: warm.timeToFirstChunk,
-                    warmPromptTokens: warm.promptTokenCount, warmReusedTokens: warm.reusedPromptTokens))
+                    warmPromptTokens: warm.promptTokenCount, warmReusedTokens: warm.reusedPromptTokens,
+                    coldTTFT: cold.timeToFirstToken, warmTTFT: warm.timeToFirstToken))
             }
             // 수락 프록시: 제안과 정답의 문자 단위 공통 접두 길이.
             var accepted = 0

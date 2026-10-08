@@ -4,12 +4,16 @@ MINTBench records measurements only. Release lineup/license approval remains in 
 
 The JSON artifact contains exact model ID/revision, fixture SHA-256, physical/Metal recommended working-set bytes, device, OS/toolchain and generation/context settings. It contains no manuscript or generated text. `completedSamples` and `failedSamples` expose incomplete cut runs.
 
+Schema 2 adds first-token timing independently of decoded chunk timing. Historical schema 1 reports remain readable; their missing token measurements stay null with zero token sample counts.
+
 | Field | Frozen definition |
 | --- | --- |
 | `prefixHitRate` | Fraction of completed cold samples with at least two matching Unicode Characters at the beginning of suggestion/truth, preserving the existing replay metric. |
 | `eojeolHitRate` | Fraction of cold suggestions sharing a whitespace-separated, punctuation-trimmed eojeol of at least two Characters with the truth. This is the current shared-word metric, not tokenizer accuracy. |
 | `coldTTFCMean` / `warmTTFCMean` | Mean generation-start to first decoded text chunk in seconds. Reset KV before each cold call, then repeat the same prompt warm. Not raw first-token timing or model download/load time. |
 | `coldLatencySamples` / `warmLatencySamples` | Number of present first-chunk measurements. Missing chunks are excluded rather than treated as zero. |
+| `coldTTFTMean` / `warmTTFTMean` | Mean MLX `GenerateCompletionInfo.promptTime` in seconds: iterator prefill time plus generation-loop start to first sampled non-stop token, before detokenization. Cold resets KV; warm repeats the same prompt. Excludes model load, tokenization, cache setup and producer scheduling before its loop starts. Final metadata is retained after sentence-boundary cancellation without consuming more text. |
+| `coldFirstTokenSamples` / `warmFirstTokenSamples` | Number of present first-token measurements. No final info, zero generated tokens (including EOS-only runs), or invalid timing means missing; chunk timing is never substituted. |
 | `kvReuseRate` | Sum of warm reused prompt tokens / sum of warm prompt tokens; zero denominator is null. |
 | `rawContamination` | Counts in consumed decoded chunks before sentence cutting and post-processing, for both cold and warm calls. |
 | `displayedContamination` | The same counters after normal editor output processing, separately from raw counts. |

@@ -1,4 +1,5 @@
 import XCTest
+import MLXLMCommon
 
 @testable import MINTCore
 
@@ -30,6 +31,50 @@ final class GenerationTaskSynchronizerTests: XCTestCase {
 
         let didFinish = await probe.finished
         XCTAssertTrue(didFinish)
+    }
+
+    func testEarlySentenceStopRetainsFirstTokenTimingWithoutAppendingBufferedText() async throws {
+        let probe = Probe()
+        let (stream, continuation) = AsyncStream<Generation>.makeStream()
+        continuation.yield(.chunk("문장이 끝났다. "))
+        let task = Task<Void, Never> {
+            while !Task.isCancelled { await Task.yield() }
+            continuation.yield(.chunk("버려야 할 다음 문장"))
+            continuation.yield(.info(.init(promptTokenCount: 100, generationTokenCount: 2,
+                                           promptTime: 0.125, generationTime: 0.05, stopReason: .cancelled)))
+            await probe.markFinished()
+            continuation.finish()
+        }
+        var iterator = stream.makeAsyncIterator()
+        var observation = CompletionEngine.TextObservation()
+        guard case .chunk(let chunk) = await iterator.next() else { return XCTFail("Missing first chunk") }
+        XCTAssertTrue(observation.append(chunk, stopAtUtteranceEnd: false))
+
+        let info = await GenerationTaskSynchronizer(task: task).cancelAndCollectInfo(from: &iterator)
+
+        XCTAssertEqual(try XCTUnwrap(info).benchmarkTimeToFirstToken, 0.125)
+        XCTAssertEqual(observation.rawText, "문장이 끝났다. ")
+        let didFinish = await probe.finished
+        XCTAssertTrue(didFinish)
+    }
+
+    func testFirstTokenTimingRequiresGeneratedTokensAndValidMeasurement() {
+        for (tokens, time) in [(0, 0.125), (1, -.infinity), (1, .nan), (1, -0.1)] {
+            let info = GenerateCompletionInfo(promptTokenCount: 100, generationTokenCount: tokens,
+                                               promptTime: time, generationTime: 0.05)
+            XCTAssertNil(info.benchmarkTimeToFirstToken)
+        }
+        let info = GenerateCompletionInfo(promptTokenCount: 100, generationTokenCount: 1,
+                                           promptTime: 0, generationTime: 0.05)
+        XCTAssertEqual(info.benchmarkTimeToFirstToken, 0)
+    }
+
+    func testFinishedStreamWithoutInfoDoesNotInventFirstTokenTiming() async {
+        let (stream, continuation) = AsyncStream<Generation>.makeStream()
+        continuation.finish()
+        var iterator = stream.makeAsyncIterator()
+        let info = await GenerationTaskSynchronizer(task: Task {}).cancelAndCollectInfo(from: &iterator)
+        XCTAssertNil(info)
     }
 
     func test_호출자가이미취소돼도_내부Task종료까지_기다린다() async {
