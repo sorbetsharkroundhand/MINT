@@ -274,7 +274,18 @@ on run argv
         -- System Writing Tools can put a floating window ahead of the editor.
         set rootElement to my findElement(targetProcess, "AXIdentifier", "main", 1)
         if rootElement is missing value then error "메인 창 없음"
-        if operation is "field-set" or operation is "field-equals" or operation is "field-absent" then
+        if operation is "recovery-preview" then
+            -- NSAlert is a separate modal window, outside the main editor tree.
+            set previewText to my findElement(targetProcess, "AXIdentifier", "mint.recovery.preview-text", 30)
+            if previewText is missing value then error "Recovery preview missing"
+            if (value of previewText as text) does not contain expectedValue then error "Recovery preview body mismatch"
+        else if operation is "recovery-press" or operation is "recovery-present" then
+            set targetElement to my findElement(targetProcess, "AXIdentifier", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(targetProcess, "AXTitle", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(targetProcess, "AXValue", expectedValue, 30)
+            if targetElement is missing value then error "Recovery control missing: " & expectedValue
+            if operation is "recovery-press" then click targetElement
+        else if operation is "field-set" or operation is "field-equals" or operation is "field-absent" then
             set targetElement to my findElementContaining(rootElement, "AXIdentifier", expectedValue, 30)
             if operation is "field-absent" then
                 if targetElement is not missing value then error "Unexpected writer field: " & expectedValue
@@ -404,7 +415,7 @@ JXA
 ui() {
     owned_pid || fail "격리 실행 파일 PID 확인 실패"
     osascript "$SMOKE_ROOT/ui.applescript" "$PID" "$1" "${2:-}" "${3:-}" >/dev/null
-    case "$1" in press|resize) sleep 0.3 ;; esac
+    case "$1" in press|resize|recovery-press) sleep 0.3 ;; esac
 }
 
 wait_ui() {
@@ -612,5 +623,81 @@ terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2$$' >/dev/null
 check_original
 
+# Exercise recovery through the actual startup error screen and native modal.
+# Only the closed, synthetic project is damaged; keep a byte-exact source snapshot.
+cp "$PROJECT_DIRECTORY/project.json" "$SMOKE_ROOT/recovery-backup.json"
+printf '%s' 'corrupt current fixture' > "$PROJECT_DIRECTORY/project.json"
+printf '%s' 'corrupt backup fixture' > "$PROJECT_DIRECTORY/previous-project.json"
+RECOVERY_MARKER_HASH=$(file_hash "$PROJECT_ROOT/active-project.json")
+snapshot_recovery_source() {
+    python3 - "$PROJECT_DIRECTORY" <<'PY'
+import hashlib, json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+snapshot = {}
+for path in sorted(root.rglob('*')):
+    if path.is_symlink():
+        raise SystemExit('Unexpected symlink in isolated recovery fixture')
+    if path.is_file():
+        snapshot[str(path.relative_to(root))] = hashlib.sha256(path.read_bytes()).hexdigest()
+print(json.dumps(snapshot, sort_keys=True))
+PY
+}
+assert_recovery_source() {
+    snapshot_recovery_source > "$SMOKE_ROOT/recovery-observed.json"
+    cmp -s "$SMOKE_ROOT/recovery-source.json" "$SMOKE_ROOT/recovery-observed.json" \
+        || fail "Recovery changed the damaged source"
+}
+snapshot_recovery_source > "$SMOKE_ROOT/recovery-source.json"
+launch
+wait_ui present "mint.recovery.preview"
+ui press "mint.recovery.preview"
+wait_ui recovery-present "이전 저장본을 복구하지 못했습니다"
+ui recovery-press "확인"
+wait_ui present "mint.recovery.preview"
+[ "$(file_hash "$PROJECT_ROOT/active-project.json")" = "$RECOVERY_MARKER_HASH" ] \
+    || fail "Invalid backup changed the active project"
+assert_recovery_source
+terminate
+
+# Make the previous revision valid while retaining the damaged current manifest.
+cp "$SMOKE_ROOT/recovery-backup.json" "$PROJECT_DIRECTORY/previous-project.json"
+snapshot_recovery_source > "$SMOKE_ROOT/recovery-source.json"
+launch
+wait_ui present "mint.recovery.preview"
+ui press "mint.recovery.preview"
+wait_ui recovery-preview "$PERSISTED_BODY"
+ui recovery-press "mint.recovery.cancel"
+wait_ui present "mint.recovery.preview"
+[ "$(file_hash "$PROJECT_ROOT/active-project.json")" = "$RECOVERY_MARKER_HASH" ] \
+    || fail "Cancel changed the active project"
+assert_recovery_source
+ui press "mint.recovery.preview"
+wait_ui recovery-preview "$PERSISTED_BODY"
+ui recovery-press "mint.recovery.open-copy"
+wait_ui equals "$PERSISTED_BODY"
+ui focused
+RECOVERED_ID=$(plutil -extract rawValue raw -o - "$PROJECT_ROOT/active-project.json")
+[ "$RECOVERED_ID" != "$PROJECT_ID" ] || fail "Recovery reused the damaged project identity"
+ui press "mint.document.$MATH_DOCUMENT_ID"
+wait_ui equals 'E=mc^2x'
+ui focused
+terminate
+assert_recovery_source
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$NEW_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" "$IMAGE_BODY" >/dev/null
+verify_project_state "$SMOKE_HOME/Documents/MINT" '$$E=mc^2x$$' >/dev/null
+RECOVERED_DIRECTORY="$PROJECT_ROOT/$RECOVERED_ID"
+[ "$(file_hash "$RECOVERED_DIRECTORY/$ASSET_PATH")" = "$ASSET_HASH" ] \
+    || fail "Recovery lost the managed image"
+[ "$(file_hash "$RECOVERED_DIRECTORY/${WRITER_RECORD#"$PROJECT_DIRECTORY/"}")" = "$(file_hash "$WRITER_RECORD")" ] \
+    || fail "Recovery changed durable writer data"
+assert_isolated_project_mode
+launch
+wait_ui equals 'E=mc^2x'
+terminate
+assert_recovery_source
+check_original
+
 PASSED=1
-echo "✓ UI 스모크 통과 — 문서 전환 · 작가 설정 · 이미지·수식 편집·Undo·Redo·재실행 · 포커스 · manifest 검증"
+echo "✓ UI 스모크 통과 — 문서 전환 · 작가 설정 · 이미지·수식 편집·Undo·Redo·재실행 · 포커스 · 복구 실패·취소·사본 열기 · manifest 검증"
