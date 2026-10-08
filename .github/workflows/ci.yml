@@ -111,7 +111,7 @@ jobs:
 
       - name: Collect artifact support context
         if: always()
-        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-app.json
+        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-app.json --expect-source-revision "$(git rev-parse HEAD)"
 
       - name: Upload artifact support context
         if: always()
@@ -167,7 +167,7 @@ jobs:
 
       - name: Collect archive support context
         if: always()
-        run: python3 scripts/collect-mint-support.py --app build/MINT.xcarchive/Products/Applications/MINT.app --output build/support-archive.json
+        run: python3 scripts/collect-mint-support.py --app build/MINT.xcarchive/Products/Applications/MINT.app --output build/support-archive.json --expect-source-revision "$(git rev-parse HEAD)"
 
       - name: Upload archive support context
         if: always()

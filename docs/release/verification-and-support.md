@@ -34,7 +34,9 @@ Both build scripts stamp `MINTSourceRevision` and `MINTSourceDirty` into the app
 Info.plist. CI checks out the tested commit; the source stamp follows that commit,
 including GitHub's test merge commit where applicable. Support reports additionally
 hash the actual executable and notice inventory. A dirty source stamp or unknown
-revision cannot stand in for a frozen RC. An older/IDE-built artifact may report
+revision cannot stand in for a frozen RC. CI requires the stamp to match its
+checked-out clean source revision, retaining a report even if that check fails.
+An older/IDE-built artifact may report
 unknown source identity; never infer it from the checkout running the collector.
 
 For the final batch, record source revision, executable hash, app version/build,

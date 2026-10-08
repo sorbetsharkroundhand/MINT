@@ -105,6 +105,13 @@ def collect(app, model_id=None, model_revision=None, model_state="unknown"):
     }
 
 
+def verify_source(report, revision):
+    app = report["application"]
+    if (not re.fullmatch(r"[0-9a-f]{40}", revision) or app.get("status") != "available"
+            or app.get("sourceRevision") != revision or app.get("sourceDirty") is not False):
+        raise ValueError("Artifact does not identify the expected clean source revision")
+
+
 def write_report(output, report):
     reject_symlinks(output)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -124,11 +131,14 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--model-id")
     parser.add_argument("--model-revision")
+    parser.add_argument("--expect-source-revision", help="Require an available artifact from this clean source revision")
     parser.add_argument("--model-state", choices=["ready", "loading", "unloaded", "error", "unknown"], default="unknown")
     args = parser.parse_args()
     try:
         report = collect(args.app, args.model_id, args.model_revision, args.model_state)
         write_report(args.output, report)
+        if args.expect_source_revision:
+            verify_source(report, args.expect_source_revision)
         print("Saved artifact/environment support report; writer data was not collected")
     except (OSError, ValueError, plistlib.InvalidFileException, ExpatError) as error:
         parser.exit(1, f"Support collection failed: {error}\n")

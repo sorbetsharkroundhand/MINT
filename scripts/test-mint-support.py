@@ -67,6 +67,24 @@ class SupportReportTests(unittest.TestCase):
         self.assertIsNone(app["sourceRevision"])
         self.assertIsNone(app["sourceDirty"])
 
+    def test_ci_source_check_rejects_missing_stale_or_dirty_artifacts(self):
+        report = support.collect(self.app)
+        support.verify_source(report, "a" * 40)
+        with self.assertRaises(ValueError):
+            support.verify_source(report, "b" * 40)
+        for revision, dirty in [(None, False), ("a" * 40, True), ("a" * 40, None)]:
+            self.info["MINTSourceRevision"] = revision or ""
+            if revision is None:
+                del self.info["MINTSourceRevision"]
+            self.info["MINTSourceDirty"] = dirty
+            if dirty is None:
+                del self.info["MINTSourceDirty"]
+            self.write_info()
+            with self.assertRaises(ValueError):
+                support.verify_source(support.collect(self.app), "a" * 40)
+        with self.assertRaises(ValueError):
+            support.verify_source(support.collect(self.root / "Absent.app"), "a" * 40)
+
     def test_owner_supplied_model_context_requires_an_exact_revision(self):
         report = support.collect(self.app, model_id="fixture/approved", model_revision="b" * 40, model_state="unloaded")
         self.assertEqual(report["model"], {"status": "owner_supplied", "id": "fixture/approved",
