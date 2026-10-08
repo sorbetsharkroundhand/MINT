@@ -145,7 +145,10 @@ def validate_app(app, manifest, text):
         raise NoticeError("Unsafe or missing app resources")
     allowed = {"PrivacyInfo.xcprivacy", *output_contents(manifest, text)}
     for name, content in output_contents(manifest, text).items():
-        if checked_file(resources, name).read_bytes() != content.encode("utf-8"):
+        path = checked_file(resources, name)
+        if path.stat().st_mode & 0o444 != 0o444:
+            raise NoticeError("Packaged notice is not readable by all users: " + name)
+        if path.read_bytes() != content.encode("utf-8"):
             raise NoticeError("Stale/tampered packaged notice: " + name)
     packages = {row["identity"] for row in manifest["packages"]}
     seen = set()
@@ -198,6 +201,7 @@ def write_output(output, manifest, text):
             try:
                 staged.write(content)
                 staged.flush()
+                temporary.chmod(0o644)
                 temporary.replace(target)
             finally:
                 temporary.unlink(missing_ok=True)

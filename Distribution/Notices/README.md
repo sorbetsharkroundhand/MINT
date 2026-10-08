@@ -24,6 +24,8 @@ source tree or package manifest; both original Git objects are checked. BoringSS
 texts match each vendor's recorded upstream revision. PocketFFT's header notice
 and LPPL 1.3c supplement the pinned sources. Each math font retains its embedded
 copyright and distinct OFL/GUST terms, independently of the library MIT notice.
+Supplementary llhttp, uSHET macros, WIDE SHA1 and zlib terms are also preserved
+for the conservatively inventoried optional networking dependencies.
 
 The release contains no bundled model weights. Unknown resources and model
 artifacts fail validation. Adding a model requires explicit #155/#180 approval

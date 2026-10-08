@@ -68,6 +68,13 @@ class NoticeSourceTests(unittest.TestCase):
         self.assertEqual(manifest["models"], [])
         self.assertEqual(self.collect(), (manifest, text))
 
+    def test_generated_notices_are_readable_by_all_local_users(self):
+        manifest, text = self.collect()
+        output = self.root / "output"
+        notices.write_output(output, manifest, text)
+        for path in output.iterdir():
+            self.assertEqual(path.stat().st_mode & 0o777, 0o644)
+
     def test_missing_license_is_rejected(self):
         self.inventory["packages"][0]["notices"][0]["path"] = "MISSING"
         with self.assertRaises(notices.NoticeError):
