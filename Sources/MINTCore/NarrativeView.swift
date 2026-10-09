@@ -246,7 +246,7 @@ struct NarrativeView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(theme.novelC)
                 Text("서사")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 if let snapshot = liveSnapshot {
                     Text("사건 \(snapshot.canonicalEvents.count) · 플롯 \(snapshot.plotThreads.count)")
@@ -279,7 +279,7 @@ struct NarrativeView: View {
                 ? "아직 이해한 내용이 없어요. 타이핑을 멈추면 백그라운드가 장면을 읽기 시작해요."
                 : "소설 종류의 문서에서만 서사를 만들어요."
         )
-        .font(MintFonts.uiFont(11))
+        .mintUIFont(11)
         .foregroundStyle(theme.ink3C)
         .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -311,7 +311,7 @@ struct NarrativeView: View {
                 } label: {
                     let name = participating.first { $0.id == selectedCharacterID }?.name
                     Label(name ?? "인물", systemImage: "person")
-                        .font(MintFonts.uiFont(10.5))
+                        .mintUIFont(10.5)
                         .foregroundStyle(name == nil ? theme.ink3C : theme.novelC)
                 }
                 .menuStyle(.button)
@@ -347,11 +347,11 @@ struct NarrativeView: View {
             HStack(spacing: 4) {
                 Circle().fill(color).frame(width: 7, height: 7)
                 Text(thread.title)
-                    .font(MintFonts.uiFont(10, .medium))
+                    .mintUIFont(10, .medium)
                     .foregroundStyle(selected ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
                 Text(thread.status.rawValue)
-                    .font(MintFonts.uiFont(8.5))
+                    .mintUIFont(8.5)
                     .foregroundStyle(
                         thread.status == .resolved ? theme.ink3C : color)
                 if thread.userEdited { UserEditedMark(theme: theme) }
@@ -426,7 +426,7 @@ struct NarrativeView: View {
         let (rows, layout) = cachedGraph(snapshot)
         if rows.isEmpty {
             Text("사건이 아직 없어요. 「지금 읽기」를 누르면 사건이 추출돼요.")
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .padding(.vertical, 8)
         } else {
@@ -647,7 +647,7 @@ struct NarrativeView: View {
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(theme.ink3C)
                         Text("검토 필요")
-                            .font(MintFonts.uiFont(11, .semibold))
+                            .mintUIFont(11, .semibold)
                             .foregroundStyle(theme.inkC)
                         if attention > 0 {
                             Text("\(attention)")
@@ -687,10 +687,10 @@ struct NarrativeView: View {
                         .foregroundStyle(theme.novelC)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(warning.kind.rawValue)
-                            .font(MintFonts.uiFont(10.5, .semibold))
+                            .mintUIFont(10.5, .semibold)
                             .foregroundStyle(theme.inkC)
                         Text(warning.message)
-                            .font(MintFonts.uiFont(10.5))
+                            .mintUIFont(10.5)
                             .foregroundStyle(theme.ink2C)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -715,7 +715,7 @@ struct NarrativeView: View {
                     .font(.system(size: 10))
                     .foregroundStyle(theme.ink3C)
                 Text("직접 수정한 항목 \(snapshot.staleOverrides.count)개의 원문 근거가 사라졌어요 — 원문이 돌아오면 다시 적용돼요.")
-                    .font(MintFonts.uiFont(10))
+                    .mintUIFont(10)
                     .foregroundStyle(theme.ink3C)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -736,7 +736,7 @@ struct NarrativeView: View {
                             .font(.system(size: 9))
                             .foregroundStyle(theme.novelC)
                         Text("시간 관계 모순")
-                            .font(MintFonts.uiFont(10.5, .semibold))
+                            .mintUIFont(10.5, .semibold)
                             .foregroundStyle(theme.inkC)
                         Menu("고치기") {
                             ForEach(ChronoRelation.allCases, id: \.rawValue) { relation in
@@ -745,11 +745,11 @@ struct NarrativeView: View {
                                 }
                             }
                         }
-                        .font(MintFonts.uiFont(9.5))
+                        .mintUIFont(9.5)
                         .fixedSize()
                     }
                     Text("\(a.summary) ↔ \(b.summary)")
-                        .font(MintFonts.uiFont(10))
+                        .mintUIFont(10)
                         .foregroundStyle(theme.ink2C)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -819,7 +819,7 @@ struct ManualIndexButton: View {
         case .blocked(let reason):
             VStack(alignment: .leading, spacing: 4) {
                 Text(reason)
-                    .font(MintFonts.uiFont(9.5))
+                    .mintUIFont(9.5)
                     .foregroundStyle(theme.warningC)
                     .fixedSize(horizontal: false, vertical: true)
                 retryButton(label: "다시 시도")
@@ -827,7 +827,7 @@ struct ManualIndexButton: View {
         case .stalled(let message):
             VStack(alignment: .leading, spacing: 4) {
                 Text(message)
-                    .font(MintFonts.uiFont(9.5))
+                    .mintUIFont(9.5)
                     .foregroundStyle(theme.dangerC)
                     .fixedSize(horizontal: false, vertical: true)
                 retryButton(label: "다시 시도")
@@ -855,7 +855,7 @@ struct ManualIndexButton: View {
             }
         } label: {
             Label("지금 읽기", systemImage: "sparkles")
-                .font(MintFonts.uiFont(10.5, .medium))
+                .mintUIFont(10.5, .medium)
                 .foregroundStyle(theme.novelC)
         } primaryAction: {
             indexer.requestPass()
@@ -869,7 +869,7 @@ struct ManualIndexButton: View {
 
     private func retryButton(label: String) -> some View {
         Button(label) { indexer.requestPass() }
-            .font(MintFonts.uiFont(10, .semibold))
+            .mintUIFont(10, .semibold)
             .buttonStyle(.bordered)
             .controlSize(.mini)
             .accessibilityLabel(Text("다시 시도"))
@@ -877,7 +877,7 @@ struct ManualIndexButton: View {
 
     private func phaseText(_ text: String, color: Color) -> some View {
         Text(text)
-            .font(MintFonts.uiFont(10))
+            .mintUIFont(10)
             .foregroundStyle(color)
             .lineLimit(1)
             .help(text)
@@ -1258,7 +1258,7 @@ private struct ThreadGraphArea: View {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 7, weight: .semibold))
                     Text("사소한 사건 \(events.count)개")
-                        .font(MintFonts.uiFont(10))
+                        .mintUIFont(10)
                 }
                 .foregroundStyle(theme.ink3C)
                 .contentShape(Rectangle())
@@ -1267,12 +1267,12 @@ private struct ThreadGraphArea: View {
         case .truncated(_, let total, let read):
             // ⚠️ 헤딩 없는 장편이 씬 하나가 되면 여기서 대부분이 잘린다 (PLAN §8).
             Text("앞 \(read.formatted())자만 이해됨 — \((total - read).formatted())자는 지식에 없어요")
-                .font(MintFonts.uiFont(9.5))
+                .mintUIFont(9.5)
                 .foregroundStyle(theme.ink3C)
                 .lineLimit(1)
         case .pending:
             Text("아직 안 읽음")
-                .font(MintFonts.uiFont(9.5))
+                .mintUIFont(9.5)
                 .foregroundStyle(theme.ink3C)
         }
     }
@@ -1286,7 +1286,7 @@ private struct ThreadGraphArea: View {
                 // 모두에서 커밋한다. SidebarView 이름 변경과 같은 패턴.
                 TextField("씬 제목", text: $draftTitle)
                     .textFieldStyle(.roundedBorder)
-                    .font(MintFonts.uiFont(10.5))
+                    .mintUIFont(10.5)
                     .focused($titleFieldFocused)
                     .onSubmit { onCommitTitle(scene.hash, scene.start) }
                     .onChange(of: titleFieldFocused) { _, focused in
@@ -1297,7 +1297,7 @@ private struct ThreadGraphArea: View {
                     .frame(width: 180)
             } else {
                 Text(scene.title ?? scene.path)
-                    .font(MintFonts.uiFont(10, .semibold))
+                    .mintUIFont(10, .semibold)
                     .foregroundStyle(theme.ink2C)
                     .lineLimit(1)
                 if scene.titleUserEdited || scene.typeUserEdited {
@@ -1305,7 +1305,7 @@ private struct ThreadGraphArea: View {
                 }
                 if scene.type != .present {
                     Text(scene.type.rawValue)
-                        .font(MintFonts.uiFont(8.5))
+                        .mintUIFont(8.5)
                         .foregroundStyle(theme.blueC)
                         .padding(.horizontal, 4)
                         .padding(.vertical, 1)
@@ -1353,7 +1353,7 @@ private struct ThreadGraphArea: View {
                 .font(.system(size: 7))
                 .foregroundStyle(theme.blueC.opacity(0.8))
             Text(text)
-                .font(MintFonts.uiFont(9))
+                .mintUIFont(9)
                 .foregroundStyle(theme.blueC.opacity(0.9))
                 .lineLimit(1)
             if userEdited { UserEditedMark(theme: theme) }
@@ -1395,7 +1395,7 @@ private struct ThreadGraphArea: View {
                 userEdited: userEdited)
             if segment.returnState == .uncertain {
                 Text("복귀 불확실")
-                    .font(MintFonts.uiFont(8))
+                    .mintUIFont(8)
                     .foregroundStyle(theme.novelC)
             }
         }
@@ -1475,7 +1475,7 @@ private struct ThreadGraphArea: View {
             || (dimmedKeys?.contains(event.canonicalKey) ?? false)
         HStack(alignment: .center, spacing: 6) {
             Text(event.summary)
-                .font(MintFonts.uiFont(11, event.importance >= 4 ? .semibold : .regular))
+                .mintUIFont(11, event.importance >= 4 ? .semibold : .regular)
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
             // 그래프 노드의 VoiceOver 대응 (#55) — 노드 원은 Canvas라 개별 요소가
@@ -1484,7 +1484,7 @@ private struct ThreadGraphArea: View {
             .accessibilityHint(Text("사건 상세 보기"))
             if event.perspectives.count >= 2 {
                 Text("관점 \(event.perspectives.count)")
-                    .font(MintFonts.uiFont(8.5))
+                    .mintUIFont(8.5)
                     .foregroundStyle(theme.novelC)
                     .padding(.horizontal, 4)
                     .padding(.vertical, 1)
@@ -1545,7 +1545,7 @@ private struct ThreadGraphArea: View {
                 .font(.system(size: 7))
                 .foregroundStyle(theme.ink3C)
             Text("같은 사건 — \(perspective.summary)")
-                .font(MintFonts.uiFont(9.5))
+                .mintUIFont(9.5)
                 .foregroundStyle(theme.ink3C)
                 .lineLimit(1)
             Spacer(minLength: 0)
@@ -1581,7 +1581,7 @@ private struct NarrativeEventDetail: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(event.summary)
-                        .font(MintFonts.uiFont(11.5, .semibold))
+                        .mintUIFont(11.5, .semibold)
                         .foregroundStyle(theme.inkC)
                         .fixedSize(horizontal: false, vertical: true)
                     Menu {
@@ -1637,7 +1637,7 @@ private struct NarrativeEventDetail: View {
                 // 관점들 (요구사항 §12·§13) — 서로 모순될 수 있는 서술을 나란히.
                 if event.perspectives.count >= 2 {
                     Text("관점")
-                        .font(MintFonts.uiFont(10, .semibold))
+                        .mintUIFont(10, .semibold)
                         .foregroundStyle(theme.ink2C)
                     ForEach(event.perspectives) { perspective in
                         perspectiveRow(perspective)
@@ -1660,7 +1660,7 @@ private struct NarrativeEventDetail: View {
                         onJump(quote)
                     } label: {
                         Label("근거 원문 보기 — “\(quote)”", systemImage: "text.quote")
-                            .font(MintFonts.uiFont(10))
+                            .mintUIFont(10)
                             .foregroundStyle(theme.blueC)
                     }
                     .buttonStyle(.plain)
@@ -1678,7 +1678,7 @@ private struct NarrativeEventDetail: View {
         }
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text("플롯")
-                .font(MintFonts.uiFont(9.5, .semibold))
+                .mintUIFont(9.5, .semibold)
                 .foregroundStyle(theme.ink3C)
             ForEach(mine) { thread in
                 let color = thread.isMain
@@ -1687,11 +1687,11 @@ private struct NarrativeEventDetail: View {
                 HStack(spacing: 3) {
                     Circle().fill(color).frame(width: 6, height: 6)
                     Text(thread.title)
-                        .font(MintFonts.uiFont(10))
+                        .mintUIFont(10)
                         .foregroundStyle(theme.ink2C)
                     if let role = thread.role(of: event.canonicalKey) {
                         Text(role.rawValue)
-                            .font(MintFonts.uiFont(8.5))
+                            .mintUIFont(8.5)
                             .foregroundStyle(color)
                     }
                 }
@@ -1740,7 +1740,7 @@ private struct NarrativeEventDetail: View {
         if discourse != nil || rank != nil {
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("시간")
-                    .font(MintFonts.uiFont(9.5, .semibold))
+                    .mintUIFont(9.5, .semibold)
                     .foregroundStyle(theme.ink3C)
                 Text(
                     [
@@ -1749,11 +1749,11 @@ private struct NarrativeEventDetail: View {
                     ]
                     .compactMap { $0 }.joined(separator: " · ")
                 )
-                .font(MintFonts.uiFont(10))
+                .mintUIFont(10)
                 .foregroundStyle(theme.ink2C)
                 if inConflict {
                     Text("모순 있음 — 검토 필요에서 고칠 수 있어요")
-                        .font(MintFonts.uiFont(9))
+                        .mintUIFont(9)
                         .foregroundStyle(theme.novelC)
                 }
             }
@@ -1772,13 +1772,13 @@ private struct NarrativeEventDetail: View {
                 .flatMap { snapshot.segment(withID: $0) }
             HStack(alignment: .firstTextBaseline, spacing: 5) {
                 Text("장면")
-                    .font(MintFonts.uiFont(9.5, .semibold))
+                    .mintUIFont(9.5, .semibold)
                     .foregroundStyle(theme.ink3C)
                 Button {
                     onJumpOffset(scene.utf16Range.lowerBound)
                 } label: {
                     Text(label)
-                        .font(MintFonts.uiFont(10))
+                        .mintUIFont(10)
                         .foregroundStyle(theme.blueC)
                         .lineLimit(1)
                         .contentShape(Rectangle())
@@ -1787,7 +1787,7 @@ private struct NarrativeEventDetail: View {
                 .help("이 장면의 시작으로 이동")
                 if let segment {
                     Text("구간: \(segment.layer.rawValue)\(segment.depth >= 2 ? " · 깊이 \(segment.depth)" : "")")
-                        .font(MintFonts.uiFont(9))
+                        .mintUIFont(9)
                         .foregroundStyle(theme.blueC)
                 }
             }
@@ -1808,20 +1808,20 @@ private struct NarrativeEventDetail: View {
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(perspective.viewpoint ?? "서술")
-                    .font(MintFonts.uiFont(9, .semibold))
+                    .mintUIFont(9, .semibold)
                     .foregroundStyle(theme.novelC)
                 Text(perspective.summary)
-                    .font(MintFonts.uiFont(10))
+                    .mintUIFont(10)
                     .foregroundStyle(theme.ink2C)
                     .fixedSize(horizontal: false, vertical: true)
                 Text("\(perspective.source.rawValue)·\(perspective.reliability.rawValue)")
-                    .font(MintFonts.uiFont(8.5))
+                    .mintUIFont(8.5)
                     .foregroundStyle(theme.ink3C)
                 if let segment = perspective.segmentID
                     .flatMap({ snapshot.segment(withID: $0) })
                 {
                     Text(segment.layer.rawValue)
-                        .font(MintFonts.uiFont(8.5))
+                        .mintUIFont(8.5)
                         .foregroundStyle(theme.blueC)
                 }
             }
@@ -1841,15 +1841,15 @@ private struct NarrativeEventDetail: View {
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
                         Text(label)
-                            .font(MintFonts.uiFont(9, .semibold))
+                            .mintUIFont(9, .semibold)
                             .foregroundStyle(theme.novelC)
                         Text(other.summary)
-                            .font(MintFonts.uiFont(10))
+                            .mintUIFont(10)
                             .foregroundStyle(theme.ink2C)
                             .lineLimit(2)
                         if !link.reason.isEmpty {
                             Text(link.reason)
-                                .font(MintFonts.uiFont(8.5))
+                                .mintUIFont(8.5)
                                 .foregroundStyle(theme.ink3C)
                                 .lineLimit(1)
                         }
@@ -1886,10 +1886,10 @@ private struct NarrativeEventDetail: View {
     @ViewBuilder private func detailLine(_ key: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
             Text(key)
-                .font(MintFonts.uiFont(9.5, .semibold))
+                .mintUIFont(9.5, .semibold)
                 .foregroundStyle(theme.ink3C)
             Text(value)
-                .font(MintFonts.uiFont(10))
+                .mintUIFont(10)
                 .foregroundStyle(theme.ink2C)
                 .fixedSize(horizontal: false, vertical: true)
         }

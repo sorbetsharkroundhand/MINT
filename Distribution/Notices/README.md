@@ -25,8 +25,14 @@ text are hash-pinned in the inventory. Attribution retains both the embedded
 Adobe copyright and the copyright in the original Google license file.
 Repository resources receive the same source and packaged-byte audit as package
 resources. MINT registers the font for its own process only; it requires neither
-system font installation nor a network connection. This body-family decision
-does not approve the UI family, accent palette, or paragraph typesetting in #153.
+system font installation nor a network connection.
+
+The owner-selected UI family, Pretendard, is also bundled unchanged from release
+1.3.9, commit `5c41199ea0024a9e0b2cb31735265056e5472d76`. The original variable TTF
+and OFL 1.1 text retain their hashes and Kil Hyung-jin attribution. AppKit and
+SwiftUI select the audited descriptor; view modifiers retain relative text
+scaling. Neither font-family decision approves the accent palette or paragraph
+typesetting in #153.
 
 Original supplemental texts in `Texts/` retain immutable upstream provenance:
 swift-xet's immediate successor adds the license without changing its compiled

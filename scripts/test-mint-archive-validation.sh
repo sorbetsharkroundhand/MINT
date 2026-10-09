@@ -43,6 +43,11 @@ mv "$BODY_FONT" "$ARCHIVE_TEST_ROOT/body.ttf"
 expect_rejected "an archive without the selected body font"
 mv "$ARCHIVE_TEST_ROOT/body.ttf" "$BODY_FONT"
 
+UI_FONT=$(find "$APP/Contents/Resources" -type f -name 'PretendardVariable.ttf' -print -quit)
+mv "$UI_FONT" "$ARCHIVE_TEST_ROOT/ui.ttf"
+expect_rejected "an archive without the selected UI font"
+mv "$ARCHIVE_TEST_ROOT/ui.ttf" "$UI_FONT"
+
 scripts/validate-mint-archive.sh "$FIXTURE"
 PRIVACY="$APP/Contents/Resources/PrivacyInfo.xcprivacy"
 mv "$PRIVACY" "$ARCHIVE_TEST_ROOT/PrivacyInfo.xcprivacy"

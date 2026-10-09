@@ -23,7 +23,7 @@ struct MathPreviewView: View {
                         height: image.size.height * scale)
             } else if let message {
                 Text(message)
-                    .font(MintFonts.uiFont(11.5))
+                    .mintUIFont(11.5)
                     .foregroundStyle(isError ? theme.ink2C : theme.ink3C)
                     .lineLimit(1)
                     .frame(maxWidth: maxWidth - 28)

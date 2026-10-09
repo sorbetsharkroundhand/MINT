@@ -71,7 +71,7 @@ struct CharacterBibleView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(theme.novelC)
                 Text("스토리 바이블")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Spacer()
                 // 수동 이해 트리거 (M6-8) — 자동(유휴)만이 아니라 사용자가
@@ -88,10 +88,10 @@ struct CharacterBibleView: View {
 
             TextField("장르 (예: 판타지 · 로맨스 · 추리)", text: genreBinding)
                 .textFieldStyle(.roundedBorder)
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
 
             Text("제목·장르·인물 카드가 예측에 함께 실려요. 최근 본문에 이름이 등장하는 인물이 우선돼요 (최대 3명).")
-                .font(MintFonts.uiFont(10.5))
+                .mintUIFont(10.5)
                 .foregroundStyle(theme.ink2C)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -122,7 +122,7 @@ struct CharacterBibleView: View {
                     }
                     if cards.isEmpty {
                         Text("아직 인물이 없어요 — 주요 인물을 등록하면 제안이 이름과 말투를 지켜요.")
-                            .font(MintFonts.uiFont(11))
+                            .mintUIFont(11)
                             .foregroundStyle(theme.ink3C)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 8)
@@ -135,7 +135,7 @@ struct CharacterBibleView: View {
                 addCard()
             } label: {
                 Label("인물 추가", systemImage: "plus")
-                    .font(MintFonts.uiFont(12, .medium))
+                    .mintUIFont(12, .medium)
             }
         }
         .padding(14)
@@ -265,10 +265,10 @@ private struct CandidateReviewList: View {
                                     "'\(candidate.name)' — '\($0)'의 별칭일까요?"
                                 } ?? "'\(candidate.name)' — 인물로 등록할까요?"
                             )
-                            .font(MintFonts.uiFont(11.5, .medium))
+                            .mintUIFont(11.5, .medium)
                             .foregroundStyle(theme.inkC)
                             Text(candidateDetail(candidate))
-                                .font(MintFonts.uiFont(10))
+                                .mintUIFont(10)
                                 .foregroundStyle(theme.ink3C)
                         }
                         Spacer()
@@ -277,25 +277,25 @@ private struct CandidateReviewList: View {
                             Button("별칭으로") {
                                 indexer.approveCandidateAsAlias(candidate, of: owner)
                             }
-                            .font(MintFonts.uiFont(11, .semibold))
+                            .mintUIFont(11, .semibold)
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
                             .tint(theme.novelC)
                         }
                         if candidate.aliasOfKnown == nil {
                             Button("등록") { indexer.approveCandidate(candidate) }
-                                .font(MintFonts.uiFont(11, .semibold))
+                                .mintUIFont(11, .semibold)
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.small)
                                 .tint(theme.novelC)
                         } else {
                             Button("새 인물") { indexer.approveCandidate(candidate) }
-                                .font(MintFonts.uiFont(11))
+                                .mintUIFont(11)
                                 .buttonStyle(.bordered)
                                 .controlSize(.small)
                         }
                         Button("무시") { indexer.rejectCandidate(candidate) }
-                            .font(MintFonts.uiFont(11))
+                            .mintUIFont(11)
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
@@ -340,11 +340,11 @@ struct CharacterCardRow: View {
                 TextField("이름", text: $card.name)
                     .accessibilityIdentifier("mint.writer.character.name.\(card.id)")
                     .textFieldStyle(.roundedBorder)
-                    .font(MintFonts.uiFont(12))
+                    .mintUIFont(12)
                     .frame(width: 110)
                 TextField("별칭·호칭 (쉼표 구분)", text: $card.aliases)
                     .textFieldStyle(.roundedBorder)
-                    .font(MintFonts.uiFont(12))
+                    .mintUIFont(12)
                 // 자동 등록 표식 (요구사항 §16) — HIGH 신뢰 감지로 만들어진 카드.
                 // 편집하면 사라진다. 삭제는 오른쪽 휴지통 한 번이다.
                 if card.autoRegistered == true {
@@ -385,7 +385,7 @@ struct CharacterCardRow: View {
                 text: $card.note, axis: .vertical)
                 .accessibilityIdentifier("mint.writer.character.note.\(card.id)")
                 .textFieldStyle(.roundedBorder)
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .lineLimit(2...4)
             // 자동 이해 — 예측 카드 줄과 같은 질의 결과의 열람 (CLAUDE.md §1-5).
             // 편집은 원문·카드에서 한다 — 파생 지식을 직접 고치게 하면 원문과
@@ -394,7 +394,7 @@ struct CharacterCardRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(understanding, id: \.self) { line in
                         Text(line)
-                            .font(MintFonts.uiFont(10.5))
+                            .mintUIFont(10.5)
                             .foregroundStyle(theme.ink2C)
                             .fixedSize(horizontal: false, vertical: true)
                     }
@@ -411,7 +411,7 @@ struct CharacterCardRow: View {
                         Image(systemName: chronicleExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 8, weight: .semibold))
                         Text("연대기 · 사건 \(chronicle.count)")
-                            .font(MintFonts.uiFont(10.5, .medium))
+                            .mintUIFont(10.5, .medium)
                     }
                     .foregroundStyle(theme.ink3C)
                     .contentShape(Rectangle())
@@ -425,7 +425,7 @@ struct CharacterCardRow: View {
                                     .font(MintFonts.monoUI(9))
                                     .foregroundStyle(theme.ink3C)
                                 Text(line)
-                                    .font(MintFonts.uiFont(10.5))
+                                    .mintUIFont(10.5)
                                     .foregroundStyle(theme.ink2C)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
@@ -475,7 +475,7 @@ struct CharacterCardRow: View {
                     )
                     .font(.system(size: 8, weight: .semibold))
                     Text("\(title) · \(count)")
-                        .font(MintFonts.uiFont(10.5, .medium))
+                        .mintUIFont(10.5, .medium)
                 }
                 .foregroundStyle(theme.ink3C)
                 .contentShape(Rectangle())
@@ -493,7 +493,7 @@ struct CharacterCardRow: View {
                                         .font(.system(size: 8))
                                         .foregroundStyle(theme.blueC)
                                     Text(entry.text)
-                                        .font(MintFonts.uiFont(10.5))
+                                        .mintUIFont(10.5)
                                         .foregroundStyle(theme.ink2C)
                                         .fixedSize(horizontal: false, vertical: true)
                                         .multilineTextAlignment(.leading)
@@ -504,7 +504,7 @@ struct CharacterCardRow: View {
                             .help("원문으로 이동")
                         } else {
                             Text(entry.text)
-                                .font(MintFonts.uiFont(10.5))
+                                .mintUIFont(10.5)
                                 .foregroundStyle(theme.ink2C)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

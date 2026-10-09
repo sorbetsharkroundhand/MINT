@@ -124,10 +124,10 @@ struct LivingMarginView: View {
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: MintSpacing.sm) {
             Text("지금 보여드릴 제안이 없어요")
-                .font(MintFonts.uiFont(12, .medium))
+                .mintUIFont(12, .medium)
                 .foregroundStyle(theme.ink2C)
             Text("확실한 맥락이나 문장 제안만 이 여백에 조용히 표시됩니다.")
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
@@ -143,7 +143,7 @@ struct LivingMarginView: View {
         let row = VStack(alignment: .leading, spacing: MintSpacing.md) {
             HStack(alignment: .firstTextBaseline, spacing: MintSpacing.sm) {
                 Label(descriptor.categoryLabel, systemImage: descriptor.systemImage)
-                    .font(MintFonts.uiFont(10, .semibold))
+                    .mintUIFont(10, .semibold)
                     .foregroundStyle(theme.novelC)
                     .labelStyle(.titleAndIcon)
                 Spacer(minLength: MintSpacing.sm)
@@ -151,7 +151,7 @@ struct LivingMarginView: View {
                     dismiss(insight.id)
                 } label: {
                     Image(systemName: "xmark")
-                        .font(MintFonts.uiFont(10, .medium))
+                        .mintUIFont(10, .medium)
                         .frame(width: 24, height: 24)
                         .contentShape(Rectangle())
                 }
@@ -163,15 +163,15 @@ struct LivingMarginView: View {
 
             VStack(alignment: .leading, spacing: MintSpacing.xs) {
                 Text(insight.title)
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text(insight.message)
-                    .font(MintFonts.uiFont(12))
+                    .mintUIFont(12)
                     .foregroundStyle(theme.ink2C)
                     .fixedSize(horizontal: false, vertical: true)
                 if let guidance = descriptor.guidance {
                     Text(guidance)
-                        .font(MintFonts.uiFont(10, .medium))
+                        .mintUIFont(10, .medium)
                         .foregroundStyle(theme.ink3C)
                 }
             }
@@ -187,13 +187,13 @@ struct LivingMarginView: View {
                                 systemImage: "arrow.up.left.and.arrow.down.right")
                         }
                         .buttonStyle(.plain)
-                        .font(MintFonts.uiFont(11, .medium))
+                        .mintUIFont(11, .medium)
                         .foregroundStyle(theme.blueC)
                     }
                     ForEach(customActions(insight)) { action in
                         Button(action.title) { onAction?(insight, action) }
                             .buttonStyle(.plain)
-                            .font(MintFonts.uiFont(11, .medium))
+                            .mintUIFont(11, .medium)
                             .foregroundStyle(theme.blueC)
                     }
                 }

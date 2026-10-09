@@ -76,7 +76,7 @@ public struct ContentView: View {
                     Text(projectSession.phase == .suspended
                         ? "프로젝트 전환을 마무리하는 중…"
                         : "프로젝트 여는 중…")
-                        .font(MintFonts.uiFont(12))
+                        .mintUIFont(12)
                         .foregroundStyle(.secondary)
                     }
                 }
@@ -95,10 +95,10 @@ public struct ContentView: View {
             case .error:
                 VStack(spacing: 12) {
                     Text("프로젝트를 열지 못했습니다")
-                        .font(MintFonts.uiFont(15, .semibold))
+                        .mintUIFont(15, .semibold)
                     if let message = projectSession.lastErrorMessage {
                         Text(message)
-                            .font(MintFonts.uiFont(12))
+                            .mintUIFont(12)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -298,7 +298,7 @@ struct EditorPane: View {
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
-                    .font(MintFonts.uiFont(13))
+                    .mintUIFont(13)
                     .foregroundStyle(theme.ink3C)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
@@ -326,7 +326,7 @@ struct EditorPane: View {
             .overlay(alignment: .bottomLeading) {
                 if let message = editorRequests.sourceNavigationError {
                     HStack {
-                        Text(message).font(MintFonts.uiFont(11))
+                        Text(message).mintUIFont(11)
                         Button("닫기") { editorRequests.sourceNavigationError = nil }
                     }
                     .padding(8).background(theme.editorSurfaceC)
@@ -383,7 +383,7 @@ struct EditorToolbar: View {
         HStack(spacing: density == .compact ? 6 : 10) {
             sidebarToggle
             Text(projectSession.selectedDocument?.title ?? "문서")
-                .font(MintFonts.uiFont(12, .medium))
+                .mintUIFont(12, .medium)
                 .foregroundStyle(theme.inkC)
                 .lineLimit(1)
                 .truncationMode(.middle)
@@ -618,7 +618,7 @@ struct MarkdownCheatSheet: View {
             ForEach(Self.inlines) { row($0) }
             theme.sepC.frame(height: 1).padding(.vertical, 7)
             Text("서식 메뉴(⌘⌥1~3, ⌘B/⌘I 등)로도 적용할 수 있어요.")
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -645,7 +645,7 @@ struct MarkdownCheatSheet: View {
                 .background(RoundedRectangle(cornerRadius: MintRadius.xs).fill(theme.chipC))
             Spacer(minLength: 8)
             Text(item.label)
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .foregroundStyle(theme.ink2C)
         }
         .padding(.vertical, 3)
@@ -706,7 +706,7 @@ struct ShortcutHintPill: View {
                     RoundedRectangle(cornerRadius: MintRadius.xs).strokeBorder(theme.sepStrongC)
                 )
             Text(label)
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .foregroundStyle(theme.ink2C)
         }
     }
@@ -739,7 +739,7 @@ struct EditorStatusBar: View {
         HStack(spacing: 16) {
             if let notice = projectSession.lastErrorMessage {
                 Text(notice)
-                    .font(MintFonts.uiFont(11))
+                    .mintUIFont(11)
                     .foregroundStyle(theme.blueC)
                     .lineLimit(1)
                 separator
@@ -831,7 +831,7 @@ struct LongParagraphNotice: View {
                     .font(.system(size: 11))
                     .foregroundStyle(theme.novelC)
                 Text("아주 긴 문단이 있어요")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Spacer()
             }
@@ -841,19 +841,19 @@ struct LongParagraphNotice: View {
                 Text(result > 0
                     ? "긴 문단 \(result)개를 문장 경계에서 나눴어요. ⌘Z로 되돌릴 수 있어요."
                     : "나눌 문단을 찾지 못했어요.")
-                    .font(MintFonts.uiFont(11.5))
+                    .mintUIFont(11.5)
                     .foregroundStyle(theme.ink2C)
                     .fixedSize(horizontal: false, vertical: true)
                 Button("닫기") { onDismiss() }
-                    .font(MintFonts.uiFont(12, .medium))
+                    .mintUIFont(12, .medium)
             } else {
                 Text("빠르게 입력하면 끊길 수 있어요.")
-                    .font(MintFonts.uiFont(11.5))
+                    .mintUIFont(11.5)
                     .foregroundStyle(theme.ink2C)
 
                 if detailShown {
                     Text(detailText)
-                        .font(MintFonts.uiFont(11))
+                        .mintUIFont(11)
                         .foregroundStyle(theme.ink2C)
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.top, 2)
@@ -867,7 +867,7 @@ struct LongParagraphNotice: View {
                         splitResult = before
                     } label: {
                         Text("문단 나누기")
-                            .font(MintFonts.uiFont(12, .semibold))
+                            .mintUIFont(12, .semibold)
                             .foregroundStyle(theme.novelC.accessibleForegroundC)
                             .padding(.vertical, 4)
                             .padding(.horizontal, 12)
@@ -876,10 +876,10 @@ struct LongParagraphNotice: View {
                     .buttonStyle(.plain)
 
                     Button(detailShown ? "접기" : "자세히") { detailShown.toggle() }
-                        .font(MintFonts.uiFont(12, .medium))
+                        .mintUIFont(12, .medium)
                     Spacer()
                     Button("그대로 두기") { onDismiss() }
-                        .font(MintFonts.uiFont(12))
+                        .mintUIFont(12)
                         .foregroundStyle(theme.ink3C)
                 }
                 .padding(.top, 2)

@@ -117,20 +117,20 @@ struct ImageAltEditorView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("대체 텍스트 (VoiceOver·EPUB)")
-                .font(MintFonts.uiFont(10, .semibold))
+                .mintUIFont(10, .semibold)
                 .foregroundStyle(theme.ink2C)
             TextField("이 이미지를 말로 설명하면", text: $alt)
                 .textFieldStyle(.roundedBorder)
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .focused($focusedField, equals: 0)
                 .onSubmit { submit() }
                 .accessibilityLabel(Text("대체 텍스트"))
             Text("마우스오버 제목 (선택)")
-                .font(MintFonts.uiFont(10, .semibold))
+                .mintUIFont(10, .semibold)
                 .foregroundStyle(theme.ink2C)
             TextField("비워 두면 title을 넣지 않는다", text: $title)
                 .textFieldStyle(.roundedBorder)
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .focused($focusedField, equals: 1)
                 .onSubmit { submit() }
                 .accessibilityLabel(Text("마우스오버 제목"))

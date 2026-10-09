@@ -19,7 +19,7 @@ struct ContextInspectorView: View {
                     .font(.system(size: 11))
                     .foregroundStyle(theme.novelC)
                 Text("AI 컨텍스트")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Spacer()
                 // 소속 문서가 활성 문서와 다른 리포트는 숨긴다 — A 작품 리포트를
@@ -38,7 +38,7 @@ struct ContextInspectorView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("\(report.contextMode.label) · 최근 제안이 참고한 정보예요. 커서 앞 원문을 함께 읽어요.")
-                            .font(MintFonts.uiFont(10))
+                            .mintUIFont(10)
                             .foregroundStyle(theme.ink3C)
                             .fixedSize(horizontal: false, vertical: true)
                         ForEach(Array(report.items.enumerated()), id: \.offset) { _, item in
@@ -54,7 +54,7 @@ struct ContextInspectorView: View {
                         ? "아직 예측이 없어요. 소설 본문에서 타이핑을 멈추면 예측이 만들어지고, 그때 참고한 컨텍스트가 여기 보여요."
                         : "소설 종류의 문서에서 예측이 만들어질 때 참고 컨텍스트가 여기 보여요."
                 )
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -67,7 +67,7 @@ struct ContextInspectorView: View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 5) {
                 Text(item.kind.rawValue)
-                    .font(MintFonts.uiFont(9, .semibold))
+                    .mintUIFont(9, .semibold)
                     .foregroundStyle(theme.novelC)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
@@ -110,7 +110,7 @@ struct ContextInspectorView: View {
                         jump(item, in: targetID)
                     } label: {
                         Label("원문", systemImage: "arrow.right.circle")
-                            .font(MintFonts.uiFont(9.5))
+                            .mintUIFont(9.5)
                             .foregroundStyle(theme.blueC)
                     }
                     .buttonStyle(.plain)
@@ -118,7 +118,7 @@ struct ContextInspectorView: View {
                 }
             }
             Text(item.text)
-                .font(MintFonts.uiFont(10.5))
+                .mintUIFont(10.5)
                 .foregroundStyle(theme.ink2C)
                 .fixedSize(horizontal: false, vertical: true)
                 .textSelection(.enabled)
@@ -156,14 +156,14 @@ struct ContextInspectorView: View {
         if !excluded.isEmpty {
             VStack(alignment: .leading, spacing: 3) {
                 Text("제외 중 \(excluded.count)")
-                    .font(MintFonts.uiFont(9.5, .semibold))
+                    .mintUIFont(9.5, .semibold)
                     .foregroundStyle(theme.ink3C)
                 ForEach(excluded) { override in
                     HStack(spacing: 5) {
                         // stable key를 그대로 보여주지 않고 사람이 을 수 있는
                         // 종류·대상으로 번역한다 (#38). key는 help로 남긴다.
                         Text(Self.readableExclusion(override.key))
-                            .font(MintFonts.uiFont(9.5))
+                            .mintUIFont(9.5)
                             .foregroundStyle(theme.ink3C)
                             .lineLimit(1)
                             .help(override.key)
@@ -173,7 +173,7 @@ struct ContextInspectorView: View {
                                 kind: .contextExclude, key: override.key,
                                 in: store.activeID)
                         }
-                        .font(MintFonts.uiFont(9.5))
+                        .mintUIFont(9.5)
                         .buttonStyle(.bordered)
                         .controlSize(.mini)
                     }

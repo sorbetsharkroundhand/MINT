@@ -22,7 +22,7 @@ struct ProjectWriterToolsView: View {
                         default: EmptyView()
                         }
                     }
-                    .font(MintFonts.uiFont(11))
+                    .mintUIFont(11)
                     .foregroundStyle(theme.ink2C)
                     .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -30,7 +30,7 @@ struct ProjectWriterToolsView: View {
                 .disabled(!session.isEditorEditable)
             } else {
                 Text("문서를 선택하거나 작가 설정을 확인해 주세요.")
-                    .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink3C).padding(14)
+                    .mintUIFont(11).foregroundStyle(theme.ink3C).padding(14)
             }
         }
         .alert("설정을 변경할 수 없어요", isPresented: Binding(
@@ -70,7 +70,7 @@ struct ProjectWriterToolsView: View {
     }
 
     @ViewBuilder private func records(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {
-        Text("작가 수정과 기록").font(MintFonts.uiFont(12, .semibold))
+        Text("작가 수정과 기록").mintUIFont(12, .semibold)
         if writer.narrativeOverrides.isEmpty && writer.decisions.isEmpty && writer.recordedConversations.isEmpty {
             Text("아직 저장된 수정이나 기록이 없어요.").foregroundStyle(theme.ink3C)
         }
@@ -153,7 +153,7 @@ struct ProjectWriterToolsView: View {
         } else { Text("아직 이 문서의 제안 기록이 없어요.").foregroundStyle(theme.ink3C) }
         let excluded = writer.narrativeOverrides.filter { $0.kind == .contextExclude }
         if !excluded.isEmpty {
-            Text("제외한 항목").font(MintFonts.uiFont(12, .semibold))
+            Text("제외한 항목").mintUIFont(12, .semibold)
             ForEach(Array(excluded.enumerated()), id: \.offset) { _, value in
                 HStack {
                     Text(ContextInspectorView.readableExclusion(value.key)); Spacer()
@@ -164,7 +164,7 @@ struct ProjectWriterToolsView: View {
     }
 
     @ViewBuilder private func evidence(_ anchor: EvidenceAnchor, _ snapshot: ProjectDocumentSnapshot) -> some View {
-        Text(anchor.quote).font(MintFonts.uiFont(10)).foregroundStyle(theme.ink3C).textSelection(.enabled)
+        Text(anchor.quote).mintUIFont(10).foregroundStyle(theme.ink3C).textSelection(.enabled)
         if let document = session.activeProject?.documents.first(where: { $0.id == anchor.documentID }),
             anchor.resolvedQuery(in: document.body) != nil {
             Button("원문 보기") {

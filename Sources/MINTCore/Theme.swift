@@ -543,6 +543,14 @@ public enum MintFonts {
     }
 
     static func bodyFontURL(in mainBundle: Bundle) -> URL? {
+        fontURL("NotoSerifKR[wght]", in: mainBundle)
+    }
+
+    static func uiFontURL(in mainBundle: Bundle) -> URL? {
+        fontURL("PretendardVariable", in: mainBundle)
+    }
+
+    private static func fontURL(_ name: String, in mainBundle: Bundle) -> URL? {
         // CLI SwiftPM accessors look beside the executable, while a macOS app
         // stores package bundles inside Contents/Resources. Do not fall back to
         // the accessor's absolute developer build path in a packaged app.
@@ -554,20 +562,23 @@ public enum MintFonts {
         } else {
             resources = .module
         }
-        guard let url = resources.url(forResource: "NotoSerifKR[wght]", withExtension: "ttf"),
+        guard let url = resources.url(forResource: name, withExtension: "ttf"),
               FileManager.default.fileExists(atPath: url.path) else { return nil }
         return url
     }
     // Resolve once, before selecting the family. No font file reads occur during typing.
     // Process registration leaves the user's system fonts untouched. The file descriptor
     // also makes AppKit use our audited copy when another Noto version is installed.
-    private static let bundledBodyFont: BundledFont? = {
-        guard let url = bodyFontURL(in: .main),
+    private static let bundledBodyFont = bundledFont(at: bodyFontURL(in: .main))
+    private static let bundledUIFont = bundledFont(at: uiFontURL(in: .main))
+
+    private static func bundledFont(at url: URL?) -> BundledFont? {
+        guard let url,
               let descriptors = CTFontManagerCreateFontDescriptorsFromURL(url as CFURL) as? [CTFontDescriptor],
               let descriptor = descriptors.first else { return nil }
         CTFontManagerRegisterFontsForURL(url as CFURL, .process, nil)
         return BundledFont(descriptor: descriptor)
-    }()
+    }
 
     /// Keep Korean coverage if a damaged developer bundle cannot load its font.
     static let serifFamily: String? = bundledBodyFont.flatMap {
@@ -576,11 +587,10 @@ public enum MintFonts {
         "Nanum Myeongjo", "AppleMyungjo",
     ].first { NSFontManager.shared.availableFontFamilies.contains($0) }
 
-    /// UI 산세리프. Apple SD Gothic Neo는 한글 9종 굵기로 macOS에 항상 있다.
-    static let uiFamily: String? = [
-        "Pretendard Variable", "Pretendard", "Apple SD Gothic Neo",
-    ]
-    .first { NSFontManager.shared.availableFontFamilies.contains($0) }
+    /// Prefer the audited UI font; retain Korean coverage for damaged developer bundles.
+    static let uiFamily: String? = bundledUIFont.flatMap {
+        CTFontDescriptorCopyAttribute($0.descriptor, kCTFontFamilyNameAttribute) as? String
+    } ?? "Apple SD Gothic Neo"
 
     /// 본문 세리프 (AppKit).
     public static func serif(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
@@ -612,8 +622,25 @@ public enum MintFonts {
         return NSFont(descriptor: descriptor, size: size) ?? base
     }
 
-    /// UI 산세리프 (AppKit).
+    /// UI sans serif from the audited bundled descriptor (AppKit).
     public static func ui(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        if let base = bundledUIFont {
+            let value: CGFloat = switch weight {
+            case .ultraLight: 100
+            case .thin: 200
+            case .light: 300
+            case .regular: 400
+            case .medium: 500
+            case .semibold: 600
+            case .bold: 700
+            case .heavy: 800
+            case .black: 900
+            default: 400
+            }
+            let descriptor = CTFontDescriptorCreateCopyWithVariation(
+                base.descriptor, NSNumber(value: 0x77676874), value)
+            return CTFontCreateWithFontDescriptor(descriptor, size, nil) as NSFont
+        }
         if let family = uiFamily,
             let font = NSFontManager.shared.font(
                 withFamily: family, traits: [], weight: Self.fontManagerWeight(weight),
@@ -626,7 +653,11 @@ public enum MintFonts {
 
     /// Descriptor-backed SwiftUI font. Use `mintSerifFont` on views for relative scaling.
     public static func serifUI(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        let appKitWeight: NSFont.Weight = switch weight {
+        Font(serif(size, weight: appKitWeight(weight)))
+    }
+
+    private static func appKitWeight(_ weight: Font.Weight) -> NSFont.Weight {
+        switch weight {
         case .ultraLight: .ultraLight
         case .thin: .thin
         case .light: .light
@@ -637,17 +668,11 @@ public enum MintFonts {
         case .black: .black
         default: .regular
         }
-        return Font(serif(size, weight: appKitWeight))
     }
 
-    /// UI 산세리프 (SwiftUI) — Dynamic Type 연동 (#31).
+    /// Descriptor-backed SwiftUI font. Use `mintUIFont` on views for relative scaling.
     public static func uiFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        let style = nearestTextStyle(for: size)
-        if let family = uiFamily {
-            return Font.custom(family, size: size, relativeTo: style).weight(weight)
-        }
-        // system(design:)에도 relativeTo 계열이 없으니 textStyle 이니셜라이저로.
-        return .system(size: size, weight: weight, design: .default)
+        Font(ui(size, weight: appKitWeight(weight)))
     }
 
     /// 모노 (상태·칩·kbd) — Dynamic Type 연동 (#31).
@@ -686,28 +711,31 @@ public enum MintFonts {
     }
 }
 
-private struct MintSerifFontModifier: ViewModifier {
+private struct MintFontModifier: ViewModifier {
     @ScaledMetric private var scaledSize: CGFloat
-    let baseSize: CGFloat
     let weight: Font.Weight
     let enabled: Bool
 
     init(size: CGFloat, weight: Font.Weight, enabled: Bool) {
         _scaledSize = ScaledMetric(wrappedValue: size, relativeTo: MintFonts.nearestTextStyle(for: size))
-        baseSize = size
         self.weight = weight
         self.enabled = enabled
     }
 
     func body(content: Content) -> some View {
-        content.font(enabled ? MintFonts.serifUI(scaledSize, weight) : MintFonts.uiFont(baseSize, weight))
+        content.font(enabled ? MintFonts.serifUI(scaledSize, weight) : MintFonts.uiFont(scaledSize, weight))
     }
 }
 
 extension View {
     /// Scale the audited body font relative to the nearest semantic text style.
     func mintSerifFont(_ size: CGFloat, _ weight: Font.Weight = .regular, enabled: Bool = true) -> some View {
-        modifier(MintSerifFontModifier(size: size, weight: weight, enabled: enabled))
+        modifier(MintFontModifier(size: size, weight: weight, enabled: enabled))
+    }
+
+    /// Scale the audited UI font relative to the nearest semantic text style.
+    func mintUIFont(_ size: CGFloat, _ weight: Font.Weight = .regular) -> some View {
+        modifier(MintFontModifier(size: size, weight: weight, enabled: false))
     }
 }
 

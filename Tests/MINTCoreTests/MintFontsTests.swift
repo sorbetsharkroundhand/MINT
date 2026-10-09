@@ -6,6 +6,40 @@ import XCTest
 
 @MainActor
 final class MintFontsTests: XCTestCase {
+    func testUIFontUsesBundledPretendardRatherThanAnInstalledCopy() throws {
+        for size: CGFloat in [11, 13, 20] {
+            let font = MintFonts.ui(size)
+            XCTAssertEqual(font.familyName, "Pretendard Variable")
+            XCTAssertEqual(font.pointSize, size)
+            let url = try XCTUnwrap(CTFontCopyAttribute(font, kCTFontURLAttribute) as? URL)
+            XCTAssertTrue(url.path.contains("MINT_MINTCore.bundle/"), url.path)
+            XCTAssertEqual(url.lastPathComponent, "PretendardVariable.ttf")
+        }
+    }
+
+    func testUIFontCoversAllModernHangulWithoutFallback() {
+        let font = MintFonts.ui(13)
+        let characters = Array(UInt16(0xAC00)...UInt16(0xD7A3))
+        var glyphs = [CGGlyph](repeating: 0, count: characters.count)
+        XCTAssertTrue(CTFontGetGlyphsForCharacters(font, characters, &glyphs, characters.count))
+        XCTAssertFalse(glyphs.contains(0))
+    }
+
+    func testUIFontResolvesRealVariableWeights() throws {
+        for (weight, expected): (NSFont.Weight, Double) in [(.regular, 400), (.medium, 500), (.semibold, 600), (.bold, 700)] {
+            let font = MintFonts.ui(13, weight: weight)
+            let variation = try XCTUnwrap(CTFontCopyVariation(font) as? [NSNumber: NSNumber])
+            let axes = try XCTUnwrap(CTFontCopyVariationAxes(font) as? [[CFString: Any]])
+            let axis = try XCTUnwrap(axes.first {
+                ($0[kCTFontVariationAxisIdentifierKey] as? NSNumber)?.uint32Value == 0x77676874
+            })
+            let defaultValue = try XCTUnwrap(axis[kCTFontVariationAxisDefaultValueKey] as? NSNumber)
+            // Core Text omits a variation when it equals the font's axis default.
+            XCTAssertEqual((variation[NSNumber(value: 0x77676874)] ?? defaultValue).doubleValue,
+                           expected, accuracy: 0.01)
+        }
+    }
+
     func testBodyFontUsesBundledNotoRatherThanAnInstalledCopy() throws {
         for size: CGFloat in [14, 18, 28] {
             let font = MintFonts.serif(size)
@@ -45,10 +79,15 @@ final class MintFontsTests: XCTestCase {
             .write(to: app.appendingPathComponent("Contents/Info.plist"))
         let font = resources.appendingPathComponent("NotoSerifKR[wght].ttf")
         try Data("synthetic font resource".utf8).write(to: font)
+        let uiFont = resources.appendingPathComponent("PretendardVariable.ttf")
+        try Data("synthetic UI font resource".utf8).write(to: uiFont)
         let bundle = try XCTUnwrap(Bundle(url: app))
         XCTAssertEqual(MintFonts.bodyFontURL(in: bundle), font)
         try FileManager.default.removeItem(at: font)
         XCTAssertNil(MintFonts.bodyFontURL(in: bundle), "An app must not read a developer checkout")
+        XCTAssertEqual(MintFonts.uiFontURL(in: bundle), uiFont)
+        try FileManager.default.removeItem(at: uiFont)
+        XCTAssertNil(MintFonts.uiFontURL(in: bundle), "An app must not read a developer checkout")
     }
 
     func testInlineBoldUsesRealWeightAndPreservesMarkdown() throws {
@@ -70,6 +109,24 @@ final class MintFontsTests: XCTestCase {
     }
 
 #if compiler(>=6.2)
+    func testSwiftUIUIFontUsesAuditedCopyDespiteAnotherRegisteredVersion() throws {
+        guard #available(macOS 26, *) else {
+            throw XCTSkip("Public SwiftUI font resolution requires macOS 26")
+        }
+        let original = try XCTUnwrap(CTFontCopyAttribute(MintFonts.ui(13), kCTFontURLAttribute) as? URL)
+        let copy = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".ttf")
+        try FileManager.default.copyItem(at: original, to: copy)
+        defer {
+            CTFontManagerUnregisterFontsForURL(copy as CFURL, .process, nil)
+            try? FileManager.default.removeItem(at: copy)
+        }
+        CTFontManagerRegisterFontsForURL(copy as CFURL, .process, nil)
+        let resolved = MintFonts.uiFont(13, .semibold).resolve(in: EnvironmentValues().fontResolutionContext)
+        XCTAssertEqual(CTFontCopyAttribute(resolved.ctFont, kCTFontURLAttribute) as? URL, original)
+        let variation = try XCTUnwrap(CTFontCopyVariation(resolved.ctFont) as? [NSNumber: NSNumber])
+        XCTAssertEqual(variation[NSNumber(value: 0x77676874)]?.doubleValue, 600)
+    }
+
     func testSwiftUISerifUsesAuditedCopyDespiteAnotherRegisteredVersion() throws {
         guard #available(macOS 26, *) else {
             throw XCTSkip("Public SwiftUI font resolution requires macOS 26")
