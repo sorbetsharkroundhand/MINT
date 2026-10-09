@@ -7,6 +7,9 @@ cd "$(dirname "$0")/.."
 LOCK_DIR="Distribution/MINT.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"
 mkdir -p "$LOCK_DIR" build
 cp Package.resolved "$LOCK_DIR/Package.resolved"
+MINT_SOURCE_REVISION=$(git rev-parse HEAD)
+MINT_SOURCE_DIRTY=false
+[ -z "$(git status --porcelain --untracked-files=normal)" ] || MINT_SOURCE_DIRTY=true
 
 xcodebuild archive \
     -project Distribution/MINT.xcodeproj -scheme MINT -configuration Release \
@@ -17,4 +20,9 @@ xcodebuild archive \
     -skipMacroValidation \
     ARCHS=arm64 CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY=
 
+# The archive is unsigned. Record provenance before validation/any owner signing.
+# Xcode's generated Info.plist does not preserve arbitrary INFOPLIST_KEY_* values.
+MINT_ARCHIVE_INFO="build/MINT.xcarchive/Products/Applications/MINT.app/Contents/Info.plist"
+plutil -replace MINTSourceRevision -string "$MINT_SOURCE_REVISION" "$MINT_ARCHIVE_INFO"
+plutil -replace MINTSourceDirty -bool "$MINT_SOURCE_DIRTY" "$MINT_ARCHIVE_INFO"
 scripts/validate-mint-archive.sh

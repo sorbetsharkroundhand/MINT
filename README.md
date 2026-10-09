@@ -238,9 +238,13 @@ swift test
 swift build --product MINTBench
 
 scripts/build-mint-app.sh
-scripts/smoke-mint-app.sh
-scripts/ui-smoke-mint-app.sh
 ```
+
+Required CI retains build, deterministic correctness, launch and sandbox checks.
+Local actual-app/UI tests are batched after implementation on one identified
+candidate; `scripts/ui-smoke-mint-app.sh` is an owner-triggered native check,
+requiring Accessibility permission. Real IME/Ghost/VoiceOver and interaction
+quality remain owner verification. See the [verification/support contract](docs/release/verification-and-support.md).
 
 </details>
 

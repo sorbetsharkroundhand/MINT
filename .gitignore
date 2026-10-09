@@ -5,6 +5,8 @@
 .build/
 .swiftpm/
 build/
+# Generated Python test/tool bytecode is not source dirtiness.
+__pycache__/
 # (Package.resolved는 앱이므로 커밋 권장 — 무시하지 않음)
 
 # 격리 개발 작업 트리

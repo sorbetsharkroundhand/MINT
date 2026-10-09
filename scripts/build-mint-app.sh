@@ -52,6 +52,8 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
     <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSHighResolutionCapable</key>
@@ -59,6 +61,13 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+# Stamp this build's source identity; binary hashes distinguish rebuilt artifacts.
+MINT_SOURCE_REVISION=$(git rev-parse HEAD)
+MINT_SOURCE_DIRTY=false
+[ -z "$(git status --porcelain --untracked-files=normal)" ] || MINT_SOURCE_DIRTY=true
+plutil -insert MINTSourceRevision -string "$MINT_SOURCE_REVISION" "$APP/Contents/Info.plist"
+plutil -insert MINTSourceDirty -bool "$MINT_SOURCE_DIRTY" "$APP/Contents/Info.plist"
 
 # 로컬 실행용 애드혹 서명 — `open` 실행과 TCC 권한 대화의 엉킴을 줄인다.
 # --deep 필요: Contents/MacOS/mlx.metallib은 무서명 코드 객체라 번들 단독

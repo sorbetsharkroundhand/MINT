@@ -50,7 +50,7 @@ Discourse order and story time differ; unknown time remains unknown. Advanced co
 `ContextAssembler` consumes prepared context. #108/#112 define release source inspection. `docs/autocomplete-context.md` is historical rationale to compare against current code.
 
 ## 12. Cache/KV
-#149 owns the current capability/exact-state contract and relevant branch specs. Historical warm replay does not prove append-typing reuse. Do not read old model reports as current measurements.
+#149 tracks post-release generalized prompt-state reuse. #154 owns release measurements; historical warm replay does not prove append-typing reuse. Do not read old model reports as current measurements.
 
 ## 13. Evaluation
 #154 owns quality and numeric performance budgets; #156 owns artifact-specific CI/support evidence. `docs/m5-replay-bench.md`, `docs/model-lineup-bench.md` and `docs/editor-perf.md` are dated evidence, read only for the affected metric.
@@ -63,4 +63,5 @@ Historical `docs/m*.md` and `docs/superpowers/` are on-demand design/experiment 
 
 ## 16. Debt and verification
 #18: dirty media rendering. #152: complete model installation. #153: native UX/accessibility. #150: sandbox/distribution. #119: integrated release gate.
+See `docs/release/verification-and-support.md` for artifact identity, automated/manual boundaries and private support reports.
 Select tests by the changed contract; preserve required CI/issue gates. Storage needs failure/recovery evidence; concurrency needs stale/cancel coverage; model changes need quality/trajectory evidence; UI needs real app/IME/accessibility evidence.

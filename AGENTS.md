@@ -36,6 +36,7 @@ Local macOS writing app, Fiction First; General writing and AI-disabled editing 
 ## Verification and delivery
 - Compile: `swift build`; tests: `swift test`; bench compile: `swift build --product MINTBench`.
 - Runtime: `scripts/prepare-metallib.sh` when needed; bundle: `scripts/build-mint-app.sh`; smoke: `scripts/smoke-mint-app.sh`; UI: `scripts/ui-smoke-mint-app.sh`.
+- During the #99 implementation pass, batch local actual-app/UI tests after implementation. Keep deterministic correctness tests and required CI per PR; the final native/IME/accessibility checks identify one candidate artifact. See `docs/release/verification-and-support.md`.
 - Isolate UI tests with `CFFIXED_USER_HOME`, not HOME alone; never use real manuscripts.
 - Keep main buildable; compare stale branches before editing; prefer one bounded issue/PR.
 - New behavior needs failing regression coverage before implementation. Never weaken CI.
