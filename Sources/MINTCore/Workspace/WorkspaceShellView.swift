@@ -355,10 +355,10 @@ struct WorkspaceSurface: View {
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(tool.title)
-                            .font(MintFonts.uiFont(12, .semibold))
+                            .mintUIFont(12, .semibold)
                             .foregroundStyle(theme.inkC)
                         Text(tool.subtitle)
-                            .font(MintFonts.uiFont(10.5))
+                            .mintUIFont(10.5)
                             .foregroundStyle(theme.ink3C)
                             .lineLimit(1)
                     }
@@ -379,7 +379,7 @@ struct WorkspaceSurface: View {
                         }
                     } label: {
                         Image(systemName: "rectangle.3.group")
-                            .font(MintFonts.uiFont(12))
+                            .mintUIFont(12)
                     }
                     .menuStyle(.borderlessButton)
                     .fixedSize()
@@ -449,7 +449,7 @@ private struct ProjectToolUnavailableView: View {
     var body: some View {
         VStack(alignment: .leading) {
             Text("이 프로젝트 도구는 아직 사용할 수 없어요.")
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .padding(14)
             Spacer(minLength: 0)

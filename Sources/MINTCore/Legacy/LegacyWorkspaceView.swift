@@ -34,7 +34,7 @@ struct LegacyWorkspaceView: View {
                         Button("라이브러리 사본…") { exportLibraryCopy() }
                     }
                 }
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .padding(14)
                 .padding(.leading, sidebarVisible ? 0 : 72)
                 if let recovery = store.pendingRecovery {
@@ -48,7 +48,7 @@ struct LegacyWorkspaceView: View {
                             Button("복구 사본 내보내기…") { exportLibraryCopy() }
                         }
                     }
-                    .font(MintFonts.uiFont(12))
+                    .mintUIFont(12)
                     .padding(12)
                 }
                 theme.sepC.frame(height: 1)
@@ -75,7 +75,7 @@ struct LegacyWorkspaceView: View {
                     Spacer()
                     if let notice = store.notice { Text(notice) }
                 }
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .padding(10)
             }
             .background(theme.editorSurfaceC)

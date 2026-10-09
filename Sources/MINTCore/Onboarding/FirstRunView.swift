@@ -57,7 +57,7 @@ public struct FirstRunView: View {
                     .mintSerifFont(32, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text("무엇을 쓰든, 먼저 원고부터 여세요.")
-                    .font(MintFonts.uiFont(14))
+                    .mintUIFont(14)
                     .foregroundStyle(theme.ink2C)
             }
 
@@ -88,7 +88,7 @@ public struct FirstRunView: View {
                     }
                 } label: {
                     Label("기존 MINT 원고 가져오기…", systemImage: "square.and.arrow.down")
-                        .font(MintFonts.uiFont(12, .medium))
+                        .mintUIFont(12, .medium)
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.bordered)
@@ -99,14 +99,14 @@ public struct FirstRunView: View {
 
             if let errorMessage {
                 Text(errorMessage)
-                    .font(MintFonts.uiFont(12))
+                    .mintUIFont(12)
                     .foregroundStyle(theme.dangerC)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityLabel("프로젝트 열기 오류: \(errorMessage)")
             }
 
             Text("AI 자동완성은 선택 사항이며 설정에서 직접 켤 때까지 모델을 내려받지 않습니다.")
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -134,10 +134,10 @@ public struct FirstRunView: View {
                     .frame(width: 30)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
-                        .font(MintFonts.uiFont(14, .semibold))
+                        .mintUIFont(14, .semibold)
                         .foregroundStyle(theme.inkC)
                     Text(detail)
-                        .font(MintFonts.uiFont(11))
+                        .mintUIFont(11)
                         .foregroundStyle(theme.ink2C)
                 }
                 Spacer()

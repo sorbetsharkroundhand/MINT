@@ -73,7 +73,7 @@ struct ProjectNavigatorView: View {
             theme.sepC.frame(height: 1)
             if let error = session.lastErrorMessage {
                 Text(error)
-                    .font(MintFonts.uiFont(11))
+                    .mintUIFont(11)
                     .foregroundStyle(theme.dangerC)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
@@ -176,7 +176,7 @@ struct ProjectNavigatorView: View {
                 Text(session.activeProject?.title ?? "프로젝트").lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
-            .font(MintFonts.uiFont(12, .semibold))
+            .mintUIFont(12, .semibold)
         }
         .menuStyle(.borderlessButton)
         .fixedSize()
@@ -195,7 +195,7 @@ struct ProjectNavigatorView: View {
                     .foregroundStyle(theme.ink3C)
             }
         }
-        .font(MintFonts.uiFont(12))
+        .mintUIFont(12)
         .padding(.vertical, 7)
         .padding(.horizontal, 9)
         .background(
@@ -216,7 +216,7 @@ struct ProjectNavigatorView: View {
     private var searchRows: some View {
         if searchResults.isEmpty {
             Text("일치하는 문서가 없어요")
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .foregroundStyle(theme.ink3C)
                 .padding(8)
         } else {
@@ -224,12 +224,12 @@ struct ProjectNavigatorView: View {
                 Button { editorRequests.jump(to: result, in: session) } label: {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(result.title)
-                            .font(MintFonts.uiFont(13, .semibold))
+                            .mintUIFont(13, .semibold)
                             .foregroundStyle(theme.ink2C)
                             .lineLimit(1)
                         if let snippet = result.snippet {
                             Text(snippet)
-                                .font(MintFonts.uiFont(11.5))
+                                .mintUIFont(11.5)
                                 .foregroundStyle(theme.ink3C)
                                 .lineLimit(2)
                         }
@@ -257,7 +257,7 @@ struct ProjectNavigatorView: View {
                     .onExitCommand { cancelRename() }
             } else {
                 Text(document.title)
-                    .font(MintFonts.uiFont(13, selected ? .semibold : .regular))
+                    .mintUIFont(13, selected ? .semibold : .regular)
                     .foregroundStyle(selected ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
             }
@@ -328,7 +328,7 @@ private struct ProjectTrashView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("휴지통").font(MintFonts.uiFont(15, .semibold))
+                Text("휴지통").mintUIFont(15, .semibold)
                 Spacer()
                 Button("닫기") { dismiss() }
             }
@@ -344,7 +344,7 @@ private struct ProjectTrashView: View {
             }
             Spacer(minLength: 0)
         }
-        .font(MintFonts.uiFont(12))
+        .mintUIFont(12)
         .foregroundStyle(theme.inkC)
         .padding(18)
         .frame(minWidth: 360, minHeight: 240)

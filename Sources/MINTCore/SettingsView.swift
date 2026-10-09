@@ -90,7 +90,7 @@ public struct SettingsView: View {
                 Toggle("색상 직접 고르기", isOn: $palette.enabled)
                 if let warning = palette.contrastWarning {
                     Text(warning)
-                        .font(MintFonts.uiFont(11))
+                        .mintUIFont(11)
                         .foregroundStyle(MintTheme.of(colorScheme).warningC)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityLabel(Text("대비 경고: \(warning)"))
@@ -216,7 +216,7 @@ public struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 14) {
                         VStack(alignment: .leading, spacing: 6) {
                             Text("모델 저장소")
-                                .font(MintFonts.uiFont(12, .semibold))
+                                .mintUIFont(12, .semibold)
                             TextField(
                                 "Hugging Face 저장소 ID (namespace/model)",
                                 text: $modelIDDraft
@@ -226,7 +226,7 @@ public struct SettingsView: View {
                             .onSubmit(commitModelIDDraft)
                             if let modelIDError {
                                 Text(modelIDError)
-                                    .font(MintFonts.uiFont(11))
+                                    .mintUIFont(11)
                                     .foregroundStyle(MintTheme.of(colorScheme).dangerC)
                                     .accessibilityLabel(Text("모델 ID 오류: \(modelIDError)"))
                             }

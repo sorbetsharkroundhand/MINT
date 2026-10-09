@@ -39,7 +39,7 @@ private struct WarningDot: View {
                 .offset(x: -3, y: 3)
                 .hidden()  // 장식 — 대신 아래 요소가 AX 값을 말한다 (#38).
             Text("일관성 경고 \(warningCountForActiveEntry)개")
-                .font(MintFonts.uiFont(0.1))
+                .mintUIFont(0.1)
                 .foregroundStyle(.clear)
                 .accessibilityAddTraits(.isStaticText)
                 .accessibilityLabel(Text("일관성 경고 \(warningCountForActiveEntry)개 — 서사 탭에서 검토"))
@@ -57,7 +57,7 @@ private struct SidebarSectionHint: View {
     var body: some View {
         VStack {
             Text(text)
-                .font(MintFonts.uiFont(11))
+                .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -216,17 +216,17 @@ struct SidebarView: View {
         } else {
             VStack(alignment: .leading, spacing: 10) {
                 Text("이 문서는 일반 저널이에요. 소설로 전환하면 인물·장르 관리와 백그라운드 이해(요약·사건·타임라인)가 켜져요.")
-                    .font(MintFonts.uiFont(11))
+                    .mintUIFont(11)
                     .foregroundStyle(theme.ink3C)
                     .fixedSize(horizontal: false, vertical: true)
                 Button {
                     store.setKind(.novel, for: store.activeID)
                 } label: {
                     Label("소설로 전환", systemImage: "book.closed")
-                        .font(MintFonts.uiFont(12, .medium))
+                        .mintUIFont(12, .medium)
                 }
                 Text("원문은 그대로예요 — 언제든 우클릭 메뉴에서 일반 저널로 되돌릴 수 있어요.")
-                    .font(MintFonts.uiFont(10))
+                    .mintUIFont(10)
                     .foregroundStyle(theme.ink3C)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 0)
@@ -397,7 +397,7 @@ struct SidebarView: View {
         // 남기지 않고 아이콘을 trailing으로 몰아 우측 툴바와 축을 맞춘다.
         HStack(spacing: 8) {
             Text("내 글")
-                .font(MintFonts.uiFont(12, .semibold))
+                .mintUIFont(12, .semibold)
                 .foregroundStyle(theme.ink2C)
             Spacer(minLength: 18)
             Menu {
@@ -459,7 +459,7 @@ struct SidebarView: View {
                 .foregroundStyle(theme.ink3C)
             TextField("모든 저널 검색", text: $searchText)
                 .textFieldStyle(.plain)
-                .font(MintFonts.uiFont(13))
+                .mintUIFont(13)
                 .foregroundStyle(theme.inkC)
                 .focused($searchFieldFocused)
             if !searchText.isEmpty {
@@ -491,7 +491,7 @@ struct SidebarView: View {
         let results = cachedSearchResults
         if results.isEmpty {
             Text("일치하는 저널이 없어요")
-                .font(MintFonts.uiFont(12))
+                .mintUIFont(12)
                 .foregroundStyle(theme.ink3C)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 11)
@@ -523,17 +523,17 @@ struct SidebarView: View {
                             .foregroundStyle(active ? theme.blueC : theme.ink3C)
                     }
                     Text(entry.title)
-                        .font(MintFonts.uiFont(13, .semibold))
+                        .mintUIFont(13, .semibold)
                         .foregroundStyle(active ? theme.inkC : theme.ink2C)
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     Text(store.dayLabel(for: entry))
-                        .font(MintFonts.uiFont(11))
+                        .mintUIFont(11)
                         .foregroundStyle(theme.ink3C)
                 }
                 if let snippet = Self.snippet(entry.body, query: searchText) {
                     Text(snippet)
-                        .font(MintFonts.uiFont(11.5))
+                        .mintUIFont(11.5)
                         .foregroundStyle(theme.ink3C)
                         .lineLimit(2)
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -579,7 +579,7 @@ struct SidebarView: View {
             if editing {
                 TextField("폴더 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                     .padding(.vertical, 3)
                     .padding(.horizontal, 7)
@@ -595,7 +595,7 @@ struct SidebarView: View {
                     }
             } else {
                 Text(folder.name)
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.ink2C)
                     .lineLimit(1)
                 // AI가 이름을 짓는 동안 — 임시 이름("새 폴더") 옆 진행 점.
@@ -720,7 +720,7 @@ struct SidebarView: View {
             if editing {
                 TextField("제목", text: $draftTitle)
                     .textFieldStyle(.plain)
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                     .padding(.vertical, 3)
                     .padding(.horizontal, 7)
@@ -748,7 +748,7 @@ struct SidebarView: View {
                 DeleteButton(theme: theme) { requestDelete(entry) }
             } else if !editing {
                 Text(store.dayLabel(for: entry))
-                    .font(MintFonts.uiFont(11))
+                    .mintUIFont(11)
                     .foregroundStyle(theme.ink3C)
             }
         }
@@ -972,7 +972,7 @@ struct TrashSheetView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text("휴지통")
-                    .font(MintFonts.uiFont(15, .semibold))
+                    .mintUIFont(15, .semibold)
                 Spacer()
                 if !trash.items.isEmpty {
                     Button("비우기", role: .destructive) { purgeAllRequested = true }
@@ -990,7 +990,7 @@ struct TrashSheetView: View {
                     Image(systemName: "trash")
                         .foregroundStyle(theme.ink3C)
                     Text("비어 있어요")
-                        .font(MintFonts.uiFont(12))
+                        .mintUIFont(12)
                         .foregroundStyle(theme.ink2C)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -1001,7 +1001,7 @@ struct TrashSheetView: View {
                             .foregroundStyle(theme.ink2C)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(item.title)
-                                .font(MintFonts.uiFont(12.5))
+                                .mintUIFont(12.5)
                                 .lineLimit(1)
                             Text(item.deletedAt.formatted(date: .abbreviated, time: .shortened))
                                 .font(MintFonts.monoUI(10))

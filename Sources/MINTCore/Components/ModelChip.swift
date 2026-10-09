@@ -68,10 +68,10 @@ struct ModelChip: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("자동완성")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text("글을 멈추면 다음 내용을 이 Mac에서 제안합니다.")
-                    .font(MintFonts.uiFont(10.5))
+                    .mintUIFont(10.5)
                     .foregroundStyle(theme.ink3C)
             }
             .padding(.horizontal, 16)
@@ -90,7 +90,7 @@ struct ModelChip: View {
                     Button("모델 다시 로드") { completion.retryEngineLoad() }
                         .disabled(completion.isMemoryPressurePaused)
                         .buttonStyle(.plain)
-                        .font(MintFonts.uiFont(12, .medium))
+                        .mintUIFont(12, .medium)
                         .foregroundStyle(theme.blueC)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
@@ -99,16 +99,16 @@ struct ModelChip: View {
             .padding(6)
             if ModelChoice.all.isEmpty {
                 Text("사용 가능한 모델이 없습니다. 원고 편집은 계속할 수 있습니다.")
-                    .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
+                    .mintUIFont(11).foregroundStyle(theme.ink2C)
                     .padding(.horizontal, 16).padding(.vertical, 10)
             }
             if completion.isMemoryPressurePaused {
                 Text(CompletionController.memoryPressureMessage)
-                    .font(MintFonts.uiFont(11)).foregroundStyle(theme.ink2C)
+                    .mintUIFont(11).foregroundStyle(theme.ink2C)
                     .padding(.horizontal, 16).padding(.vertical, 8)
             }
             if let error = completion.modelOperationError {
-                Text(error).font(MintFonts.uiFont(11)).foregroundStyle(theme.dangerC)
+                Text(error).mintUIFont(11).foregroundStyle(theme.dangerC)
                     .padding(.horizontal, 16).padding(.vertical, 8)
             }
             downloadFailureFooter
@@ -130,10 +130,10 @@ struct ModelChip: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 1) {
                 Text("예측 길이")
-                    .font(MintFonts.uiFont(13, .semibold))
+                    .mintUIFont(13, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text("한 번에 제안하는 최대 토큰")
-                    .font(MintFonts.uiFont(11.5))
+                    .mintUIFont(11.5)
                     .foregroundStyle(theme.ink2C)
             }
             Spacer(minLength: 0)
@@ -160,12 +160,12 @@ struct ModelChip: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("자동완성")
-                        .font(MintFonts.uiFont(13, .semibold))
+                        .mintUIFont(13, .semibold)
                         .foregroundStyle(theme.inkC)
                     Text(settings.autocompleteEnabled
                         ? "글을 멈추면 이어질 내용을 제안해요"
                         : "꺼짐 — 제안하지 않아요")
-                        .font(MintFonts.uiFont(11.5))
+                        .mintUIFont(11.5)
                         .foregroundStyle(theme.ink2C)
                 }
                 Spacer(minLength: 0)
@@ -192,10 +192,10 @@ struct ModelChip: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(choice.name)
-                        .font(MintFonts.uiFont(13, .semibold))
+                        .mintUIFont(13, .semibold)
                         .foregroundStyle(theme.inkC)
                     Text(Self.userFacingSummary(for: choice))
-                        .font(MintFonts.uiFont(11))
+                        .mintUIFont(11)
                         .foregroundStyle(theme.ink2C)
                 }
                 Spacer(minLength: 0)
@@ -238,10 +238,10 @@ struct ModelChip: View {
             if case .failed(let message) = failure.value {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(ModelChip.displayName(failure.key)) 다운로드 실패")
-                        .font(MintFonts.uiFont(11, .semibold))
+                        .mintUIFont(11, .semibold)
                         .foregroundStyle(theme.dangerC)
                     Text(Self.recoveryAdvice(for: message))
-                        .font(MintFonts.uiFont(10.5))
+                        .mintUIFont(10.5)
                         .foregroundStyle(theme.ink2C)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -329,10 +329,10 @@ struct ModelChip: View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("보관된 모델 선택")
-                    .font(MintFonts.uiFont(12, .semibold))
+                    .mintUIFont(12, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text("이 Mac에서 사용할 수 없음 · 설정에서 관리")
-                    .font(MintFonts.uiFont(10.5))
+                    .mintUIFont(10.5)
                     .foregroundStyle(theme.ink3C)
             }
             Spacer(minLength: 0)
@@ -356,7 +356,7 @@ struct ModelChip: View {
         } label: {
             HStack {
                 Label("설정 열기", systemImage: "gearshape")
-                    .font(MintFonts.uiFont(11.5, .medium))
+                    .mintUIFont(11.5, .medium)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.system(size: 9, weight: .semibold))
