@@ -14,17 +14,22 @@ final class MathEditGeometryTests: XCTestCase {
         view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
         view.refreshRenderedBlocks()
         let rendered = try XCTUnwrap(view.mathDrawnRect(forParagraphAt: 0))
+        // Reproduce a busy main actor delaying the scheduled preview's start.
+        let schedulerLoad = Task { @MainActor in
+            let deadline = ContinuousClock.now.advanced(by: .milliseconds(300))
+            while ContinuousClock.now < deadline {}
+        }
         view.setSelectedRange(NSRange(location: 2, length: 0))
         view.refreshRenderedBlocks()
         view.refreshActiveLineHighlight()
-        try await Task.sleep(for: .milliseconds(200))
+        let preview = try await waitForMathPreview(in: view)
+        await schedulerLoad.value
         let manager = try XCTUnwrap(view.layoutManager), container = try XCTUnwrap(view.textContainer)
         manager.ensureLayout(for: container)
         let para = (view.string as NSString).paragraphRange(for: view.selectedRange())
         let glyphs = manager.glyphRange(forCharacterRange: para, actualCharacterRange: nil)
         let block = manager.boundingRect(forGlyphRange: glyphs, in: container)
             .offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
-        let preview = try XCTUnwrap(view.subviews.compactMap { $0 as? NSHostingView<MathPreviewView> }.first)
         XCTAssertGreaterThanOrEqual(preview.frame.minY, block.minY)
         XCTAssertLessThanOrEqual(preview.frame.maxY, block.maxY, "Preview must belong to the active math block")
         let caret = try XCTUnwrap(view.subviews.first {
@@ -74,8 +79,7 @@ final class MathEditGeometryTests: XCTestCase {
         let selection = NSRange(location: (view.string as NSString).range(of: "a &").location, length: 2)
         view.setSelectedRange(selection)
         view.refreshRenderedBlocks()
-        try await Task.sleep(for: .milliseconds(200))
-        let preview = try XCTUnwrap(view.subviews.compactMap { $0 as? NSHostingView<MathPreviewView> }.first)
+        let preview = try await waitForMathPreview(in: view)
         let lm = try XCTUnwrap(view.layoutManager), tc = try XCTUnwrap(view.textContainer)
         let block = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: group, actualCharacterRange: nil), in: tc)
             .offsetBy(dx: view.textContainerOrigin.x, dy: view.textContainerOrigin.y)
@@ -130,5 +134,20 @@ final class MathEditGeometryTests: XCTestCase {
         view.refreshRenderedBlocks()
         try await Task.sleep(for: .milliseconds(200))
         XCTAssertFalse(view.subviews.contains { $0 is NSHostingView<MathPreviewView> })
+    }
+
+    private func waitForMathPreview(
+        in view: BlockTextView, file: StaticString = #filePath, line: UInt = #line
+    ) async throws -> NSHostingView<MathPreviewView> {
+        func preview() -> NSHostingView<MathPreviewView>? {
+            view.subviews.compactMap { $0 as? NSHostingView<MathPreviewView> }.first
+        }
+        // The debounce starts when its main-actor task runs, which can be later
+        // than the test's suspension. Wait for presentation, not elapsed time.
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while preview() == nil && ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        return try XCTUnwrap(preview(), "Math preview did not appear", file: file, line: line)
     }
 }
