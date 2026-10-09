@@ -18,6 +18,16 @@ Every copied package resource must match its recorded original bytes. Generated
 bundle metadata/signatures and MLX Metal output are separately identified.
 Build-time dependencies are included conservatively.
 
+The owner-selected body font, Noto Serif KR, is bundled unchanged in
+`MINT_MINTCore.bundle` from Google Fonts commit
+`8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5`. Its variable TTF and original OFL 1.1
+text are hash-pinned in the inventory. Attribution retains both the embedded
+Adobe copyright and the copyright in the original Google license file.
+Repository resources receive the same source and packaged-byte audit as package
+resources. MINT registers the font for its own process only; it requires neither
+system font installation nor a network connection. This body-family decision
+does not approve the UI family, accent palette, or paragraph typesetting in #153.
+
 Original supplemental texts in `Texts/` retain immutable upstream provenance:
 swift-xet's immediate successor adds the license without changing its compiled
 source tree or package manifest; both original Git objects are checked. BoringSSL

@@ -29,7 +29,7 @@ cp "$REL/mlx.metallib" "$APP/Contents/MacOS/mlx.metallib"
 cp Distribution/Resources/PrivacyInfo.xcprivacy "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
 python3 scripts/validate-mint-privacy.py "$APP"
 # Copy the distributed SwiftPM resources; test and benchmark bundles stay outside the app.
-for BUNDLE in SwiftMath_SwiftMath swift-transformers_Hub swift-crypto_Crypto; do
+for BUNDLE in MINT_MINTCore SwiftMath_SwiftMath swift-transformers_Hub swift-crypto_Crypto; do
     cp -R "$REL/$BUNDLE.bundle" "$APP/Contents/Resources/"
 done
 python3 scripts/mint-notices.py --checkouts .build/checkouts \

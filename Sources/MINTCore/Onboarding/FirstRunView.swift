@@ -54,7 +54,7 @@ public struct FirstRunView: View {
         VStack(alignment: .leading, spacing: 28) {
             VStack(alignment: .leading, spacing: 7) {
                 Text("MINT")
-                    .font(MintFonts.serifUI(32, .semibold))
+                    .mintSerifFont(32, .semibold)
                     .foregroundStyle(theme.inkC)
                 Text("무엇을 쓰든, 먼저 원고부터 여세요.")
                     .font(MintFonts.uiFont(14))

@@ -1918,8 +1918,10 @@ final class BlockTextView: NSTextView {
                 addition[.backgroundColor] = palette.codeBg
             } else {
                 if attrs[.mintBold] as? Bool == true {
-                    let converted = NSFontManager.shared.convert(
-                        base, toHaveTrait: .boldFontMask)
+                    // NSFontManager does not select the bundled variable font's weight axis.
+                    let converted = base.familyName == bodyFont.familyName
+                        ? MintFonts.serif(base.pointSize, weight: .bold)
+                        : NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
                     if converted != base { addition[.font] = converted }
                     // 시스템 serif(New York) 폴백은 볼드가 한글 글리프에
                     // 적용되지 않는다 — 커버하지 못하면 스트로크로 가짜 볼드.

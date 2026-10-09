@@ -737,9 +737,7 @@ struct SidebarView: View {
             } else {
                 // 소설 제목은 본문과 같은 세리프 — 목록에서도 "책" 느낌이 나게.
                 Text(entry.title)
-                    .font(entry.resolvedKind == .novel
-                        ? MintFonts.serifUI(13, active ? .semibold : .medium)
-                        : MintFonts.uiFont(13, active ? .semibold : .medium))
+                    .mintSerifFont(13, active ? .semibold : .medium, enabled: entry.resolvedKind == .novel)
                     .foregroundStyle(active ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
             }

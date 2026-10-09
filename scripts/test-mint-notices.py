@@ -167,6 +167,65 @@ class NoticeSourceTests(unittest.TestCase):
         with self.assertRaises(notices.NoticeError):
             self.collect()
 
+    def repository_font(self):
+        path = "Sources/MINTCore/Resources/Fonts/body.ttf"
+        (self.root / path).parent.mkdir(parents=True)
+        (self.root / path).write_bytes(b"repository font")
+        license_path = "Distribution/Notices/body-OFL.txt"
+        (self.root / license_path).write_bytes(self.license)
+        self.inventory["components"] = [{"identity": "body-font", "package": "mint",
+            "root": "repository", "kind": "font", "revision": "a" * 40,
+            "source": "https://example.invalid/fonts/tree/" + "a" * 40,
+            "artifacts": [{"path": path, "sha256": digest(b"repository font")}],
+            "notices": [{"root": "repository", "path": license_path, "sha256": digest(self.license)}],
+            "licenseProvenance": {"url": "https://example.invalid/fonts/" + "a" * 40 + "/OFL.txt",
+                                  "licenseRevision": "a" * 40},
+            "attribution": {"copyright": "Copyright Font Authors", "license": "SIL OFL 1.1"}}]
+        self.inventory["resourceRoots"] = [{"package": "mint", "path": "Sources/MINTCore/Resources/Fonts"}]
+        self.inventory["resourceBundles"] = [{"package": "mint", "name": "MINT_MINTCore.bundle",
+                                              "sourcePrefix": "Sources/MINTCore/Resources/Fonts/"}]
+        return path
+
+    def test_repository_font_preserves_original_bytes_and_immutable_provenance(self):
+        path = self.repository_font()
+        manifest, text = self.collect()
+        self.assertEqual(manifest["components"], self.inventory["components"])
+        self.assertIn("SIL OFL 1.1", text)
+        (self.root / path).write_bytes(b"changed font")
+        with self.assertRaises(notices.NoticeError):
+            self.collect()
+
+    def test_repository_font_rejects_unpinned_source_and_unrecorded_files(self):
+        self.repository_font()
+        row = self.inventory["components"][0]
+        for key, value in [("revision", "main"), ("source", "https://example.invalid/fonts/main")]:
+            original = row[key]
+            row[key] = value
+            with self.assertRaises(notices.NoticeError):
+                self.collect()
+            row[key] = original
+        self.collect()
+        (self.root / "Sources/MINTCore/Resources/Fonts/extra.ttf").write_bytes(b"unrecorded")
+        with self.assertRaises(notices.NoticeError):
+            self.collect()
+
+    def test_packaged_repository_font_is_required_and_hash_checked(self):
+        path = self.repository_font()
+        manifest, text = self.collect()
+        app = self.root / "Font.app"
+        resources = app / "Contents/Resources"
+        notices.write_output(resources, manifest, text)
+        font = resources / "MINT_MINTCore.bundle/body.ttf"
+        font.parent.mkdir()
+        shutil.copyfile(self.root / path, font)
+        notices.validate_app(app, manifest, text)
+        font.write_bytes(b"changed")
+        with self.assertRaises(notices.NoticeError):
+            notices.validate_app(app, manifest, text)
+        font.unlink()
+        with self.assertRaises(notices.NoticeError):
+            notices.validate_app(app, manifest, text)
+
     def packaged_fixture(self, wrapped=False):
         assets = self.package / "Assets"
         assets.mkdir()
