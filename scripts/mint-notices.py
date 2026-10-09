@@ -106,10 +106,20 @@ def collect(repo, checkouts):
     identities = set()
     for row in inventory["components"]:
         identity, package = row["identity"], row["package"]
-        if identity in identities or package not in rows or not row.get("artifacts"):
+        repository_resource = package == "mint" and row.get("root") == "repository"
+        if identity in identities or (package not in rows and not repository_resource) or not row.get("artifacts"):
             raise NoticeError("Duplicate, unowned or empty resource component")
         identities.add(identity)
-        checkout = folders[package]
+        checkout = repo if repository_resource else folders[package]
+        if repository_resource:
+            revision = row.get("revision", "")
+            source = row.get("source", "")
+            provenance = row.get("licenseProvenance", {})
+            if (not re.fullmatch(r"[0-9a-f]{40}", revision) or not source.startswith("https://")
+                    or revision not in source or provenance.get("licenseRevision") != revision
+                    or any(record.get("root") != "repository" for record in row.get("notices", []))):
+                raise NoticeError("Repository resource lacks immutable source/license provenance")
+            text.append("Source: " + source + "\nRevision: " + revision + "\n")
         for artifact in row["artifacts"]:
             verified_bytes(checkout, artifact)
             covered.add((package, artifact["path"]))
@@ -122,8 +132,16 @@ def collect(repo, checkouts):
         read_notices(row, checkout)
         manifest["components"].append(row)
     for resource in inventory.get("resourceRoots", []):
-        checkout = folders[resource["package"]]
+        package = resource["package"]
+        checkout = repo if package == "mint" else folders[package]
         directory = checkout / resource["path"]
+        if resource["path"].startswith("/") or any(part in ("", ".", "..") for part in resource["path"].split("/")):
+            raise NoticeError("Noncanonical resource root")
+        ancestor = checkout
+        for part in resource["path"].split("/"):
+            ancestor = ancestor / part
+            if ancestor.is_symlink():
+                raise NoticeError("Symlink in resource root")
         if directory.is_symlink() or not directory.is_dir() or not directory.resolve().is_relative_to(checkout.resolve()):
             raise NoticeError("Unsafe resource root")
         for path in directory.rglob("*"):
@@ -150,7 +168,7 @@ def validate_app(app, manifest, text):
             raise NoticeError("Packaged notice is not readable by all users: " + name)
         if path.read_bytes() != content.encode("utf-8"):
             raise NoticeError("Stale/tampered packaged notice: " + name)
-    packages = {row["identity"] for row in manifest["packages"]}
+    packages = {row["identity"] for row in manifest["packages"]} | {"mint"}
     seen = set()
     for bundle in manifest["resourceBundles"]:
         name, package = bundle["name"], bundle["package"]

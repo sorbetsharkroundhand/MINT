@@ -309,7 +309,7 @@ struct EditorPane: View {
                     // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
                     GeometryReader { geo in
                         Text("여기서 글을 시작하세요…")
-                            .font(MintFonts.serifUI(20))
+                            .mintSerifFont(20)
                             .foregroundStyle(theme.ghostC)
                             .padding(.top, 51)
                             .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)

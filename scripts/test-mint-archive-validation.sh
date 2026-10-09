@@ -38,6 +38,11 @@ mv "$FONT" "$ARCHIVE_TEST_ROOT/latinmodern-math.otf"
 expect_rejected "an archive without math fonts"
 mv "$ARCHIVE_TEST_ROOT/latinmodern-math.otf" "$FONT"
 
+BODY_FONT=$(find "$APP/Contents/Resources" -type f -name 'NotoSerifKR*.ttf' -print -quit)
+mv "$BODY_FONT" "$ARCHIVE_TEST_ROOT/body.ttf"
+expect_rejected "an archive without the selected body font"
+mv "$ARCHIVE_TEST_ROOT/body.ttf" "$BODY_FONT"
+
 scripts/validate-mint-archive.sh "$FIXTURE"
 PRIVACY="$APP/Contents/Resources/PrivacyInfo.xcprivacy"
 mv "$PRIVACY" "$ARCHIVE_TEST_ROOT/PrivacyInfo.xcprivacy"

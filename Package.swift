@@ -41,7 +41,8 @@ let package = Package(
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "SwiftMath", package: "SwiftMath"),
             ],
-            path: "Sources/MINTCore"
+            path: "Sources/MINTCore",
+            resources: [.process("Resources/Fonts")]
         ),
         // @main 진입점만 담은 얇은 실행 셸. 실제 화면/로직은 MINTCore에 있다.
         .executableTarget(
