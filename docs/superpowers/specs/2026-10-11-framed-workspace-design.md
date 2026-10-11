@@ -1,6 +1,6 @@
 # Framed Workspace and Navigation Rail — #163
 
-Status: approved by the owner on 2026-10-11; detailed plan review is pending.
+Status: design and detailed implementation plan approved by the owner on 2026-10-11; sequential inline implementation authorized.
 
 ## Owner intent and scope
 

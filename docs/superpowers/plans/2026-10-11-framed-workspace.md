@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. The owner selected inline execution without subagents in #163.
 
+**Status:** Approved by the owner on 2026-10-11 for sequential inline implementation.
+
 **Goal:** Ship an opaque manuscript frame, adaptive navigator card, and functional persistent navigation rail while retaining the existing editor and writer data.
 
 **Architecture:** Existing preference bindings feed an immutable presentation snapshot and a pure geometry policy. The shell keeps the editor and visible navigator in stable structural slots; the rail reuses existing actions. Project/runtime ownership remains in `ProjectSession`.
