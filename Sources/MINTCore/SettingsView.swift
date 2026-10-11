@@ -57,6 +57,7 @@ public struct SettingsView: View {
         // 고정 크기 — 탭 안의 Form이 이 높이를 넘으면 그 안에서 스크롤한다.
         // 창이 내용을 따라 늘어나면 다시 "아래가 안 보이는" 문제로 돌아간다.
         .frame(width: 500, height: 520)
+        .tint(palette.theme(for: colorScheme).blueC)
         .onAppear { syncModelIDDraft() }
         // 프리셋 적용 등 외부 경로로 모델이 바뀌면 초안·오류를 따라 맞춘다.
         .onChange(of: settings.modelID) { _, _ in syncModelIDDraft() }

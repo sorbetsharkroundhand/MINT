@@ -7,7 +7,7 @@ import SwiftUI
 /// 값은 목업의 CSS 변수(themeVars)를 그대로 옮긴 것 — 라이트/다크 두 벌.
 /// 에디터(NSTextView)와 SwiftUI 크롬이 같은 팔레트를 공유한다.
 public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
-    /// 본문은 사용자 팔레트에서도 항상 불투명하게 유지한다 (PLAN §5).
+    /// Manuscript surfaces remain opaque, including with a custom palette.
     public var editorSurface: NSColor { glassWin.withAlphaComponent(1) }
     public var editorSurfaceC: Color { Color(nsColor: editorSurface) }
 
@@ -15,6 +15,8 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public let ink2: NSColor
     public let ink3: NSColor
     public let ghost: NSColor
+    /// Meaningful suggestion and placeholder text, separate from decorative tint.
+    public let ghostSuggestion: NSColor
     public let blue: NSColor
     public let sep: NSColor
     public let sepStrong: NSColor
@@ -32,13 +34,13 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public let statusbar: NSColor
     /// 커서가 놓인 줄의 은은한 하이라이트 (글로우 대체 — 에디터 v3.1).
     public let activeLine: NSColor
-    /// 드래그 선택 영역 틴트 — 시스템 사각 하이라이트 대신 우리가 그리는
-    /// 라운드 영역 표시의 채움색. 앱 이름 그대로 **민트** 계열 — 파랑(액센트)과
-    /// 구분되는 MINT만의 선택 표시 (다크는 유리 배경 위에서 읽히도록 더 진하게).
+    /// Outline fallback when a custom fill would obscure meaningful text.
+    public let activeLineOutline: NSColor?
+    /// Rounded selection fill uses a restrained tint of the command accent.
     public let selection: NSColor
     /// 드래그 선택 영역의 헤어라인 테두리 — 채움과 같은 민트 계열, 더 또렷하게.
     public let selectionBorder: NSColor
-    /// 소설 글쓰기 액센트 — 저널(파랑)과 나란히 놓아도 구분되는 보라 계열.
+    /// Fiction commands share the same accent family as the writing workspace.
     public let novel: NSColor
     /// 소설 액센트의 은은한 배경 틴트 (활성 행·배지).
     public let novelBg: NSColor
@@ -53,16 +55,9 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     /// 그림자는 정의상 항상 검정 알파라 토큰으로 만들지 않는다 (예외, #56).
     public let knob: NSColor
 
-    /// 소설 액센트 원색 — 기본 팔레트의 대표색과 같은 연둣빛.
-    ///
-    /// 다크 모드에선 이 색 그대로 쓴다(어두운 배경 대비 ~16:1). 라이트 모드는
-    /// 흰 배경 대비가 1.16:1이라 그대로 두면 아이콘·강조 글자가 사라지므로,
-    /// **색상은 지키고 명도만 낮춰** 파생한다 (`adjustedForContrast`).
-    public static let accentSeed: UInt32 = 0xE9FF7A
-
-    /// 라이트 모드용으로 어둡게 내린 액센트 — 연둣빛을 유지한 올리브.
-    static let accentLight = NSColor(hex: accentSeed)
-        .adjustedForContrast(against: .white, target: 4.5, darken: true)
+    /// Owner-approved release accents (#153), chosen for each surface brightness.
+    public static let accentSeed: UInt32 = 0x4DE0D6
+    static let accentLight = NSColor(hex: 0x00857D)
 
     public static let light = MintTheme(
         ink: NSColor(hex: 0x1C1C1E),
@@ -73,11 +68,12 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         // ghost는 **장식 전용**(플레이스홀더·비의미 틴트) — 의미 텍스트에 쓰지
         // 않는다는 것이 토큰 계약이다 (#29). 대비 하한은 적용하지 않는다.
         ghost: NSColor(hex: 0xB4B4B9),
-        blue: NSColor(hex: 0x0A84FF),
+        ghostSuggestion: NSColor(hex: 0x6B6B70),
+        blue: accentLight,
         sep: NSColor(white: 0, alpha: 0.08),
         sepStrong: NSColor(white: 0, alpha: 0.12),
         hover: NSColor(white: 0, alpha: 0.05),
-        activeBg: NSColor(hex: 0x0A84FF, alpha: 0.10),
+        activeBg: accentLight.withAlphaComponent(0.10),
         chip: NSColor(white: 0, alpha: 0.05),
         chipBorder: NSColor(white: 0, alpha: 0.09),
         pill: NSColor(white: 1, alpha: 0.74),
@@ -90,11 +86,11 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         statusbar: NSColor(white: 1, alpha: 0.24),
         // 현재 줄 인식이 실제로 느껴지도록 아주 옅던 값을 살짝 올린다 (L3).
         activeLine: NSColor(white: 0, alpha: 0.055),
-        selection: NSColor(hex: 0x00C7BE, alpha: 0.16),
-        selectionBorder: NSColor(hex: 0x00A89E, alpha: 0.45),
+        activeLineOutline: nil,
+        selection: accentLight.withAlphaComponent(0.16),
+        selectionBorder: accentLight.withAlphaComponent(0.45),
         novel: accentLight,
-        // 배경 틴트는 원색 그대로 — 옅게 깔리는 면이라 대비 문제가 없다.
-        novelBg: NSColor(hex: accentSeed, alpha: 0.28),
+        novelBg: accentLight.withAlphaComponent(0.10),
         danger: NSColor(hex: 0xD93025),
         dangerBg: NSColor(hex: 0xD93025, alpha: 0.14),
         warning: NSColor(hex: 0xC77800),
@@ -109,11 +105,12 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         ink3: NSColor(hex: 0x838389),
         // 본문(0xF2F2F0)보다는 확실히 흐리되, 어두운 유리 배경 위에서 읽히는 밝기.
         ghost: NSColor(hex: 0x8E8E96),
-        blue: NSColor(hex: 0x0A84FF),
+        ghostSuggestion: NSColor(hex: 0x9A9A9F),
+        blue: NSColor(hex: accentSeed),
         sep: NSColor(white: 1, alpha: 0.09),
         sepStrong: NSColor(white: 1, alpha: 0.16),
         hover: NSColor(white: 1, alpha: 0.06),
-        activeBg: NSColor(hex: 0x0A84FF, alpha: 0.18),
+        activeBg: NSColor(hex: accentSeed, alpha: 0.18),
         chip: NSColor(white: 1, alpha: 0.07),
         chipBorder: NSColor(white: 1, alpha: 0.12),
         pill: NSColor(red: 44 / 255, green: 44 / 255, blue: 48 / 255, alpha: 0.72),
@@ -126,9 +123,9 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
         statusbar: NSColor(white: 1, alpha: 0.03),
         // 어두운 유리 위에서 현재 줄이 또렷하도록 살짝 올린다 (L3).
         activeLine: NSColor(white: 1, alpha: 0.075),
-        selection: NSColor(hex: 0x00C7BE, alpha: 0.26),
-        selectionBorder: NSColor(hex: 0x4DE0D6, alpha: 0.55),
-        // 어두운 배경 위에서는 지정색 그대로가 가장 잘 읽힌다 (~16:1).
+        activeLineOutline: nil,
+        selection: NSColor(hex: accentSeed, alpha: 0.26),
+        selectionBorder: NSColor(hex: accentSeed, alpha: 0.55),
         novel: NSColor(hex: accentSeed),
         novelBg: NSColor(hex: accentSeed, alpha: 0.18),
         danger: NSColor(hex: 0xFF453A),
@@ -151,6 +148,7 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public var ink2C: Color { Color(nsColor: ink2) }
     public var ink3C: Color { Color(nsColor: ink3) }
     public var ghostC: Color { Color(nsColor: ghost) }
+    public var ghostSuggestionC: Color { Color(nsColor: ghostSuggestion) }
     public var blueC: Color { Color(nsColor: blue) }
     public var sepC: Color { Color(nsColor: sep) }
     public var sepStrongC: Color { Color(nsColor: sepStrong) }
@@ -176,7 +174,8 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     /// 토큰 전체 동등성 — `.equatable()`·조기 종료 등 diffing 최적화의 전제 (#54).
     public static func == (lhs: MintTheme, rhs: MintTheme) -> Bool {
         lhs.ink == rhs.ink && lhs.ink2 == rhs.ink2 && lhs.ink3 == rhs.ink3
-            && lhs.ghost == rhs.ghost && lhs.blue == rhs.blue
+            && lhs.ghost == rhs.ghost && lhs.ghostSuggestion == rhs.ghostSuggestion
+            && lhs.blue == rhs.blue
             && lhs.sep == rhs.sep && lhs.sepStrong == rhs.sepStrong
             && lhs.hover == rhs.hover && lhs.activeBg == rhs.activeBg
             && lhs.chip == rhs.chip && lhs.chipBorder == rhs.chipBorder
@@ -184,7 +183,8 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
             && lhs.kbd == rhs.kbd && lhs.codeBg == rhs.codeBg
             && lhs.glassWin == rhs.glassWin && lhs.toolbar == rhs.toolbar
             && lhs.sidebarTint == rhs.sidebarTint && lhs.statusbar == rhs.statusbar
-            && lhs.activeLine == rhs.activeLine && lhs.selection == rhs.selection
+            && lhs.activeLine == rhs.activeLine && lhs.activeLineOutline == rhs.activeLineOutline
+            && lhs.selection == rhs.selection
             && lhs.selectionBorder == rhs.selectionBorder
             && lhs.novel == rhs.novel && lhs.novelBg == rhs.novelBg
             && lhs.danger == rhs.danger && lhs.dangerBg == rhs.dangerBg
@@ -278,7 +278,7 @@ extension NSColor {
 
 /// 사용자 색상 팔레트 — 밝기 순 5단계 (라이트/다크 각각 한 벌).
 ///
-/// **배경·표면에만 쓴다.** 글자색(ink 계열)은 팔레트가 바뀌어도 그대로다 —
+    /// **배경·표면에만 쓴다.** 글자색(ink 계열)은 팔레트가 바뀌어도 그대로다 —
 /// 가독성을 팔레트에 맡기면 읽을 수 없는 조합이 너무 쉽게 나온다. 액센트
 /// (아이콘·강조 글자)만 팔레트에서 **색상은 물려받되 명도는 대비에 맞춰**
 /// 파생한다 (`NSColor.adjustedForContrast`).
@@ -330,10 +330,29 @@ extension MintTheme {
         let accent = accentBase.adjustedForContrast(
             against: dark ? NSColor(hex: 0x141416) : .white,
             target: 4.5, darken: !dark)
+        let surface = palette.color(dark ? 3 : 0)
+        let foreground = surface.accessibleForeground()
+        var lineTint = palette.color(4, alpha: 0.18)
+        var lineOutline: NSColor?
+        func coveredContrast(_ color: NSColor) -> CGFloat {
+            Self.covered(color, by: lineTint).contrastRatio(against: Self.covered(surface, by: lineTint))
+        }
+        // The caret band overlays text as well as its background. Account for
+        // both composites; use an outline if even black/white cannot stay readable.
+        if coveredContrast(foreground) < 4.65 {
+            lineTint = (foreground == .black ? NSColor.white : .black)
+                .withAlphaComponent(0.055)
+            if coveredContrast(foreground) < 4.65 {
+                lineTint = .clear
+                lineOutline = foreground.withAlphaComponent(0.25)
+            }
+        }
+        let suggestion = readableSuggestion(on: surface, coveredBy: lineTint, toward: foreground)
 
         return MintTheme(
             // 글자 계열 — 그대로.
-            ink: ink, ink2: ink2, ink3: ink3, ghost: ghost, blue: blue,
+            ink: ink, ink2: ink2, ink3: ink3, ghost: ghost,
+            ghostSuggestion: suggestion, blue: accent,
             sep: sep, sepStrong: sepStrong, hover: hover,
             activeBg: palette.color(4, alpha: dark ? 0.30 : 0.35),
             chip: palette.color(2, alpha: dark ? 0.45 : 0.28),
@@ -345,7 +364,8 @@ extension MintTheme {
             toolbar: palette.color(dark ? 3 : 0, alpha: dark ? 0.45 : 0.35),
             sidebarTint: palette.color(dark ? 2 : 1, alpha: dark ? 0.35 : 0.22),
             statusbar: palette.color(dark ? 3 : 0, alpha: dark ? 0.40 : 0.30),
-            activeLine: palette.color(4, alpha: dark ? 0.18 : 0.18),
+            activeLine: lineTint,
+            activeLineOutline: lineOutline,
             selection: palette.color(4, alpha: dark ? 0.30 : 0.35),
             selectionBorder: accent.withAlphaComponent(0.45),
             novel: accent,
@@ -353,6 +373,33 @@ extension MintTheme {
             // 상태색(위험·주의)과 노브는 의미가 고정 — 팔레트에 물리지 않는다.
             danger: danger, dangerBg: dangerBg, warning: warning, knob: knob
         )
+    }
+
+    /// Resolve once with the theme, never in the prediction or drawing hot path.
+    private func readableSuggestion(on surface: NSColor, coveredBy tint: NSColor,
+        toward foreground: NSColor) -> NSColor {
+        let highlighted = Self.covered(surface, by: tint)
+        for step in 0...50 {
+            let candidate = ghostSuggestion.blended(withFraction: CGFloat(step) / 50,
+                of: foreground) ?? foreground
+            if candidate.contrastRatio(against: surface) >= 4.65,
+                Self.covered(candidate, by: tint).contrastRatio(against: highlighted) >= 4.65 {
+                return candidate
+            }
+        }
+        return foreground
+    }
+
+    private static func covered(_ color: NSColor, by tint: NSColor) -> NSColor {
+        guard let base = color.usingColorSpace(.sRGB),
+            let overlay = tint.usingColorSpace(.sRGB) else { return color }
+        let alpha = overlay.alphaComponent
+        // Match the caret layer's source-over composition, rather than NSColor's
+        // color-space-dependent blending utility.
+        return NSColor(srgbRed: base.redComponent * (1 - alpha) + overlay.redComponent * alpha,
+            green: base.greenComponent * (1 - alpha) + overlay.greenComponent * alpha,
+            blue: base.blueComponent * (1 - alpha) + overlay.blueComponent * alpha,
+            alpha: 1)
     }
 }
 
@@ -364,9 +411,8 @@ public final class PaletteSettings: ObservableObject {
 
     /// 커스터마이징 사용 여부 — **기본은 꺼짐**이다.
     ///
-    /// 꺼져 있으면 앱은 손대지 않은 기본 테마(유리 배경 + 연둣빛 액센트)로
-    /// 그린다. 팔레트는 원하는 사람만 켜는 기능이지, 기본 외형을 대체하는
-    /// 것이 아니다 — 켜지 않은 사용자가 색 때문에 놀랄 이유가 없다.
+    /// Disabled customization uses the default release theme. Saved custom colors
+    /// remain available for the writer to enable explicitly.
     @Published public var enabled: Bool {
         didSet { UserDefaults.standard.set(enabled, forKey: Keys.enabled) }
     }

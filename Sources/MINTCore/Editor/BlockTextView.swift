@@ -4971,6 +4971,8 @@ final class BlockTextView: NSTextView {
             return
         }
         activeLineView.layer?.backgroundColor = palette.activeLine.cgColor
+        activeLineView.layer?.borderColor = palette.activeLineOutline?.cgColor
+        activeLineView.layer?.borderWidth = palette.activeLineOutline == nil ? 0 : 1
         activeLineView.frame = rect
         activeLineView.isHidden = false
     }
@@ -5182,7 +5184,7 @@ final class BlockTextView: NSTextView {
         let font = (typingAttributes[.font] as? NSFont) ?? bodyFont
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font,
-            .foregroundColor: palette.ghost.withAlphaComponent(ghostOpacity),
+            .foregroundColor: palette.ghostSuggestion.withAlphaComponent(ghostOpacity),
         ]
         // 프래그먼트 top(caretRect.minY)이 아니라 본문 글리프와 같은
         // 베이스라인에 맞춰야 실제 글자 높이와 일치한다 (줄 간격과 무관하게).
@@ -5833,14 +5835,14 @@ final class MintLayoutManager: NSLayoutManager {
         if checked {
             theme.blue.setFill()
             NSBezierPath(roundedRect: box, xRadius: 5, yRadius: 5).fill()
-            let check = NSAttributedString(
-                string: "✓",
-                attributes: [
-                    .font: MintFonts.ui(10.5, weight: .bold), .foregroundColor: NSColor.white,
-                ])
-            let size = check.size()
-            check.draw(at: NSPoint(
-                x: box.midX - size.width / 2, y: box.midY - size.height / 2))
+            let configuration = NSImage.SymbolConfiguration(pointSize: 10.5, weight: .bold)
+                .applying(.init(paletteColors: [theme.blue.accessibleForeground()]))
+            guard let check = NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
+                .withSymbolConfiguration(configuration) else { return }
+            let size = check.size
+            check.draw(in: NSRect(x: box.midX - size.width / 2, y: box.midY - size.height / 2,
+                width: size.width, height: size.height), from: .zero,
+                operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
         } else {
             theme.ink3.setStroke()
             path.stroke()

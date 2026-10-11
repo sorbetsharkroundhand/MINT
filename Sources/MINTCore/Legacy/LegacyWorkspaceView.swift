@@ -80,6 +80,7 @@ struct LegacyWorkspaceView: View {
             }
             .background(theme.editorSurfaceC)
         }
+        .tint(theme.blueC)
         .environment(\.mintWindowChromeLeadingInset,
             WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
         .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
