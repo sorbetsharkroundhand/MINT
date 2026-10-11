@@ -3,6 +3,12 @@ import SwiftMath
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Presentation policy supplied by the workspace; storage stays independent of writing modes.
+public enum EditorProseLayout: Sendable {
+    case spaced
+    case indented
+}
+
 /// Notion식 블록 에디터 (에디터 v3 — 디자인 완전 이식).
 ///
 /// 웹 목업의 세 축을 NSTextView(TextKit 1)로 옮긴 것:
@@ -41,6 +47,7 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let lineSpacing: CGFloat
     /// 본문 기본 글자 크기(pt) — 설정에서 조절(⌘+/⌘−).
     private let baseFontSize: CGFloat
+    private let proseLayout: EditorProseLayout
     /// 현재 편집 중인 안정적인 문서 identity — runtime generation은 포함하지 않는다.
     private let documentIdentity: EditorDocumentIdentity
     private let positionStore: WritingPositionStore
@@ -61,6 +68,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         theme: MintTheme = .light,
         lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing),
         baseFontSize: CGFloat = CGFloat(CompletionSettings.defaultFontSize),
+        proseLayout: EditorProseLayout = .spaced,
         documentIdentity: EditorDocumentIdentity,
         positionStore: WritingPositionStore = .shared,
         isEditable: Bool = true,
@@ -76,6 +84,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.theme = theme
         self.lineSpacing = lineSpacing
         self.baseFontSize = baseFontSize
+        self.proseLayout = proseLayout
         self.documentIdentity = documentIdentity
         self.positionStore = positionStore
         self.focusRequest = focusRequest
@@ -169,6 +178,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.palette = theme
         textView.lineSpacing = lineSpacing
         textView.baseFontSize = baseFontSize
+        textView.proseLayout = proseLayout
         textView.editorWindowDidChange = onEditorWindowChange
         configureAssets(textView)
         textView.load(markdown: text)
@@ -223,6 +233,12 @@ public struct MintBlockEditor: NSViewRepresentable {
             context.coordinator.isDocumentTransitioning = true
         } else {
             context.coordinator.parent = self
+        }
+
+        if textView.proseLayout != proseLayout {
+            textView.proseLayout = proseLayout
+            // A document transition loads its new presentation below.
+            if !documentChanged { textView.restyleAll() }
         }
 
         // 팔레트는 ink를 바꾸지 않을 수 있다 — 테마 **전체** 동등성으로 판정해야
@@ -946,6 +962,7 @@ final class BlockTextView: NSTextView {
     /// 쓰는 이유: 배수는 여백을 라인 위쪽에 몰아 글자가 커서 아래쪽에 붙지만,
     /// lineSpacing은 자연 줄 높이를 유지해 글자·커서 높이가 일치한다 (요구 1·4).
     var lineSpacing: CGFloat = CGFloat(CompletionSettings.defaultLineSpacing)
+    var proseLayout: EditorProseLayout = .spaced
 
     /// 고스트 페이드 인 진행도(0…1) — 없던 제안이 새로 뜰 때만 0에서 1로 올린다.
     /// AI 제안이 커서 옆에 "쿵" 나타나 시선을 때리지 않고 부드럽게 스며들게 하려는 것.
@@ -1321,6 +1338,9 @@ final class BlockTextView: NSTextView {
         setSelectedRange(NSRange(location: 0, length: 0))
         // 뷰포트도 맨 위로 — 긴 저널을 열면 처음부터 보이게.
         scrollToBeginningOfDocument(nil)
+        if storage.length == 0 {
+            applyBlock(.p, to: NSRange(location: 0, length: 0), registerUndo: false)
+        }
         syncTypingAttributes()
         isTransforming = false
         selectedImageLocation = nil
@@ -1849,6 +1869,9 @@ final class BlockTextView: NSTextView {
     /// 팔레트/테마 변경 시 문서 전체를 다시 입힌다.
     func restyleAll() {
         let ns = string as NSString
+        let caret = min(max(0, selectedRange().location), ns.length)
+        let caretParagraph = ns.paragraphRange(for: NSRange(location: caret, length: 0))
+        let emptyTail = caretParagraph.length == 0 ? blockInfo(in: caretParagraph) : nil
         var location = 0
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
@@ -1857,6 +1880,12 @@ final class BlockTextView: NSTextView {
                 info.block, checked: info.checked, marker: info.marker,
                 to: para, registerUndo: false)
             location = para.upperBound
+        }
+        // The final empty paragraph has no storage attributes. Do not inherit the preceding
+        // heading/list when a theme or font change restyles the document.
+        if let emptyTail {
+            applyBlock(emptyTail.block, checked: emptyTail.checked, marker: emptyTail.marker,
+                to: caretParagraph, registerUndo: false)
         }
         syncTypingAttributes()
         // 테마가 바뀌면 잉크 색으로 수식을 다시 렌더한다.
@@ -1985,10 +2014,14 @@ final class BlockTextView: NSTextView {
 
         switch block {
         case .p:
-            // 문단 사이에 숨 쉴 여백 — Enter로 나뉜 문단이 랩된 줄과 구분돼 프로즈
-            // 리듬이 산다. paragraphSpacing은 하드 리턴 뒤에만 붙고 랩된 줄
-            // 사이(lineSpacing)에는 영향이 없다.
-            ps.paragraphSpacing = 10
+            if proseLayout == .indented {
+                ps.firstLineHeadIndent = baseFontSize
+                ps.alignment = .left
+                ps.lineBreakMode = .byWordWrapping
+                ps.lineBreakStrategy = .hangulWordPriority
+            } else {
+                ps.paragraphSpacing = 10
+            }
         case .h1:
             font = MintFonts.serif(31 * fontScale, weight: .bold)
             ps.paragraphSpacingBefore = 16
