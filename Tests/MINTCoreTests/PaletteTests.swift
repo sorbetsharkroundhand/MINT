@@ -13,7 +13,7 @@ final class PaletteTests: XCTestCase {
 
     // MARK: - 기본 액센트 (팔레트를 켜지 않아도 적용되는 색)
 
-    /// 다크 모드는 지정색(#E9FF7A) 그대로 — 어두운 배경에서 충분히 읽힌다.
+    /// The approved dark accent remains unchanged on the default dark surface.
     func test_다크_기본_액센트는_지정색_그대로다() {
         XCTAssertEqual(MintTheme.dark.novel.hexValue, MintTheme.accentSeed)
     }

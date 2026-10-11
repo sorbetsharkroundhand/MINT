@@ -430,6 +430,7 @@ struct WorkspaceSurface: View {
                 }
             }
         }
+        .tint(theme.blueC)
         .environment(
             \.mintWindowChromeLeadingInset,
             WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))

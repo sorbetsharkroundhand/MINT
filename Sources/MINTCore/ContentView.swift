@@ -312,7 +312,7 @@ struct EditorPane: View {
                     GeometryReader { geo in
                         Text("여기서 글을 시작하세요…")
                             .mintSerifFont(20)
-                            .foregroundStyle(theme.ghostC)
+                            .foregroundStyle(theme.ghostSuggestionC)
                             .padding(.top, 51)
                             .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
                     }

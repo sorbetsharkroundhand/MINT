@@ -336,7 +336,7 @@ struct ModelChip: View {
                     .foregroundStyle(theme.ink3C)
             }
             Spacer(minLength: 0)
-            Text("✓")
+            Image(systemName: "checkmark")
                 .font(.system(size: 12, weight: .bold))
                 .foregroundStyle(theme.blueC)
                 .frame(width: 16)

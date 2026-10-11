@@ -942,7 +942,7 @@ private struct RowIconButton: View {
     }
 }
 
-/// 활성 행의 ✕ — 위험색 틴트 변형 (#56 dangerC). 본체는 HoverIconButton.
+/// Delete control uses the shared hover button with the destructive-state tint.
 private struct DeleteButton: View {
     let theme: MintTheme
     let action: () -> Void
@@ -952,7 +952,7 @@ private struct DeleteButton: View {
             theme: theme, help: "이 저널 삭제", tint: theme.dangerC,
             contentWidth: 20, contentHeight: 20, cornerRadius: MintRadius.sm,
             action: action) {
-            Text("✕").font(.system(size: 12))
+            Image(systemName: "xmark").font(.system(size: 12))
         }
     }
 }

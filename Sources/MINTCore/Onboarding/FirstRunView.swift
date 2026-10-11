@@ -114,6 +114,7 @@ public struct FirstRunView: View {
         .frame(width: 500)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.editorSurfaceC)
+        .tint(theme.blueC)
     }
 
     private func projectButton(
