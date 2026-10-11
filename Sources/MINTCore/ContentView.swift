@@ -268,6 +268,8 @@ struct EditorPane: View {
                     theme: theme,
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
+                    proseLayout: projectSession.activeProject?.mode == .fiction
+                        && projectSession.selectedDocument?.kind == .manuscript ? .indented : .spaced,
                     documentIdentity: identity,
                     positionStore: positionStore,
                     isEditable: projectSession.isEditorEditable,
