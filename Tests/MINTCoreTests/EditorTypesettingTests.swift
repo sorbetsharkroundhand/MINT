@@ -69,6 +69,58 @@ final class EditorTypesettingTests: XCTestCase {
         XCTAssertEqual(editor.serialize(), "")
     }
 
+    func testDeletingFormattedProseKeepsInheritedBoldThroughEmptyRestyle() async throws {
+        let harness = try await TypesettingHarness(mode: .fiction, kind: .manuscript, body: "**원고**")
+        defer { harness.close() }
+        let editor = try await harness.editor()
+        harness.window.makeFirstResponder(editor)
+        let undo = harness.window.testUndo
+        undo.beginUndoGrouping()
+        editor.setSelectedRange(NSRange(location: 0, length: editor.string.utf16.count))
+        editor.deleteBackward(nil)
+        undo.endUndoGrouping()
+        XCTAssertEqual(editor.string, "")
+        XCTAssertEqual(editor.typingAttributes[.mintBold] as? Bool, true)
+        harness.settings.editorFontSize = 24
+        try await harness.waitUntil { editor.baseFontSize == 24 }
+        XCTAssertEqual(editor.typingAttributes[.mintBold] as? Bool, true)
+        undo.beginUndoGrouping()
+        editor.insertText("다음", replacementRange: editor.selectedRange())
+        undo.endUndoGrouping()
+        XCTAssertEqual(editor.serialize(), "**다음**")
+    }
+
+    func testDeletingStyledProseRebuildsInheritedColorSizeAndAlignmentForFurtherTyping() async throws {
+        let harness = try await TypesettingHarness(mode: .fiction, kind: .manuscript,
+            body: "<p align=\"right\"><font color=\"#FF453A\" size=\"30\">***원고***</font></p>")
+        defer { harness.close() }
+        let editor = try await harness.editor()
+        harness.window.makeFirstResponder(editor)
+        let undo = harness.window.testUndo
+        undo.beginUndoGrouping()
+        editor.applyLineSpacing(12)
+        editor.setSelectedRange(NSRange(location: 0, length: editor.string.utf16.count))
+        editor.deleteBackward(nil)
+        undo.endUndoGrouping()
+        XCTAssertEqual(editor.typingAttributes[.mintAlign] as? String, "right")
+        harness.settings.editorFontSize = 24
+        try await harness.waitUntil { editor.baseFontSize == 24 }
+        let attrs = editor.typingAttributes
+        XCTAssertEqual(attrs[.mintBold] as? Bool, true)
+        XCTAssertEqual(attrs[.mintItalic] as? Bool, true)
+        XCTAssertEqual((attrs[.font] as? NSFont)?.pointSize, 30)
+        XCTAssertEqual((attrs[.foregroundColor] as? NSColor)?.hexValue, 0xFF453A)
+        XCTAssertEqual(attrs[.obliqueness] as? Double, 0.18)
+        let style = try XCTUnwrap(attrs[.paragraphStyle] as? NSParagraphStyle)
+        XCTAssertEqual(style.alignment, .right)
+        XCTAssertEqual(style.lineSpacing, 12)
+        undo.beginUndoGrouping()
+        editor.insertText("다음", replacementRange: editor.selectedRange())
+        undo.endUndoGrouping()
+        XCTAssertEqual(editor.serialize(),
+            "<p align=\"right\"><font color=\"#FF453A\" size=\"30\">***다음***</font></p>")
+    }
+
     func testGeneralManuscriptsAndFictionNotesAndReferencesKeepSpacedLayout() async throws {
         for (mode, kind) in [(WritingMode.general, WritingDocument.Kind.manuscript),
                               (.fiction, .note), (.fiction, .reference)] {

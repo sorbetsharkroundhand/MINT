@@ -1872,6 +1872,7 @@ final class BlockTextView: NSTextView {
         let caret = min(max(0, selectedRange().location), ns.length)
         let caretParagraph = ns.paragraphRange(for: NSRange(location: caret, length: 0))
         let emptyTail = caretParagraph.length == 0 ? blockInfo(in: caretParagraph) : nil
+        let emptyTailInline = typingAttributes.filter { InlineMarkdown.inlineKeys.contains($0.key) }
         var location = 0
         while location < ns.length {
             let para = ns.paragraphRange(for: NSRange(location: location, length: 0))
@@ -1886,6 +1887,16 @@ final class BlockTextView: NSTextView {
         if let emptyTail {
             applyBlock(emptyTail.block, checked: emptyTail.checked, marker: emptyTail.marker,
                 to: caretParagraph, registerUndo: false)
+            typingAttributes.merge(emptyTailInline) { _, inherited in inherited }
+            typingAttributes.merge(inlineDecoration(for: typingAttributes)) { _, decorated in decorated }
+            if let ps = typingAttributes[.paragraphStyle] as? NSMutableParagraphStyle {
+                if let align = emptyTailInline[.mintAlign] as? String {
+                    ps.alignment = align == "right" ? .right : .center
+                }
+                if let spacing = emptyTailInline[.mintLineSpacing] as? Double {
+                    ps.lineSpacing = CGFloat(spacing)
+                }
+            }
         }
         syncTypingAttributes()
         // 테마가 바뀌면 잉크 색으로 수식을 다시 렌더한다.
@@ -1933,43 +1944,49 @@ final class BlockTextView: NSTextView {
     func decorateInline(in range: NSRange) {
         guard let storage = textStorage, range.length > 0 else { return }
         storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
-            var addition: [NSAttributedString.Key: Any] = [:]
-            var base = attrs[.font] as? NSFont ?? bodyFont
-            // 크기 조절은 블록 기본 폰트를 리사이즈한 것 위에 굵게·기울임을 쌓는다.
-            if let size = attrs[.mintFontSize] as? Double,
-                abs(base.pointSize - CGFloat(size)) > 0.1 {
-                base = NSFontManager.shared.convert(base, toSize: CGFloat(size))
-                addition[.font] = base
-            }
-            if attrs[.mintCode] as? Bool == true {
-                addition[.font] = NSFont.monospacedSystemFont(
-                    ofSize: base.pointSize * 0.78, weight: .regular)
-                addition[.backgroundColor] = palette.codeBg
-            } else {
-                if attrs[.mintBold] as? Bool == true {
-                    // NSFontManager does not select the bundled variable font's weight axis.
-                    let converted = base.familyName == bodyFont.familyName
-                        ? MintFonts.serif(base.pointSize, weight: .bold)
-                        : NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
-                    if converted != base { addition[.font] = converted }
-                    // 시스템 serif(New York) 폴백은 볼드가 한글 글리프에
-                    // 적용되지 않는다 — 커버하지 못하면 스트로크로 가짜 볼드.
-                    if !converted.coveredCharacterSet.contains(
-                        UnicodeScalar(0xAC00)!) {
-                        addition[.strokeWidth] = -2.5
-                    }
-                }
-                // 기울임은 항상 obliqueness — 한글엔 이탤릭 페이스가 없어
-                // 폰트 변환으론 라틴만 기울어진다.
-                if attrs[.mintItalic] as? Bool == true {
-                    addition[.obliqueness] = 0.18
-                }
-            }
-            if let hex = attrs[.mintColor] as? String, let color = NSColor(inlineHex: hex) {
-                addition[.foregroundColor] = color
-            }
+            let addition = inlineDecoration(for: attrs)
             if !addition.isEmpty { storage.addAttributes(addition, range: run) }
         }
+    }
+
+    private func inlineDecoration(for attrs: [NSAttributedString.Key: Any])
+        -> [NSAttributedString.Key: Any] {
+        var addition: [NSAttributedString.Key: Any] = [:]
+        var base = attrs[.font] as? NSFont ?? bodyFont
+        // 크기 조절은 블록 기본 폰트를 리사이즈한 것 위에 굵게·기울임을 쌓는다.
+        if let size = attrs[.mintFontSize] as? Double,
+            abs(base.pointSize - CGFloat(size)) > 0.1 {
+            base = NSFontManager.shared.convert(base, toSize: CGFloat(size))
+            addition[.font] = base
+        }
+        if attrs[.mintCode] as? Bool == true {
+            addition[.font] = NSFont.monospacedSystemFont(
+                ofSize: base.pointSize * 0.78, weight: .regular)
+            addition[.backgroundColor] = palette.codeBg
+        } else {
+            if attrs[.mintBold] as? Bool == true {
+                // NSFontManager does not select the bundled variable font's weight axis.
+                let converted = base.familyName == bodyFont.familyName
+                    ? MintFonts.serif(base.pointSize, weight: .bold)
+                    : NSFontManager.shared.convert(base, toHaveTrait: .boldFontMask)
+                if converted != base { addition[.font] = converted }
+                // 시스템 serif(New York) 폴백은 볼드가 한글 글리프에
+                // 적용되지 않는다 — 커버하지 못하면 스트로크로 가짜 볼드.
+                if !converted.coveredCharacterSet.contains(
+                    UnicodeScalar(0xAC00)!) {
+                    addition[.strokeWidth] = -2.5
+                }
+            }
+            // 기울임은 항상 obliqueness — 한글엔 이탤릭 페이스가 없어
+            // 폰트 변환으론 라틴만 기울어진다.
+            if attrs[.mintItalic] as? Bool == true {
+                addition[.obliqueness] = 0.18
+            }
+        }
+        if let hex = attrs[.mintColor] as? String, let color = NSColor(inlineHex: hex) {
+            addition[.foregroundColor] = color
+        }
+        return addition
     }
 
     /// 문단에 저장된 .mintAlign을 문단 스타일에 반영한다.
