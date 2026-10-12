@@ -115,3 +115,18 @@ struct WorkspaceActionButton: NSViewRepresentable {
         @objc func invokeAction() { action() }
     }
 }
+
+/// Internal preview/test options can enable accessibility accommodations, never disable system choices.
+struct WorkspaceAccessibilityOptions {
+    var reduceMotion = false
+    var reduceTransparency = false
+}
+private struct WorkspaceAccessibilityOptionsKey: EnvironmentKey {
+    static let defaultValue = WorkspaceAccessibilityOptions()
+}
+extension EnvironmentValues {
+    var mintWorkspaceAccessibilityOptions: WorkspaceAccessibilityOptions {
+        get { self[WorkspaceAccessibilityOptionsKey.self] }
+        set { self[WorkspaceAccessibilityOptionsKey.self] = newValue }
+    }
+}

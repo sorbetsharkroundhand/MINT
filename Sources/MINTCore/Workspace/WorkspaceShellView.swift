@@ -5,129 +5,114 @@ enum WorkspaceMotion {
 }
 
 /// The shell owns presentation only; document lifetime, storage and indexing belong to the session.
-struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
+struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: View>: View {
     @Binding var navigatorWidth: Double
-    let navigatorVisible: Bool
+    let presentation: WorkspacePresentationState
     let onNavigatorCollapse: () -> Void
-    let contextVisible: Bool
-    let toolDockPosition: ToolDockPosition
+    let railWidth: CGFloat
     let theme: MintTheme
     @ViewBuilder var navigator: () -> Navigator
     @ViewBuilder var editor: () -> Editor
     @ViewBuilder var context: () -> Context
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ViewBuilder var rail: () -> Rail
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
+    @Environment(\.mintWorkspaceAccessibilityOptions) private var accessibilityOptions
     @State private var navigatorDragProjectedWidth: CGFloat?
+    private var reduceMotion: Bool { systemReduceMotion || accessibilityOptions.reduceMotion }
 
     var body: some View {
         GeometryReader { geometry in
-            let width = WorkspaceLayoutState(
-                navigatorWidth: Double(navigatorDragProjectedWidth ?? CGFloat(navigatorWidth)))
-                .navigatorWidth(in: geometry.size.width)
-            let effectiveDock = WorkspaceLayoutState.effectiveToolDock(
-                preferred: toolDockPosition,
-                availableWidth: geometry.size.width,
-                navigatorVisible: navigatorVisible,
-                navigatorWidth: width)
+            let layout = WorkspaceLayoutPolicy.resolve(availableWidth: geometry.size.width,
+                presentation: presentation, railWidth: railWidth,
+                projectedNavigatorWidth: navigatorDragProjectedWidth)
+            let contextVisible = presentation.toolSection != nil
+            let effectiveDock = layout.toolDock
+            let height = max(0, geometry.size.height - 2 * WorkspaceLayoutPolicy.outerInset)
+            let railReservation = railWidth > 0 ? railWidth + WorkspaceLayoutPolicy.surfaceGap : 0
+            let navigatorLeading = WorkspaceLayoutPolicy.outerInset + railReservation
+                + (layout.navigatorPlacement == .overlay && contextVisible && effectiveDock == .left
+                    ? WorkspaceLayoutState.toolWidth + WorkspaceLayoutPolicy.toolSeparatorWidth : 0)
 
             HStack(spacing: 0) {
-                if navigatorVisible {
-                    navigator()
-                        .frame(width: width)
-                        .opacity(navigatorDragOpacity)
-                        .clipped()
-                        .background(WorkspaceChromeSurface(theme: theme))
-                        .transition(.move(edge: .leading).combined(with: .opacity))
+                if railWidth > 0 {
+                    rail().frame(width: railWidth)
+                    Color.clear.frame(width: WorkspaceLayoutPolicy.surfaceGap)
                 }
-
-                if contextVisible && effectiveDock == .left {
-                    context()
-                        .frame(width: WorkspaceLayoutState.toolWidth)
-                        .background(WorkspaceToolSurface(theme: theme, floating: false))
-                    theme.sepC.frame(width: 1)
-                }
-
+                // This allocation changes width; the actual navigator keeps one overlay slot.
+                Color.clear.frame(width: layout.navigatorReservation)
                 WorkspaceFrame(theme: theme) {
-                    VStack(spacing: 0) {
-                        editor()
-                            .frame(
-                                minWidth: WorkspaceLayoutState.editorMinWidth,
-                                maxWidth: .infinity,
-                                maxHeight: .infinity)
-                            .background(theme.editorSurfaceC)
-
-                        if contextVisible && effectiveDock == .bottom {
-                            theme.sepC.frame(height: 1)
-                            context()
-                                .frame(
-                                    height: min(
-                                        WorkspaceLayoutState.bottomToolMaxHeight,
-                                        geometry.size.height * 0.4))
+                    HStack(spacing: 0) {
+                        if contextVisible && effectiveDock == .left {
+                            context().frame(width: WorkspaceLayoutState.toolWidth)
+                                .background(WorkspaceToolSurface(theme: theme, floating: false))
+                            theme.sepC.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
+                        }
+                        VStack(spacing: 0) {
+                            editor().frame(maxWidth: .infinity, maxHeight: .infinity)
+                            if contextVisible && effectiveDock == .bottom {
+                                theme.sepC.frame(height: 1)
+                                context().frame(height: min(WorkspaceLayoutState.bottomToolMaxHeight, height * 0.4))
+                                    .background(WorkspaceToolSurface(theme: theme, floating: false))
+                            }
+                        }
+                        .frame(width: layout.manuscriptWidth, height: height)
+                        if contextVisible && effectiveDock == .right {
+                            theme.sepC.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
+                            context().frame(width: WorkspaceLayoutState.toolWidth)
                                 .background(WorkspaceToolSurface(theme: theme, floating: false))
                         }
                     }
                 }
-
-                if contextVisible && effectiveDock == .right {
-                    theme.sepC.frame(width: 1)
-                    context()
-                        .frame(width: WorkspaceLayoutState.toolWidth)
-                        .background(WorkspaceToolSurface(theme: theme, floating: false))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            .padding(WorkspaceLayoutPolicy.outerInset)
+            .overlay(alignment: .topLeading) {
+                if presentation.navigatorVisible {
+                    navigator()
+                        .frame(width: layout.navigatorWidth, height: height)
+                        .opacity(navigatorDragOpacity)
+                        .background(theme.editorSurfaceC)
+                        .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
+                                .strokeBorder(theme.sepC).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                        .offset(x: navigatorLeading, y: WorkspaceLayoutPolicy.outerInset)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
                 }
             }
-            .overlay(alignment: .leading) {
-                if navigatorVisible {
+            .overlay(alignment: .topLeading) {
+                if presentation.navigatorVisible {
                     SidebarResizeDivider(
-                        width: Binding(get: { width }, set: { navigatorWidth = Double($0) }),
+                        width: Binding(get: { layout.navigatorWidth }, set: { navigatorWidth = Double($0) }),
                         minWidth: WorkspaceLayoutState.navigatorMinWidth,
-                        maxWidth: min(
-                            WorkspaceLayoutState.navigatorMaxWidth,
-                            max(
-                                WorkspaceLayoutState.navigatorMinWidth,
-                                geometry.size.width - WorkspaceLayoutState.editorMinWidth)),
+                        maxWidth: max(WorkspaceLayoutState.navigatorMinWidth, layout.navigatorMaximumWidth),
                         collapseThreshold: WorkspaceLayoutState.navigatorCollapseThreshold,
-                        collapseReleaseThreshold:
-                            WorkspaceLayoutState.navigatorCollapseReleaseThreshold,
-                        onCollapse: {
-                            settleNavigatorDrag(collapse: true)
-                        },
-                        onDragPreview: { projectedWidth in
-                            navigatorDragProjectedWidth = projectedWidth
-                        },
-                        onDragSettled: {
-                            settleNavigatorDrag(collapse: false)
-                        },
-                        theme: theme
-                    )
-                    .frame(width: 24)
-                    .offset(x: width - 12)
+                        collapseReleaseThreshold: WorkspaceLayoutState.navigatorCollapseReleaseThreshold,
+                        onCollapse: { settleNavigatorDrag(collapse: true) },
+                        onDragPreview: { navigatorDragProjectedWidth = $0 },
+                        onDragSettled: { settleNavigatorDrag(collapse: false) }, theme: theme)
+                        .frame(width: 24, height: height)
+                        .offset(x: navigatorLeading + layout.navigatorWidth - 12,
+                                y: WorkspaceLayoutPolicy.outerInset)
                 }
             }
             .overlay(alignment: .topTrailing) {
                 if contextVisible && effectiveDock == .floating {
                     context()
-                        .frame(
-                            width: WorkspaceLayoutState.toolWidth,
-                            height: min(
-                                WorkspaceLayoutState.floatingToolMaxHeight,
-                                max(240, geometry.size.height - 36)))
+                        .frame(width: WorkspaceLayoutState.toolWidth,
+                            height: min(WorkspaceLayoutState.floatingToolMaxHeight, max(240, geometry.size.height - 36)))
                         .background(WorkspaceToolSurface(theme: theme, floating: true))
-                        .clipShape(
-                            RoundedRectangle(
-                                cornerRadius: MintRadius.lg,
-                                style: .continuous))
-                        .overlay(
-                            RoundedRectangle(
-                                cornerRadius: MintRadius.lg,
-                                style: .continuous)
-                                .strokeBorder(theme.sepC))
-                        .shadow(
-                            color: .black.opacity(MintElevation.floating.opacity),
-                            radius: MintElevation.floating.radius,
-                            y: MintElevation.floating.y)
+                        .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
+                                .strokeBorder(theme.sepC).allowsHitTesting(false).accessibilityHidden(true)
+                        }
+                        .shadow(color: .black.opacity(MintElevation.floating.opacity),
+                            radius: MintElevation.floating.radius, y: MintElevation.floating.y)
                         .padding(18)
                 }
             }
-
         }
         .background(theme.editorSurfaceC)
     }
@@ -157,10 +142,11 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
 
 struct WorkspaceChromeSurface: View {
     let theme: MintTheme
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.accessibilityReduceTransparency) private var systemReduceTransparency
+    @Environment(\.mintWorkspaceAccessibilityOptions) private var accessibilityOptions
 
     var body: some View {
-        if reduceTransparency {
+        if systemReduceTransparency || accessibilityOptions.reduceTransparency {
             theme.editorSurfaceC
         } else {
             Rectangle().fill(.thinMaterial)
@@ -171,22 +157,10 @@ struct WorkspaceChromeSurface: View {
 struct WorkspaceToolSurface: View {
     let theme: MintTheme
     let floating: Bool
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
     var body: some View {
-        if reduceTransparency {
-            if floating {
-                RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                    .fill(theme.editorSurfaceC)
-            } else {
-                theme.editorSurfaceC
-            }
-        } else if floating {
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                .fill(.regularMaterial)
-        } else {
-            Rectangle().fill(.thinMaterial)
-        }
+        if floating {
+            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous).fill(theme.editorSurfaceC)
+        } else { theme.editorSurfaceC }
     }
 }
 
@@ -215,8 +189,6 @@ struct WorkspaceSurface: View {
         VStack(spacing: 0) {
             WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
             workspace(presentation: presentation, theme: theme)
-                .padding(.horizontal, WorkspaceLayoutPolicy.outerInset)
-                .padding(.bottom, WorkspaceLayoutPolicy.outerInset)
         }
         .tint(theme.blueC)
         .ignoresSafeArea(.container, edges: .top)
@@ -225,13 +197,9 @@ struct WorkspaceSurface: View {
     private func workspace(presentation: WorkspacePresentationState, theme: MintTheme) -> some View {
         WorkspaceShellView(
             navigatorWidth: $sidebarWidth,
-            navigatorVisible: sidebarVisible,
-            onNavigatorCollapse: {
-                sidebarVisible = false
-                editorRequests.focusEditor()
-            },
-            contextVisible: presentation.toolSection != nil,
-            toolDockPosition: presentation.toolDock,
+            presentation: presentation,
+            onNavigatorCollapse: hideNavigator,
+            railWidth: 0,
             theme: theme
         ) {
             ProjectNavigatorView(
@@ -333,7 +301,7 @@ struct WorkspaceSurface: View {
                     ProjectToolUnavailableView(theme: theme)
                 }
             }
-        }
+        } rail: { EmptyView() }
     }
 
     private func hideNavigator() {
