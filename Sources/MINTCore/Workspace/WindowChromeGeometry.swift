@@ -59,6 +59,8 @@ struct WindowChromeProbe: NSViewRepresentable {
     final class ProbeView: NSView {
         var onChange: ((CGFloat?) -> Void)?
 
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             scheduleMeasurement()

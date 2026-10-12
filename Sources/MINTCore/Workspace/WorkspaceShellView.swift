@@ -46,22 +46,24 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View>: View {
                     theme.sepC.frame(width: 1)
                 }
 
-                VStack(spacing: 0) {
-                    editor()
-                        .frame(
-                            minWidth: WorkspaceLayoutState.editorMinWidth,
-                            maxWidth: .infinity,
-                            maxHeight: .infinity)
-                        .background(theme.editorSurfaceC)
-
-                    if contextVisible && effectiveDock == .bottom {
-                        theme.sepC.frame(height: 1)
-                        context()
+                WorkspaceFrame(theme: theme) {
+                    VStack(spacing: 0) {
+                        editor()
                             .frame(
-                                height: min(
-                                    WorkspaceLayoutState.bottomToolMaxHeight,
-                                    geometry.size.height * 0.4))
-                            .background(WorkspaceToolSurface(theme: theme, floating: false))
+                                minWidth: WorkspaceLayoutState.editorMinWidth,
+                                maxWidth: .infinity,
+                                maxHeight: .infinity)
+                            .background(theme.editorSurfaceC)
+
+                        if contextVisible && effectiveDock == .bottom {
+                            theme.sepC.frame(height: 1)
+                            context()
+                                .frame(
+                                    height: min(
+                                        WorkspaceLayoutState.bottomToolMaxHeight,
+                                        geometry.size.height * 0.4))
+                                .background(WorkspaceToolSurface(theme: theme, floating: false))
+                        }
                     }
                 }
 
@@ -204,13 +206,23 @@ struct WorkspaceSurface: View {
     @AppStorage("mint.toolDockPosition")
     private var toolDockRaw = ToolDockPosition.automatic.rawValue
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
-    @State private var trafficLightMaxX: CGFloat?
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
         let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
             navigatorWidth: sidebarWidth, rawToolSection: section,
             rawToolDock: toolDockRaw, chromeHidden: chromeHidden)
+        VStack(spacing: 0) {
+            WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
+            workspace(presentation: presentation, theme: theme)
+                .padding(.horizontal, WorkspaceLayoutPolicy.outerInset)
+                .padding(.bottom, WorkspaceLayoutPolicy.outerInset)
+        }
+        .tint(theme.blueC)
+        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private func workspace(presentation: WorkspacePresentationState, theme: MintTheme) -> some View {
         WorkspaceShellView(
             navigatorWidth: $sidebarWidth,
             navigatorVisible: sidebarVisible,
@@ -225,7 +237,7 @@ struct WorkspaceSurface: View {
             ProjectNavigatorView(
                 session: projectSession,
                 editorRequests: editorRequests,
-                theme: theme)
+                theme: theme, onClose: hideNavigator)
         } editor: {
             EditorPane(
                 projectSession: projectSession,
@@ -322,12 +334,11 @@ struct WorkspaceSurface: View {
                 }
             }
         }
-        .tint(theme.blueC)
-        .environment(
-            \.mintWindowChromeLeadingInset,
-            WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
-        .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
-        .ignoresSafeArea(.container, edges: .top)
+    }
+
+    private func hideNavigator() {
+        sidebarVisible = false
+        editorRequests.focusEditor()
     }
 
     private var activeWritingMode: WritingMode {
