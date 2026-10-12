@@ -18,11 +18,12 @@ struct WorkspaceFrame<Content: View>: View {
 }
 
 /// The background is a sibling of the editor, so rounding never clips its transients.
-private struct WorkspacePaperSurface: NSViewRepresentable {
+struct WorkspacePaperSurface: NSViewRepresentable {
     let theme: MintTheme
+    var identifier = "mint.workspace.frame"
     func makeNSView(context: Context) -> SurfaceView {
         let view = SurfaceView(); view.wantsLayer = true
-        view.setAccessibilityIdentifier("mint.workspace.frame")
+        view.setAccessibilityIdentifier(identifier)
         return view
     }
     func updateNSView(_ view: SurfaceView, context: Context) {
@@ -107,7 +108,10 @@ struct WorkspaceActionButton: NSViewRepresentable {
         button.contentTintColor = selected == true ? theme.blue : theme.ink2
         button.toolTip = label; button.setAccessibilityLabel(label)
         button.setAccessibilityIdentifier(identifier)
-        if let selected { button.setAccessibilityValue(NSNumber(value: selected)) }
+        if let selected {
+            button.setButtonType(.toggle); button.state = selected ? .on : .off
+            button.setAccessibilityValue(NSNumber(value: selected))
+        }
     }
     @MainActor final class Coordinator: NSObject {
         var action: () -> Void

@@ -5,22 +5,9 @@ import XCTest
 
 @MainActor
 final class WriterCompatibilityTests: XCTestCase {
-    func testToolbarExposesAccessibleSearchAndCompatibilityMenuInGeneral() async throws {
-        let h = try await SourceNavigationHarness(short: true); defer { h.close() }
-        let host = NSHostingView(rootView: EditorToolbar(projectSession: h.fixture.session,
-            editorRequests: h.requests, completion: h.completion, settings: h.completion.settings,
-            theme: .light).defaultAppStorage(h.fixture.defaults))
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 860, height: 52),
-            styleMask: [.titled], backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false; window.contentView = host
-        defer { window.contentView = nil; window.close() }
-        for _ in 0..<20 { host.layoutSubtreeIfNeeded(); await Task.yield() }
-        func elements(_ value: Any, depth: Int = 0) -> [any NSAccessibilityProtocol] {
-            guard depth < 20, let node = value as? any NSAccessibilityProtocol else { return [] }
-            let children = (node.accessibilityChildren() ?? []) + ((value as? NSView)?.subviews ?? [])
-            return [node] + children.flatMap { elements($0, depth: depth + 1) }
-        }
-        let controls = elements(window)
+    func testRailExposesAccessibleSearchAndCompatibilityMenuInGeneral() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let controls = h.elements()
         let search = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.source-search.show" })
         let compatibility = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.writer-tools.compatibility" })
         XCTAssertEqual(search.accessibilityLabel(), "원문 검색")
@@ -30,7 +17,7 @@ final class WriterCompatibilityTests: XCTestCase {
         XCTAssertEqual(menu.items.dropFirst().map(\.title), ["인물과 작품 정보", "작가 수정과 기록", "제안에 쓰인 내용"])
         XCTAssertNotNil(menu.items.first?.image)
         XCTAssertTrue(try XCTUnwrap(search as? NSButton).refusesFirstResponder)
-        XCTAssertTrue(window.makeFirstResponder(try XCTUnwrap(compatibility as? NSPopUpButton)),
+        XCTAssertTrue(h.window.makeFirstResponder(try XCTUnwrap(compatibility as? NSPopUpButton)),
             "The compatibility route must support native keyboard focus")
         let view = try await h.editor(), before = h.fixture.session.activeProject
         view.setSelectedRange(NSRange(location: 3, length: 4))
@@ -42,8 +29,7 @@ final class WriterCompatibilityTests: XCTestCase {
             XCTAssertEqual(view.selectedRange(), selection)
             XCTAssertEqual(h.fixture.session.activeProject, before)
         }
-        window.setContentSize(NSSize(width: 420, height: 52))
-        for _ in 0..<20 { host.layoutSubtreeIfNeeded(); await Task.yield() }
+        h.window.setContentSize(NSSize(width: 860, height: 760)); await h.layout()
         XCTAssertEqual((search as? NSButton)?.title, "")
         _ = search.accessibilityPerformPress()
         await h.layout()

@@ -173,6 +173,7 @@ struct WorkspaceSurface: View {
     var editorBridge: ProjectEditorBridge? = nil
     var positionStore: WritingPositionStore = .shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openSettings) private var openSettings
     @StateObject private var palette = PaletteSettings.shared
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
@@ -199,7 +200,7 @@ struct WorkspaceSurface: View {
             navigatorWidth: $sidebarWidth,
             presentation: presentation,
             onNavigatorCollapse: hideNavigator,
-            railWidth: 0,
+            railWidth: WorkspaceLayoutPolicy.railWidth,
             theme: theme
         ) {
             ProjectNavigatorView(
@@ -301,7 +302,11 @@ struct WorkspaceSurface: View {
                     ProjectToolUnavailableView(theme: theme)
                 }
             }
-        } rail: { EmptyView() }
+        } rail: {
+            WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
+                session: projectSession, requests: editorRequests, theme: theme,
+                openSettings: { openSettings() })
+        }
     }
 
     private func hideNavigator() {

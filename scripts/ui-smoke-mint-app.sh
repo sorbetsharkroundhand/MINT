@@ -446,6 +446,8 @@ assert_isolated_project_mode() {
 
 launch
 wait_ui equals "$PROJECT_BODY"
+ui present "mint.workspace.frame"
+ui present "mint.workspace.rail"
 ui type "$EDITED_BODY"
 wait_ui equals "$PERSISTED_BODY"
 ui absent "mint.workspace-mode"

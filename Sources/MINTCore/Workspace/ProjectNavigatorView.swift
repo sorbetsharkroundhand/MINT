@@ -12,11 +12,18 @@ public final class ProjectEditorRequests: ObservableObject {
     @Published internal var sourceNavigationError: String?
     weak var nativeEditor: BlockTextView?
     var nativeEditorKey: ProjectDocumentKey?
+    private var consumedSearchFocusRequest = 0
 
     public init() {}
 
     public func focusEditor() { editorFocusRequest += 1 }
     public func focusSearch() { searchFocusRequest += 1 }
+    func consumeSearchFocusRequest() -> Bool {
+        guard searchFocusRequest != consumedSearchFocusRequest else { return false }
+        consumedSearchFocusRequest = searchFocusRequest
+        return true
+    }
+
     public func beginRename() { renameRequest += 1 }
 
     public func jump(to result: ProjectSearchResult, in session: ProjectSession) {
@@ -107,7 +114,8 @@ struct ProjectNavigatorView: View {
             guard !Task.isCancelled else { return }
             searchResults = results
         }
-        .onChange(of: editorRequests.searchFocusRequest) { _, _ in searchFocused = true }
+        .onAppear { focusSearchIfRequested() }
+        .onChange(of: editorRequests.searchFocusRequest) { _, _ in focusSearchIfRequested() }
         .onChange(of: editorRequests.renameRequest) { _, _ in
             if let document = session.selectedDocument { startRename(document) }
         }
@@ -120,6 +128,10 @@ struct ProjectNavigatorView: View {
                 theme: theme,
                 onRestore: { ProjectCommandActions(session: session).restoreDocument($0) })
         }
+    }
+
+    private func focusSearchIfRequested() {
+        if editorRequests.consumeSearchFocusRequest() { searchFocused = true }
     }
 
     private var header: some View {
