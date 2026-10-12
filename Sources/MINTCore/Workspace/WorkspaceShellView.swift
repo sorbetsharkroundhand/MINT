@@ -312,10 +312,14 @@ struct WorkspaceSurface: View {
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
     @AppStorage("mint.toolDockPosition")
     private var toolDockRaw = ToolDockPosition.automatic.rawValue
+    @AppStorage("mint.chromeHidden") private var chromeHidden = false
     @State private var trafficLightMaxX: CGFloat?
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
+        let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
+            navigatorWidth: sidebarWidth, rawToolSection: section,
+            rawToolDock: toolDockRaw, chromeHidden: chromeHidden)
         WorkspaceShellView(
             navigatorWidth: $sidebarWidth,
             navigatorVisible: sidebarVisible,
@@ -323,8 +327,8 @@ struct WorkspaceSurface: View {
                 sidebarVisible = false
                 editorRequests.focusEditor()
             },
-            contextVisible: WorkspaceToolPresentation.isVisible(section),
-            toolDockPosition: ToolDockPosition(rawValue: toolDockRaw) ?? .automatic,
+            contextVisible: presentation.toolSection != nil,
+            toolDockPosition: presentation.toolDock,
             theme: theme
         ) {
             ProjectNavigatorView(
@@ -370,9 +374,7 @@ struct WorkspaceSurface: View {
                                 editorRequests.focusEditor()
                             } label: {
                                 Label(position.label, systemImage: position.systemImage)
-                                if (ToolDockPosition(rawValue: toolDockRaw) ?? .automatic)
-                                    == position
-                                {
+                                if presentation.toolDock == position {
                                     Image(systemName: "checkmark")
                                 }
                             }
@@ -420,8 +422,7 @@ struct WorkspaceSurface: View {
                                 query: jump.query)
                         },
                         onAction: nil)
-                } else if let selectedSection = SidebarSection(rawValue: section),
-                    [.bible, .narrative, .context].contains(selectedSection) {
+                } else if let selectedSection = presentation.toolSection {
                     ProjectWriterToolsView(session: projectSession, completion: completion,
                         editorRequests: editorRequests, section: selectedSection, theme: theme)
                         .id(projectSession.runtimeIdentity?.key)
@@ -436,7 +437,6 @@ struct WorkspaceSurface: View {
             WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
         .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
         .ignoresSafeArea(.container, edges: .top)
-        .onAppear { section = SidebarSection.files.rawValue }
     }
 
     private var activeWritingMode: WritingMode {
