@@ -61,7 +61,8 @@ final class WorkspaceLayoutTests: XCTestCase {
     }
 
     func testProjectionKeepsResistanceAndSafeWidths() {
-        for (saved, expected) in [(-10.0, CGFloat(200)), (.infinity, 250), (.nan, 250), (999, 360)] {
+        for (saved, expected) in [(-10.0, CGFloat(200)), (0, 200), (175, 200),
+                                  (.infinity, 250), (.nan, 250), (999, 360)] {
             let state = presentation(width: saved)
             let layout = WorkspaceLayoutPolicy.resolve(availableWidth: 1180, presentation: state)
             XCTAssertEqual(layout.navigatorWidth, expected)

@@ -149,8 +149,10 @@ enum WorkspaceLayoutPolicy {
             ? .hidden : (canInline ? .inline : .overlay)
         let maximum = min(WorkspaceLayoutState.navigatorMaxWidth, max(0,
             placement == .inline ? base - surfaceGap - WorkspaceLayoutState.editorMinWidth : base))
+        let savedWidth = presentation.navigatorWidth.isFinite
+            ? max(WorkspaceLayoutState.navigatorMinWidth, CGFloat(presentation.navigatorWidth)) : 250
         let width = min(maximum, WorkspaceLayoutState.projectedNavigatorWidth(
-            projectedNavigatorWidth ?? CGFloat(presentation.navigatorWidth)))
+            projectedNavigatorWidth ?? savedWidth))
         let reservation = placement == .inline ? width + surfaceGap : 0
         let writingWidth = max(0, base - reservation)
         let hasTool = presentation.toolSection != nil
