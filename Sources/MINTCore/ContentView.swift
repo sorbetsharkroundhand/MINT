@@ -354,23 +354,14 @@ struct EditorPane: View {
 
 // MARK: - Writing toolbar
 
-/// Original search is primary; saved author information stays in a secondary menu.
+/// Document-local title, modes, model status and writing notices stay beside the editor.
 struct EditorToolbar: View {
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var projectSession: ProjectSession
     @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
-    @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
-    @State private var sidebarButtonHovered = false
-    @State private var settingsButtonHovered = false
     @State private var longParagraphOpen = false
-    /// ⌘,의 Settings 씬을 여는 표준 액션 (macOS 14+). 다크 모드·사용 방법·
-    /// 저자 이름이 전부 설정으로 옮겨 가면서 눈에 보이는 입구가 필요해졌다.
-    @Environment(\.openSettings) private var openSettings
-    /// 기존 섹션 키를 재사용해 오른쪽 또는 아래의 도구 패널을 연다.
-    @AppStorage("mint.sidebarSection") private var sidebarSection = SidebarSection.files.rawValue
 
     var body: some View {
         GeometryReader { geometry in
@@ -382,7 +373,6 @@ struct EditorToolbar: View {
 
     private func toolbar(density: WorkspaceToolbarDensity) -> some View {
         HStack(spacing: density == .compact ? 6 : 10) {
-            sidebarToggle
             Text(projectSession.selectedDocument?.title ?? "문서")
                 .mintUIFont(12, .medium)
                 .foregroundStyle(theme.inkC)
@@ -435,12 +425,7 @@ struct EditorToolbar: View {
                 }
             }
             Spacer(minLength: 8)
-            SourceSearchToolbarButton(session: projectSession, requests: editorRequests,
-                compact: density == .compact)
-                .frame(width: density == .compact ? 26 : 80, height: 28)
-            WriterCompatibilityMenu(section: $sidebarSection).frame(width: 26, height: 28)
             ModelChip(completion: completion, settings: settings, theme: theme, compact: density == .compact)
-            settingsButton
         }
         .padding(.horizontal, WindowChromeGeometry.toolbarHorizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -455,51 +440,6 @@ struct EditorToolbar: View {
                     session: projectSession,
                     requestEditorFocus: editorRequests.focusEditor)
             })
-    }
-
-    /// 파일 목록(사이드바) 접기/펴기 — 끄면 입력창에 집중하는 모드.
-    private var sidebarToggle: some View {
-        Button {
-            withAnimation(reduceMotion ? nil : WorkspaceMotion.navigator) {
-                sidebarVisible.toggle()
-            }
-        } label: {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(sidebarVisible ? theme.ink2C : theme.ink3C)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                        .fill(sidebarButtonHovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { sidebarButtonHovered = $0 }
-        .help(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기")
-            .accessibilityLabel(Text(sidebarVisible ? "파일 목록 숨기기" : "파일 목록 보이기"))
-    }
-
-    /// 설정 — ⌘,와 같은 Settings 창을 연다. 모델·제안·다크 모드·저자 이름·
-    /// 사용 방법이 전부 그 안에 있으므로 툴바의 유일한 설정 입구다.
-    private var settingsButton: some View {
-        Button {
-            openSettings()
-        } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundStyle(theme.ink2C)
-                .frame(width: 28, height: 28)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                        .fill(settingsButtonHovered ? theme.hoverC : .clear)
-                )
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { settingsButtonHovered = $0 }
-        .help("설정 (⌘,) — 모델·제안·다크 모드·저자 이름·사용 방법")
-            .accessibilityLabel(Text("설정"))
     }
 }
 
