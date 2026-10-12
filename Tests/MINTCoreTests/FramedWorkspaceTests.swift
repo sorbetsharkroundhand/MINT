@@ -5,6 +5,46 @@ import XCTest
 
 @MainActor
 final class FramedWorkspaceTests: XCTestCase {
+    func testFrameAndWindowTitleHaveSeparateSafeGeometry() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        var project = try XCTUnwrap(h.fixture.session.activeProject)
+        project.title = String(repeating: "Long project title ", count: 30)
+        try await h.fixture.session.saveAndActivate(project); await h.layout()
+        let frame = try XCTUnwrap(h.element("mint.workspace.frame") as? NSView)
+        let chrome = try XCTUnwrap(h.element("mint.workspace.chrome") as? NSView)
+        let title = try XCTUnwrap(h.element("mint.workspace.chrome.title") as? NSTextField)
+        XCTAssertEqual(chrome.bounds.height, 52, accuracy: 0.5)
+        XCTAssertEqual(frame.layer?.backgroundColor?.alpha, 1)
+        XCTAssertEqual(frame.layer?.cornerRadius, 12)
+        XCTAssertEqual(frame.layer?.masksToBounds, false, "Decoration must not clip editor transients")
+        XCTAssertTrue(chrome.mouseDownCanMoveWindow)
+        XCTAssertEqual(title.stringValue, project.title)
+        let buttonsMaxX = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { h.window.standardWindowButton($0) }
+            .map { $0.convert($0.bounds, to: nil).maxX }.max() ?? 0
+        let titleRect = title.convert(title.bounds, to: nil)
+        XCTAssertGreaterThanOrEqual(titleRect.minX, buttonsMaxX + 12)
+        XCTAssertLessThanOrEqual(titleRect.maxX, chrome.convert(chrome.bounds, to: nil).maxX)
+        XCTAssertEqual(title.maximumNumberOfLines, 1)
+        XCTAssertEqual(title.lineBreakMode, .byTruncatingMiddle)
+    }
+
+    func testNavigatorLocalCloseReturnsToEditor() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let editor = try await h.editor()
+        editor.setSelectedRange(NSRange(location: 3, length: 4))
+        let before = h.fixture.session.activeProject
+        let close = try XCTUnwrap(h.element("mint.navigator.close") as? NSButton)
+        XCTAssertGreaterThanOrEqual(close.bounds.width, 32)
+        XCTAssertGreaterThanOrEqual(close.bounds.height, 32)
+        XCTAssertEqual(close.accessibilityLabel(), "파일 목록 숨기기")
+        close.performClick(nil); await h.layout()
+        XCTAssertFalse(h.fixture.defaults.bool(forKey: "mint.sidebarVisible"))
+        XCTAssertTrue(h.window.firstResponder === editor)
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 3, length: 4))
+        XCTAssertEqual(h.fixture.session.activeProject, before)
+    }
+
     func testSavedToolChoiceSurvivesWorkspaceAppearance() async throws {
         for section in ["bible", "timeline", "context"] {
             let h = try await FramedWorkspaceHarness(presentationDefaults: ["mint.sidebarSection": section])
@@ -14,7 +54,7 @@ final class FramedWorkspaceTests: XCTestCase {
             await h.layout()
             XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), section)
             let editor = try await h.editor()
-            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 589, accuracy: 1,
+            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 569, accuracy: 1,
                 "The saved tool must reserve its visible side pane")
             XCTAssertEqual(h.fixture.session.activeProject, project)
             XCTAssertEqual(h.fixture.session.selectedDocumentID, selected)
@@ -30,7 +70,7 @@ final class FramedWorkspaceTests: XCTestCase {
             await h.layout()
             XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), section)
             let editor = try await h.editor()
-            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 930, accuracy: 1,
+            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 910, accuracy: 1,
                 "Deferred and unknown tools must leave all writing space available")
             XCTAssertEqual(h.fixture.session.activeProject, project)
             XCTAssertEqual(h.fixture.session.selectedDocumentID, selected)
@@ -106,6 +146,10 @@ final class FramedWorkspaceHarness {
             return result
         }
         return walk(host)
+    }
+
+    func element(_ identifier: String) -> (any NSAccessibilityProtocol)? {
+        elements().first { $0.accessibilityIdentifier() == identifier }
     }
 
     func close() {

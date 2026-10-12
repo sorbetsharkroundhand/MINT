@@ -1,7 +1,14 @@
+import AppKit
 import XCTest
 @testable import MINTCore
 
 final class WindowChromeGeometryTests: XCTestCase {
+    @MainActor
+    func testMeasurementProbeDoesNotInterceptWindowDragging() {
+        let probe = WindowChromeProbe.ProbeView(frame: NSRect(x: 0, y: 0, width: 1180, height: 52))
+        XCTAssertNil(probe.hitTest(NSPoint(x: 30, y: 20)))
+    }
+
     func testMissingWindowGeometryUsesDesignPadding() {
         XCTAssertEqual(
             WindowChromeGeometry.leadingContentInset(trafficLightMaxX: nil),

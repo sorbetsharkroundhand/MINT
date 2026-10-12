@@ -42,6 +42,7 @@ struct ProjectNavigatorView: View {
     @ObservedObject var session: ProjectSession
     @ObservedObject var editorRequests: ProjectEditorRequests
     let theme: MintTheme
+    let onClose: () -> Void
 
     @State private var searchText = ""
     @State private var searchResults: [ProjectSearchResult] = []
@@ -141,9 +142,11 @@ struct ProjectNavigatorView: View {
                     .help("휴지통")
                     .accessibilityLabel("휴지통")
             }
+            WorkspaceActionButton(identifier: "mint.navigator.close", label: "파일 목록 숨기기",
+                symbol: "xmark", theme: theme, action: onClose).frame(width: 32, height: 32)
         }
         .foregroundStyle(theme.ink2C)
-        .padding(.leading, 74)
+        .padding(.leading, 12)
         .padding(.trailing, 12)
         .frame(height: 52)
     }
@@ -189,6 +192,7 @@ struct ProjectNavigatorView: View {
             TextField("프로젝트 검색", text: $searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
+                .accessibilityIdentifier("mint.navigator.search")
             if !searchText.isEmpty {
                 Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
@@ -253,6 +257,7 @@ struct ProjectNavigatorView: View {
                 TextField("문서 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
                     .focused($renameFocused)
+                    .accessibilityIdentifier("mint.navigator.rename")
                     .onSubmit { commitRename() }
                     .onExitCommand { cancelRename() }
             } else {

@@ -356,7 +356,6 @@ struct EditorPane: View {
 
 /// Original search is primary; saved author information stays in a secondary menu.
 struct EditorToolbar: View {
-    @Environment(\.mintWindowChromeLeadingInset) private var windowChromeLeadingInset
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var projectSession: ProjectSession
     @ObservedObject var editorRequests: ProjectEditorRequests
@@ -443,14 +442,7 @@ struct EditorToolbar: View {
             ModelChip(completion: completion, settings: settings, theme: theme, compact: density == .compact)
             settingsButton
         }
-        // When Navigator is hidden, use the measured macOS traffic-light safe region.
-        // With Navigator visible, regular design padding is enough.
-        .padding(
-            .leading,
-            sidebarVisible
-                ? WindowChromeGeometry.toolbarHorizontalPadding
-                : windowChromeLeadingInset)
-        .padding(.trailing, WindowChromeGeometry.toolbarHorizontalPadding)
+        .padding(.horizontal, WindowChromeGeometry.toolbarHorizontalPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
     }
 
