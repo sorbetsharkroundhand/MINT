@@ -114,8 +114,7 @@ struct ProjectNavigatorView: View {
             guard !Task.isCancelled else { return }
             searchResults = results
         }
-        .onAppear { focusSearchIfRequested() }
-        .onChange(of: editorRequests.searchFocusRequest) { _, _ in focusSearchIfRequested() }
+        .task(id: editorRequests.searchFocusRequest) { await focusSearchIfRequested() }
         .onChange(of: editorRequests.renameRequest) { _, _ in
             if let document = session.selectedDocument { startRename(document) }
         }
@@ -130,8 +129,15 @@ struct ProjectNavigatorView: View {
         }
     }
 
-    private func focusSearchIfRequested() {
-        if editorRequests.consumeSearchFocusRequest() { searchFocused = true }
+    private func focusSearchIfRequested() async {
+        guard editorRequests.consumeSearchFocusRequest() else { return }
+        let projectID = session.activeProject?.id
+        // Apply focus after native field insertion; an onAppear request can be lost.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        guard !Task.isCancelled, session.activeProject?.id == projectID else { return }
+        searchFocused = true
     }
 
     private var header: some View {

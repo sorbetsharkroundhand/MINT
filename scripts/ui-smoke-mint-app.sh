@@ -319,6 +319,13 @@ on run argv
                 if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
                 if operation is "press" then click targetElement
             end if
+        else if operation is "project-search" then
+            set frontmost of targetProcess to true
+            tell targetProcess to key code 3 using {command down, shift down}
+        else if operation is "search-focused" then
+            set searchField to my findElement(rootElement, "AXIdentifier", "mint.navigator.search", 30)
+            if searchField is missing value then error "Project search field missing"
+            if not (value of attribute "AXFocused" of searchField) then error "Project search focus missing"
         else if operation is "resize" then
             set size of rootElement to {expectedValue as integer, 700}
         else if operation is "autocomplete" then
@@ -459,6 +466,18 @@ wait_ui autocomplete ""
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
+ui press "mint.navigator.close"
+ui focused
+ui project-search ""
+wait_ui search-focused ""
+ui field-set "mint.navigator.search" "keyboard-$TOKEN"
+wait_ui equals "$PERSISTED_BODY"
+ui field-equals "mint.navigator.search" "keyboard-$TOKEN"
+ui field-set "mint.navigator.search" ""
+ui press "mint.navigator.close"
+ui focused
+ui press "mint.workspace.navigator-toggle"
+ui focused
 open_writer_information
 ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
