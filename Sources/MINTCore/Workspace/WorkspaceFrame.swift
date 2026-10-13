@@ -85,6 +85,7 @@ private struct WorkspaceWindowDragRegion: NSViewRepresentable {
     func updateNSView(_ view: DragView, context: Context) {}
     final class DragView: NSView {
         override var mouseDownCanMoveWindow: Bool { true }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func mouseDown(with event: NSEvent) {
             window?.performDrag(with: event)
         }

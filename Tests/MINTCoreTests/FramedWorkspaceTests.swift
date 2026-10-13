@@ -292,11 +292,15 @@ final class FramedWorkspaceTests: XCTestCase {
         editor.setSelectedRange(NSRange(location: 3, length: 4))
         let originalStyle = h.window.styleMask
         let originalBackgroundDragging = h.window.isMovableByWindowBackground
+        h.window.makeKeyAndOrderFront(nil)
+        h.window.makeFirstResponder(editor)
         let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown,
             location: chrome.convert(NSPoint(x: chrome.bounds.midX, y: chrome.bounds.midY), to: nil),
             modifierFlags: [], timestamp: 1, windowNumber: h.window.windowNumber,
             context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
-        chrome.mouseDown(with: event)
+        XCTAssertTrue(chrome.acceptsFirstMouse(for: event),
+            "An inactive title region must accept the first press")
+        h.window.sendEvent(event)
         XCTAssertTrue(h.window.lastDragEvent === event,
             "A title press must hand the original event to native window dragging")
         XCTAssertEqual(h.window.styleMask, originalStyle)
