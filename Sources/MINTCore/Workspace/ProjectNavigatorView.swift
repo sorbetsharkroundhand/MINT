@@ -114,8 +114,7 @@ struct ProjectNavigatorView: View {
             guard !Task.isCancelled else { return }
             searchResults = results
         }
-        .onAppear { focusSearchIfRequested() }
-        .onChange(of: editorRequests.searchFocusRequest) { _, _ in focusSearchIfRequested() }
+        .task(id: editorRequests.searchFocusRequest) { await focusSearchIfRequested() }
         .onChange(of: editorRequests.renameRequest) { _, _ in
             if let document = session.selectedDocument { startRename(document) }
         }
@@ -130,8 +129,15 @@ struct ProjectNavigatorView: View {
         }
     }
 
-    private func focusSearchIfRequested() {
-        if editorRequests.consumeSearchFocusRequest() { searchFocused = true }
+    private func focusSearchIfRequested() async {
+        guard editorRequests.consumeSearchFocusRequest() else { return }
+        let projectID = session.activeProject?.id
+        // Apply focus after native field insertion; an onAppear request can be lost.
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+        guard !Task.isCancelled, session.activeProject?.id == projectID else { return }
+        searchFocused = true
     }
 
     private var header: some View {
@@ -188,13 +194,14 @@ struct ProjectNavigatorView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Text(session.activeProject?.title ?? "프로젝트").lineLimit(1)
+                Text(session.activeProject?.title ?? "프로젝트")
+                    .lineLimit(1).truncationMode(.middle)
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
             .mintUIFont(12, .semibold)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel("최근 프로젝트")
     }
 
@@ -261,11 +268,12 @@ struct ProjectNavigatorView: View {
 
     private func documentRow(_ document: WritingDocument) -> some View {
         let selected = document.id == session.selectedDocumentID
+        let editingName = editingKey == documentKey(for: document)
         return HStack(spacing: 8) {
             Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(selected ? theme.blueC : theme.ink3C)
-            if editingKey == documentKey(for: document) {
+            if editingName {
                 TextField("문서 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
                     .focused($renameFocused)
@@ -287,14 +295,16 @@ struct ProjectNavigatorView: View {
                 .fill(selected ? theme.activeBgC : .clear))
         .contentShape(Rectangle())
         .onTapGesture {
+            guard !editingName else { return }
             session.selectDocument(document.id)
             editorRequests.focusEditor()
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: editingName ? .contain : .combine)
         .accessibilityIdentifier("mint.document.\(document.id.rawValue.uuidString)")
         .accessibilityLabel(Text(document.title))
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(editingName ? [] : .isButton)
         .accessibilityAction {
+            guard !editingName else { return }
             session.selectDocument(document.id)
             editorRequests.focusEditor()
         }

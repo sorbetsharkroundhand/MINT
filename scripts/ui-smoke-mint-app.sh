@@ -319,6 +319,29 @@ on run argv
                 if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
                 if operation is "press" then click targetElement
             end if
+        else if operation is "document-title" then
+            set titleText to my findElement(rootElement, "AXValue", expectedValue, 30)
+            if titleText is missing value then error "Document title text missing"
+        else if operation is "begin-rename" then
+            set frontmost of targetProcess to true
+            tell targetProcess to click menu bar item "파일" of menu bar 1
+            set renameCommand to my findElement(targetProcess, "AXTitle", "문서 이름 바꾸기", 30)
+            if renameCommand is missing value then error "Rename menu command missing"
+            click renameCommand
+        else if operation is "field-focused" then
+            set targetField to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
+            if targetField is missing value then error "Editable field missing: " & expectedValue
+            if not (value of attribute "AXFocused" of targetField) then error "Editable field focus missing"
+        else if operation is "submit-field" then
+            set frontmost of targetProcess to true
+            tell targetProcess to key code 36
+        else if operation is "project-search" then
+            set frontmost of targetProcess to true
+            tell targetProcess to key code 3 using {command down, shift down}
+        else if operation is "search-focused" then
+            set searchField to my findElement(rootElement, "AXIdentifier", "mint.navigator.search", 30)
+            if searchField is missing value then error "Project search field missing"
+            if not (value of attribute "AXFocused" of searchField) then error "Project search focus missing"
         else if operation is "resize" then
             set size of rootElement to {expectedValue as integer, 700}
         else if operation is "autocomplete" then
@@ -459,6 +482,37 @@ wait_ui autocomplete ""
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
+ui press "mint.navigator.close"
+ui focused
+ui project-search ""
+wait_ui search-focused ""
+ui field-set "mint.navigator.search" "keyboard-$TOKEN"
+wait_ui equals "$PERSISTED_BODY"
+ui field-equals "mint.navigator.search" "keyboard-$TOKEN"
+ui field-set "mint.navigator.search" ""
+ui press "mint.navigator.close"
+ui focused
+ui press "mint.workspace.navigator-toggle"
+ui focused
+ui begin-rename ""
+wait_ui field-focused "mint.navigator.rename"
+ui field-set "mint.navigator.rename" "renamed-$TOKEN"
+ui resize 860
+ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
+ui field-focused "mint.navigator.rename"
+ui resize 1250
+ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
+ui field-focused "mint.navigator.rename"
+ui submit-field ""
+wait_ui document-title "renamed-$TOKEN"
+ui field-absent "mint.navigator.rename"
+wait_ui equals "$PERSISTED_BODY"
+for _ in $(seq 1 40); do
+    [ "$(plutil -extract documents.0.title raw -o - "$PROJECT_DIRECTORY/project.json")" = "renamed-$TOKEN" ] && break
+    sleep 0.25
+done
+[ "$(plutil -extract documents.0.title raw -o - "$PROJECT_DIRECTORY/project.json")" = "renamed-$TOKEN" ] \
+    || fail "Renamed document title did not persist"
 open_writer_information
 ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
