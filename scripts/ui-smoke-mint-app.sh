@@ -319,6 +319,9 @@ on run argv
                 if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
                 if operation is "press" then click targetElement
             end if
+        else if operation is "document-title" then
+            set titleText to my findElement(rootElement, "AXValue", expectedValue, 30)
+            if titleText is missing value then error "Document title text missing"
         else if operation is "begin-rename" then
             set frontmost of targetProcess to true
             tell targetProcess to click menu bar item "파일" of menu bar 1
@@ -499,9 +502,17 @@ ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
 ui field-focused "mint.navigator.rename"
 ui resize 1250
 ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
+ui field-focused "mint.navigator.rename"
 ui submit-field ""
-wait_ui present "renamed-$TOKEN"
+wait_ui document-title "renamed-$TOKEN"
+ui field-absent "mint.navigator.rename"
 wait_ui equals "$PERSISTED_BODY"
+for _ in $(seq 1 40); do
+    [ "$(plutil -extract documents.0.title raw -o - "$PROJECT_DIRECTORY/project.json")" = "renamed-$TOKEN" ] && break
+    sleep 0.25
+done
+[ "$(plutil -extract documents.0.title raw -o - "$PROJECT_DIRECTORY/project.json")" = "renamed-$TOKEN" ] \
+    || fail "Renamed document title did not persist"
 open_writer_information
 ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
