@@ -319,6 +319,19 @@ on run argv
                 if targetElement is missing value then error "필요한 컨트롤 없음: " & expectedValue
                 if operation is "press" then click targetElement
             end if
+        else if operation is "begin-rename" then
+            set frontmost of targetProcess to true
+            tell targetProcess to click menu bar item "파일" of menu bar 1
+            set renameCommand to my findElement(targetProcess, "AXTitle", "문서 이름 바꾸기", 30)
+            if renameCommand is missing value then error "Rename menu command missing"
+            click renameCommand
+        else if operation is "field-focused" then
+            set targetField to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
+            if targetField is missing value then error "Editable field missing: " & expectedValue
+            if not (value of attribute "AXFocused" of targetField) then error "Editable field focus missing"
+        else if operation is "submit-field" then
+            set frontmost of targetProcess to true
+            tell targetProcess to key code 36
         else if operation is "project-search" then
             set frontmost of targetProcess to true
             tell targetProcess to key code 3 using {command down, shift down}
@@ -478,6 +491,17 @@ ui press "mint.navigator.close"
 ui focused
 ui press "mint.workspace.navigator-toggle"
 ui focused
+ui begin-rename ""
+wait_ui field-focused "mint.navigator.rename"
+ui field-set "mint.navigator.rename" "renamed-$TOKEN"
+ui resize 860
+ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
+ui field-focused "mint.navigator.rename"
+ui resize 1250
+ui field-equals "mint.navigator.rename" "renamed-$TOKEN"
+ui submit-field ""
+wait_ui present "renamed-$TOKEN"
+wait_ui equals "$PERSISTED_BODY"
 open_writer_information
 ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"

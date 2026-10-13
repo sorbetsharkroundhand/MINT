@@ -268,11 +268,12 @@ struct ProjectNavigatorView: View {
 
     private func documentRow(_ document: WritingDocument) -> some View {
         let selected = document.id == session.selectedDocumentID
+        let editingName = editingKey == documentKey(for: document)
         return HStack(spacing: 8) {
             Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(selected ? theme.blueC : theme.ink3C)
-            if editingKey == documentKey(for: document) {
+            if editingName {
                 TextField("문서 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
                     .focused($renameFocused)
@@ -294,14 +295,16 @@ struct ProjectNavigatorView: View {
                 .fill(selected ? theme.activeBgC : .clear))
         .contentShape(Rectangle())
         .onTapGesture {
+            guard !editingName else { return }
             session.selectDocument(document.id)
             editorRequests.focusEditor()
         }
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: editingName ? .contain : .combine)
         .accessibilityIdentifier("mint.document.\(document.id.rawValue.uuidString)")
         .accessibilityLabel(Text(document.title))
-        .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(editingName ? [] : .isButton)
         .accessibilityAction {
+            guard !editingName else { return }
             session.selectDocument(document.id)
             editorRequests.focusEditor()
         }
