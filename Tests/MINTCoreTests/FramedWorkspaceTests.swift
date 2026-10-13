@@ -5,6 +5,31 @@ import XCTest
 
 @MainActor
 final class FramedWorkspaceTests: XCTestCase {
+    func testLongProjectTitleKeepsNavigatorCloseInsideCard() async throws {
+        let title = "Synthetic framed workspace matrix · 아주 긴 프로젝트 이름과 최근 작품 목록"
+        for navigatorWidth in [200.0, 250.0, 360.0] {
+            let h = try await FramedWorkspaceHarness(
+                presentationDefaults: ["mint.sidebarWidth": navigatorWidth], projectTitle: title)
+            defer { h.close() }
+            let editor = try await h.editor()
+            for width: CGFloat in [860, 1180, 1440] {
+                h.window.setContentSize(NSSize(width: width, height: 760)); await h.layout()
+                let rail = try XCTUnwrap(h.element("mint.workspace.rail") as? NSView)
+                let close = try XCTUnwrap(h.element("mint.navigator.close") as? NSButton)
+                let navigatorLeading = rail.convert(rail.bounds, to: nil).maxX + 10
+                let closeRect = close.convert(close.bounds, to: nil)
+                XCTAssertGreaterThanOrEqual(closeRect.minX, navigatorLeading + 12)
+                XCTAssertLessThanOrEqual(closeRect.maxX, navigatorLeading + navigatorWidth,
+                    "Long titles must not push the close button outside the clipped navigator")
+                XCTAssertEqual(close.bounds.width, 32, accuracy: 0.5)
+                XCTAssertEqual(h.fixture.session.activeProject?.title, title)
+            }
+            try XCTUnwrap(h.element("mint.navigator.close") as? NSButton).performClick(nil)
+            await h.layout()
+            XCTAssertTrue(h.window.firstResponder === editor)
+        }
+    }
+
     func testRailExposesFunctionalActionsAndSelectedNavigatorState() async throws {
         let h = try await FramedWorkspaceHarness(presentationDefaults: ["mint.sidebarVisible": true])
         defer { h.close() }
@@ -310,8 +335,8 @@ final class FramedWorkspaceHarness {
 
     init(width: CGFloat = 1180, presentationDefaults: [String: Any] = [:],
          appearance: ColorScheme = .light, reduceMotion: Bool = false,
-         reduceTransparency: Bool = false) async throws {
-        fixture = try await LegacyBoundaryFixture()
+         reduceTransparency: Bool = false, projectTitle: String = "Project") async throws {
+        fixture = try await LegacyBoundaryFixture(projectTitle: projectTitle)
         initialProject = fixture.session.activeProject
         initialDocumentID = fixture.session.selectedDocumentID
         for (key, value) in presentationDefaults { fixture.defaults.set(value, forKey: key) }

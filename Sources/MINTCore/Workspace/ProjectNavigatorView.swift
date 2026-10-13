@@ -188,13 +188,14 @@ struct ProjectNavigatorView: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Text(session.activeProject?.title ?? "프로젝트").lineLimit(1)
+                Text(session.activeProject?.title ?? "프로젝트")
+                    .lineLimit(1).truncationMode(.middle)
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
             .mintUIFont(12, .semibold)
         }
         .menuStyle(.borderlessButton)
-        .fixedSize()
+        .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel("최근 프로젝트")
     }
 
