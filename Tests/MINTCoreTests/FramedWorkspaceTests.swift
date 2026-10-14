@@ -272,6 +272,43 @@ final class FramedWorkspaceTests: XCTestCase {
         XCTAssertEqual(title.lineBreakMode, .byTruncatingMiddle)
     }
 
+    func testWindowTitleHitTestingReachesNativeDragRegion() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let chrome = try XCTUnwrap(h.element("mint.workspace.chrome") as? NSView)
+        let title = try XCTUnwrap(h.element("mint.workspace.chrome.title") as? NSTextField)
+        for view in [chrome, title] {
+            let center = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
+            let point = view.convert(center, to: h.host.superview)
+            let receiver = h.host.hitTest(point)
+            XCTAssertTrue(receiver === chrome,
+                "Title pointer must reach the native drag view, got \(String(describing: receiver))")
+        }
+    }
+
+    func testWindowTitlePressDelegatesToNativeWindowDragging() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let chrome = try XCTUnwrap(h.element("mint.workspace.chrome") as? NSView)
+        let editor = try await h.editor()
+        editor.setSelectedRange(NSRange(location: 3, length: 4))
+        let originalStyle = h.window.styleMask
+        let originalBackgroundDragging = h.window.isMovableByWindowBackground
+        h.window.makeKeyAndOrderFront(nil)
+        h.window.makeFirstResponder(editor)
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown,
+            location: chrome.convert(NSPoint(x: chrome.bounds.midX, y: chrome.bounds.midY), to: nil),
+            modifierFlags: [], timestamp: 1, windowNumber: h.window.windowNumber,
+            context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        XCTAssertTrue(chrome.acceptsFirstMouse(for: event),
+            "An inactive title region must accept the first press")
+        h.window.sendEvent(event)
+        XCTAssertTrue(h.window.lastDragEvent === event,
+            "A title press must hand the original event to native window dragging")
+        XCTAssertEqual(h.window.styleMask, originalStyle)
+        XCTAssertEqual(h.window.isMovableByWindowBackground, originalBackgroundDragging)
+        XCTAssertTrue(h.window.firstResponder === editor)
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 3, length: 4))
+    }
+
     func testNavigatorLocalCloseReturnsToEditor() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let editor = try await h.editor()
@@ -328,7 +365,7 @@ final class FramedWorkspaceHarness {
     let requests = ProjectEditorRequests()
     let initialProject: WritingProject?
     let initialDocumentID: WritingDocumentID?
-    let window: LegacyUndoWindow
+    let window: FramedWorkspaceWindow
     let host: NSView
     let completion: CompletionController
     let indexer: BackgroundIndexer
@@ -344,7 +381,7 @@ final class FramedWorkspaceHarness {
         settings.setCompletionEnabled(false)
         completion = CompletionController(settings: settings)
         indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings)
-        window = LegacyUndoWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 760),
+        window = FramedWorkspaceWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.testUndo.groupsByEvent = false
@@ -405,4 +442,12 @@ final class FramedWorkspaceHarness {
         window.testUndo.removeAllActions(); window.contentView = nil; window.close()
         completion.shutdown(); indexer.shutdown(); fixture.cleanUp()
     }
+}
+
+@MainActor
+final class FramedWorkspaceWindow: NSWindow {
+    let testUndo = UndoManager()
+    var lastDragEvent: NSEvent?
+    override var undoManager: UndoManager? { testUndo }
+    override func performDrag(with event: NSEvent) { lastDragEvent = event }
 }
