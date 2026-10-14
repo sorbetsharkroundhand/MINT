@@ -298,6 +298,42 @@ final class PlotThreadTests: XCTestCase {
             a.nodes.mapValues(\.slot), b.nodes.mapValues(\.slot))
     }
 
+    func testLayoutPreservesFirstRowsAndUniqueMembershipsAcrossSlotReuse() throws {
+        let rows = eventRows(["A", "B", "A", "C", "unclaimed"])
+        let layout = ThreadGraphLayout.compute(rows: rows, threads: [
+            thread(id: PlotThread.mainID, members: ["A", "C"], resolvedAt: "C", main: true),
+            thread(id: "side", members: ["A", "A", "B", "hidden"], resolvedAt: "B"),
+            thread(id: "late", members: ["C"]),
+            thread(id: "hidden-only", members: ["hidden"]),
+        ])
+
+        XCTAssertEqual(layout.lanes.map(\.thread.id), [PlotThread.mainID, "side", "late"])
+        XCTAssertEqual(layout.lanes.map(\.slot), [0, 1, 1])
+        XCTAssertEqual(layout.lanes.map(\.openRow), [0, 0, 3])
+        XCTAssertEqual(layout.lanes.map(\.resolveRow), [3, 1, nil])
+        XCTAssertEqual(layout.lanes.map(\.memberRows), [[0, 3], [0, 0, 1], [3]])
+        XCTAssertEqual(layout.slotCount, 2)
+
+        // Duplicate rows use the first occurrence; duplicate memberships join a lane once.
+        // Hidden keys create no phantom nodes, and an unclaimed event still has a node.
+        let expected: [(key: String, row: Int, slot: Int, lanes: [Int], opens: [Int], resolves: [Int])] = [
+            ("A", 0, 0, [0, 1], [1], []),
+            ("B", 1, 1, [1], [], []),
+            ("C", 3, 0, [0, 1], [1], []),
+            ("unclaimed", 4, 0, [], [], []),
+        ]
+        XCTAssertEqual(Set(layout.nodes.keys), Set(["A", "B", "C", "unclaimed"]))
+        for want in expected {
+            let node = try XCTUnwrap(layout.nodes[want.key])
+            XCTAssertEqual(node.key, want.key)
+            XCTAssertEqual(node.row, want.row, want.key)
+            XCTAssertEqual(node.slot, want.slot, want.key)
+            XCTAssertEqual(node.laneSlots, want.lanes, want.key)
+            XCTAssertEqual(node.opensSlots, want.opens, want.key)
+            XCTAssertEqual(node.resolvesSlots, want.resolves, want.key)
+        }
+    }
+
     func test_projection이_바뀌어도_thread_identity_유지() {
         // 흐름(담화)과 시간순은 행 순서만 다르다 — 레인의 스레드 ID 집합은 같다.
         let discourse = ["A", "B", "C", "D"]

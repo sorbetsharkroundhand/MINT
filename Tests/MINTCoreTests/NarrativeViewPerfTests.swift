@@ -2,12 +2,9 @@ import XCTest
 
 @testable import MINTCore
 
-/// 서사 화면의 **스크롤 경로 비용** 측정 (CLAUDE.md §2-7 "측정 없이 튜닝 없음").
-///
-/// 왜 이 측정이 필요한가: `NarrativeView.body`가 한 번 재평가될 때마다
-/// `GraphRow.flowRows` + `ThreadGraphLayout.compute`가 통째로 다시 돈다.
-/// hover 같은 고빈도 상태가 상위 body를 무효화하면 이 비용이 프레임마다
-/// 반복돼 스크롤이 끊긴다 — 그 비용이 실제로 얼마인지 숫자로 남긴다.
+/// Cold narrative projection cost. NarrativeView caches this result until the snapshot
+/// generation, projection or minor-group expansion changes; ordinary hover/typing reuses it.
+/// The existing frame-budget gate protects the rebuild without measuring actual app paint.
 final class NarrativeViewPerfTests: XCTestCase {
 
     /// 장편 규모 픽스처 — 씬 200개, 씬당 사건 3개(=600), 플롯 6개.
@@ -60,9 +57,9 @@ final class NarrativeViewPerfTests: XCTestCase {
             overrides: NarrativeOverrides([]))
     }
 
-    /// body 1회 재평가의 비용 — 스크롤 중 hover가 유발하던 바로 그 작업.
+    /// Rebuild the cold projection at each synthetic scale, without using the view cache.
     func test_그래프_행_레이아웃_비용() {
-        print("\n=== 서사 body 1회 재평가 비용 (프레임 예산 16.7ms) ===")
+        print("\n=== Cold narrative projection (frame budget 16.7ms) ===")
         var worst: Double = 0
         for sceneCount in [50, 100, 200, 400] {
             let snapshot = makeLargeSnapshot(sceneCount: sceneCount)
@@ -89,7 +86,7 @@ final class NarrativeViewPerfTests: XCTestCase {
         }
         print("")
 
-        // 회귀 그물 — 한 프레임 예산(16.7ms)을 이 계산 하나가 다 먹으면 안 된다.
+        // Keep the existing frame-budget gate unchanged.
         XCTAssertLessThan(worst, 16.7)
     }
 

@@ -1,9 +1,8 @@
 import SwiftUI
 
-/// 서사 그래프의 **행 모델·레이아웃 투영** (이슈 #61 PR2 — AGENTS §4 "지식 로직의
-/// 자리"). 스냅샷(값) → 그래프 행/레인 좌표의 순수 변환만 담당한다 — 뷰 색·제스처는
-/// NarrativeView에 남는다. 캐시(#48)와 벤치(NarrativeViewPerfTests)가 이 계층을
-/// 직접 검증한다.
+/// Pure snapshot-to-row/lane projection; colors and gestures belong to NarrativeView.
+/// The view caches results by snapshot generation, projection and minor-group expansion.
+/// Projection cannot mutate manuscript or runtime ownership.
 
 // MARK: - 행 모델 (두 Projection 공용)
 
@@ -303,14 +302,23 @@ struct ThreadGraphLayout {
                     resolveRow: resolveRow, memberRows: memberRows))
         }
 
-        // 노드 — 참여 레인의 최소 슬롯에 놓고, 열림/해결 곡선 슬롯을 기록한다.
-        let membersByLane = lanes.map { Set($0.thread.memberKeys) }
+        // Index actual memberships once instead of scanning every lane for each node.
+        // Sets retain the previous single participation for duplicate member keys.
+        var laneIndicesByEvent: [String: [Int]] = [:]
+        for (index, lane) in lanes.enumerated() {
+            for key in Set(lane.thread.memberKeys) where rowByKey[key] != nil {
+                laneIndicesByEvent[key, default: []].append(index)
+            }
+        }
+
+        // Preserve lane order for open/resolve curves and the minimum participating slot.
         var nodes: [String: Node] = [:]
         for (key, row) in rowByKey {
             var laneSlots: [Int] = []
             var opens: [Int] = []
             var resolves: [Int] = []
-            for (index, lane) in lanes.enumerated() where membersByLane[index].contains(key) {
+            for index in laneIndicesByEvent[key] ?? [] {
+                let lane = lanes[index]
                 laneSlots.append(lane.slot)
                 if lane.openRow == row { opens.append(lane.slot) }
                 if lane.resolveRow == row { resolves.append(lane.slot) }
