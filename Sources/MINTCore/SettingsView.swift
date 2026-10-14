@@ -1,15 +1,7 @@
 import SwiftUI
 
-/// 설정 화면 — 앱 메뉴/⌘,의 Settings 씬, 툴바 톱니바퀴에서 연다.
-///
-/// `CompletionSettings`(UserDefaults 보존)에 바인딩된다. 모델·프롬프트 방식
-/// 변경은 **다음 제안부터** 적용되며, 새 모델은 첫 사용 시 다운로드된다.
-///
-/// **탭으로 나눈 이유**: 한 Form에 모든 섹션을 세로로 쌓으니 창이 화면보다
-/// 길어져 아래에 무엇이 있는지 알 수 없었다. macOS 설정창 관례대로 기능별
-/// 탭으로 자르고, 각 탭은 고정 높이 안에서 스스로 스크롤한다 — 예전의
-/// `.fixedSize(vertical: true)`가 Form을 내용 전체 높이로 늘려 스크롤 자체를
-/// 없앴던 것이 문제였다.
+/// Native Settings panes prioritize writing controls while retaining the existing settings owner.
+/// Each grouped form scrolls within the fixed window, including custom palettes and diagnostics.
 public struct SettingsView: View {
     @ObservedObject private var settings: CompletionSettings
     /// 예측 의유 통로 (이슈 #11) — 자동완성 스위치·모델 변경은 settings를 직접
@@ -43,19 +35,18 @@ public struct SettingsView: View {
 
     public var body: some View {
         TabView {
-            generalTab
-                .tabItem { Label("일반", systemImage: "gearshape") }
+            writingTab
+                .tabItem { Label("글쓰기", systemImage: "pencil") }
+            appearanceTab
+                .tabItem { Label("모양", systemImage: "paintpalette") }
             predictionTab
                 .tabItem { Label("자동완성", systemImage: "sparkles") }
-            novelTab
-                .tabItem { Label("소설", systemImage: "book.closed") }
             helpTab
                 .tabItem { Label("사용 방법", systemImage: "questionmark.circle") }
-            metricsTab
-                .tabItem { Label("지표", systemImage: "chart.bar") }
+            advancedTab
+                .tabItem { Label("고급", systemImage: "slider.horizontal.3") }
         }
-        // 고정 크기 — 탭 안의 Form이 이 높이를 넘으면 그 안에서 스크롤한다.
-        // 창이 내용을 따라 늘어나면 다시 "아래가 안 보이는" 문제로 돌아간다.
+        // Keep every pane scrollable within the existing native Settings window.
         .frame(width: 500, height: 520)
         .tint(palette.theme(for: colorScheme).blueC)
         .onAppear { syncModelIDDraft() }
@@ -72,9 +63,9 @@ public struct SettingsView: View {
         }
     }
 
-    // MARK: - 일반 (외형·본문 조판)
+    // MARK: - Appearance
 
-    private var generalTab: some View {
+    private var appearanceTab: some View {
         Form {
             Section("외형") {
                 // 3상태 — 시스템/라이트/다크를 모두 노출한다 (#29).
@@ -105,23 +96,6 @@ public struct SettingsView: View {
             if palette.enabled {
                 paletteSection(dark: false)
                 paletteSection(dark: true)
-            }
-
-            Section("본문") {
-                Stepper(
-                    "글자 크기: \(Int(settings.editorFontSize.rounded()))pt",
-                    value: $settings.editorFontSize,
-                    in: CompletionSettings.minFontSize...CompletionSettings.maxFontSize,
-                    step: 1
-                )
-                caption("본문·제목이 이 크기에 비례해요 (⌘+ / ⌘− / ⌘0).")
-                Stepper(
-                    "줄 간격: \(Int(settings.lineSpacing.rounded()))pt",
-                    value: $settings.lineSpacing,
-                    in: 0...20,
-                    step: 1
-                )
-                caption("줄 사이 여백을 조절해요 — 낮추면 촘촘하게, 높이면 시원하게.")
             }
         }
         .formStyle(.grouped)
@@ -308,34 +282,32 @@ public struct SettingsView: View {
         return ModelChip.userFacingSummary(for: choice) + " · 처음 사용할 때 내려받아요."
     }
 
-    // MARK: - 소설 (작품 메타데이터·이해 범위)
+    // MARK: - Writing
 
-    private var novelTab: some View {
+    private var writingTab: some View {
         Form {
+            Section("본문") {
+                Stepper(
+                    "글자 크기: \(Int(settings.editorFontSize.rounded()))pt",
+                    value: $settings.editorFontSize,
+                    in: CompletionSettings.minFontSize...CompletionSettings.maxFontSize,
+                    step: 1
+                )
+                caption("본문·제목이 이 크기에 비례해요 (⌘+ / ⌘− / ⌘0).")
+                Stepper(
+                    "줄 간격: \(Int(settings.lineSpacing.rounded()))pt",
+                    value: $settings.lineSpacing,
+                    in: 0...20,
+                    step: 1
+                )
+                caption("줄 사이 여백을 조절해요 — 낮추면 촘촘하게, 높이면 시원하게.")
+            }
+
             Section("저자") {
                 TextField("저자 이름 (필명)", text: $settings.authorName)
                     .textFieldStyle(.roundedBorder)
                     .autocorrectionDisabled()
                 caption("EPUB으로 내보낼 때 저자로 실려요 — 비워 두면 저자 정보 없이 내보내요.")
-            }
-
-            Section("이해 범위") {
-                Picker("제안 문맥 비교", selection: Binding(get: { settings.ghostContextMode }, set: { mode in
-                    if let completion { completion.changeContextMode(to: mode) }
-                    else { settings.ghostContextMode = mode }
-                })) {
-                    ForEach(GhostContextMode.allCases, id: \.self) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                caption("A/B는 요약을 넣지 않아요. 모델이 준비되면 원문 범위를 넓히되, 모델의 한도 안에서 읽어요. 기본은 C예요.")
-                Stepper(
-                    "소설 컨텍스트: \(settings.novelContextCharacters)자",
-                    value: $settings.novelContextCharacters,
-                    in: 1_200...12_000,
-                    step: 400
-                )
-                caption("소설 종류 문서가 커서 앞에서 읽는 최대 분량 — 넓을수록 멀리 기억하지만 첫 제안이 느려질 수 있어요.")
             }
         }
         .formStyle(.grouped)
@@ -362,15 +334,18 @@ public struct SettingsView: View {
 
             Section("찾기·이동") {
                 shortcut("⌘F / ⌘G / ⇧⌘G", "문서에서 찾기 · 다음 · 이전")
-                shortcut("⇧⌘F", "저널 검색")
+                shortcut("⌘K / ⇧⌘K", "원문 검색 · 이전 집필 위치로 돌아가기")
+                shortcut("⇧⌘F", "프로젝트·라이브러리 검색")
             }
 
             Section("문서·창") {
-                shortcut("⌘N / ⌥⌘N / ⇧⌘N", "새 저널 · 새 소설 · 새 폴더")
+                shortcut("⌘N", "새 문서")
+                shortcut("⇧⌘N / ⌥⌘N", "새 Fiction 프로젝트 · 새 General 프로젝트")
+                shortcut("⌘S", "저장")
                 shortcut("⌃⌘S", "파일 목록 접기/펴기")
                 shortcut("⇧⌘D", "집중 모드")
                 shortcut("⇧⌘E / ⌘P", "Markdown 내보내기 · 인쇄")
-                caption("작성일 바꾸기·EPUB 내보내기·소설 전환은 사이드바에서 저널을 오른쪽 클릭.")
+                caption("문서 이름 바꾸기와 EPUB 내보내기는 파일 메뉴에서 할 수 있어요.")
             }
 
             Section("마크다운 서식") {
@@ -381,11 +356,30 @@ public struct SettingsView: View {
         .formStyle(.grouped)
     }
 
-    // MARK: - 지표 (로컬 전용)
+    // MARK: - Advanced
 
-    /// 실사용 품질 지표 (M7, PLAN §13) — 로컬 파일에만, 원격 전송 절대 금지.
-    private var metricsTab: some View {
+    /// Experimental context controls and local diagnostics keep their existing bindings and actions.
+    private var advancedTab: some View {
         Form {
+            Section("이해 범위") {
+                Picker("제안 문맥 비교", selection: Binding(get: { settings.ghostContextMode }, set: { mode in
+                    if let completion { completion.changeContextMode(to: mode) }
+                    else { settings.ghostContextMode = mode }
+                })) {
+                    ForEach(GhostContextMode.allCases, id: \.self) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                caption("A/B는 요약을 넣지 않아요. 모델이 준비되면 원문 범위를 넓히되, 모델의 한도 안에서 읽어요. 기본은 C예요.")
+                Stepper(
+                    "소설 컨텍스트: \(settings.novelContextCharacters)자",
+                    value: $settings.novelContextCharacters,
+                    in: 1_200...12_000,
+                    step: 400
+                )
+                caption("소설 종류 문서가 커서 앞에서 읽는 최대 분량 — 넓을수록 멀리 기억하지만 첫 제안이 느려질 수 있어요.")
+            }
+
             Section("품질 지표 (로컬 전용)") {
                 if metrics.shown == 0 {
                     caption("아직 기록이 없어요 — 제안이 뜨고 수락/거절될 때마다 이 Mac에만 기록돼요.")
