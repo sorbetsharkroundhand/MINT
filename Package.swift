@@ -26,6 +26,14 @@ let package = Package(
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.5.0"),
     ],
     targets: [
+        // Prepared from the checksum-pinned manifest before package loading/building.
+        .binaryTarget(name: "Kiwi", path: "Packages/MINTKoreanBackend/Artifacts/KiwiStatic.xcframework"),
+        .target(name: "CKiwiBridge", dependencies: ["Kiwi"],
+            path: "Packages/MINTKoreanBackend/Sources/CKiwiBridge",
+            linkerSettings: [.linkedLibrary("c++"), .linkedLibrary("z")]),
+        .target(name: "MINTKoreanBackend", dependencies: ["CKiwiBridge"],
+            path: "Packages/MINTKoreanBackend/Sources/MINTKoreanBackend",
+            resources: [.copy("Resources/Kiwi")]),
         // 앱의 화면·로직은 라이브러리 타깃에 둔다.
         //  · SwiftUI 프리뷰는 executableTarget에서 ENABLE_DEBUG_DYLIB 제약으로 막히지만,
         //    라이브러리 타깃의 뷰는 프리뷰가 정상 동작한다.
@@ -33,6 +41,7 @@ let package = Package(
         .target(
             name: "MINTCore",
             dependencies: [
+                "MINTKoreanBackend",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
@@ -61,7 +70,7 @@ let package = Package(
         // 순수 로직만 — 원고 무결성(직렬화 왕복)이 첫 대상이다.
         .testTarget(
             name: "MINTCoreTests",
-            dependencies: ["MINTCore"],
+            dependencies: ["MINTCore", "MINTKoreanBackend"],
             path: "Tests/MINTCoreTests"
         ),
     ]

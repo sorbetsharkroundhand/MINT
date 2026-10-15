@@ -226,6 +226,38 @@ class NoticeSourceTests(unittest.TestCase):
         with self.assertRaises(notices.NoticeError):
             notices.validate_app(app, manifest, text)
 
+    def test_verified_nlp_does_not_allow_unlisted_llm_weights(self):
+        path = "Resources/NLP/corpus.mdl"
+        (self.root / path).parent.mkdir(parents=True)
+        (self.root / path).write_bytes(b"offline corpus fixture")
+        license_path = "Distribution/Notices/NLP-LICENSE.txt"
+        (self.root / license_path).write_bytes(self.license)
+        revision = "d" * 40
+        self.inventory["components"] = [{"identity": "korean-nlp", "package": "mint",
+            "root": "repository", "kind": "nlp-model", "revision": revision,
+            "source": "https://example.invalid/nlp/tree/" + revision,
+            "artifacts": [{"path": path, "sha256": digest(b"offline corpus fixture")}],
+            "notices": [{"root": "repository", "path": license_path, "sha256": digest(self.license)}],
+            "licenseProvenance": {"url": "https://example.invalid/nlp/" + revision + "/LICENSE",
+                                  "licenseRevision": revision}}]
+        self.inventory["resourceRoots"] = [{"package": "mint", "path": "Resources/NLP"}]
+        self.inventory["resourceBundles"] = [{"package": "mint", "name": "MINT_Korean.bundle",
+                                              "sourcePrefix": "Resources/NLP/"}]
+        manifest, text = self.collect()
+        self.assertEqual(manifest["models"], [])
+        app = self.root / "NLP.app"
+        resources = app / "Contents/Resources"
+        notices.write_output(resources, manifest, text)
+        bundle = resources / "MINT_Korean.bundle"
+        bundle.mkdir()
+        shutil.copyfile(self.root / path, bundle / "corpus.mdl")
+        notices.validate_app(app, manifest, text)
+        for name in ("unlisted.bin", "unlisted.safetensors"):
+            extra = bundle / name
+            extra.write_bytes(b"unlisted")
+            with self.assertRaises(notices.NoticeError):
+                notices.validate_app(app, manifest, text)
+            extra.unlink()
     def packaged_fixture(self, wrapped=False):
         assets = self.package / "Assets"
         assets.mkdir()

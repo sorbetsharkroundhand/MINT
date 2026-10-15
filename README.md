@@ -232,7 +232,11 @@ It does not produce an App Store-validated distribution artifact.
 
 <br>
 
+Prepare the pinned offline Korean backend inputs before loading SwiftPM on a clean
+checkout. Bundle and archive entry points run this preparation automatically.
+
 ```bash
+scripts/prepare-korean-backend.sh
 swift build
 swift test
 swift build --product MINTBench

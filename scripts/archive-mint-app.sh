@@ -2,6 +2,7 @@
 # Produce the unsigned #173 distribution foundation; signing belongs to #150 Phase B.
 set -eu
 cd "$(dirname "$0")/.."
+scripts/prepare-korean-backend.sh
 
 # Keep one dependency authority. Xcode's generated workspace receives the same pins.
 LOCK_DIR="Distribution/MINT.xcodeproj/project.xcworkspace/xcshareddata/swiftpm"

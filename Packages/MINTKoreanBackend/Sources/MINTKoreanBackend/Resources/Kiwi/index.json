@@ -1,0 +1,53 @@
+{
+  "backendVersion": "0.24.0",
+  "files": [
+    {
+      "bytes": 8462892,
+      "path": "models/cong/base/sj.morph",
+      "sha256": "d0af27b3863799cc2058f66c8058cb2bc0d16e8ae0daaf42c7739b4e375523d7"
+    },
+    {
+      "bytes": 3090954,
+      "path": "models/cong/base/default.dict",
+      "sha256": "d4293e44b2588d0c3aabbce607a0f41ad3534abd31b34139847b127254e01549"
+    },
+    {
+      "bytes": 644,
+      "path": "models/cong/base/dialect.dict",
+      "sha256": "bb6f0ab37dbfcc0fd33dc679121218d24725ae438f31bb362f9b24703e93cda2"
+    },
+    {
+      "bytes": 12064440,
+      "path": "models/cong/base/multi.dict",
+      "sha256": "e9eff7712d163b214c750333a5d388ab77b50ec386ae55b360babcd24c0c3195"
+    },
+    {
+      "bytes": 395,
+      "path": "models/cong/base/typo.dict",
+      "sha256": "aa15e48fcd32886441fc1ff9719a3109d3192e91d4b67efbd64260610d68322d"
+    },
+    {
+      "bytes": 3611,
+      "path": "models/cong/base/combiningRule.txt",
+      "sha256": "4f78771daa3dd8a52aa0b5c8824396578ece8e8bbaa11cf3add82721b046bc15"
+    },
+    {
+      "bytes": 75854705,
+      "path": "models/cong/base/cong.mdl",
+      "sha256": "5f64105e45f04e5313f41c0ff1db5fe629780c8076c4a6fd3b1b2cf78c2cc934"
+    },
+    {
+      "bytes": 17370,
+      "path": "models/cong/base/extract.mdl",
+      "sha256": "a0c92ffc051e43ae497845cdb8d4c8b9e2f359893cb55c67279c76d1d531ee17"
+    },
+    {
+      "bytes": 9734234,
+      "path": "models/cong/base/nounchr.mdl",
+      "sha256": "4b687e36836dd60dcb7addcfcf369ac082b339bab76549574ac1ce2b7ccd6836"
+    }
+  ],
+  "modelDirectory": "models/cong/base",
+  "schemaVersion": 1,
+  "sourceRevision": "6e16bbcfc0940fabccbdde574abb4ea3a659588e"
+}
