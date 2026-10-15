@@ -20,23 +20,23 @@ struct WritingProseBlock: Sendable {
         sourceLength = sourceText.utf16.count; proseLength = proseText.utf16.count
     }
     var hasValidMap: Bool {
-        let source = sourceText as NSString, prose = proseText as NSString
         var sourceEnd = 0, proseEnd = 0
         func valid(_ range: NSRange, length: Int) -> Bool {
             range.location >= 0 && range.location <= length && range.length >= 0 && range.length <= length - range.location
         }
         for segment in segments {
-            guard valid(segment.source, length: source.length), valid(segment.prose, length: prose.length),
+            guard valid(segment.source, length: sourceLength), valid(segment.prose, length: proseLength),
                   segment.source.location >= sourceEnd, segment.prose.location == proseEnd,
                   segment.prose.length > 0, !segment.unsupported || !segment.eligible else { return false }
             if segment.eligible {
                 guard segment.source.length == segment.prose.length,
                       Range(segment.source, in: sourceText) != nil, Range(segment.prose, in: proseText) != nil,
-                      source.substring(with: segment.source).utf16.elementsEqual(prose.substring(with: segment.prose).utf16) else { return false }
+                      (sourceText as NSString).substring(with: segment.source).utf16.elementsEqual(
+                        (proseText as NSString).substring(with: segment.prose).utf16) else { return false }
             }
             sourceEnd = segment.source.upperBound; proseEnd = segment.prose.upperBound
         }
-        return proseEnd == prose.length
+        return proseEnd == proseLength
     }
 }
 

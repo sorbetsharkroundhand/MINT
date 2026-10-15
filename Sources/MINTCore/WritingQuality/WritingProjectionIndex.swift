@@ -80,20 +80,28 @@ final class WritingProjectionIndex {
     /// The caller supplies complete affected pieces, with captured Markdown/native state.
     /// Reject an unknown edit rather than silently rebuilding the document on typing.
     @discardableResult
-    func apply(_ patch: WritingProjectionPatch) -> Bool {
+    func apply(_ patch: WritingProjectionPatch, admission: @Sendable () -> Bool = { true }) -> Bool {
         let range = patch.oldSourceRange.nsRange
         lastMutationVisits = 0; lastMutationSourceUTF16 = 0
-        guard WritingRangeMapping.valid(range, in: sourceLength),
-              patch.replacement.allSatisfy({ !$0.sourceText.isEmpty && $0.hasValidMap }),
+        guard admission(), WritingRangeMapping.valid(range, in: sourceLength),
               let first = rank(range.location), let end = rank(range.upperBound) else { return false }
+        for block in patch.replacement {
+            guard admission(), !block.sourceText.isEmpty,
+                  block.sourceLength <= 2048 || block.segments.allSatisfy({ $0.unsupported && !$0.eligible }) else { return false }
+            lastMutationSourceUTF16 += block.sourceLength
+            guard block.hasValidMap else { return false }
+        }
+        guard admission() else { return false }
         let (before, remaining) = split(root, count: first)
         let (_, after) = split(remaining, count: end - first)
         var replacement: WritingProjectionNode?
         for block in patch.replacement {
-            lastMutationSourceUTF16 += block.sourceLength
+            guard admission() else { return false }
             replacement = merge(replacement, node(block))
         }
-        root = merge(merge(before, replacement), after)
+        let updated = merge(merge(before, replacement), after)
+        guard admission() else { return false }
+        root = updated
         return true
     }
     func sourcePiece(containing offset: Int) -> Piece? {

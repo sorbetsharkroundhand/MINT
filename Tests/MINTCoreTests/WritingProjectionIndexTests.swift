@@ -99,4 +99,27 @@ final class WritingProjectionIndexTests: XCTestCase {
         XCTAssertEqual(index.sourceLength, source.utf16.count)
         XCTAssertNil(index.sourceRanges(forProse: .init(location: 0, length: 1)))
     }
+
+    func testCancelledMultiPieceEditKeepsPreviousIndex() {
+        let index = WritingProjectionIndex()
+        index.reset(source: "원문")
+        let blocks = WritingProseProjection.blocks(source: String(repeating: "가", count: 100_000))
+        let patch = WritingProjectionPatch(oldSourceRange: .init(location: 0, length: 2), replacement: blocks)
+        let admission = ProjectionAdmission(limit: 2)
+        XCTAssertFalse(index.apply(patch, admission: { admission.next() }))
+        XCTAssertGreaterThan(index.lastMutationSourceUTF16, 0)
+        XCTAssertLessThanOrEqual(index.lastMutationSourceUTF16, 4096)
+        XCTAssertEqual(index.sourceLength, 2)
+        XCTAssertEqual(index.sourceRanges(forProse: .init(location: 0, length: 2)), [.init(location: 0, length: 2)])
+        XCTAssertTrue(index.apply(patch, admission: { true }))
+        XCTAssertEqual(index.sourceLength, 100_000)
+    }
+}
+
+private final class ProjectionAdmission: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls = 0
+    private let limit: Int
+    init(limit: Int) { self.limit = limit }
+    func next() -> Bool { lock.withLock { calls += 1; return calls <= limit } }
 }
