@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "host": {
+    "hardware": "Mac14,6",
+    "memoryBytes": "34359738368",
+    "cpu": "Apple M2 Max",
+    "os": "27.0.1",
+    "swift": "Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx28.0",
+    "xcode": "Xcode 26.6\nBuild version 17F113"
+  },
+  "probeSourceSHA256": "5778a4279c1617883345c907b1ba322c30a52d23ae7fc9adc707d5242b9041f8",
+  "manifestSHA256": "9cd23a44cffcc0ecdd2174c7ddd00d02b968dbbbf2fd6da4613e608a91b6c479",
+  "nativeCallMaxUTF16": 1024,
+  "metrics": {
+    "coldInitializationNS": {
+      "baselineMaximum": 966377584,
+      "limit": 1207971980,
+      "unit": "ns"
+    },
+    "peakResidentBytes": {
+      "baselineMaximum": 869433344,
+      "limit": 956376679,
+      "unit": "bytes"
+    },
+    "packagedBytes": {
+      "baselineMaximum": 119365573,
+      "limit": 131302131,
+      "unit": "bytes"
+    },
+    "cancellationDrainNS": {
+      "baselineMaximum": 14415667,
+      "limit": 18019584,
+      "unit": "ns"
+    },
+    "warm256NS": {
+      "baselineMaximum": 3454250,
+      "limit": 4317813,
+      "unit": "ns"
+    },
+    "native256NS": {
+      "baselineMaximum": 3180333,
+      "limit": 3975417,
+      "unit": "ns"
+    },
+    "warm1024NS": {
+      "baselineMaximum": 13388584,
+      "limit": 16735730,
+      "unit": "ns"
+    },
+    "native1024NS": {
+      "baselineMaximum": 12250833,
+      "limit": 15313542,
+      "unit": "ns"
+    },
+    "warm4096NS": {
+      "baselineMaximum": 125847375,
+      "limit": 157309219,
+      "unit": "ns"
+    },
+    "native4096NS": {
+      "baselineMaximum": 118172042,
+      "limit": 147715053,
+      "unit": "ns"
+    }
+  }
+}

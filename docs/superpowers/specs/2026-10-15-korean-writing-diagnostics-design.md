@@ -1,7 +1,7 @@
 # Korean Writing Diagnostics Design
 
 Date: 2026-10-15 (Asia/Seoul)
-Status: written specification approved by the owner on 2026-10-15; implementation-plan review follows.
+Status: written specification and implementation plan approved by the owner on 2026-10-15; sequential implementation in progress.
 Authority: [#99](https://github.com/sorbetsharkroundhand/MINT/issues/99), [#126](https://github.com/sorbetsharkroundhand/MINT/issues/126), [#158](https://github.com/sorbetsharkroundhand/MINT/issues/158).
 Code baseline: `8a5804e78f0463834e8fbd14498d6fa6cca7df43`.
 

@@ -38,6 +38,9 @@ jobs:
       - name: Verify support diagnostics exclude writer data
         run: python3 scripts/test-mint-support.py
 
+      - name: Verify Korean backend artifact and budget rejection paths
+        run: python3 scripts/test-korean-backend-validation.py
+
       - name: Build MINT
         run: swift build --product MINT
 
