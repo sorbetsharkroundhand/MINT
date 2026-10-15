@@ -1,0 +1,147 @@
+[
+  {
+    "id": "ending-nde",
+    "text": "나는 밥을 먹었는데 비가 오는데 길이 어두운데 집으로 간다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-ending",
+        "count": 3,
+        "surfaces": [
+          "는데",
+          "는데",
+          "운데"
+        ]
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "causal-inflection",
+    "text": "나는 문을 열어서 길을 막아서 손을 더하여서 시간을 벌었다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-ending",
+        "count": 3
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "topic-particles",
+    "text": "나는 걸었다. 바람은 불었다. 시간은 흘렀다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-particle",
+        "count": 3,
+        "surfaces": [
+          "는",
+          "은",
+          "은"
+        ]
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "connectors",
+    "text": "그래서 나는 밖으로 나왔다. 그래서 그는 문을 닫았다. 그래서 우리는 집에 갔다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-connector",
+        "count": 3,
+        "surfaces": [
+          "그래서",
+          "그래서",
+          "그래서"
+        ]
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "lexical-word",
+    "text": "바람, 놀랍다. 바람, 차갑다. 바람, 오래간다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-word",
+        "count": 3,
+        "surfaces": [
+          "바람",
+          "바람",
+          "바람"
+        ]
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "polite-endings",
+    "text": "문을 닫습니다. 바깥을 봅니다. 천천히 걷습니다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-ending",
+        "count": 3
+      }
+    ],
+    "quiet": []
+  },
+  {
+    "id": "universal-da",
+    "text": "새가 난다. 바람은 분다. 아이를 봤다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-ending"
+    ]
+  },
+  {
+    "id": "particle-homograph",
+    "text": "은 광물이다. 은 귀금속이다. 은 단단하다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-particle"
+    ]
+  },
+  {
+    "id": "ending-homograph",
+    "text": "그는 데를 보았다. 그는 데를 골랐다. 그는 데를 기억했다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-ending"
+    ]
+  },
+  {
+    "id": "nonadjacent-word",
+    "text": "바람이 분다. 아이가 웃는다. 나는 걷는다. 바람을 본다. 문이 열린다. 시간이 흐른다. 바람이 잠든다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-word"
+    ]
+  },
+  {
+    "id": "paragraphs",
+    "text": "바람, 놀랍다.\n바람, 차갑다.\n바람, 오래간다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-word",
+      "ko.style.repeated-particle",
+      "ko.style.repeated-ending",
+      "ko.style.repeated-connector"
+    ]
+  },
+  {
+    "id": "nfd-ending",
+    "text": "🙂 나는 밥을 먹었는데 비가 오는데 길이 어두운데 집으로 간다.",
+    "required": [
+      {
+        "ruleID": "ko.style.repeated-ending",
+        "count": 3,
+        "surfaces": [
+          "는데",
+          "는데",
+          "운데"
+        ]
+      }
+    ],
+    "quiet": []
+  }
+]
