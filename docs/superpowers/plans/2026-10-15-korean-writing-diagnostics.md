@@ -176,7 +176,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** `KoreanMorphology(worker: KoreanNativeWorker)` and `analyze(_ text: String) async throws -> KoreanAnalysis` adapt Task 2's native values. `KoreanAnalysis` contains `text: String`, `[KoreanToken]` (form/tag/range), sentence ranges and correction candidates (originalRange/replacement/origin), converting NSRange to validated `WritingDiagnosticRange` at this boundary. `KoreanCorrectnessRules.evaluate(_ analysis: KoreanAnalysis, profile: WritingStyleProfile) -> [WritingDiagnostic]`. `KoreanDiagnosticsProvider(morphology: KoreanMorphology): WritingDiagnosticsProvider` implements existing `analyze(_:)`; `id = "ko.kiwi.v0.24.0"`. Rule revision is an explicit cache-key input, starting at 1.
 
-- [ ] **Step 1: Write failing real-provider `testUnambiguousTypoAndMorphologicalSpacing`, `testAmbiguousFictionAndLearnedNamesRemainSuggestionsOrQuiet`, `testMixedAndDecomposedOffsetsStayOriginal`.** Assert:
+- [x] **Step 1: Write failing real-provider `testUnambiguousTypoAndMorphologicalSpacing`, `testAmbiguousFictionAndLearnedNamesRemainSuggestionsOrQuiet`, `testMixedAndDecomposedOffsetsStayOriginal`.** Assert:
 
   ```swift
   XCTAssertEqual(typo.alternatives, ["됐다"])
@@ -188,10 +188,10 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   Pin complete positive/negative contexts, not the isolated substring `수`. Include `됬다`, morphology-confirmed `할수 있다`, `장례희망`, proper names, dialect, literary spelling, emoji prefixes, mixed English and NFC/NFD equivalents. No fixture provider may satisfy this suite.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanCorrectnessTests`; expect missing production provider or required detections.
-- [ ] **Step 3: Implement native candidate conversion and explicit eligibility rules.** Derive alternatives from verified native typo/spacing/join operations; permit inline severity only for reviewed unambiguous morphological/context signatures with exact original spans. Keep uncertain candidates advisory/quiet, confidence nil unless independently calibrated, and unsupported-language spans quiet. Do not implement a suffix/string replacement list as a purported Korean analyzer. Preserve normalized lookup-to-original offset mapping and apply learned-word suppression to lexical entries, not arbitrary substrings. Invalid provider ranges are rejected, not clamped into unrelated prose.
-- [ ] **Step 4: Run** the real suite and Task 1 verification. Record fixture outcomes separately from orchestration tests; expect required positives, no automatic ambiguous-fiction errors and exact original ranges.
-- [ ] **Step 5: Commit** `git commit -m "feat: detect conservative Korean spelling and spacing issues"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanCorrectnessTests`; expect missing production provider or required detections.
+- [x] **Step 3: Implement native candidate conversion and explicit eligibility rules.** Derive alternatives from verified native typo/spacing/join operations; permit inline severity only for reviewed unambiguous morphological/context signatures with exact original spans. Keep uncertain candidates advisory/quiet, confidence nil unless independently calibrated, and unsupported-language spans quiet. Do not implement a suffix/string replacement list as a purported Korean analyzer. Preserve normalized lookup-to-original offset mapping and apply learned-word suppression to lexical entries, not arbitrary substrings. Invalid provider ranges are rejected, not clamped into unrelated prose.
+- [x] **Step 4: Run** the real suite and Task 1 verification. Record fixture outcomes separately from orchestration tests; expect required positives, no automatic ambiguous-fiction errors and exact original ranges.
+- [x] **Step 5: Commit** `git commit -m "feat: detect conservative Korean spelling and spacing issues"`.
 
 ### Task 7: Detect morphological repetition with evidence
 
