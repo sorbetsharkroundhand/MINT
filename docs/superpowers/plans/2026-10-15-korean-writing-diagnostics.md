@@ -199,7 +199,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** `KoreanRepetitionRules.evaluate(_ analysis: KoreanAnalysis, profile: WritingStyleProfile) -> [WritingDiagnostic]`. Stable IDs: `ko.style.repeated-word`, `ko.style.repeated-particle`, `ko.style.repeated-ending`, `ko.style.repeated-connector`. Produces suggestion severity, primary plus related original ranges, Korean explanations and no unsolicited rewrite.
 
-- [ ] **Step 1: Write failing `testInflectedFamiliesAndHomographs`, `testSensitivityAndDialogueMatrix`, `testParagraphBoundaryAndIntentionalRepetition`.** Real tokens for `-는데`, causal `-아서/-어서/-여서`, particles and connectors; assert:
+- [x] **Step 1: Write failing `testInflectedFamiliesAndHomographs`, `testSensitivityAndDialogueMatrix`, `testParagraphBoundaryAndIntentionalRepetition`.** Real tokens for `-는데`, causal `-아서/-어서/-여서`, particles and connectors; assert:
 
   ```swift
   XCTAssertEqual(requiredOccurrencesBySensitivity, [4, 3, 2])
@@ -211,10 +211,10 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   New-profile quoted dialogue needs four occurrences; explicit old standard needs three; off suppresses dialogue style but not correctness. Cover nested Korean/ASCII quotes, rhetorical repetition, and actual occurrence explanations. Intentional suppression is applied with Task 5 ownership, not inferred from text.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanRepetitionTests`; expect absent style findings.
-- [ ] **Step 3: Implement grammatical-family normalization and bounded adjacent occurrence grouping.** Use native POS and clause/sentence context, not suffix-only matching. Maintain original spans for every family occurrence and aggregate one pattern rather than overlapping warnings. Preserve paragraph boundaries and dialogue sensitivity; correctness policy stays independent.
-- [ ] **Step 4: Run** the suite and `KoreanCorrectnessTests`; expect exact threshold matrix, evidence and quiet negatives.
-- [ ] **Step 5: Commit** `git commit -m "feat: detect Korean morphological repetition"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanRepetitionTests`; expect absent style findings.
+- [x] **Step 3: Implement grammatical-family normalization and bounded adjacent occurrence grouping.** Use native POS and clause/sentence context, not suffix-only matching. Maintain original spans for every family occurrence and aggregate one pattern rather than overlapping warnings. Preserve paragraph boundaries and dialogue sensitivity; correctness policy stays independent.
+- [x] **Step 4: Run** the suite and `KoreanCorrectnessTests`; expect exact threshold matrix, evidence and quiet negatives.
+- [x] **Step 5: Commit** `git commit -m "feat: detect Korean morphological repetition"`.
 
 ### Task 8: Add sentence flow rules and chunk-independent report state
 

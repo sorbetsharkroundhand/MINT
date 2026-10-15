@@ -2,7 +2,7 @@ import Foundation
 
 actor KoreanDiagnosticsProvider: WritingDiagnosticsProvider {
     nonisolated let id = KoreanCorrectnessRules.providerID
-    nonisolated static let ruleRevision = KoreanCorrectnessRules.revision
+    nonisolated static let ruleRevision = 2
     private let morphology: KoreanMorphology
 
     init(morphology: KoreanMorphology) { self.morphology = morphology }
@@ -14,6 +14,7 @@ actor KoreanDiagnosticsProvider: WritingDiagnosticsProvider {
         try Task.checkCancellation()
         guard analysis.unsupportedRanges.isEmpty else { throw KoreanMorphologyError.unsupportedInput }
         let diagnostics = KoreanCorrectnessRules.evaluate(analysis, profile: request.styleProfile)
+            + KoreanRepetitionRules.evaluate(analysis, profile: request.styleProfile)
         try Task.checkCancellation()
         return diagnostics
     }
