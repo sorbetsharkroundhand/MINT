@@ -290,7 +290,11 @@ public enum ImageReferenceParser {
         var i = start
         while i < s.endIndex {
             let c = s[i]
-            if c == "\\" { i = s.index(after: i) }
+            if c == "\\" {
+                let next = s.index(after: i)
+                guard next < s.endIndex else { return nil }
+                i = next
+            }
             else if c == "[" { depth += 1 }
             else if c == "]" {
                 depth -= 1
@@ -317,7 +321,11 @@ public enum ImageReferenceParser {
         var i = start
         while i < s.endIndex {
             let c = s[i]
-            if c == "\\" { i = s.index(after: i) }
+            if c == "\\" {
+                let next = s.index(after: i)
+                guard next < s.endIndex else { return nil }
+                i = next
+            }
             else if c == stop { return i }
             i = s.index(after: i)
         }
@@ -331,7 +339,11 @@ public enum ImageReferenceParser {
         var sawAny = false
         while i < s.endIndex {
             let c = s[i]
-            if c == "\\" { i = s.index(after: i); sawAny = true }
+            if c == "\\" {
+                let next = s.index(after: i)
+                guard next < s.endIndex else { return nil }
+                i = next; sawAny = true
+            }
             else if c == "(" { depth += 1; sawAny = true }
             else if c == ")" {
                 if depth == 0 {
@@ -364,10 +376,10 @@ public enum ImageReferenceParser {
         while i < s.endIndex {
             let c = s[i]
             if c == "\\" {
-                if let next = s.index(i, offsetBy: 1, limitedBy: s.endIndex) {
-                    out.append(s[next])
-                    i = next
-                }
+                let next = s.index(after: i)
+                guard next < s.endIndex else { return nil }
+                out.append(s[next])
+                i = next
             } else if c == close {
                 return (out, s.index(after: i))
             } else {
