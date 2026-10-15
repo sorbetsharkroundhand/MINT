@@ -448,9 +448,13 @@ public struct MintBlockEditor: NSViewRepresentable {
             // 후속 작업(SwiftUI 갱신·레이아웃)까지의 총 구간을 나눠 잰다.
             // 랙 보고를 숫자로 만들기 위한 장비 — 측정 없이 튜닝 없음 (CLAUDE.md §2-7).
             let start = CFAbsoluteTimeGetCurrent()
+            textView.writingProjectionCapture.willBind()
             let serialized = textView.serialize()
             lastSyncedText = serialized
             parent.text = serialized
+            if let storage = textView.textStorage {
+                textView.writingProjectionCapture.didBind(source: serialized, storage: storage)
+            }
             // 집필 위치 영속 기록 (#36) — 메모리 갱신 + 디바운스 디스크. 조합 중은
             // record가 무시한다. 전환 없이 ⌘Q해도 마지막 자리가 남는 이유다.
             if let snapshot = textView.writingPositionSnapshot() {
@@ -803,6 +807,7 @@ extension NSAttributedString.Key {
 
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
+    let writingProjectionCapture = WritingEditorProjectionCapture()
     var usesProjectAssets = false
     var projectAssetCatalog: ProjectAssetCatalog? {
         didSet {
@@ -1354,6 +1359,7 @@ final class BlockTextView: NSTextView {
         // 커서가 어느 문단에 있든(수식·이미지 포함) 로드 직후엔 전부 렌더로 강제한다 —
         // 소스가 잠깐 보였다 사라지지 않게. 사용자가 커서를 움직이면 평소 규칙으로 복귀.
         refreshRenderedBlocks(forceRender: true)
+        writingDidLoad(markdown)
         needsDisplay = true
     }
 
@@ -1454,6 +1460,8 @@ final class BlockTextView: NSTextView {
     /// 예전 코드와 동일한 결과라 정답이 보장된다. 안전 판정은 델리게이트가 한다
     /// (`updateSerialCacheState`). 등식은 `SerializationFuzzTests`가 검증한다.
     func serialize() -> String {
+        writingProjectionCapture.serializationInvocationCount += 1
+        writingProjectionCapture.beginSerialization(storage: textStorage)
         if !serialLinesValid {
             rebuildSerialCache()
         } else if serialFastDirty {
@@ -1517,39 +1525,44 @@ final class BlockTextView: NSTextView {
     /// 문단 하나가 직렬화에 기여하는 줄과 코드 여부. 전체 재구축·증분 갱신이
     /// **같은 코드**를 쓰므로 두 경로의 출력이 구조적으로 일치한다.
     private func serializedLine(of para: NSRange) -> (text: String, isCode: Bool) {
-        // 직렬화는 storage 속성만 신뢰한다 — typingAttributes 폴백을 쓰면
-        // "빈 문서 + 블록 typingAttributes" 상태에서 저장 텍스트가 실제 내용과
-        // 어긋나 reload 루프를 만든다 (r1 버그).
+        // Trust stored block attributes, never typing attributes from an empty caret paragraph.
         let info = storageBlockInfo(in: para)
+        let native = string as NSString
+        let hasFeed = para.length > 0 && para.upperBound <= native.length && native.character(at: para.upperBound - 1) == 0x0A
+        writingProjectionCapture.beginLine(para, hasLineFeed: hasFeed)
         let content = serializedContent(of: para, block: info.block)
+        func result(prefix: String = "", suffix: String = "", code: Bool = false,
+                    literal: Bool = false) -> (text: String, isCode: Bool) {
+            let text = prefix + (literal ? "" : content) + suffix
+            writingProjectionCapture.finishLine(text: text, prefix: prefix, suffix: suffix, isCode: code,
+                eligible: ![MintBlock.code, .math, .divider, .image].contains(info.block), literal: literal)
+            return (text, code)
+        }
         switch info.block {
-        case .code: return (content, true)
-        case .h1: return ("# " + content, false)
-        case .h2: return ("## " + content, false)
-        case .h3: return ("### " + content, false)
-        case .quote: return ("> " + content, false)
-        case .bullet: return ("- " + content, false)
-        case .number: return ((info.marker ?? "1.") + " " + content, false)
-        case .todo: return ("- [" + (info.checked ? "x" : " ") + "] " + content, false)
+        case .code: return result(code: true)
+        case .h1: return result(prefix: "# ")
+        case .h2: return result(prefix: "## ")
+        case .h3: return result(prefix: "### ")
+        case .quote: return result(prefix: "> ")
+        case .bullet: return result(prefix: "- ")
+        case .number: return result(prefix: (info.marker ?? "1.") + " ")
+        case .todo: return result(prefix: "- [" + (info.checked ? "x" : " ") + "] ")
         case .math:
-            // 다중 행 display 그룹 — 그룹 문단은 **원문 그대로** 저장됐다 (열기/
-            // 중간/닫기 모두). 그대로 돌려주면 왕복이 항상 정확하다 (이슈 #20).
-            // 단독 완결 수식만 마커를 다시 감싼다.
             if let storage = textStorage, para.location < storage.length {
                 let attrs = storage.attributes(at: para.location, effectiveRange: nil)
                 switch attrs[.mintMathDelim] as? String {
-                case "open", "mid", "close": return (content, false)
+                case "open", "mid", "close": return result()
                 default: break
                 }
             }
-            return ("$$" + content + "$$", false)
-        case .divider: return ("---", false)
-        case .image: return (content, false)  // content = 원문 ![](src)
+            return result(prefix: "$$", suffix: "$$")
+        case .divider: return result(prefix: "---", literal: true)
+        case .image: return result()
         default:
             if let align = alignValue(at: para) {
-                return ("<p align=\"\(align)\">\(content)</p>", false)
+                return result(prefix: "<p align=\"\(align)\">", suffix: "</p>")
             }
-            return (content, false)
+            return result()
         }
     }
 
@@ -1814,10 +1827,16 @@ final class BlockTextView: NSTextView {
         let plain = paragraphContent(paragraph)
         guard let storage = textStorage,
             ![MintBlock.code, .math, .divider, .image].contains(block)
-        else { return plain }
+        else {
+            writingProjectionCapture.recordRawBody()
+            return plain
+        }
         let contentRange = NSRange(
             location: paragraph.location, length: (plain as NSString).length)
-        return InlineMarkdown.serialize(storage, in: contentRange)
+        return InlineMarkdown.serialize(storage, in: contentRange,
+            capture: writingProjectionCapture.capturesCurrentLine ? { [writingProjectionCapture] span in
+                writingProjectionCapture.recordSpan(span)
+            } : nil)
     }
 
     /// 문단의 저장된 정렬 값 ("center"/"right") — 직렬화용.
@@ -2178,6 +2197,18 @@ final class BlockTextView: NSTextView {
         }
         // IME 조합 중에도 갱신 — 문단 위치가 밀리면 렌더 range를 다시 잡아야 한다.
         refreshRenderedBlocks()
+    }
+
+    override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        writingProjectionCapture.beginComposition()
+        super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
+        writingProjectionCapture.endComposition(hasMarkedText() ? markedRange() : nil)
+    }
+
+    override func unmarkText() {
+        writingProjectionCapture.beginComposition()
+        super.unmarkText()
+        writingProjectionCapture.endComposition(nil)
     }
 
     /// 커서 바로 앞에서 완성된 인라인 마커(`***…***` `**…**` `*…*` `` `…` ``)를
@@ -5513,6 +5544,7 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
+        writingProjectionCapture.storageChanged(mask: editedMask, range: editedRange, delta: delta, storage: textStorage)
         updateMediaRenderIndex(mask: editedMask, range: editedRange, delta: delta)
         // 직렬화 증분 캐시 판정 — 모든 편집에 대해 먼저(마커 조기 반환에 가리지 않게).
         updateSerialCacheState(editedMask: editedMask, editedRange: editedRange, delta: delta)

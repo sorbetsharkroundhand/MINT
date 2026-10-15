@@ -47,7 +47,7 @@ struct WritingProjectionPatch: Sendable {
 
 /// Load/recovery projection. Ordinary edits supply already bounded, authoritative pieces.
 enum WritingProseProjection {
-    private struct Run { let source: NSRange; let eligible: Bool }
+    struct Run { let source: NSRange; let eligible: Bool; var unsupported = false }
     private static let alignment = rx(#"^<p align="(?:center|right)">(.*)</p>$"#)
     private static let prefix = rx(#"^(?:#{1,3} |[-*] |\d+\.\s|> |>$|- \[[ x]\] )"#)
     private static let divider = rx(#"^---+\s*$"#)
@@ -120,7 +120,7 @@ enum WritingProseProjection {
         return result
     }
 
-    private static func inlineRuns(_ text: String, offset: Int) -> [Run] {
+    static func inlineRuns(_ text: String, offset: Int) -> [Run] {
         var omitted: [NSRange] = [], barriers: [NSRange] = []
         let spans = MarkdownInlineScanner.scan(text)
         for region in MathScanner.regions(in: text, skipping: spans.filter { $0.style.code }.map(\.sourceRange)) {
@@ -158,9 +158,9 @@ enum WritingProseProjection {
         return result
     }
 
-    private struct Link { let source: NSRange; let label: NSRange; let image: Bool }
+    struct Link { let source: NSRange; let label: NSRange; let image: Bool }
     /// Reuse MINT's balanced/escaped destination grammar; never expose a URL tail as prose.
-    private static func links(in text: String) -> [Link] {
+    static func links(in text: String) -> [Link] {
         let body = text[...]
         var cursor = body.startIndex, result: [Link] = []
         func skipSpaces(_ index: inout String.Index) {

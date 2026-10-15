@@ -58,37 +58,83 @@ enum InlineMarkdown {
     /// 범위의 인라인 속성 런을 마커로 감싸 마크다운 한 줄로 되돌린다.
     /// 인라인 수식 원자(attachment)는 `$latex$`로 — 굵게 등 다른 마커로
     /// 감싸지 않는다 (원자는 서식의 대상이 아니라 객체다, 이슈 #20).
-    static func serialize(_ storage: NSAttributedString, in range: NSRange) -> String {
+    struct SerializedSpan: Sendable {
+        let source: NSRange
+        let body: NSRange?
+        let native: NSRange
+        let style: MarkdownInlineScanner.Style
+        var prefix = ""
+        var suffix = ""
+        var opaqueID: ObjectIdentifier? = nil
+    }
+
+    static func serialize(_ storage: NSAttributedString, in range: NSRange,
+                          capture: ((SerializedSpan) -> Void)? = nil) -> String {
         guard range.length > 0 else { return "" }
-        var out = ""
+        var out = "", sourceOffset = 0
         storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
             var text = (storage.string as NSString).substring(with: run)
             if let atom = attrs[.attachment] as? MathAtomAttachment {
-                out += "$\(atom.latex)$"
+                let fragment = "$\(atom.latex)$"
+                if let capture {
+                    let length = atom.latex.utf16.count + 2
+                    capture(SerializedSpan(source: NSRange(location: sourceOffset, length: length),
+                                           body: nil, native: run, style: .init(), prefix: fragment, opaqueID: ObjectIdentifier(atom)))
+                    sourceOffset += length
+                }
+                out += fragment
                 return
             }
-            if attrs[.mintCode] as? Bool == true {
+            var style = MarkdownInlineScanner.Style()
+            style.code = attrs[.mintCode] as? Bool == true
+            var prefixLength = 0, suffixLength = 0
+            var prefix = "", suffix = ""
+            if style.code {
                 text = "`\(text)`"
+                prefixLength = 1; suffixLength = 1
+                prefix = "`"; suffix = "`"
             } else {
                 let isBold = attrs[.mintBold] as? Bool == true
                 let isItalic = attrs[.mintItalic] as? Bool == true
+                style.bold = isBold; style.italic = isItalic
                 if isBold && isItalic {
                     text = "***\(text)***"
+                    prefixLength = 3; suffixLength = 3
+                    prefix = "***"; suffix = "***"
                 } else if isBold {
                     text = "**\(text)**"
+                    prefixLength = 2; suffixLength = 2
+                    prefix = "**"; suffix = "**"
                 } else if isItalic {
                     text = "*\(text)*"
+                    prefixLength = 1; suffixLength = 1
+                    prefix = "*"; suffix = "*"
                 }
             }
             var tagAttrs: [String] = []
             if let hex = attrs[.mintColor] as? String {
                 tagAttrs.append("color=\"#\(hex)\"")
+                style.color = hex
             }
             if let size = attrs[.mintFontSize] as? Double {
                 tagAttrs.append("size=\"\(String(format: "%g", size))\"")
+                style.fontSize = size
             }
             if !tagAttrs.isEmpty {
-                text = "<font \(tagAttrs.joined(separator: " "))>\(text)</font>"
+                let opening = "<font \(tagAttrs.joined(separator: " "))>"
+                text = "\(opening)\(text)</font>"
+                if capture != nil {
+                    prefixLength += opening.utf16.count; suffixLength += 7
+                    prefix = opening + prefix; suffix += "</font>"
+                }
+            }
+            if let capture {
+                // Native run lengths already give body UTF-16 size, including emoji/NFD.
+                let length = prefixLength + run.length + suffixLength
+                capture(SerializedSpan(source: NSRange(location: sourceOffset, length: length),
+                    body: NSRange(location: sourceOffset + prefixLength, length: run.length), native: run, style: style,
+                    prefix: prefix, suffix: suffix))
+                sourceOffset += length
             }
             out += text
         }

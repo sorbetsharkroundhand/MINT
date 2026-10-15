@@ -130,7 +130,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** Consumes Task 3 blocks/patches. Produces `WritingEditorCommit(baseIdentity: ProjectRuntimeIdentity, nativeRevision: UInt64, patch: WritingProjectionPatch, markedRange: WritingDiagnosticRange?)`, emitted after the existing binding publishes committed source. `BlockTextView.writingNativeRevision: UInt64`, `writingCommitDidChange: ((WritingEditorCommit) -> Void)?`, `writingCompositionDidChange: ((WritingDiagnosticRange?) -> Void)?`, and `nativeRange(forSource: WritingDiagnosticRange, revision: UInt64) -> WritingDiagnosticRange?`. Keep language analysis outside the editor.
 
-- [ ] **Step 1: Write failing `testLoadAndNativeEditMapsMatchCanonicalSource`, `testIMEIsNeverCommittedForDiagnostics`, `testHugeParagraphDeltaDoesNotReserializeForDiagnostics`, `testUndoRedoAndProgrammaticChangesEmitValidPatches`.** Use inert NSTextStorage/NSTextView and test UndoManager, without showing MINT:
+- [x] **Step 1: Write failing `testLoadAndNativeEditMapsMatchCanonicalSource`, `testIMEIsNeverCommittedForDiagnostics`, `testHugeParagraphDeltaDoesNotReserializeForDiagnostics`, `testUndoRedoAndProgrammaticChangesEmitValidPatches`.** Use inert NSTextStorage/NSTextView and test UndoManager, without showing MINT:
 
   ```swift
   XCTAssertEqual(nativeSubstring, expectedOriginal)
@@ -141,10 +141,12 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   Include newline joins/splits, paste, block marker conversion, formatting-only edits, duplicate paragraphs, media/math attachments and 300k single-paragraph insertion. Existing serialization may assemble the binding value; diagnostics must not add another full comparison/hash/parse.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter WritingEditorProjectionTests`; expect missing hooks/map failure.
-- [ ] **Step 3: Implement passive hooks.** Capture before/after deltas at existing storage/serialization seams, share cached block serialization metadata and source-span scanning, and attach native ranges only when verified against the current storage revision. Increment native revision for character and mapping-affecting attribute changes. Pair the commit with the authoritative post-binding project snapshot; a source snapshot arriving before its native delta remains pending. Composition notifications cancel work/marks without changing IME. An untracked programmatic edit must capture its affected storage range; it cannot silently masquerade as a cheap local patch or reuse an old map. Avoid widening unrelated private math state.
-- [ ] **Step 4: Run** the suite plus `EditorRenderIndexTests`, `SerializationFuzzTests`, `ProjectEditorTransitionTests` and existing IME/Ghost tests; expect no content/selection/Undo regression and no extra document pass.
-- [ ] **Step 5: Commit** `git commit -m "feat: capture revisioned editor prose changes"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter WritingEditorProjectionTests`; expect missing hooks/map failure.
+- [x] **Step 3: Implement passive hooks.** Capture before/after deltas at existing storage/serialization seams, share cached block serialization metadata and source-span scanning, and attach native ranges only when verified against the current storage revision. Increment native revision for character and mapping-affecting attribute changes. Pair the commit with the authoritative post-binding project snapshot; a source snapshot arriving before its native delta remains pending. Composition notifications cancel work/marks without changing IME. An untracked programmatic edit must capture its affected storage range; it cannot silently masquerade as a cheap local patch or reuse an old map. Avoid widening unrelated private math state.
+- [x] **Step 4: Run** the suite plus `EditorRenderIndexTests`, `SerializationFuzzTests`, `ProjectEditorTransitionTests` and existing IME/Ghost tests; expect no content/selection/Undo regression and no extra document pass.
+- [x] **Step 5: Commit** `git commit -m "feat: capture revisioned editor prose changes"`.
+
+**Implementation boundary:** Native/source row prefix totals are separate; mapping requires current runtime/revision, exact original UTF-16 and whole composed characters. Literal edits inherit proved grammar scopes from bounded cached source pieces. Structural/paste edits reuse the existing serializer's row strings in yielding, cancellable pieces, without another document serialization, parse or hash. A raw reference that cannot be proved within a deferred piece is explicitly unsupported through its line, and following lines resume; Tasks 9/10 must expose that partial coverage. Profile-only snapshot adoption verifies unchanged source at that explicit transition; ordinary binding snapshots stay pending until their native commit arrives.
 
 ### Task 5: Persist project style choices without replacing unreadable data
 

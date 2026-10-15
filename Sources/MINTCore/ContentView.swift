@@ -151,7 +151,8 @@ public struct ContentView: View {
                     completion?.prepareForProjectTransition()
                     indexer?.prepareForProjectTransition()
                 }
-                projectSession.documentDidChange = { [weak completion, weak indexer] snapshot in
+                projectSession.documentDidChange = { [weak completion, weak indexer, weak projectEditorBridge] snapshot in
+                    projectEditorBridge?.noteSnapshot(snapshot)
                     completion?.noteDocumentChange(snapshot)
                     indexer?.noteDocumentChange(snapshot)
                 }
@@ -222,6 +223,41 @@ public struct ContentView: View {
 @MainActor
 final class ProjectEditorBridge {
     weak var editor: BlockTextView?
+    private var currentSnapshot: (() -> ProjectDocumentSnapshot?)?
+    private(set) var pendingSnapshot: ProjectDocumentSnapshot?
+    var snapshotDidChange: ((ProjectDocumentSnapshot) -> Void)?
+    var commitDidChange: ((WritingEditorCommit, ProjectDocumentSnapshot) -> Void)?
+    var compositionDidChange: ((WritingDiagnosticRange?) -> Void)?
+
+    func connect(_ editor: BlockTextView, currentSnapshot: @escaping () -> ProjectDocumentSnapshot?) {
+        if let previous = self.editor, previous !== editor { disconnect(previous) }
+        self.editor = editor; self.currentSnapshot = currentSnapshot
+        editor.writingRuntimeIdentityProvider = { [weak self] in self?.currentSnapshot?()?.identity }
+        editor.writingCommitDidChange = { [weak self] in self?.receive($0) }
+        editor.writingCompositionDidChange = { [weak self] in self?.compositionDidChange?($0) }
+        if let snapshot = currentSnapshot() { noteSnapshot(snapshot) }
+    }
+    func disconnect(_ editor: BlockTextView) {
+        guard self.editor === editor else { return }
+        editor.writingRuntimeIdentityProvider = nil
+        editor.writingCommitDidChange = nil; editor.writingCompositionDidChange = nil
+        self.editor = nil; currentSnapshot = nil; pendingSnapshot = nil
+    }
+    func noteSnapshot(_ snapshot: ProjectDocumentSnapshot) {
+        guard currentSnapshot?()?.identity == snapshot.identity else { return }
+        pendingSnapshot = snapshot
+        editor?.writingProjectionCapture.noteSnapshot(snapshot)
+        snapshotDidChange?(snapshot)
+    }
+    func receive(_ commit: WritingEditorCommit) {
+        guard let editor, let snapshot = currentSnapshot?(),
+              snapshot.identity == pendingSnapshot?.identity,
+              snapshot.identity.key == commit.baseIdentity.key,
+              editor.writingProjectionCapture.mappedIdentity == snapshot.identity,
+              editor.writingProjectionCapture.mappedRevision == commit.nativeRevision,
+              editor.writingNativeRevision == commit.nativeRevision, !editor.hasMarkedText() else { return }
+        commitDidChange?(commit, snapshot)
+    }
 }
 
 struct EditorPane: View {
@@ -285,13 +321,15 @@ struct EditorPane: View {
                     onEditorWindowChange: { [weak projectSession, weak editorBridge, weak editorRequests] view in
                         guard let editor = view as? BlockTextView else { return }
                         if view.window != nil {
-                            editorBridge?.editor = editor
+                            editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in
+                                projectSession?.selectedDocumentSnapshot
+                            })
                             editorRequests?.nativeEditor = editor
                             editorRequests?.nativeEditorKey = projectSession?.runtimeIdentity?.key
                             // Read the live gate even if this representable update was queued earlier.
                             editor.isEditable = projectSession?.isEditorEditable == true
                         } else if editorBridge?.editor === editor {
-                            editorBridge?.editor = nil
+                            editorBridge?.disconnect(editor)
                             if editorRequests?.nativeEditor === editor { editorRequests?.nativeEditor = nil }
                         }
                     },
