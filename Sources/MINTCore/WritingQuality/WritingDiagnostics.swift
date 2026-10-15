@@ -128,6 +128,18 @@ public struct WritingStyleProfile: Codable, Equatable, Sendable {
         self.repetitionSensitivity = repetitionSensitivity
         self.dialogueSensitivity = dialogueSensitivity
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case ignoredRuleIDs, learnedWords, repetitionSensitivity, dialogueSensitivity
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        ignoredRuleIDs = values.contains(.ignoredRuleIDs) ? try values.decode(Set<String>.self, forKey: .ignoredRuleIDs) : []
+        learnedWords = values.contains(.learnedWords) ? try values.decode(Set<String>.self, forKey: .learnedWords) : []
+        repetitionSensitivity = values.contains(.repetitionSensitivity) ? try values.decode(WritingQualitySensitivity.self, forKey: .repetitionSensitivity) : .standard
+        dialogueSensitivity = values.contains(.dialogueSensitivity) ? try values.decode(WritingQualitySensitivity.self, forKey: .dialogueSensitivity) : .standard
+    }
 }
 
 public enum WritingDiagnosticsScope: String, Codable, Sendable {

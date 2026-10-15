@@ -154,7 +154,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** `WritingStyleRecord` version 1 contains `profile: WritingStyleProfile`, `languageTag: String?`, and `[WritingIntentionalOccurrence]` (rule ID, `EvidenceAnchor`, captured source revision). `WritingStyleLoad` is `.ready(WritingStyleRecord)` or `.unreadable(original: Data, reason: String)`. `WritingStyleRepository.read(_ snapshot: ProjectDocumentSnapshot) -> WritingStyleLoad`; `update(_ record: WritingStyleRecord, in session: ProjectSession, identity: ProjectRuntimeIdentity) throws`. Both repository entry points are MainActor. Missing record uses standard/low; value-only legacy profiles decode preserving explicit standard/standard. Learned words use canonical Unicode composition and exact lexical comparison, without lowercasing unrelated scripts or modifying source.
 
-- [ ] **Step 1: Write failing `testNewLegacyUnknownAndCorruptProfiles`, `testChoicesSurviveFlushReopenReindexAndRestore`, `testStaleAtoBtoAActionCannotWrite`.** Assert:
+- [x] **Step 1: Write failing `testNewLegacyUnknownAndCorruptProfiles`, `testChoicesSurviveFlushReopenReindexAndRestore`, `testStaleAtoBtoAActionCannotWrite`.** Assert:
 
   ```swift
   XCTAssertEqual(newRecord.profile.dialogueSensitivity, .low)
@@ -165,10 +165,10 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   Include failed save, runtime transition, no-op update, two occurrences with identical quotes, and a changed ambiguous source which must not inherit occurrence suppression. Reuse temporary-project backup/recovery harnesses; no second storage owner.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter WritingStyleRepositoryTests`; expect absent envelope/repository failure.
-- [ ] **Step 3: Implement decoding and gated writes.** Use safe key `writing-style-profile`, existing autosave and recovery. Refuse normal updates while unreadable bytes exist; reading never writes defaults. Resolve intentional choices against captured evidence/current occurrence, using `SourceAnchor` for explicit re-anchoring and declining ambiguity. Compute a whole-source revision only for deliberate capture/re-anchor/load operations, never each automatic edit. Learned words and ignored rules stay project owned and survive derived-index deletion.
-- [ ] **Step 4: Run** the new suite plus `ProjectUserDataTests`, `ProjectUserDataSessionTests`, existing backup/recovery suites and `WritingDiagnosticsTests`; expect preserved bytes, defaults and ownership.
-- [ ] **Step 5: Commit** `git commit -m "feat: persist project writing style choices"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter WritingStyleRepositoryTests`; expect absent envelope/repository failure.
+- [x] **Step 3: Implement decoding and gated writes.** Use safe key `writing-style-profile`, existing autosave and recovery. Refuse normal updates while unreadable bytes exist; reading never writes defaults. Resolve intentional choices against captured evidence/current occurrence, using `SourceAnchor` for explicit re-anchoring and declining ambiguity. Compute a whole-source revision only for deliberate capture/re-anchor/load operations, never each automatic edit. Learned words and ignored rules stay project owned and survive derived-index deletion.
+- [x] **Step 4: Run** the new suite plus `ProjectUserDataTests`, `ProjectUserDataSessionTests`, existing backup/recovery suites and `WritingDiagnosticsTests`; expect preserved bytes, defaults and ownership.
+- [x] **Step 5: Commit** `git commit -m "feat: persist project writing style choices"`.
 
 ### Task 6: Add real morphology and conservative correctness findings
 
