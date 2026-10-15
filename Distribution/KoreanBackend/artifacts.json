@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "repository": "https://github.com/bab2min/Kiwi",
+    "tag": "v0.24.0",
+    "revision": "6e16bbcfc0940fabccbdde574abb4ea3a659588e"
+  },
+  "assets": [
+    {
+      "id": "native",
+      "name": "Kiwi.xcframework.zip",
+      "kind": "zip",
+      "url": "https://github.com/bab2min/Kiwi/releases/download/v0.24.0/Kiwi.xcframework.zip",
+      "releaseAssetID": 561335356,
+      "sha256": "391f948f2e8231bb16449931beba26d055523804f695acc70b79ed6b9dbeb0d7",
+      "downloadBytes": 37721249,
+      "files": [
+        {
+          "path": "Kiwi.xcframework/macos-arm64_x86_64/Kiwi.framework/Kiwi",
+          "sha256": "c49f6f5fc0bc07847b2ad293d96c406a32c4cbf684fb286929d193d20ac60bcb",
+          "bytes": 76888920
+        },
+        {
+          "path": "Kiwi.xcframework/macos-arm64_x86_64/Kiwi.framework/Headers/Macro.h",
+          "sha256": "19af14ebeaca651e94c9bab3b5e597da428b8243ec8f0d91567884e0b3a511e7",
+          "bytes": 299
+        },
+        {
+          "path": "Kiwi.xcframework/macos-arm64_x86_64/Kiwi.framework/Headers/capi.h",
+          "sha256": "bc2c1bdd5bf2adbe60813b852eb257dff73b331af38af4e7641d87aee4bf9fcc",
+          "bytes": 62439
+        },
+        {
+          "path": "Kiwi.xcframework/macos-arm64_x86_64/Kiwi.framework/Modules/module.modulemap",
+          "sha256": "0552a4dc947c064354dd3403a7ad6bbab9e9f58c93bde844f276e2ae36d6c54c",
+          "bytes": 94
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64_x86_64-simulator/Kiwi.framework/Kiwi",
+          "sha256": "c8ee3aff3e59d34fc91ab2c4bc0b97764886293d1eea6717b2bb2bc97263ee44",
+          "bytes": 75685504
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64_x86_64-simulator/Kiwi.framework/Headers/Macro.h",
+          "sha256": "19af14ebeaca651e94c9bab3b5e597da428b8243ec8f0d91567884e0b3a511e7",
+          "bytes": 299
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64_x86_64-simulator/Kiwi.framework/Headers/capi.h",
+          "sha256": "bc2c1bdd5bf2adbe60813b852eb257dff73b331af38af4e7641d87aee4bf9fcc",
+          "bytes": 62439
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64_x86_64-simulator/Kiwi.framework/Modules/module.modulemap",
+          "sha256": "0552a4dc947c064354dd3403a7ad6bbab9e9f58c93bde844f276e2ae36d6c54c",
+          "bytes": 94
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64/Kiwi.framework/Kiwi",
+          "sha256": "2222a8cebef909b50fa5e2e50972dd63b322e28f7b5f2ab53812b77cd9b6c3c2",
+          "bytes": 31925656
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64/Kiwi.framework/Headers/Macro.h",
+          "sha256": "19af14ebeaca651e94c9bab3b5e597da428b8243ec8f0d91567884e0b3a511e7",
+          "bytes": 299
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64/Kiwi.framework/Headers/capi.h",
+          "sha256": "bc2c1bdd5bf2adbe60813b852eb257dff73b331af38af4e7641d87aee4bf9fcc",
+          "bytes": 62439
+        },
+        {
+          "path": "Kiwi.xcframework/ios-arm64/Kiwi.framework/Modules/module.modulemap",
+          "sha256": "0552a4dc947c064354dd3403a7ad6bbab9e9f58c93bde844f276e2ae36d6c54c",
+          "bytes": 94
+        },
+        {
+          "path": "Kiwi.xcframework/Info.plist",
+          "sha256": "13a4d48d284d7a632274d88156c0b5f06c305c7636bf1b18ff9383b421c4315a",
+          "bytes": 1555
+        }
+      ]
+    },
+    {
+      "id": "model",
+      "name": "kiwi_model_v0.24.0_base.tgz",
+      "kind": "tar.gz",
+      "url": "https://github.com/bab2min/Kiwi/releases/download/v0.24.0/kiwi_model_v0.24.0_base.tgz",
+      "releaseAssetID": 561329490,
+      "sha256": "33188ba932bba4717bad5244bbec0ef8b1c9cbb47e26e68394a7976d8d779083",
+      "downloadBytes": 87967233,
+      "files": [
+        {
+          "path": "models/cong/base/sj.morph",
+          "sha256": "d0af27b3863799cc2058f66c8058cb2bc0d16e8ae0daaf42c7739b4e375523d7",
+          "bytes": 8462892
+        },
+        {
+          "path": "models/cong/base/default.dict",
+          "sha256": "d4293e44b2588d0c3aabbce607a0f41ad3534abd31b34139847b127254e01549",
+          "bytes": 3090954
+        },
+        {
+          "path": "models/cong/base/dialect.dict",
+          "sha256": "bb6f0ab37dbfcc0fd33dc679121218d24725ae438f31bb362f9b24703e93cda2",
+          "bytes": 644
+        },
+        {
+          "path": "models/cong/base/multi.dict",
+          "sha256": "e9eff7712d163b214c750333a5d388ab77b50ec386ae55b360babcd24c0c3195",
+          "bytes": 12064440
+        },
+        {
+          "path": "models/cong/base/typo.dict",
+          "sha256": "aa15e48fcd32886441fc1ff9719a3109d3192e91d4b67efbd64260610d68322d",
+          "bytes": 395
+        },
+        {
+          "path": "models/cong/base/combiningRule.txt",
+          "sha256": "4f78771daa3dd8a52aa0b5c8824396578ece8e8bbaa11cf3add82721b046bc15",
+          "bytes": 3611
+        },
+        {
+          "path": "models/cong/base/cong.mdl",
+          "sha256": "5f64105e45f04e5313f41c0ff1db5fe629780c8076c4a6fd3b1b2cf78c2cc934",
+          "bytes": 75854705
+        },
+        {
+          "path": "models/cong/base/extract.mdl",
+          "sha256": "a0c92ffc051e43ae497845cdb8d4c8b9e2f359893cb55c67279c76d1d531ee17",
+          "bytes": 17370
+        },
+        {
+          "path": "models/cong/base/nounchr.mdl",
+          "sha256": "4b687e36836dd60dcb7addcfcf369ac082b339bab76549574ac1ce2b7ccd6836",
+          "bytes": 9734234
+        }
+      ]
+    }
+  ],
+  "notices": [
+    {
+      "identity": "kiwi",
+      "path": "Distribution/KoreanBackend/notices/Kiwi-LICENSE",
+      "url": "https://github.com/bab2min/Kiwi/blob/6e16bbcfc0940fabccbdde574abb4ea3a659588e/LICENSE",
+      "revision": "6e16bbcfc0940fabccbdde574abb4ea3a659588e",
+      "sha256": "4070ef92694190ae0d19410380654c37f0602e8a2aa3ddcc45e2dad3039b5b20"
+    },
+    {
+      "identity": "kiwi",
+      "path": "Distribution/KoreanBackend/notices/Kiwi-NOTICE",
+      "url": "https://github.com/bab2min/Kiwi/blob/6e16bbcfc0940fabccbdde574abb4ea3a659588e/NOTICE",
+      "revision": "6e16bbcfc0940fabccbdde574abb4ea3a659588e",
+      "sha256": "0c1c4963546b66b2b750d14fada239efda2d67774e69ba99ec90829ca393b5bc"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/cpp-btree-LICENSE",
+      "url": "https://github.com/bab2min/cpp-btree/blob/226ce3aed24702bef1b03dba4b3cb55bc0bf31dd/LICENSE",
+      "revision": "226ce3aed24702bef1b03dba4b3cb55bc0bf31dd",
+      "identity": "cpp-btree",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/cpuinfo-LICENSE",
+      "url": "https://github.com/pytorch/cpuinfo/blob/05dd959fa26c7e68fa229495a35f55e06a3b9655/LICENSE",
+      "revision": "05dd959fa26c7e68fa229495a35f55e06a3b9655",
+      "identity": "cpuinfo",
+      "sha256": "8e7e60636c3aa0cb03571a1a841ce5697f9551ff92b3c426c2561613d15ade70"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/json-LICENSE.MIT",
+      "url": "https://github.com/nlohmann/json/blob/55f93686c01528224f448c19128836e7df245f72/LICENSE.MIT",
+      "revision": "55f93686c01528224f448c19128836e7df245f72",
+      "identity": "json",
+      "sha256": "46a65cffd1ea955132d95a8dd921640714a8d6b537d2e4e482d31145ae95b603"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/mimalloc-LICENSE",
+      "url": "https://github.com/microsoft/mimalloc/blob/fbd8b99c2b828428947d70fdc046bb55609be93e/LICENSE",
+      "revision": "fbd8b99c2b828428947d70fdc046bb55609be93e",
+      "identity": "mimalloc",
+      "sha256": "82ade5d7d9b029044b5fbbc326207fc47c2d44ee4dd71e8a559c36d728217de9"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/streamvbyte-LICENSE",
+      "url": "https://github.com/fast-pack/streamvbyte/blob/862c2e7a4c39717b5a6e590c8a784bcd7924b20b/LICENSE",
+      "revision": "862c2e7a4c39717b5a6e590c8a784bcd7924b20b",
+      "identity": "streamvbyte",
+      "sha256": "cb5e8e7e5f4a3988e1063c142c60dc2df75605f4c46515e776e3aca6df976e14"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/eigen-COPYING.MPL2",
+      "url": "https://gitlab.com/libeigen/eigen/-/raw/3147391d946bb4b6c68edd901f2add6ac1f31f8c/COPYING.MPL2",
+      "revision": "3147391d946bb4b6c68edd901f2add6ac1f31f8c",
+      "identity": "eigen",
+      "sha256": "fab3dd6bdab226f1c08630b1dd917e11fcb4ec5e1e020e2c16f83a0a13863e85"
+    },
+    {
+      "path": "Distribution/KoreanBackend/notices/eigen-COPYING.README",
+      "url": "https://gitlab.com/libeigen/eigen/-/raw/3147391d946bb4b6c68edd901f2add6ac1f31f8c/COPYING.README",
+      "revision": "3147391d946bb4b6c68edd901f2add6ac1f31f8c",
+      "identity": "eigen",
+      "sha256": "c83230b770f17ef1386ea1fd3681271dd98aa93646bdbfb5bff3a1b7050fff9d"
+    }
+  ],
+  "linkage": {
+    "kind": "static-xcframework",
+    "libraryIdentifier": "macos-arm64_x86_64",
+    "validatedArchitecture": "arm64",
+    "target": "arm64-apple-macos14.0",
+    "cHeaderSHA256": "bc2c1bdd5bf2adbe60813b852eb257dff73b331af38af4e7641d87aee4bf9fcc",
+    "nativeCallMaxUTF16": 1024,
+    "typoMode": "per-analysis-prepared-basic",
+    "modelRelativePath": "models/cong/base"
+  }
+}

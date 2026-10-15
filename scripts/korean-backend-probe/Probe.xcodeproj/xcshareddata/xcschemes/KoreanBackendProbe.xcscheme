@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Scheme LastUpgradeVersion="2600" version="1.3">
+  <BuildAction parallelizeBuildables="NO" buildImplicitDependencies="YES">
+    <BuildActionEntries><BuildActionEntry buildForTesting="YES" buildForRunning="YES" buildForProfiling="YES" buildForArchiving="YES" buildForAnalyzing="YES">
+      <BuildableReference BuildableIdentifier="primary" BlueprintIdentifier="B12600000000000000000005" BuildableName="KoreanBackendProbe.app" BlueprintName="KoreanBackendProbe" ReferencedContainer="container:Probe.xcodeproj"/>
+    </BuildActionEntry></BuildActionEntries>
+  </BuildAction>
+  <ArchiveAction buildConfiguration="Release" revealArchiveInOrganizer="NO"/>
+</Scheme>

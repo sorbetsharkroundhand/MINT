@@ -1,0 +1,22 @@
+// !$*UTF8*$!
+{
+    archiveVersion = 1;
+    classes = {};
+    objectVersion = 56;
+    objects = {
+        B12600000000000000000001 = {isa = PBXProject; attributes = {LastUpgradeCheck = 2600;}; buildConfigurationList = B12600000000000000000002; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; knownRegions = (en,); mainGroup = B12600000000000000000003; productRefGroup = B12600000000000000000004; projectDirPath = ""; projectRoot = ""; targets = (B12600000000000000000005,);};
+        B12600000000000000000002 = {isa = XCConfigurationList; buildConfigurations = (B12600000000000000000006,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+        B12600000000000000000003 = {isa = PBXGroup; children = (B12600000000000000000007, B12600000000000000000004,); sourceTree = "<group>";};
+        B12600000000000000000004 = {isa = PBXGroup; children = (B12600000000000000000008,); name = Products; sourceTree = "<group>";};
+        B12600000000000000000005 = {isa = PBXNativeTarget; buildConfigurationList = B12600000000000000000009; buildPhases = (B1260000000000000000000A, B1260000000000000000000B,); buildRules = (); dependencies = (); name = KoreanBackendProbe; productName = KoreanBackendProbe; productReference = B12600000000000000000008; productType = "com.apple.product-type.application";};
+        B12600000000000000000006 = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; MACOSX_DEPLOYMENT_TARGET = 14.0; SDKROOT = macosx;}; name = Release;};
+        B12600000000000000000007 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = main.swift; sourceTree = "<group>";};
+        B12600000000000000000008 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = KoreanBackendProbe.app; sourceTree = BUILT_PRODUCTS_DIR;};
+        B12600000000000000000009 = {isa = XCConfigurationList; buildConfigurations = (B1260000000000000000000C,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+        B1260000000000000000000A = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (B1260000000000000000000D,); runOnlyForDeploymentPostprocessing = 0;};
+        B1260000000000000000000B = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;};
+        B1260000000000000000000C = {isa = XCBuildConfiguration; buildSettings = {CODE_SIGNING_ALLOWED = NO; ENABLE_APP_SANDBOX = YES; FRAMEWORK_SEARCH_PATHS = ("$(inherited)", "$(KIWI_FRAMEWORK_DIR)",); GENERATE_INFOPLIST_FILE = YES; INFOPLIST_KEY_CFBundleDisplayName = KoreanBackendProbe; INFOPLIST_KEY_LSUIElement = YES; OTHER_LDFLAGS = ("-framework", Kiwi, "-lc++", "-lz",); PRODUCT_BUNDLE_IDENTIFIER = "app.mint.korean-backend-probe"; PRODUCT_NAME = "$(TARGET_NAME)"; SKIP_INSTALL = NO; SWIFT_OPTIMIZATION_LEVEL = "-O"; SWIFT_VERSION = 6.0;}; name = Release;};
+        B1260000000000000000000D = {isa = PBXBuildFile; fileRef = B12600000000000000000007;};
+    };
+    rootObject = B12600000000000000000001;
+}

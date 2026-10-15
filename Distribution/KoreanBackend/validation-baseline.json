@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "metrics": {
+    "coldInitializationNS": 966377584,
+    "peakResidentBytes": 869433344,
+    "packagedBytes": 119365573,
+    "cancellationDrainNS": 14415667,
+    "warm256NS": 3454250,
+    "native256NS": 3180333,
+    "warm1024NS": 13388584,
+    "native1024NS": 12250833,
+    "warm4096NS": 125847375,
+    "native4096NS": 118172042
+  },
+  "packaging": {
+    "unsignedArchive": true,
+    "sandboxOutsideWriteDenied": true,
+    "missingModelRefused": true,
+    "packagedBytes": 119365573
+  },
+  "performance": {
+    "cancellation": {
+      "callsAfterCancellation": 0,
+      "cancellationDrainNS": 14415667,
+      "nativeCallInterruptible": false,
+      "uncancelledControlCalls": 2
+    },
+    "peakResidentBytes": 869384192,
+    "windows": [
+      {
+        "iterations": 30,
+        "maxNS": 3454250,
+        "nativeCallMaxNS": 3180333,
+        "p50NS": 3260834,
+        "p95NS": 3386166,
+        "utf16": 256,
+        "warmups": 5
+      },
+      {
+        "iterations": 30,
+        "maxNS": 13388584,
+        "nativeCallMaxNS": 12250833,
+        "p50NS": 13222834,
+        "p95NS": 13367042,
+        "utf16": 1024,
+        "warmups": 5
+      },
+      {
+        "iterations": 30,
+        "maxNS": 125847375,
+        "nativeCallMaxNS": 118172042,
+        "p50NS": 56439791,
+        "p95NS": 118649833,
+        "utf16": 4096,
+        "warmups": 5
+      }
+    ]
+  },
+  "coldInitializationsNS": [
+    966006334,
+    966377584,
+    965021500
+  ],
+  "probeSourceSHA256": "5778a4279c1617883345c907b1ba322c30a52d23ae7fc9adc707d5242b9041f8",
+  "manifestSHA256": "9cd23a44cffcc0ecdd2174c7ddd00d02b968dbbbf2fd6da4613e608a91b6c479",
+  "host": {
+    "hardware": "Mac14,6",
+    "memoryBytes": "34359738368",
+    "cpu": "Apple M2 Max",
+    "os": "27.0.1",
+    "swift": "Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)\nTarget: arm64-apple-macosx28.0",
+    "xcode": "Xcode 26.6\nBuild version 17F113"
+  }
+}
