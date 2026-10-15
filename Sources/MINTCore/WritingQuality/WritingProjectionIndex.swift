@@ -23,18 +23,37 @@ struct WritingAnalysisWindows: Sequence, Sendable {
 
 /// Immutable nodes share unchanged subtrees with already-issued window sequences.
 private final class WritingProjectionNode: Sendable {
-    let block: WritingProseBlock
+    private final class Record: Sendable {
+        let block: WritingProseBlock
+        init(_ block: WritingProseBlock) { self.block = block }
+    }
+    private let record: Record
+    var block: WritingProseBlock { record.block }
     let priority: UInt64
     let left: WritingProjectionNode?, right: WritingProjectionNode?
     let count: Int, sourceLength: Int, proseLength: Int
-    init(_ block: WritingProseBlock, priority: UInt64, left: WritingProjectionNode? = nil, right: WritingProjectionNode? = nil) {
-        self.block = block; self.priority = priority; self.left = left; self.right = right
+    convenience init(_ block: WritingProseBlock, priority: UInt64, left: WritingProjectionNode? = nil, right: WritingProjectionNode? = nil) {
+        self.init(record: Record(block), priority: priority, left: left, right: right)
+    }
+    private init(record: Record, priority: UInt64, left: WritingProjectionNode?, right: WritingProjectionNode?) {
+        self.record = record; self.priority = priority; self.left = left; self.right = right
+        let block = record.block
         count = 1 + (left?.count ?? 0) + (right?.count ?? 0)
         sourceLength = block.sourceLength + (left?.sourceLength ?? 0) + (right?.sourceLength ?? 0)
         proseLength = block.proseLength + (left?.proseLength ?? 0) + (right?.proseLength ?? 0)
     }
     func copy(left: WritingProjectionNode?, right: WritingProjectionNode?) -> WritingProjectionNode {
-        WritingProjectionNode(block, priority: priority, left: left, right: right)
+        WritingProjectionNode(record: record, priority: priority, left: left, right: right)
+    }
+    func sharesRecord(with other: WritingProjectionNode) -> Bool { record === other.record }
+
+    static func sourceBlocks(_ node: WritingProjectionNode?, range: NSRange, base: Int = 0,
+                             into result: inout [WritingProseBlock]) {
+        guard let node, base < range.upperBound, base + node.sourceLength > range.location else { return }
+        let location = base + (node.left?.sourceLength ?? 0)
+        sourceBlocks(node.left, range: range, base: base, into: &result)
+        if location < range.upperBound && location + node.block.sourceLength > range.location { result.append(node.block) }
+        sourceBlocks(node.right, range: range, base: location + node.block.sourceLength, into: &result)
     }
     static func collect(_ node: WritingProjectionNode?, range: NSRange, source: Int = 0, prose: Int = 0,
                         body: (WritingProseBlock, Int, Int) -> Void) {
@@ -69,8 +88,51 @@ final class WritingProjectionIndex {
     private var root: WritingProjectionNode?
     private var random: UInt64 = 0x6d696e742d70726f
     private(set) var resetCount = 0, lastMutationSourceUTF16 = 0, lastMutationVisits = 0
+    private(set) var lastDiffVisits = 0
     var sourceLength: Int { root?.sourceLength ?? 0 }
     var proseLength: Int { root?.proseLength ?? 0 }
+
+    func snapshot() -> WritingProjectionIndex {
+        let copy = WritingProjectionIndex()
+        copy.root = root; copy.random = random; copy.resetCount = resetCount
+        return copy
+    }
+    /// Exact record identity skips shared subtrees. No text comparison/hash is needed.
+    func patch(from previous: WritingProjectionIndex) -> WritingProjectionPatch? {
+        lastDiffVisits = 0
+        guard root !== previous.root else { return nil }
+        let prefix = commonSourceLength(root, previous.root, reverse: false)
+        if prefix == sourceLength && prefix == previous.sourceLength { return nil }
+        let suffix = commonSourceLength(root, previous.root, reverse: true)
+        var replacement: [WritingProseBlock] = []
+        WritingProjectionNode.sourceBlocks(root, range: NSRange(location: prefix, length: sourceLength - prefix - suffix), into: &replacement)
+        return WritingProjectionPatch(oldSourceRange: .init(location: prefix, length: previous.sourceLength - prefix - suffix), replacement: replacement)
+    }
+    private func commonSourceLength(_ first: WritingProjectionNode?, _ second: WritingProjectionNode?, reverse: Bool) -> Int {
+        typealias Item = (node: WritingProjectionNode, record: Bool)
+        var left: [Item] = first.map { [($0, false)] } ?? []
+        var right: [Item] = second.map { [($0, false)] } ?? []
+        var length = 0
+        func expand(_ stack: inout [Item]) {
+            let item = stack.removeLast(), node = item.node
+            if let trailing = reverse ? node.left : node.right { stack.append((trailing, false)) }
+            stack.append((node, true))
+            if let leading = reverse ? node.right : node.left { stack.append((leading, false)) }
+        }
+        while let a = left.last, let b = right.last {
+            lastDiffVisits += 1
+            if !a.record && !b.record && a.node === b.node {
+                length += a.node.sourceLength; left.removeLast(); right.removeLast()
+            } else if a.record && b.record {
+                guard a.node.sharesRecord(with: b.node) else { break }
+                length += a.node.block.sourceLength; left.removeLast(); right.removeLast()
+            } else {
+                if !a.record { expand(&left) }
+                if !b.record { expand(&right) }
+            }
+        }
+        return length
+    }
 
     func reset(source: String) {
         root = nil; resetCount += 1
