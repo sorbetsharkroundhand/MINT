@@ -10,6 +10,7 @@
 # 사용법:  scripts/build-mint-app.sh   → build/MINT.app
 set -eu
 cd "$(dirname "$0")/.."
+scripts/prepare-korean-backend.sh
 
 # metallib은 mlx-swift 리비전에 묶여 있다 — 낡은 캐시 복사를 막으려면 항상 경유.
 scripts/prepare-metallib.sh
@@ -29,7 +30,7 @@ cp "$REL/mlx.metallib" "$APP/Contents/MacOS/mlx.metallib"
 cp Distribution/Resources/PrivacyInfo.xcprivacy "$APP/Contents/Resources/PrivacyInfo.xcprivacy"
 python3 scripts/validate-mint-privacy.py "$APP"
 # Copy the distributed SwiftPM resources; test and benchmark bundles stay outside the app.
-for BUNDLE in MINT_MINTCore SwiftMath_SwiftMath swift-transformers_Hub swift-crypto_Crypto; do
+for BUNDLE in MINT_MINTCore MINT_MINTKoreanBackend SwiftMath_SwiftMath swift-transformers_Hub swift-crypto_Crypto; do
     cp -R "$REL/$BUNDLE.bundle" "$APP/Contents/Resources/"
 done
 python3 scripts/mint-notices.py --checkouts .build/checkouts \

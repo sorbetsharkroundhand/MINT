@@ -41,6 +41,7 @@ jobs:
 
       - name: Resolve locked dependencies
         run: |
+          scripts/prepare-korean-backend.sh
           swift package resolve
           git diff --exit-code -- Package.resolved
 

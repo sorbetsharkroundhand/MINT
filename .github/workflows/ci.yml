@@ -31,7 +31,9 @@ jobs:
           xcodebuild -version
 
       - name: Resolve dependencies
+        # Local binary/resource inputs must exist before SwiftPM loads the manifest.
         run: |
+          scripts/prepare-korean-backend.sh
           swift package resolve
           git diff --exit-code -- Package.resolved
 
@@ -39,7 +41,9 @@ jobs:
         run: python3 scripts/test-mint-support.py
 
       - name: Verify Korean backend artifact and budget rejection paths
-        run: python3 scripts/test-korean-backend-validation.py
+        run: |
+          python3 scripts/test-korean-backend-validation.py
+          python3 scripts/test-korean-backend-preparation.py
 
       - name: Build MINT
         run: swift build --product MINT
@@ -142,6 +146,7 @@ jobs:
 
       - name: Resolve locked dependencies
         run: |
+          scripts/prepare-korean-backend.sh
           swift package resolve
           git diff --exit-code -- Package.resolved
 

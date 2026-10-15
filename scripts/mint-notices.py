@@ -60,7 +60,9 @@ def collect(repo, checkouts):
     manifest = {"schemaVersion": 1, "packages": [], "components": [], "models": [],
                 "resourceBundles": inventory.get("resourceBundles", [])}
     text = ["MINT third-party notices\n\nResolved dependency sources, vendored code and bundled resources.\n"
-            "Build-time dependencies are included conservatively. No model weights are included.\n"]
+            "Build-time dependencies are included conservatively. No shipping LLM weights are included.\n"]
+    if any(row.get("kind") == "nlp-model" for row in inventory["components"]):
+        text.append("Bundled offline Korean NLP resources and their attribution are inventoried below.\n")
 
     def read_notices(row, checkout):
         records = row.get("notices")
@@ -239,7 +241,7 @@ def main():
         if args.validate_app:
             validate_app(args.validate_app, manifest, text)
         print(f"Notices verified: {len(manifest['packages'])} dependencies, "
-              f"{len(manifest['components'])} vendored/resource components, no bundled models")
+              f"{len(manifest['components'])} vendored/resource components, no bundled LLM weights")
     except (NoticeError, OSError, ValueError, KeyError, TypeError) as error:
         parser.exit(1, f"Notice validation failed: {error}\n")
 
