@@ -1,0 +1,253 @@
+[
+  {
+    "id": "typo",
+    "text": "그 일은 어제 됬다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 8,
+        "length": 2
+      }
+    ]
+  },
+  {
+    "id": "spacing",
+    "text": "나는 할수 있다.",
+    "expected": [
+      {
+        "original": "할수 있다",
+        "replacement": "할 수 있다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "multiple",
+    "text": "그 일은 어제 됬다. 나는 할수 있다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 8,
+        "length": 2
+      },
+      {
+        "original": "할수 있다",
+        "replacement": "할 수 있다",
+        "kind": "spacing",
+        "location": 15,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "mixed",
+    "text": "🙂 English: 그 일은 어제 됬다. I can do it.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 20,
+        "length": 2
+      }
+    ]
+  },
+  {
+    "id": "nfd-typo",
+    "text": "🙂 그 일은 어제 됬다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 18,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "nfd-spacing",
+    "text": "🙂 나는 할수 있다.",
+    "expected": [
+      {
+        "original": "할수 있다",
+        "replacement": "할 수 있다",
+        "kind": "spacing",
+        "location": 9,
+        "length": 11
+      }
+    ]
+  },
+  {
+    "id": "already-correct",
+    "text": "그 일은 어제 됐다. 나는 할 수 있다.",
+    "expected": []
+  },
+  {
+    "id": "ambiguous-fiction",
+    "text": "그의 장례희망에는 흰 꽃이 적혀 있었다.",
+    "expected": []
+  },
+  {
+    "id": "proper-name",
+    "text": "라온이가 말했다.",
+    "expected": []
+  },
+  {
+    "id": "dialect",
+    "text": "\"혼저 옵서예.\" 라온이가 말했다.",
+    "expected": []
+  },
+  {
+    "id": "literary",
+    "text": "그는 달빛을 즈려밟고 갔다.",
+    "expected": []
+  },
+  {
+    "id": "homograph",
+    "text": "그 수는 내가 세는 수와 다르다.",
+    "expected": []
+  },
+  {
+    "id": "quoted-name",
+    "text": "“됬다”는 그의 별명이다.",
+    "expected": []
+  },
+  {
+    "id": "dialogue-typo",
+    "text": "“그 일은 어제 됬다.” 그가 말했다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 9,
+        "length": 2
+      }
+    ]
+  },
+  {
+    "id": "spacing-eat",
+    "text": "나는 먹을수 있다.",
+    "expected": [
+      {
+        "original": "먹을수 있다",
+        "replacement": "먹을 수 있다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 6
+      }
+    ]
+  },
+  {
+    "id": "spacing-go",
+    "text": "나는 갈수 있다.",
+    "expected": [
+      {
+        "original": "갈수 있다",
+        "replacement": "갈 수 있다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "spacing-adjective",
+    "text": "그 방법은 좋을수 있다.",
+    "expected": [
+      {
+        "original": "좋을수 있다",
+        "replacement": "좋을 수 있다",
+        "kind": "spacing",
+        "location": 6,
+        "length": 6
+      }
+    ]
+  },
+  {
+    "id": "spacing-negative",
+    "text": "나는 할수 없다.",
+    "expected": [
+      {
+        "original": "할수 없다",
+        "replacement": "할 수 없다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "spacing-both",
+    "text": "나는 할수있다.",
+    "expected": [
+      {
+        "original": "할수있다",
+        "replacement": "할 수 있다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 4
+      }
+    ]
+  },
+  {
+    "id": "spacing-predicate",
+    "text": "나는 할 수있다.",
+    "expected": [
+      {
+        "original": "할 수있다",
+        "replacement": "할 수 있다",
+        "kind": "spacing",
+        "location": 3,
+        "length": 5
+      }
+    ]
+  },
+  {
+    "id": "duplicate-typo",
+    "text": "그 일은 어제 됬다. 그 일은 어제 됬다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 8,
+        "length": 2
+      },
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 20,
+        "length": 2
+      }
+    ]
+  },
+  {
+    "id": "nfd-duplicate-typo",
+    "text": "🙂 그 일은 어제 됬다. 그 일은 어제 됬다.",
+    "expected": [
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 18,
+        "length": 5
+      },
+      {
+        "original": "됬다",
+        "replacement": "됐다",
+        "kind": "spelling",
+        "location": 40,
+        "length": 5
+      }
+    ]
+  }
+]
