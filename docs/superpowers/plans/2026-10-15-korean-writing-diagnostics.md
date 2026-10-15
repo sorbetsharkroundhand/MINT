@@ -222,7 +222,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** `KoreanRuleSession(profile: WritingStyleProfile)`; `consume(_ analysis: KoreanAnalysis, proseOffset: Int, final: Bool) -> [WritingDiagnostic]`; `reset()`. Session composes correctness/repetition/flow, belongs to one request/report, and returns ranges relative to the entire exact request text. Add `KoreanDiagnosticsProvider.analyzeChunks(_ request: WritingDiagnosticsRequest, emit: @escaping @Sendable (KoreanDiagnosticsChunk) async throws -> Void) async throws`. `KoreanDiagnosticsChunk` contains diagnostics, assessed prose range and total prose UTF-16 length. Existing `analyze(_:)` collects this pipeline; `.document` internally splits using Task 3's splitter, while `.local` is already bounded. Stable new IDs: `ko.style.redundant-causality`, `ko.style.connective-chain`, `ko.style.repeated-sentence-start`, `ko.style.sentence-length`, `ko.style.sentence-rhythm`.
 
-- [ ] **Step 1: Write failing `testCausalTransitionChainStartAndLengthBoundaries`, `testChunkBoundaryDoesNotChangeReport`, `testSessionResetCannotLeakQuoteOrPatternState`.** Assert:
+- [x] **Step 1: Write failing `testCausalTransitionChainStartAndLengthBoundaries`, `testChunkBoundaryDoesNotChangeReport`, `testSessionResetCannotLeakQuoteOrPatternState`.** Assert:
 
   ```swift
   XCTAssertEqual(chainFindingCountsForThreeAndFourClauses, [0, 1])
@@ -234,10 +234,10 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   Put the causal ending/`그래서`, repeated starts and rhythm sequence across every relevant chunk boundary, including a long sentence crossing 4,096 units. Validate rhetorical/dialogue negatives and reason/evidence for each rule. Single-pass reference is a pure-rule test, not an oversized native call.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanSentenceRulesTests`; expect missing flow/session implementation.
-- [ ] **Step 3: Implement bounded streaming rule state.** Carry at most the threshold's recent occurrence records, first two lexical forms, three sentence-pattern summaries, current clause count/range and quote state; store digests/ranges instead of accumulating sentence text. Overlap ownership emits each occurrence once. Reset on cancellation/profile/document revision. Flow findings are suggestions; length/rhythm aggregate as info. Reject context-free causal guesses.
-- [ ] **Step 4: Run** the suite and all Korean rule suites; expect boundary-independent output and bounded retained state on a 300k single paragraph.
-- [ ] **Step 5: Commit** `git commit -m "feat: analyze Korean sentence flow across bounded chunks"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanSentenceRulesTests`; expect missing flow/session implementation.
+- [x] **Step 3: Implement bounded streaming rule state.** Carry at most the threshold's recent occurrence records, first two lexical forms, three sentence-pattern summaries, current clause count/range and quote state; store digests/ranges instead of accumulating sentence text. Overlap ownership emits each occurrence once. Reset on cancellation/profile/document revision. Flow findings are suggestions; length/rhythm aggregate as info. Reject context-free causal guesses.
+- [x] **Step 4: Run** the suite and all Korean rule suites; expect boundary-independent output and bounded retained state on a 300k single paragraph.
+- [x] **Step 5: Commit** `git commit -m "feat: analyze Korean sentence flow across bounded chunks"`.
 
 ### Task 9: Schedule incremental work with health and publication ownership
 
