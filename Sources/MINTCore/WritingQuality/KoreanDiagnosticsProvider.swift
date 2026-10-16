@@ -1,11 +1,18 @@
 import Foundation
+import MINTKoreanBackend
 
-actor KoreanDiagnosticsProvider: WritingDiagnosticsProvider {
+actor KoreanDiagnosticsProvider: WritingDiagnosticsProvider, WritingDiagnosticsFailureClassifying {
     nonisolated let id = KoreanCorrectnessRules.providerID
     nonisolated static let ruleRevision = 3
     private let morphology: KoreanMorphology
 
     init(morphology: KoreanMorphology) { self.morphology = morphology }
+
+    nonisolated func failureOutcome(_ error: any Error) -> WritingProviderOutcome {
+        if let native = error as? KoreanNativeError, native == .unavailable { return .init(providerID: id, status: .unavailable, reason: .resource) }
+        if let morphology = error as? KoreanMorphologyError, case .unsupportedInput = morphology { return .init(providerID: id, status: .unavailable, reason: .unsupportedInput) }
+        return .init(providerID: id, status: .failed, reason: .provider)
+    }
 
     func analyze(_ request: WritingDiagnosticsRequest) async throws -> [WritingDiagnostic] {
         let collector = KoreanDiagnosticsCollector()

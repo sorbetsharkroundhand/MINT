@@ -213,6 +213,20 @@ final class WritingProjectionIndex {
             }
         }
     }
+    func sourceText(in range: WritingDiagnosticRange, maximum: Int = 8192) -> String? {
+        guard WritingRangeMapping.valid(range.nsRange, in: sourceLength), range.length <= maximum else { return nil }
+        var blocks: [WritingProseBlock] = []
+        WritingProjectionNode.sourceBlocks(root, range: range.nsRange, into: &blocks)
+        guard let first = sourcePiece(containing: range.location) else { return range.length == 0 ? "" : nil }
+        var offset = first.range.location, text = ""
+        for block in blocks {
+            let overlap = NSIntersectionRange(NSRange(location: offset, length: block.sourceLength), range.nsRange)
+            if overlap.length > 0 { text += (block.sourceText as NSString).substring(with: NSRange(location: overlap.location - offset, length: overlap.length)) }
+            offset += block.sourceLength
+        }
+        return text.utf16.count == range.length ? text : nil
+    }
+
     func sourceRanges(for range: WritingDiagnosticRange, in window: WritingAnalysisWindow) -> [WritingDiagnosticRange]? {
         WritingRangeMapping.map(range.nsRange, length: window.text.utf16.count, segments: window.segments)
     }
