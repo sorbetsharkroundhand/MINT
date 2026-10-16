@@ -14,6 +14,8 @@ public final class WritingDiagnosticsRuntime: ObservableObject {
     private var sharedBackgroundPaused = false
     private var terminated = false
     private var observations = Set<AnyCancellable>()
+    private var workspaceBinding: WritingDiagnosticsWorkspaceBinding?
+    @Published private(set) var actionMessage: String?
 
     public convenience init() { self.init(observeEnergy: true) }
     convenience init(observeEnergy: Bool) {
@@ -37,6 +39,37 @@ public final class WritingDiagnosticsRuntime: ObservableObject {
         }
     }
     func configure(currentSnapshot: @escaping @MainActor () -> ProjectDocumentSnapshot?) { reader.provider = currentSnapshot }
+    func connect(session: ProjectSession, editorBridge: ProjectEditorBridge, livingMargin: LivingMarginModel) {
+        guard !terminated else { return }
+        configure(currentSnapshot: { [weak session] in session?.selectedDocumentSnapshot })
+        if let workspaceBinding, workspaceBinding.matches(session: session, bridge: editorBridge, margin: livingMargin) {
+            workspaceBinding.refresh(); return
+        }
+        workspaceBinding?.stop()
+        let binding = WritingDiagnosticsWorkspaceBinding(controller: controller, session: session, bridge: editorBridge, margin: livingMargin)
+        workspaceBinding = binding; binding.connect()
+    }
+    func waitForPresentation() async { await workspaceBinding?.waitForPublication() }
+    @discardableResult
+    func performMarginAction(insightID: String, action: MarginAction) throws -> WritingCorrectionResult? {
+        guard let workspaceBinding else { throw WritingDiagnosticsActionError.stale }
+        do {
+            let result = try workspaceBinding.perform(insightID: insightID, action: action)
+            if case .some(.refused(let reason)) = result {
+                switch reason {
+                case .stale: actionMessage = "원문이나 설정이 바뀌었습니다. 새 제안을 확인해 주세요."
+                case .composing: actionMessage = "입력을 마친 뒤 다시 선택해 주세요."
+                case .unmapped, .ambiguous: actionMessage = "이 위치를 정확히 확인할 수 없어요. 원문을 확인해 주세요."
+                case .formatting: actionMessage = "서식을 보존하며 바꿀 수 없는 제안이에요. 원문에서 직접 고쳐 주세요."
+                }
+            } else { actionMessage = nil }
+            return result
+        } catch {
+            actionMessage = "원문이나 설정이 바뀌었습니다. 새 제안을 확인해 주세요."
+            throw error
+        }
+    }
+    func retry() { actionMessage = nil; controller.retry() }
     func setForegroundBusy(_ busy: Bool) { guard !terminated else { return }; controller.setForegroundBusy(busy) }
     func setEnergyPolicy(thermal: ProcessInfo.ThermalState, lowPower: Bool) {
         guard !terminated else { return }; controller.setEnergyPolicy(thermal: thermal, lowPower: lowPower)
@@ -79,11 +112,12 @@ public final class WritingDiagnosticsRuntime: ObservableObject {
         await releaseTask?.value
     }
     func prepareForProjectTransition() {
+        workspaceBinding?.resetPublication(); actionMessage = nil
         controller.clearContext(); worker.cancelPending()
     }
     public func stop() {
         guard !terminated else { return }
-        terminated = true; observations.removeAll()
+        terminated = true; workspaceBinding?.stop(); workspaceBinding = nil; observations.removeAll()
         controller.clearContext(); worker.cancelPending(); reader.provider = nil
     }
     public func prepareForTermination() async {

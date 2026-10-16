@@ -139,6 +139,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
+        textView.writingDocumentIdentity = documentIdentity
         textView.setAccessibilityIdentifier("mint.editor")
         // 편집 범위를 알아야 수식·이미지 마커 검사를 증분으로 할 수 있다
         // (전체 문자열 검색은 30만 자에서 16.9ms — docs/editor-perf.md).
@@ -220,6 +221,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? BlockTextView else { return }
+        textView.writingDocumentIdentity = documentIdentity
         if !isEditable, textView.hasMarkedText() {
             textView.unmarkText()
             textView.didChangeText()
@@ -400,6 +402,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         }
 
         func attach(to textView: BlockTextView) {
+            textView.writingDocumentIdentity = parent.documentIdentity
             callbackEpoch &+= 1
             let attachedEpoch = callbackEpoch
             let attachedIdentity = parent.documentIdentity
@@ -808,6 +811,12 @@ extension NSAttributedString.Key {
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
     let writingProjectionCapture = WritingEditorProjectionCapture()
+    /// Native binding ownership is independent of the session's current runtime generation.
+    var writingDocumentIdentity: EditorDocumentIdentity? {
+        didSet {
+            if oldValue != writingDocumentIdentity { writingProjectionCapture.sourceDidLoad?() }
+        }
+    }
     let writingDecorations = WritingDiagnosticsDecorationLayer()
     var usesProjectAssets = false
     var projectAssetCatalog: ProjectAssetCatalog? {

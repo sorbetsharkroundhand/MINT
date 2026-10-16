@@ -90,7 +90,7 @@ public struct ContentView: View {
                     completion: completion,
                     livingMargin: livingMargin,
                     editorBridge: projectEditorBridge,
-                    positionStore: positionStore)
+                    positionStore: positionStore, writingDiagnostics: writingDiagnostics)
             case .error:
                 VStack(spacing: 12) {
                     Text("프로젝트를 열지 못했습니다")
@@ -125,7 +125,8 @@ public struct ContentView: View {
                 if let store = legacyWorkspace.legacyStore {
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
                 } else {
-                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer,
+                        writingDiagnostics: writingDiagnostics, editorBridge: projectEditorBridge, livingMargin: livingMargin)
                 }
                 indexer.caretProvider = { [weak completion] in completion?.lastCaretLocation }
                 legacyWorkspace.didEnterLegacy = { [weak completion, weak indexer, weak writingDiagnostics] store in
@@ -135,10 +136,11 @@ public struct ContentView: View {
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
                 }
                 legacyWorkspace.willFlushLegacy = Self.commitMarkedText
-                legacyWorkspace.willLeaveLegacy = { [weak projectSession, weak completion, weak indexer, weak writingDiagnostics] in
+                legacyWorkspace.willLeaveLegacy = { [weak projectSession, weak completion, weak indexer, weak writingDiagnostics, weak projectEditorBridge, weak livingMargin] in
                     guard let projectSession, let completion, let indexer else { return }
                     completion.prepareForProjectTransition()
-                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer,
+                        writingDiagnostics: writingDiagnostics, editorBridge: projectEditorBridge, livingMargin: livingMargin)
                 }
                 projectSession.willTransition = { [weak projectEditorBridge, weak completion, weak indexer, weak writingDiagnostics] in
                     if let textView = projectEditorBridge?.editor {
@@ -153,9 +155,8 @@ public struct ContentView: View {
                     completion?.prepareForProjectTransition()
                     indexer?.prepareForProjectTransition()
                 }
-                projectSession.documentDidChange = { [weak completion, weak indexer, weak projectEditorBridge, weak writingDiagnostics] snapshot in
+                projectSession.documentDidChange = { [weak completion, weak indexer, weak projectEditorBridge] snapshot in
                     projectEditorBridge?.noteSnapshot(snapshot)
-                    writingDiagnostics?.controller.noteSnapshot(snapshot)
                     completion?.noteDocumentChange(snapshot)
                     indexer?.noteDocumentChange(snapshot)
                 }
@@ -177,8 +178,12 @@ public struct ContentView: View {
 
     static func connectProjectConsumers(
         session: ProjectSession, completion: CompletionController, indexer: BackgroundIndexer,
-        writingDiagnostics: WritingDiagnosticsRuntime? = nil
+        writingDiagnostics: WritingDiagnosticsRuntime? = nil, editorBridge: ProjectEditorBridge? = nil,
+        livingMargin: LivingMarginModel? = nil
     ) {
+        if let writingDiagnostics, let editorBridge, let livingMargin {
+            writingDiagnostics.connect(session: session, editorBridge: editorBridge, livingMargin: livingMargin)
+        }
         writingDiagnostics?.configure(currentSnapshot: { [weak session] in session?.selectedDocumentSnapshot })
         completion.documentContextProvider = nil
         completion.projectDocumentProvider = { [weak session] in session?.selectedDocumentSnapshot }
@@ -236,37 +241,82 @@ final class ProjectEditorBridge {
     weak var editor: BlockTextView?
     private var currentSnapshot: (() -> ProjectDocumentSnapshot?)?
     private(set) var pendingSnapshot: ProjectDocumentSnapshot?
+    private var acceptedIdentity: ProjectRuntimeIdentity?
+    private var acceptedRevision: UInt64?
     var snapshotDidChange: ((ProjectDocumentSnapshot) -> Void)?
     var commitDidChange: ((WritingEditorCommit, ProjectDocumentSnapshot) -> Void)?
     var compositionDidChange: ((WritingDiagnosticRange?) -> Void)?
+    var editorDidChange: ((BlockTextView?) -> Void)?
+    var nativeLoadDidChange: ((ProjectDocumentSnapshot) -> Void)?
 
     func connect(_ editor: BlockTextView, currentSnapshot: @escaping () -> ProjectDocumentSnapshot?) {
-        if let previous = self.editor, previous !== editor { disconnect(previous) }
+        let changed = self.editor !== editor
+        if let previous = self.editor, changed { disconnect(previous) }
         self.editor = editor; self.currentSnapshot = currentSnapshot
-        editor.writingRuntimeIdentityProvider = { [weak self] in self?.currentSnapshot?()?.identity }
+        if changed { acceptedIdentity = nil; acceptedRevision = nil; editorDidChange?(editor) }
+        editor.writingProjectionCapture.sourceDidLoad = { [weak self] in self?.didLoadSource() }
         editor.writingCommitDidChange = { [weak self] in self?.receive($0) }
         editor.writingCompositionDidChange = { [weak self] in self?.compositionDidChange?($0) }
+        editor.writingRuntimeIdentityProvider = { [weak self] in self?.currentSnapshot?()?.identity }
         if let snapshot = currentSnapshot() { noteSnapshot(snapshot) }
     }
     func disconnect(_ editor: BlockTextView) {
         guard self.editor === editor else { return }
+        editor.writingProjectionCapture.sourceDidLoad = nil
         editor.writingRuntimeIdentityProvider = nil
         editor.writingCommitDidChange = nil; editor.writingCompositionDidChange = nil
         self.editor = nil; currentSnapshot = nil; pendingSnapshot = nil
+        acceptedIdentity = nil; acceptedRevision = nil; editorDidChange?(nil)
+    }
+    func replayPreparedAuthority(baseIdentity: ProjectRuntimeIdentity?) {
+        acceptedIdentity = baseIdentity; acceptedRevision = nil
+        if let snapshot = currentSnapshot?() { noteSnapshot(snapshot) }
+    }
+    private func didLoadSource() {
+        guard let snapshot = currentSnapshot?() else { return }
+        acceptedIdentity = nil; acceptedRevision = nil
+        pendingSnapshot = snapshot; snapshotDidChange?(snapshot)
+        nativeLoadDidChange?(snapshot)
+        // A queued native load can outlive its binding. Identical bodies do not prove ownership.
+        guard let editor, editor.writingDocumentIdentity == .project(snapshot.identity.key) else {
+            if editor?.writingDocumentIdentity != nil { editor?.writingProjectionCapture.rejectUnownedLoad() }
+            return
+        }
+        // Prove bytes only at load, outside ordinary edit handling.
+        guard let source = editor.writingProjectionCapture.loadedSource,
+              source.utf16.elementsEqual(snapshot.body.utf16) else {
+            editor.writingProjectionCapture.rejectUnownedLoad()
+            return
+        }
+        noteSnapshot(snapshot)
     }
     func noteSnapshot(_ snapshot: ProjectDocumentSnapshot) {
         guard currentSnapshot?()?.identity == snapshot.identity else { return }
         pendingSnapshot = snapshot
-        editor?.writingProjectionCapture.noteSnapshot(snapshot)
         snapshotDidChange?(snapshot)
+        editor?.writingProjectionCapture.noteSnapshot(snapshot)
+        adoptPreparedMap(snapshot)
+    }
+    private func adoptPreparedMap(_ snapshot: ProjectDocumentSnapshot) {
+        guard let editor, editor.writingDocumentIdentity == .project(snapshot.identity.key),
+              !editor.hasMarkedText(), editor.writingProjectionCapture.compositionDepth == 0,
+              editor.writingProjectionCapture.mappedIdentity == snapshot.identity,
+              editor.writingProjectionCapture.mappedRevision == editor.writingNativeRevision,
+              editor.writingProjectionCapture.nativeLookup != nil,
+              acceptedIdentity != snapshot.identity || acceptedRevision != editor.writingNativeRevision else { return }
+        let base = acceptedIdentity?.key == snapshot.identity.key ? acceptedIdentity! : snapshot.identity
+        let commit = WritingEditorCommit(baseIdentity: base, nativeRevision: editor.writingNativeRevision,
+            patch: .init(oldSourceRange: .init(location: 0, length: 0), replacement: []), markedRange: nil)
+        receive(commit)
     }
     func receive(_ commit: WritingEditorCommit) {
-        guard let editor, let snapshot = currentSnapshot?(),
-              snapshot.identity == pendingSnapshot?.identity,
+        guard let editor, let snapshot = currentSnapshot?(), snapshot.identity == pendingSnapshot?.identity,
+              editor.writingDocumentIdentity == .project(snapshot.identity.key),
               snapshot.identity.key == commit.baseIdentity.key,
               editor.writingProjectionCapture.mappedIdentity == snapshot.identity,
               editor.writingProjectionCapture.mappedRevision == commit.nativeRevision,
               editor.writingNativeRevision == commit.nativeRevision, !editor.hasMarkedText() else { return }
+        acceptedIdentity = snapshot.identity; acceptedRevision = commit.nativeRevision
         commitDidChange?(commit, snapshot)
     }
 }

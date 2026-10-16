@@ -30,9 +30,37 @@ final class WritingDiagnosticsActions {
     private let controller: WritingDiagnosticsController
     private let editor: () -> BlockTextView?
     private let currentSnapshot: () -> ProjectDocumentSnapshot?
+    private let session: ProjectSession?
     init(controller: WritingDiagnosticsController, editor: @escaping () -> BlockTextView?,
-         currentSnapshot: @escaping () -> ProjectDocumentSnapshot?) {
-        self.controller = controller; self.editor = editor; self.currentSnapshot = currentSnapshot
+         currentSnapshot: @escaping () -> ProjectDocumentSnapshot?, session: ProjectSession? = nil) {
+        self.controller = controller; self.editor = editor; self.currentSnapshot = currentSnapshot; self.session = session
+    }
+    @discardableResult
+    func perform(_ action: MarginAction, findingID: String) throws -> WritingCorrectionResult? {
+        guard let finding = controller.currentFinding(id: findingID), let snapshot = currentSnapshot(),
+              snapshot.identity == finding.stamp.runtime, editor()?.hasMarkedText() != true,
+              let binding = WritingDiagnosticsPresentation.bindings(for: finding).first(where: { $0.action == action }) else {
+            throw WritingDiagnosticsActionError.stale
+        }
+        if case .apply(let index) = binding.operation { return apply(findingID: findingID, alternativeIndex: index) }
+        guard let session, session.runtimeIdentity == snapshot.identity,
+              case .ready(var record) = WritingStyleRepository.read(snapshot) else { throw WritingDiagnosticsActionError.stale }
+        switch binding.operation {
+        case .apply: break
+        case .disableRule: record.profile.ignoredRuleIDs.insert(finding.diagnostic.ruleID)
+        case .learnWord(let word): record.profile.learnedWords.insert(word)
+        case .intentional:
+            guard let first = finding.sourceRanges.first, let last = finding.sourceRanges.last else { throw WritingDiagnosticsActionError.stale }
+            let range = WritingDiagnosticRange(location: first.location, length: last.location + last.length - first.location)
+            let occurrence = try WritingStyleRepository.captureIntentional(ruleID: finding.diagnostic.ruleID, range: range, in: snapshot)
+            guard occurrence.evidence.quote.utf16.elementsEqual(finding.evidence.quote.utf16) else { throw WritingDiagnosticsActionError.stale }
+            guard controller.rememberExplicitSourceRevision(occurrence.sourceRevision, stamp: finding.stamp) else {
+                throw WritingDiagnosticsActionError.stale
+            }
+            if !record.intentionalOccurrences.contains(occurrence) { record.intentionalOccurrences.append(occurrence) }
+        }
+        try WritingStyleRepository.update(record, in: session, identity: snapshot.identity)
+        return nil
     }
     func apply(findingID: String, alternativeIndex: Int) -> WritingCorrectionResult {
         func refuse(_ reason: WritingCorrectionRefusal) -> WritingCorrectionResult {
@@ -55,3 +83,5 @@ final class WritingDiagnosticsActions {
         return result
     }
 }
+
+enum WritingDiagnosticsActionError: Error { case stale }

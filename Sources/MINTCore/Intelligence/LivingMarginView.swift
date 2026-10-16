@@ -88,6 +88,7 @@ struct LivingMarginView: View {
     let theme: MintTheme
     var onJumpToEvidence: (EvidenceAnchor) -> Void
     var onAction: ((MarginInsight, MarginAction) -> Void)?
+    var supportsAction: ((MarginInsight) -> Bool)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -216,7 +217,7 @@ struct LivingMarginView: View {
     }
 
     private func customActions(_ insight: MarginInsight) -> [MarginAction] {
-        guard onAction != nil else { return [] }
+        guard onAction != nil, supportsAction?(insight) != false else { return [] }
         return insight.actions.filter { action in
             action.kind != .jumpToEvidence && action.kind != .dismiss
         }

@@ -27,6 +27,7 @@ final class WritingEditorProjectionCapture {
     private var collectionEpoch: UInt64 = 0
     var runtimeIdentity: (() -> ProjectRuntimeIdentity?)?
     var commitDidChange: ((WritingEditorCommit) -> Void)?
+    var sourceDidLoad: (() -> Void)?
     var compositionDidChange: ((WritingDiagnosticRange?) -> Void)?
     private(set) var revision: UInt64 = 0
     private(set) var resetCount = 0
@@ -60,6 +61,12 @@ final class WritingEditorProjectionCapture {
     var nativeRows = WritingNativeRowIndex()
     let sourceProjection = WritingProjectionIndex()
     var publishedProjection: WritingProjectionIndex?
+
+    func rejectUnownedLoad() {
+        knownIdentity = nil; mappedIdentity = nil; mappedRevision = nil; nativeLookup = nil
+        base = nil; boundIdentity = nil; boundRevision = nil; prepared = nil
+        projectionTask?.cancel(); projectionTask = nil; deferred.removeAll(); collectionEpoch &+= 1
+    }
 
     func didLoad(source: String) {
         projectionTask?.cancel(); projectionTask = nil; deferred.removeAll(); collectionEpoch &+= 1
@@ -625,6 +632,7 @@ extension BlockTextView {
         invalidateSerialCache()
         let canonical = serialize()
         writingProjectionCapture.finishInitialCollection(original: source, canonical: canonical, nativeLength: textStorage?.length ?? 0)
+        writingProjectionCapture.sourceDidLoad?()
     }
 
     func nativeRange(forSource range: WritingDiagnosticRange, revision: UInt64) -> WritingDiagnosticRange? {

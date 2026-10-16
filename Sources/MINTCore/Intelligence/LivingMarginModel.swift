@@ -117,11 +117,13 @@ public enum LivingMarginPolicy {
         var kind: MarginInsight.Kind
         var title: String
         var message: String
+        var writingOccurrence: EvidenceAnchor?
 
         init(insight: MarginInsight) {
             kind = insight.kind
             title = Self.normalized(insight.title)
             message = Self.normalized(insight.message)
+            writingOccurrence = insight.kind == .writingQuality ? insight.evidence.first : nil
         }
 
         private static func normalized(_ value: String) -> String {
@@ -138,17 +140,26 @@ public enum LivingMarginPolicy {
 public final class LivingMarginModel: ObservableObject {
     @Published public private(set) var insights: [MarginInsight]
     @Published public private(set) var dismissedIDs: Set<String>
+    private var otherProducerInsights: [MarginInsight]
+    private var writingQualityInsights: [MarginInsight] = []
 
     public init(
         insights: [MarginInsight] = [],
         dismissedIDs: Set<String> = []
     ) {
         self.insights = insights
+        self.otherProducerInsights = insights
         self.dismissedIDs = dismissedIDs
     }
 
     public func replace(with insights: [MarginInsight]) {
-        self.insights = insights
+        otherProducerInsights = insights
+        self.insights = otherProducerInsights + writingQualityInsights
+    }
+
+    public func replace(writingQuality insights: [MarginInsight]) {
+        writingQualityInsights = insights
+        self.insights = otherProducerInsights + writingQualityInsights
     }
 
     public func dismiss(_ insightID: String) {

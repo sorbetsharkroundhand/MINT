@@ -101,6 +101,11 @@ final class WritingDiagnosticsController: ObservableObject {
                 value.relatedSourceRanges = value.relatedSourceRanges.map { $0.map { Self.shift($0, after: old.upperBound, by: delta) } }
                 value.contextRange = Self.shift(value.contextRange, after: old.upperBound, by: delta)
                 if let hint = value.evidence.utf16Hint, hint >= old.upperBound { value.evidence.utf16Hint = hint + delta }
+                value.relatedEvidence = value.relatedEvidence.map { anchor in
+                    var shifted = anchor
+                    if let hint = anchor.utf16Hint, hint >= old.upperBound { shifted.utf16Hint = hint + delta }
+                    return shifted
+                }
                 return value
             }
             state.findings = kept
@@ -141,6 +146,37 @@ final class WritingDiagnosticsController: ObservableObject {
         invalidateWork(); state.findings.removeAll(); state.coverage.assessed.removeAll(); assessedWindows.removeAll()
         state.coverage.dirty = wholeSource; refreshState()
     }
+
+    var preparedStyle: (identity: ProjectRuntimeIdentity, load: WritingStyleLoad)? {
+        guard let snapshot else { return nil }
+        let load: WritingStyleLoad = profileReadable ? .ready(record)
+            : .unreadable(original: profileBytes ?? Data(), reason: "저장된 교정 설정을 읽을 수 없습니다. 원본은 보존됩니다.")
+        return (snapshot.identity, load)
+    }
+    func isCurrent(_ value: WritingDiagnosticsStamp) -> Bool {
+        hasVerifiedNative && !awaitingCommit && profileReadable && currentSnapshot()?.identity == boundIdentity
+            && value == stamp(digest: value.windowDigest)
+    }
+    /// Only an explicit owned source capture supplies this proof; edits still clear it.
+    func rememberExplicitSourceRevision(_ revision: String, stamp: WritingDiagnosticsStamp) -> Bool {
+        guard !revision.isEmpty, isCurrent(stamp) else { return false }
+        verifiedSourceRevision = revision
+        return true
+    }
+    var nativeAuthorityBase: ProjectRuntimeIdentity? { boundIdentity }
+    func isNativeBound(to identity: ProjectRuntimeIdentity, revision: UInt64) -> Bool {
+        hasVerifiedNative && !awaitingCommit && boundIdentity == identity && nativeRevision == revision
+    }
+    func suspendNativeAuthority() {
+        invalidateWork(); nativeRevision = 0; hasVerifiedNative = false; awaitingCommit = true; refreshState()
+    }
+    func noteNativeLoad(_ next: ProjectDocumentSnapshot) {
+        if boundIdentity != next.identity || snapshot?.identity != next.identity {
+            clearContext(); noteSnapshot(next)
+        }
+        suspendNativeAuthority()
+    }
+    func retry() { invalidateWork(); cache.clear(); schedule() }
 
     func currentFinding(id: String) -> WritingDiagnosticsFinding? {
         guard hasVerifiedNative, !awaitingCommit, profileReadable,
@@ -369,7 +405,7 @@ final class WritingDiagnosticsController: ObservableObject {
     private func publish(_ diagnostics: [WritingDiagnostic], window: WritingAnalysisWindow, stamp: WritingDiagnosticsStamp) -> Bool {
         let context = Self.context(of: window)
         var values = Dictionary(uniqueKeysWithValues: state.findings.map { ($0.id, $0) })
-        var cost = state.findings.reduce(assessedWindows.count * 256) { $0 + Self.findingCost($1) }, complete = true
+        var cost = state.findings.reduce(assessedWindows.count * 256) { $0 + WritingDiagnosticsCache.findingCost($1) }, complete = true
         for diagnostic in diagnostics {
             guard let primary = index.sourceRanges(for: diagnostic.range, in: window), let first = primary.first, let last = primary.last else { continue }
             let related = diagnostic.relatedRanges.compactMap { index.sourceRanges(for: $0, in: window) }
@@ -382,9 +418,11 @@ final class WritingDiagnosticsController: ObservableObject {
             if record.intentionalOccurrences.contains(where: { $0.suppresses(ruleID: diagnostic.ruleID, evidence: evidence, sourceRevision: verifiedSourceRevision) }) { continue }
             let discriminator = "\(diagnostic.providerID)|\(diagnostic.ruleID)|\(stamp.runtime.key.documentID.rawValue)|\(piece.block.id)|\(first.location - piece.range.location)|\(quote)"
             let id = SHA256.hash(data: Data(discriminator.utf8)).map { String(format: "%02x", $0) }.joined()
+            let relatedEvidence = related.compactMap { index.freeze().boundedEvidence(for: $0, documentID: stamp.runtime.key.documentID) }
+            guard relatedEvidence.count == related.count else { complete = false; continue }
             let finding = WritingDiagnosticsFinding(id: id, diagnostic: diagnostic, sourceRanges: primary, relatedSourceRanges: related,
-                evidence: evidence, contextRange: context, stamp: stamp)
-            let previousCost = values[id].map(Self.findingCost) ?? 0, added = Self.findingCost(finding)
+                evidence: evidence, relatedEvidence: relatedEvidence, contextRange: context, stamp: stamp)
+            let previousCost = values[id].map(WritingDiagnosticsCache.findingCost) ?? 0, added = WritingDiagnosticsCache.findingCost(finding)
             guard added <= findingBudgetBytes, cost - previousCost <= findingBudgetBytes - added else {
                 resultBudgetExhausted = true; complete = false; continue
             }
@@ -397,18 +435,11 @@ final class WritingDiagnosticsController: ObservableObject {
     }
     private func retainAssessment(_ context: WritingDiagnosticRange) -> Bool {
         if assessedWindows.contains(context) { return true }
-        let cost = state.findings.reduce((assessedWindows.count + 1) * 256) { $0 + Self.findingCost($1) }
+        let cost = state.findings.reduce((assessedWindows.count + 1) * 256) { $0 + WritingDiagnosticsCache.findingCost($1) }
         guard cost <= findingBudgetBytes else { resultBudgetExhausted = true; return false }
         assessedWindows.insert(context); return true
     }
 
-    private static func findingCost(_ finding: WritingDiagnosticsFinding) -> Int {
-        var cost = 512 + WritingDiagnosticsCache.diagnosticCost(finding.diagnostic)
-        cost += WritingDiagnosticsCache.stringCost(finding.evidence.quote)
-        cost += finding.sourceRanges.count * 32
-        for ranges in finding.relatedSourceRanges { cost += ranges.count * 32 }
-        return cost
-    }
     private func refreshState() {
         state.coverage.isComplete = !awaitingCommit && state.coverage.dirty.isEmpty && state.coverage.pending.isEmpty
             && state.coverage.unsupported.isEmpty && !resultBudgetExhausted && profileReadable && languageSupported

@@ -79,15 +79,15 @@ actor WritingReportMapper {
             let discriminator = "\(diagnostic.providerID)|\(diagnostic.ruleID)|\(identity.key.documentID.rawValue)|\(piece.block.id)|\(first.location - piece.range.location)|\(quote)"
             let id = SHA256.hash(data: Data(discriminator.utf8)).map { String(format: "%02x", $0) }.joined()
             guard seen.insert(id).inserted else { continue }
-            findingBytes += 512 + WritingDiagnosticsCache.diagnosticCost(diagnostic) + WritingDiagnosticsCache.stringCost(quote)
-            findingBytes += primary.count * 32
-            for ranges in related { findingBytes += ranges.count * 32 }
-            guard findingBytes <= findingBudgetBytes else { partial = true; break }
+            let relatedEvidence = related.compactMap { projection.boundedEvidence(for: $0, documentID: identity.key.documentID) }
+            guard relatedEvidence.count == related.count else { partial = true; continue }
             let stamp = WritingDiagnosticsStamp(runtime: identity, nativeRevision: 0, profileRevision: profileRevision,
                 providerRevision: providerRevision, ruleRevision: ruleRevision, windowDigest: sourceRevision)
-            let context = entire
-            findings.append(.init(id: id, diagnostic: diagnostic, sourceRanges: primary, relatedSourceRanges: related,
-                evidence: evidence, contextRange: context, stamp: stamp))
+            let finding = WritingDiagnosticsFinding(id: id, diagnostic: diagnostic, sourceRanges: primary, relatedSourceRanges: related,
+                evidence: evidence, relatedEvidence: relatedEvidence, contextRange: entire, stamp: stamp)
+            let cost = WritingDiagnosticsCache.findingCost(finding)
+            guard cost <= findingBudgetBytes, findingBytes <= findingBudgetBytes - cost else { partial = true; break }
+            findingBytes += cost; findings.append(finding)
         }
         return Update(findings: findings, completed: completed)
     }

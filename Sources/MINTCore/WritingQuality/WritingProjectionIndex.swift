@@ -294,6 +294,15 @@ struct WritingProjectionSnapshot: Sendable {
         return text.utf16.count == range.length ? text : nil
     }
 
+    func boundedEvidence(for ranges: [WritingDiagnosticRange], documentID: WritingDocumentID) -> EvidenceAnchor? {
+        guard let first = ranges.first, first.length > 0,
+              WritingRangeMapping.valid(first.nsRange, in: sourceLength), let piece = sourcePiece(containing: first.location) else { return nil }
+        let available = piece.range.length - (first.location - piece.range.location)
+        let range = WritingDiagnosticRange(location: first.location, length: min(first.length, available))
+        guard let quote = sourceText(in: range, maximum: 2048), !quote.isEmpty else { return nil }
+        return EvidenceAnchor(documentID: documentID, quote: quote, utf16Hint: first.location)
+    }
+
     /// Explicit-report evidence verification streams bounded pieces instead of joining a long quote.
     func matchesSource(_ expected: String, in range: WritingDiagnosticRange) -> Bool {
         guard WritingRangeMapping.valid(range.nsRange, in: sourceLength), expected.utf16.count == range.length else { return false }
