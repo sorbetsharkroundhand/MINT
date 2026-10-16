@@ -65,9 +65,10 @@ extension BlockTextView {
 
 extension MintLayoutManager {
     func drawWritingDiagnostics(forGlyphRange visible: NSRange, at origin: NSPoint, view: BlockTextView) {
-        guard let container = textContainers.first else { return }
+        guard Thread.isMainThread, let container = textContainers.first else { return }
         let characters = characterRange(forGlyphRange: visible, actualGlyphRange: nil)
-        let ranges = view.writingDecorationRanges(visible: characters)
+        // TextKit's drawing override is nonisolated; MINT paints editor chrome on main.
+        let ranges = MainActor.assumeIsolated { view.writingDecorationRanges(visible: characters) }
         guard !ranges.isEmpty else { return }
         NSGraphicsContext.saveGraphicsState()
         defer { NSGraphicsContext.restoreGraphicsState() }
