@@ -280,8 +280,11 @@ final class WritingDiagnosticsController: ObservableObject {
     }
 
     private static func findingCost(_ finding: WritingDiagnosticsFinding) -> Int {
-        512 + WritingDiagnosticsCache.diagnosticCost(finding.diagnostic) + WritingDiagnosticsCache.stringCost(finding.evidence.quote)
-            + finding.sourceRanges.count * 32 + finding.relatedSourceRanges.reduce(0) { $0 + $1.count * 32 }
+        var cost = 512 + WritingDiagnosticsCache.diagnosticCost(finding.diagnostic)
+        cost += WritingDiagnosticsCache.stringCost(finding.evidence.quote)
+        cost += finding.sourceRanges.count * 32
+        for ranges in finding.relatedSourceRanges { cost += ranges.count * 32 }
+        return cost
     }
     private func refreshState() {
         state.coverage.isComplete = !awaitingCommit && state.coverage.dirty.isEmpty && state.coverage.pending.isEmpty

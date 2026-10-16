@@ -31,8 +31,11 @@ final class WritingDiagnosticsCache {
     @discardableResult
     func insert(_ diagnostics: [WritingDiagnostic], text: String, for key: Key) -> Bool {
         if let old = entries.removeValue(forKey: key) { unlink(old); costBytes -= old.cost }
-        let cost = 256 + Self.stringCost(text) + Self.stringCost(key.digest) + Self.stringCost(key.languageTag)
-            + Self.stringCost(key.providerRevision) + diagnostics.reduce(0) { $0 + Self.diagnosticCost($1) }
+        var cost = 256 + Self.stringCost(text)
+        cost += Self.stringCost(key.digest)
+        cost += Self.stringCost(key.languageTag)
+        cost += Self.stringCost(key.providerRevision)
+        for diagnostic in diagnostics { cost += Self.diagnosticCost(diagnostic) }
         guard cost <= budgetBytes else { return false }
         while costBytes > budgetBytes - cost, let oldest = last {
             entries.removeValue(forKey: oldest.key); unlink(oldest); costBytes -= oldest.cost
@@ -44,9 +47,10 @@ final class WritingDiagnosticsCache {
     func clear() { entries.removeAll(); first = nil; last = nil; costBytes = 0 }
     static func stringCost(_ text: String) -> Int { 32 + text.utf8.count + text.utf16.count * 2 }
     static func diagnosticCost(_ value: WritingDiagnostic) -> Int {
-        256 + [value.id, value.ruleID, value.providerID, value.message, value.reason ?? "", value.languageTag]
-            .reduce(0) { $0 + stringCost($1) } + value.alternatives.reduce(0) { $0 + stringCost($1) }
-            + value.relatedRanges.count * 32
+        var cost = 256 + value.relatedRanges.count * 32
+        for text in [value.id, value.ruleID, value.providerID, value.message, value.reason ?? "", value.languageTag] { cost += stringCost(text) }
+        for text in value.alternatives { cost += stringCost(text) }
+        return cost
     }
     private func unlink(_ entry: Entry) {
         let previous = entry.previous, next = entry.next
