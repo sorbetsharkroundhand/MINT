@@ -291,7 +291,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** MainActor `BlockTextView.setWritingDiagnostics(_ findings: [WritingDiagnosticsFinding], revision: UInt64)`; `applyWritingCorrection(_ correction: WritingCorrection, identity: ProjectRuntimeIdentity) -> WritingCorrectionResult`. `WritingCorrection` carries finding/stamp, exact expected source/native text and replacement. Result is `.applied` or `.refused(reason: WritingCorrectionRefusal)`; refusal cases stale/composing/unmapped/ambiguous/formatting. `WritingDiagnosticsActions.apply(findingID: String, alternativeIndex: Int) -> WritingCorrectionResult` resolves only current controller values and current project/editor ownership.
 
-- [ ] **Step 1: Write failing `testCorrectionIsOneUndoableEdit`, `testRefuseStaleDuplicateFormattedAndMarkedTargets`, `testDecorationNeverMutatesStorageOrOtherLayers`.** Assert:
+- [x] **Step 1: Write failing `testCorrectionIsOneUndoableEdit`, `testRefuseStaleDuplicateFormattedAndMarkedTargets`, `testDecorationNeverMutatesStorageOrOtherLayers`.** Assert:
 
   ```swift
   XCTAssertEqual(afterCorrection, expectedMarkdown)
@@ -304,10 +304,10 @@ All new production types are internal unless required by the `MINT` executable's
   ```
 
   Include duplicate quotes after unrelated edits, emoji, mixed format runs inside a word, media/math neighbors, stale alternatives, project transitions, selection/search/current-line/Ghost coexistence, autosave event emission and focus/caret after success. Retain Ghost key behavior tests; diagnostic controls add no editor key interception.
-- [ ] **Step 2: Run** `swift test --disable-automatic-resolution --filter 'WritingDiagnosticsEditorTests|WritingDiagnosticsDecorationTests'`; expect missing native action/decoration methods.
-- [ ] **Step 3: Implement native presentation and mutation.** Store diagnostic marks outside NSTextStorage attributes; draw only visible mapped correctness runs through a separate layout drawing helper using existing palette contrast. Clear/withhold overlapping marks during composition; never force unmark. Validate current runtime/native/source map, exact substring and uniform eligible formatting immediately before mutation. Call existing `shouldChangeText`/native replacement/`didChangeText` path inside one undo group, preserving formatting and normal autosave serialization. Refuse and schedule recheck when any proof fails. Return focus to the same editor with caret after replacement; no document reload.
-- [ ] **Step 4: Run** the suites plus serialization/media/math, Ghost, project transition and recovery regressions. Measure visible decoration cost on pinned synthetic fixtures and record it separately from actual paint/IME acceptance. Expect unchanged author attributes and byte-exact unaffected source.
-- [ ] **Step 5: Commit** `git commit -m "feat: apply safe native writing corrections"`.
+- [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter 'WritingDiagnosticsEditorTests|WritingDiagnosticsDecorationTests'`; expect missing native action/decoration methods.
+- [x] **Step 3: Implement native presentation and mutation.** Store diagnostic marks outside NSTextStorage attributes; draw only visible mapped correctness runs through a separate layout drawing helper using existing palette contrast. Clear/withhold overlapping marks during composition; never force unmark. Validate current runtime/native/source map, exact substring and uniform eligible formatting immediately before mutation. Call existing `shouldChangeText`/native replacement/`didChangeText` path inside one undo group, preserving formatting and normal autosave serialization. Refuse and schedule recheck when any proof fails. Return focus to the same editor with caret after replacement; no document reload.
+- [x] **Step 4: Run** the suites plus serialization/media/math, Ghost, project transition and recovery regressions. Measure visible decoration cost on pinned synthetic fixtures and record it separately from actual paint/IME acceptance. Expect unchanged author attributes and byte-exact unaffected source.
+- [x] **Step 5: Commit** `git commit -m "feat: apply safe native writing corrections"`.
 
 ### Task 12: Connect Living Margin, project controls and production flow
 

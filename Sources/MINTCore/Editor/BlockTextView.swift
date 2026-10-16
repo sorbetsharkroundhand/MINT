@@ -808,6 +808,7 @@ extension NSAttributedString.Key {
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
     let writingProjectionCapture = WritingEditorProjectionCapture()
+    let writingDecorations = WritingDiagnosticsDecorationLayer()
     var usesProjectAssets = false
     var projectAssetCatalog: ProjectAssetCatalog? {
         didSet {
@@ -5668,6 +5669,7 @@ final class MintLayoutManager: NSLayoutManager {
         let theme = view.palette
         let ns = storage.string as NSString
         let shownChars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        drawWritingDiagnostics(forGlyphRange: glyphsToShow, at: origin, view: view)
 
         var location = shownChars.location
         while location < min(shownChars.upperBound + 1, ns.length + 1) {

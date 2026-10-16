@@ -640,3 +640,54 @@ extension BlockTextView {
         return WritingDiagnosticRange(mapped.range)
     }
 }
+
+
+extension BlockTextView {
+    /// No anchor search or document reload: the exact captured map is the only authority.
+    func applyWritingCorrection(_ correction: WritingCorrection, identity: ProjectRuntimeIdentity) -> WritingCorrectionResult {
+        if hasMarkedText() || writingProjectionCapture.compositionDepth > 0 { return .refused(reason: .composing) }
+        let finding = correction.finding
+        guard identity == writingRuntimeIdentityProvider?(), identity == finding.stamp.runtime,
+              finding.stamp.nativeRevision == writingNativeRevision else { return .refused(reason: .stale) }
+        guard finding.diagnostic.alternatives.contains(where: { $0.utf16.elementsEqual(correction.replacement.utf16) }) else {
+            return .refused(reason: .stale)
+        }
+        guard finding.sourceRanges.count == 1, let source = finding.sourceRanges.first,
+              finding.evidence.documentID == identity.key.documentID,
+              finding.evidence.utf16Hint == source.location else { return .refused(reason: .ambiguous) }
+        guard finding.evidence.quote.utf16.elementsEqual(correction.expectedSource.utf16),
+              correction.expectedSource.utf16.count == source.length else { return .refused(reason: .unmapped) }
+        guard correction.expectedSource.utf16.elementsEqual(correction.expectedNative.utf16),
+              correction.hasPlainReplacement else {
+            return .refused(reason: .formatting)
+        }
+        guard let native = nativeRange(forSource: source, revision: finding.stamp.nativeRevision), let storage = textStorage,
+              (storage.string as NSString).substring(with: native.nsRange).utf16.elementsEqual(correction.expectedNative.utf16) else {
+            return .refused(reason: .unmapped)
+        }
+        let attributes = storage.attributes(at: native.location, effectiveRange: nil)
+        guard attributes[.attachment] == nil, attributes[.mintMath] == nil, attributes[.mintCode] == nil, attributes[.link] == nil else {
+            return .refused(reason: .formatting)
+        }
+        var uniform = true
+        storage.enumerateAttributes(in: native.nsRange) { other, _, stop in
+            if !NSDictionary(dictionary: attributes).isEqual(NSDictionary(dictionary: other)) { uniform = false; stop.pointee = true }
+        }
+        guard uniform else { return .refused(reason: .formatting) }
+        guard window != nil, allowsUndo, let undo = undoManager else { return .refused(reason: .stale) }
+        guard undo.isUndoRegistrationEnabled else { return .refused(reason: .stale) }
+        breakUndoCoalescing()
+        undo.beginUndoGrouping()
+        guard shouldChangeText(in: native.nsRange, replacementString: correction.replacement) else {
+            undo.endUndoGrouping(); return .refused(reason: .unmapped)
+        }
+        storage.replaceCharacters(in: native.nsRange, with: NSAttributedString(string: correction.replacement, attributes: attributes))
+        setSelectedRange(NSRange(location: native.location + correction.replacement.utf16.count, length: 0))
+        didChangeText()
+        undo.setActionName("교정 적용")
+        undo.endUndoGrouping()
+        breakUndoCoalescing()
+        window?.makeFirstResponder(self)
+        return .applied
+    }
+}

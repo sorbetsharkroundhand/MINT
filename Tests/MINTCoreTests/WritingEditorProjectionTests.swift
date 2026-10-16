@@ -9,7 +9,7 @@ final class WritingEditorProjectionTests: XCTestCase {
         let harness = WritingEditorHarness("안전한 원고")
         defer { harness.close() }
         var range = WritingDiagnosticRange(location: 0, length: 1)
-        range.location = Int.min // Codable/public mutation can bypass the clamping initializer.
+        range.location = Int.min // Persisted or provider coordinates may be invalid.
         XCTAssertNil(harness.editor.nativeRange(forSource: range, revision: harness.editor.writingNativeRevision))
         range.location = 0; range.length = Int.max
         XCTAssertNil(harness.editor.nativeRange(forSource: range, revision: harness.editor.writingNativeRevision))
@@ -326,7 +326,7 @@ final class WritingEditorProjectionTests: XCTestCase {
 }
 
 @MainActor
-private final class WritingEditorHarness {
+final class WritingEditorHarness {
     let key = ProjectDocumentKey(projectID: WritingProjectID(), documentID: WritingDocumentID())
     let window = LegacyUndoWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 500),
                                   styleMask: [.titled], backing: .buffered, defer: false)
