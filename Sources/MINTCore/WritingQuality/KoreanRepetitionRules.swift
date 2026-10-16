@@ -87,8 +87,8 @@ enum KoreanRepetitionRules {
     private static func threshold(_ sensitivity: WritingQualitySensitivity) -> Int {
         switch sensitivity { case .off: Int.max; case .low: 4; case .standard: 3; case .high: 2 }
     }
-    private static func baseTag(_ tag: String) -> String { String(tag.prefix { $0 != "-" }) }
-    private static func particle(_ form: String, tag: String) -> String? {
+    static func baseTag(_ tag: String) -> String { String(tag.prefix { $0 != "-" }) }
+    static func particle(_ form: String, tag: String) -> String? {
         switch (tag, form) {
         case ("JX", "은"), ("JX", "는"): "topic"
         case ("JKS", "이"), ("JKS", "가"): "subject"
@@ -99,7 +99,7 @@ enum KoreanRepetitionRules {
         default: nil
         }
     }
-    private static func ending(_ form: String, tag: String) -> String? {
+    static func ending(_ form: String, tag: String) -> String? {
         if tag == "EF", ["다", "ᆫ다", "는다"].contains(form) { return nil }
         if tag == "EC", ["는데", "은데", "ᆫ데"].contains(form) { return "nde" }
         if tag == "EC", ["아서", "어서", "여서"].contains(form) { return "causal" }
@@ -108,7 +108,7 @@ enum KoreanRepetitionRules {
         if tag == "EC", ["며", "으며"].contains(form) { return "and-while" }
         return tag + ":" + form
     }
-    private static func compositeNde(at index: Int, tokens: [KoreanToken], source: NSString) -> NSRange? {
+    static func compositeNde(at index: Int, tokens: [KoreanToken], source: NSString) -> NSRange? {
         guard index >= 1, index + 1 < tokens.count else { return nil }
         let modifier = tokens[index], noun = tokens[index + 1], predicate = tokens[index - 1]
         guard baseTag(modifier.tag) == "ETM", ["는", "은", "ᆫ"].contains(modifier.form),

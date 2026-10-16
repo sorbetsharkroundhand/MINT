@@ -27,6 +27,8 @@ struct KoreanAnalysis: Sendable {
     let candidates: [KoreanCorrectionCandidate]
     let slices: [KoreanAnalysisSlice]
     let unsupportedRanges: [WritingDiagnosticRange]
+    /// Exact nonoverlapping source ownership inside a contextual report window.
+    var ownedRange: WritingDiagnosticRange? = nil
 }
 
 enum KoreanMorphologyError: Error { case invalidInput, invalidNativeOutput, unsupportedInput }

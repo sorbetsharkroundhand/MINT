@@ -1,0 +1,75 @@
+[
+  {
+    "id": "causal-transition",
+    "text": "문을 열어서 그래서 밖으로 나갔다.",
+    "required": [
+      "ko.style.redundant-causality"
+    ],
+    "quiet": []
+  },
+  {
+    "id": "causal-separate-sentences",
+    "text": "문을 열었다. 그래서 밖으로 나갔다.",
+    "required": [],
+    "quiet": [
+      "ko.style.redundant-causality"
+    ]
+  },
+  {
+    "id": "causal-homograph",
+    "text": "그는 ‘어서’라는 말을 듣고 그래서 웃었다.",
+    "required": [],
+    "quiet": [
+      "ko.style.redundant-causality"
+    ]
+  },
+  {
+    "id": "chain-three",
+    "text": "문을 열고 길을 건너며 사람을 보았다.",
+    "required": [],
+    "quiet": [
+      "ko.style.connective-chain"
+    ]
+  },
+  {
+    "id": "chain-four",
+    "text": "문을 열고 길을 건너며 몸을 돌려서 사람을 보았다.",
+    "required": [
+      "ko.style.connective-chain"
+    ],
+    "quiet": []
+  },
+  {
+    "id": "sentence-starts",
+    "text": "그 사람은 걸었다. 그 사람은 웃었다. 그 사람은 떠났다.",
+    "required": [
+      "ko.style.repeated-sentence-start"
+    ],
+    "quiet": []
+  },
+  {
+    "id": "sentence-rhythm",
+    "text": "새가 난다. 문이 열린다. 바람이 분다.",
+    "required": [
+      "ko.style.sentence-rhythm"
+    ],
+    "quiet": []
+  },
+  {
+    "id": "paragraph-start-reset",
+    "text": "그 사람은 걸었다.\n그 사람은 웃었다.\n그 사람은 떠났다.",
+    "required": [],
+    "quiet": [
+      "ko.style.repeated-sentence-start",
+      "ko.style.sentence-rhythm"
+    ]
+  },
+  {
+    "id": "nested-quoted-connector-name",
+    "text": "“문을 열어서 ‘그래서’라는 단어를 읽었다.”",
+    "required": [],
+    "quiet": [
+      "ko.style.redundant-causality"
+    ]
+  }
+]
