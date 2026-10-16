@@ -135,6 +135,53 @@ final class WritingDiagnosticsIntegrationTests: XCTestCase {
         }
     }
 
+    func testUnownedNativeLoadCannotPublishOrEnableCurrentActions() async throws {
+        try await withDiagnosticsFixture { fixture in
+            try await fixture.settle()
+            let original = try XCTUnwrap(fixture.session.selectedDocument?.body)
+            let before = try XCTUnwrap(fixture.runtime.controller.state.findings.first { $0.diagnostic.kind == .spelling })
+            fixture.loadUnownedNativeSource("🙂 됬다. 다른 문서에서 늦게 도착한 원고")
+            await fixture.runtime.waitForPresentation()
+            let identity = try XCTUnwrap(fixture.session.runtimeIdentity)
+            XCTAssertFalse(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision))
+            XCTAssertNil(fixture.runtime.controller.currentFinding(id: before.id))
+            XCTAssertTrue(fixture.margin.visibleInsights(for: .general).isEmpty)
+            XCTAssertEqual(fixture.session.selectedDocument?.body, original)
+            fixture.edit("!", range: .init(location: fixture.editor.string.utf16.count, length: 0), acceptingBinding: false)
+            await fixture.runtime.waitForPresentation()
+            XCTAssertFalse(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision),
+                "An ignored stale native binding cannot restore diagnostic authority")
+            fixture.loadUnownedNativeSource(original)
+            await fixture.runtime.waitForPresentation()
+            XCTAssertTrue(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision))
+            XCTAssertNotNil(fixture.runtime.controller.currentFinding(id: before.id))
+            XCTAssertEqual(fixture.session.selectedDocument?.body, original)
+        }
+    }
+
+    func testIdenticalSourceFromAnotherNativeDocumentCannotAcquireAuthority() async throws {
+        try await withDiagnosticsFixture { fixture in
+            try await fixture.settle()
+            let original = try XCTUnwrap(fixture.session.selectedDocument?.body)
+            let identity = try XCTUnwrap(fixture.session.runtimeIdentity)
+            let finding = try XCTUnwrap(fixture.runtime.controller.state.findings.first { $0.diagnostic.kind == .spelling })
+            let other = ProjectDocumentKey(projectID: identity.key.projectID, documentID: WritingDocumentID())
+            fixture.loadUnownedNativeSource(original, documentKey: other)
+            await fixture.runtime.waitForPresentation()
+            XCTAssertFalse(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision))
+            XCTAssertNil(fixture.runtime.controller.currentFinding(id: finding.id))
+            XCTAssertTrue(fixture.margin.visibleInsights(for: .general).isEmpty)
+            fixture.edit("!", range: .init(location: fixture.editor.string.utf16.count, length: 0), acceptingBinding: false)
+            await fixture.runtime.waitForPresentation()
+            XCTAssertFalse(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision))
+            XCTAssertEqual(fixture.session.selectedDocument?.body, original)
+            fixture.loadUnownedNativeSource(original, documentKey: identity.key)
+            await fixture.runtime.waitForPresentation()
+            XCTAssertTrue(fixture.runtime.controller.isNativeBound(to: identity, revision: fixture.editor.writingNativeRevision))
+            XCTAssertNotNil(fixture.runtime.controller.currentFinding(id: finding.id))
+        }
+    }
+
     func testSameEditorExternalLoadUsesNewSourceIndexAndCurrentFinding() async throws {
         try await withDiagnosticsFixture { fixture in
             try await fixture.settle()
@@ -201,6 +248,7 @@ private final class DiagnosticsIntegrationFixture {
     let window = LegacyUndoWindow(contentRect: .init(x: 0, y: 0, width: 700, height: 500), styleMask: [.titled], backing: .buffered, defer: false)
     let editor: BlockTextView
     private var coordinator: MintBlockEditor.Coordinator!
+    private var acceptsBinding = true
 
     init(mode: WritingMode, body: String, profileData: Data?, worker: KoreanNativeWorker?, bindAfterLoad: Bool) async throws {
         root = try temporaryProjectRoot(); defaults = UserDefaults(suiteName: suite)!
@@ -218,7 +266,7 @@ private final class DiagnosticsIntegrationFixture {
         editor = BlockTextView(frame: .init(x: 0, y: 0, width: 650, height: 450), textContainer: container)
         storage.delegate = editor; editor.allowsUndo = true
         window.isReleasedWhenClosed = false; window.testUndo.groupsByEvent = false; window.contentView = editor
-        let binding = Binding<String>(get: { [unowned self] in session.selectedDocument?.body ?? "" }, set: { [unowned self] in session.updateSelectedDocumentBody($0) })
+        let binding = Binding<String>(get: { [unowned self] in session.selectedDocument?.body ?? "" }, set: { [unowned self] in if acceptsBinding { session.updateSelectedDocumentBody($0) } })
         let key = try XCTUnwrap(session.runtimeIdentity?.key)
         coordinator = MintBlockEditor(text: binding, documentIdentity: .project(key)).makeCoordinator()
         editor.delegate = coordinator
@@ -242,8 +290,22 @@ private final class DiagnosticsIntegrationFixture {
         await clock.waitForSleep(); await clock.advance(by: .milliseconds(350))
         await runtime.controller.waitForCurrentWork(); await runtime.waitForPresentation()
     }
-    func edit(_ value: String, range: NSRange) {
+    func edit(_ value: String, range: NSRange, acceptingBinding: Bool = true) {
+        acceptsBinding = acceptingBinding
         window.testUndo.beginUndoGrouping(); editor.insertText(value, replacementRange: range); window.testUndo.endUndoGrouping()
+        acceptsBinding = true
+    }
+    func loadUnownedNativeSource(_ body: String, documentKey: ProjectDocumentKey? = nil) {
+        if let documentKey {
+            let binding = Binding<String>(get: { [unowned self] in session.selectedDocument?.body ?? "" },
+                set: { [unowned self] in if acceptsBinding { session.updateSelectedDocumentBody($0) } })
+            coordinator.parent = MintBlockEditor(text: binding, documentIdentity: .project(documentKey))
+            coordinator.loadedDocumentIdentity = .project(documentKey)
+            coordinator.attach(to: editor)
+        }
+        coordinator.isDocumentTransitioning = true
+        editor.load(markdown: body); coordinator.lastSyncedText = body
+        coordinator.isDocumentTransitioning = false
     }
     func close() async {
         await runtime.prepareForTermination(); bridge.disconnect(editor)

@@ -62,6 +62,12 @@ final class WritingEditorProjectionCapture {
     let sourceProjection = WritingProjectionIndex()
     var publishedProjection: WritingProjectionIndex?
 
+    func rejectUnownedLoad() {
+        knownIdentity = nil; mappedIdentity = nil; mappedRevision = nil; nativeLookup = nil
+        base = nil; boundIdentity = nil; boundRevision = nil; prepared = nil
+        projectionTask?.cancel(); projectionTask = nil; deferred.removeAll(); collectionEpoch &+= 1
+    }
+
     func didLoad(source: String) {
         projectionTask?.cancel(); projectionTask = nil; deferred.removeAll(); collectionEpoch &+= 1
         revision &+= 1; resetCount += 1

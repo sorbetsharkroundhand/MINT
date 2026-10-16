@@ -4,7 +4,7 @@ The app owns one `WritingDiagnosticsRuntime` shared by the project editor, Livin
 
 ## Native authority and publication
 
-The project session remains the only mutable manuscript/profile owner. The editor bridge delivers the current document snapshot before a proved native commit. Initial loads, same-editor external reloads and unchanged metadata use the capture's exact source/native map, without guessing offsets or comparing the whole body on normal typing. A consumer attached after the editor can replay that existing proof. Repeated connection to the same current identity/revision is idempotent. Replacing or detaching the native editor suspends authority; an explicit load resets source only when required by ownership.
+The project session remains the only mutable manuscript/profile owner. The editor bridge delivers the current document snapshot before a proved native commit. Initial loads, same-editor external reloads and unchanged metadata use the capture's exact source/native map, without guessing offsets or comparing the whole body on normal typing. A consumer attached after the editor can replay that existing proof. Repeated connection to the same current identity/revision is idempotent. Replacing or detaching the native editor suspends authority; an explicit load resets source only when required by ownership. Initial/reloaded authority also requires the actual native binding’s stable project/document key and exact original UTF-16 bytes to match the session snapshot. Identical text in another document is insufficient. A rejected load clears mapped/queued capture authority; an ignored stale binding cannot restore it. The full comparison occurs only at the load seam, outside ordinary typing.
 
 Publication is coalesced outside the native binding callback and checks current ownership/stamps before preparing values. Opening a surface reads prepared values and does not start analysis, load a model, navigate, or move focus. Correctness marks use the separate native layer; prepared margin updates retain other producers and session dismissal IDs. Independent occurrences are not merged solely because their messages and spelling are identical. Related style occurrences carry bounded original source anchors, including exact decomposed Hangul units; their hints rebase through unrelated edits and their retained quotes count toward the existing finding budgets.
 
@@ -30,13 +30,13 @@ The frozen Task 12 backend gate passed with unchanged resource/worker inputs: co
 
 Clean developer-bundle/unsigned-archive validation uses a fresh ignored task output directory. Task-scoped runner copies change only cwd/output/validation paths from the standard scripts so retained app/archive artifacts are not replaced. Runner diffs, hashes and source/artifact/support receipts remain in the ignored execution ledger. Final packaging evidence is recorded separately after validation. This remains developer packaging evidence, not Store or final native acceptance.
 
-The implementation gate passed 1,142 tests (2 existing skips), build, MINTBench and a warning-free Release MINTCore compile. The reviewed explicit-intentional regression is RED→GREEN and preserves source/projection-reset counts. Nine support privacy tests and 17 notice tests passed. Package/archive validation and required PR/main CI are recorded separately from this logic evidence.
+The initial implementation gate passed 1,142 tests (2 existing skips), build, MINTBench and a warning-free Release MINTCore compile. The reviewed explicit-intentional regression is RED→GREEN and preserves source/projection-reset counts. Nine support privacy tests and 17 notice tests passed. Package/archive validation and required PR/main CI are recorded separately from this logic evidence.
 
-## Clean artifact evidence
+## Initial artifact evidence (superseded candidate)
 
-Developer bundle and unsigned Xcode archive resource validation passed from clean implementation commit `d31185390b5dde112b722552197a6729ca75239f`. Both support reports verify that exact revision with `sourceDirty=false` and exclude synthetic manuscript/profile canaries and private paths. The standard rejection suite was explicitly repeated against the **new** archive and passed all 11 rejection cases. Product compilation reported zero warnings/errors. Retained `build/MINT.app` and `build/MINT.xcarchive` metadata/executable hashes remained unchanged.
+Before the final native-load ownership hardening, developer bundle and unsigned Xcode archive resource validation passed from clean implementation commit `d31185390b5dde112b722552197a6729ca75239f`. Both support reports verify that exact revision with `sourceDirty=false` and exclude synthetic manuscript/profile canaries and private paths. The standard rejection suite was explicitly repeated against the **new** archive and passed all 11 rejection cases. Product compilation reported zero warnings/errors. Retained `build/MINT.app` and `build/MINT.xcarchive` metadata/executable hashes remained unchanged.
 
-Artifacts and full receipts are retained under `build/task-12-package-verification-20261016/`. The tracked code/resource digest (Sources, manifests, Distribution and scripts) is `d2eb164085c40d9f3bb1f18472d5afaa36ddcba201c85a0df836914b40573953`. The final documentation-only evidence commit does not change this digest.
+Artifacts and full receipts are retained under `build/task-12-package-verification-20261016/`. The tracked code/resource digest (Sources, manifests, Distribution and scripts) is `d2eb164085c40d9f3bb1f18472d5afaa36ddcba201c85a0df836914b40573953`. The associated documentation-only evidence commit preserved this digest. These artifacts remain retained historical evidence; they are not the final ownership-hardened candidate.
 
 | Artifact | Executable SHA-256 |
 | --- | --- |
@@ -44,3 +44,9 @@ Artifacts and full receipts are retained under `build/task-12-package-verificati
 | Unsigned archive application | `16544c2897db3ad9af2c222850a03b32380e5e8556d3bc270951b7f7ed2029b4` |
 
 No local MINT product launch, UI smoke, signing account, Store validation or actual native acceptance is implied by these resource inspections. Required exact-head PR/main CI and the owner's later acceptance remain separate records in #126/#119.
+
+## Native-load ownership regression gate
+
+Final review reproduced two unsafe loads before the fix: a different native body carrying the same typo/hint, and byte-identical text loaded through another document binding. Each RED test failed three authority/publication assertions. The bridge now proves both the native stable binding key and the loaded original UTF-16 source; a rejection clears capture ownership and queued projection work. The regression also verifies that ignored stale edits cannot restore authority and a correct explicit reload can recover. Existing runtime-key invalidation is preserved.
+
+After hardening, 94 focused tests and the full 1,144-test suite passed (2 existing full-suite skips), as did build and MINTBench. The unchanged native backend gate above remains applicable; clean bundle/archive validation must be repeated from this hardened committed source before PR delivery. No product launch or final native acceptance is claimed.

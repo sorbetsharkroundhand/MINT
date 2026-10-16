@@ -277,6 +277,17 @@ final class ProjectEditorBridge {
         acceptedIdentity = nil; acceptedRevision = nil
         pendingSnapshot = snapshot; snapshotDidChange?(snapshot)
         nativeLoadDidChange?(snapshot)
+        // A queued native load can outlive its binding. Identical bodies do not prove ownership.
+        guard let editor, editor.writingDocumentIdentity == .project(snapshot.identity.key) else {
+            if editor?.writingDocumentIdentity != nil { editor?.writingProjectionCapture.rejectUnownedLoad() }
+            return
+        }
+        // Prove bytes only at load, outside ordinary edit handling.
+        guard let source = editor.writingProjectionCapture.loadedSource,
+              source.utf16.elementsEqual(snapshot.body.utf16) else {
+            editor.writingProjectionCapture.rejectUnownedLoad()
+            return
+        }
         noteSnapshot(snapshot)
     }
     func noteSnapshot(_ snapshot: ProjectDocumentSnapshot) {
@@ -287,7 +298,8 @@ final class ProjectEditorBridge {
         adoptPreparedMap(snapshot)
     }
     private func adoptPreparedMap(_ snapshot: ProjectDocumentSnapshot) {
-        guard let editor, !editor.hasMarkedText(), editor.writingProjectionCapture.compositionDepth == 0,
+        guard let editor, editor.writingDocumentIdentity == .project(snapshot.identity.key),
+              !editor.hasMarkedText(), editor.writingProjectionCapture.compositionDepth == 0,
               editor.writingProjectionCapture.mappedIdentity == snapshot.identity,
               editor.writingProjectionCapture.mappedRevision == editor.writingNativeRevision,
               editor.writingProjectionCapture.nativeLookup != nil,
@@ -299,6 +311,7 @@ final class ProjectEditorBridge {
     }
     func receive(_ commit: WritingEditorCommit) {
         guard let editor, let snapshot = currentSnapshot?(), snapshot.identity == pendingSnapshot?.identity,
+              editor.writingDocumentIdentity == .project(snapshot.identity.key),
               snapshot.identity.key == commit.baseIdentity.key,
               editor.writingProjectionCapture.mappedIdentity == snapshot.identity,
               editor.writingProjectionCapture.mappedRevision == commit.nativeRevision,
