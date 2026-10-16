@@ -343,7 +343,7 @@ final class WritingDiagnosticsControllerTests: XCTestCase {
     private final class SnapshotHolder { var value: ProjectDocumentSnapshot; init(_ value: ProjectDocumentSnapshot) { self.value = value } }
 }
 
-private actor ManualDiagnosticsClock: WritingDiagnosticsClock {
+actor ManualDiagnosticsClock: WritingDiagnosticsClock {
     private var now: Duration = .zero
     private var sleepers: [UUID: (Duration, CheckedContinuation<Void, Error>)] = [:]
     private var observers: [CheckedContinuation<Void, Never>] = []

@@ -14,6 +14,9 @@ final class WritingDiagnosticsController: ObservableObject {
     private let findingBudgetBytes: Int
     private let ruleRevision: Int
     private let supportedLanguages: Set<String>
+    private let reportProvider: (any WritingDiagnosticsChunkProvider)?
+    private weak var activeReport: WritingDiagnosticsReportStorage?
+    private var reportEpoch: UInt64 = 0
     private var snapshot: ProjectDocumentSnapshot?
     private var boundIdentity: ProjectRuntimeIdentity?
     private var nativeRevision: UInt64 = 0
@@ -40,11 +43,11 @@ final class WritingDiagnosticsController: ObservableObject {
     init(engine: WritingDiagnosticsEngine, clock: any WritingDiagnosticsClock = ContinuousWritingDiagnosticsClock(),
          currentSnapshot: @escaping @MainActor () -> ProjectDocumentSnapshot?,
          cacheBudgetBytes: Int = 16 * 1024 * 1024, findingBudgetBytes: Int = 16 * 1024 * 1024,
-         ruleRevision: Int = 0, supportedLanguages: Set<String> = ["ko"]) {
+         ruleRevision: Int = 0, supportedLanguages: Set<String> = ["ko"], reportProvider: (any WritingDiagnosticsChunkProvider)? = nil) {
         self.engine = engine; self.clock = clock; self.currentSnapshot = currentSnapshot
         cache = WritingDiagnosticsCache(budgetBytes: cacheBudgetBytes)
         self.findingBudgetBytes = max(0, findingBudgetBytes); self.ruleRevision = ruleRevision
-        self.supportedLanguages = supportedLanguages
+        self.supportedLanguages = supportedLanguages; self.reportProvider = reportProvider
     }
     deinit { workTask?.cancel() }
     func waitForCurrentWork() async { await workTask?.value }
@@ -123,6 +126,7 @@ final class WritingDiagnosticsController: ObservableObject {
     }
     func setMemoryPressure(_ level: MemoryPressureLevel) {
         guard pressure != level else { return }; pressure = level
+        if level != .normal { cache.clear() }
         if level == .critical {
             cache.clear(); state.findings.removeAll(); state.coverage.assessed.removeAll(); assessedWindows.removeAll()
             state.coverage.dirty = wholeSource; resultBudgetExhausted = false
@@ -138,6 +142,102 @@ final class WritingDiagnosticsController: ObservableObject {
         state.coverage.dirty = wholeSource; refreshState()
     }
 
+    func clearContext() {
+        cancel(); cache.clear(); index.reset(source: "")
+        snapshot = nil; boundIdentity = nil; hasVerifiedNative = false; awaitingCommit = true
+        verifiedSourceRevision = nil; assessedWindows.removeAll(); resultBudgetExhausted = false
+        state = WritingDiagnosticsState()
+    }
+
+    func cancelReport() { reportEpoch &+= 1; activeReport?.cancel(); activeReport = nil }
+
+    func scanDocument(_ target: ProjectDocumentSnapshot) -> WritingDiagnosticsReport {
+        cancelReport()
+        let ownedReport = reportEpoch, ownedProfile = profileRevision
+        let owner = currentSnapshot()?.identity
+        let storage = WritingDiagnosticsReportStorage(runtime: target.identity, profileRevision: ownedProfile)
+        let channel = storage.channel
+        activeReport = storage
+        let provider = reportProvider, profile = record, revision = ruleRevision, configuration = engine.configurationRevision
+        let initialAvailability: WritingDiagnosticsAvailability?
+        if policyPaused { initialAvailability = .pausedPolicy }
+        else if !profileReadable { initialAvailability = .unavailableProfile }
+        else if !languageSupported { initialAvailability = .unsupportedLanguage }
+        else if owner?.key.projectID != target.identity.key.projectID || owner?.generation != target.identity.generation { initialAvailability = .unavailableProvider }
+        else if provider == nil { initialAvailability = .unavailableProvider }
+        else { initialAvailability = nil }
+        let check: @MainActor @Sendable () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return self.reportEpoch == ownedReport && self.profileRevision == ownedProfile
+                && self.currentSnapshot()?.identity == owner && !self.policyPaused && self.profileReadable
+        }
+        let waitForLocal: @MainActor @Sendable () async -> Void = { [weak self] in await self?.waitForCurrentWork() }
+        let task = Task(priority: .background) {
+            await withTaskCancellationHandler {
+                do {
+                    if let initialAvailability {
+                        try await channel.send(.failed(initialAvailability)); await channel.finish(); return
+                    }
+                    guard let provider else { return }
+                    let preparing = Task.detached(priority: .utility) {
+                        let projection = try WritingProjectionSnapshot.prepare(source: target.body)
+                        try Task.checkCancellation()
+                        var prose = "", cursor = 0
+                        for window in projection.windows(intersecting: .init(location: 0, length: projection.sourceLength)) {
+                            try Task.checkCancellation()
+                            let lower = max(0, cursor - window.coveredRange.location)
+                            prose += (window.text as NSString).substring(from: lower)
+                            cursor = window.coveredRange.location + window.coveredRange.length
+                        }
+                        return (projection, prose, DocumentOutline.stableHash(target.body))
+                    }
+                    let prepared = try await withTaskCancellationHandler { try await preparing.value } onCancel: { preparing.cancel() }
+                    guard check(), !Task.isCancelled else { throw CancellationError() }
+                    let mapper = WritingReportMapper(projection: prepared.0, prose: prepared.1, sourceRevision: prepared.2, profile: profile,
+                        identity: target.identity, profileRevision: ownedProfile, providerRevision: configuration, ruleRevision: revision)
+                    let total = prepared.0.eligibleProseLength
+                    try await channel.send(.progress(completed: 0, total: total))
+                    try await channel.waitForCapacity()
+                    await waitForLocal()
+                    guard check(), !Task.isCancelled else { throw CancellationError() }
+                    let request = WritingDiagnosticsRequest(projectID: target.identity.key.projectID, documentID: target.identity.key.documentID,
+                        text: prepared.1, languageTag: profile.languageTag ?? "ko", scope: .document, styleProfile: profile.profile)
+                    try await provider.analyzeChunks(request) { chunk in
+                        guard await check(), !Task.isCancelled else { throw CancellationError() }
+                        let update = try await mapper.consume(chunk)
+                        guard await check(), !Task.isCancelled else { throw CancellationError() }
+                        if !update.findings.isEmpty { try await channel.send(.findings(update.findings)) }
+                        guard await check(), !Task.isCancelled else { throw CancellationError() }
+                        try await channel.send(.progress(completed: update.completed, total: total))
+                        try await channel.waitForCapacity()
+                        guard await check(), !Task.isCancelled else { throw CancellationError() }
+                        await waitForLocal()
+                        guard await check(), !Task.isCancelled else { throw CancellationError() }
+                    }
+                    guard check(), !Task.isCancelled else { throw CancellationError() }
+                    let coverage = await mapper.finish()
+                    guard check(), !Task.isCancelled else { throw CancellationError() }
+                    try await channel.send(.finished(coverage))
+                    await channel.finish()
+                } catch is CancellationError { await channel.cancel() }
+                catch {
+                    guard check(), !Task.isCancelled else { await channel.cancel(); return }
+                    let availability: WritingDiagnosticsAvailability
+                    if let classifier = provider as? any WritingDiagnosticsFailureClassifying {
+                        switch classifier.failureOutcome(error).reason {
+                        case .resource: availability = .unavailableResource
+                        case .unsupportedInput: availability = .unsupportedInput
+                        default: availability = .unavailableProvider
+                        }
+                    } else { availability = .unavailableProvider }
+                    try? await channel.send(.failed(availability)); await channel.finish()
+                }
+            } onCancel: { Task { await channel.cancel() } }
+        }
+        storage.start(task)
+        return WritingDiagnosticsReport(storage: storage)
+    }
+
     private var wholeSource: [WritingDiagnosticRange] { index.sourceLength == 0 ? [] : [.init(location: 0, length: index.sourceLength)] }
     private var language: String { record.languageTag ?? "ko" }
     private var policyPaused: Bool {
@@ -146,6 +246,7 @@ final class WritingDiagnosticsController: ObservableObject {
     private var languageSupported: Bool { supportedLanguages.contains(String(language.lowercased().split(separator: "-").first ?? "")) }
     private func invalidateWork() {
         epoch &+= 1; workTask?.cancel(); workTask = nil; state.coverage.pending.removeAll()
+        cancelReport()
     }
     private func policyChanged() { invalidateWork(); schedule() }
     private func readProfile(_ next: ProjectDocumentSnapshot, force: Bool) {

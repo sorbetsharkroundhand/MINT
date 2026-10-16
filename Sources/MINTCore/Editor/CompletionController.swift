@@ -245,6 +245,24 @@ public final class CompletionController: ObservableObject {
     public var originalNameAnchorsProvider: (() -> OriginalNameAnchorIndex?)?
     public var contextConfigurationDidChange: (() -> Void)?
     public var foregroundCompletionDidChange: ((Bool) -> Void)?
+    private final class ForegroundObserver {
+        weak var owner: AnyObject?
+        let handler: (Bool) -> Void
+        init(owner: AnyObject, handler: @escaping (Bool) -> Void) { self.owner = owner; self.handler = handler }
+    }
+    private var foregroundObservers: [ObjectIdentifier: ForegroundObserver] = [:]
+    private var foregroundIsBusy = false
+    func observeForegroundCompletion(owner: AnyObject, handler: @escaping (Bool) -> Void) {
+        foregroundObservers = foregroundObservers.filter { $0.value.owner != nil }
+        foregroundObservers[ObjectIdentifier(owner)] = ForegroundObserver(owner: owner, handler: handler)
+        handler(foregroundIsBusy)
+    }
+    private func notifyForegroundCompletion(_ busy: Bool) {
+        foregroundIsBusy = busy
+        foregroundCompletionDidChange?(busy)
+        foregroundObservers = foregroundObservers.filter { $0.value.owner != nil }
+        for observer in Array(foregroundObservers.values) { observer.handler(busy) }
+    }
     public var usesOriginalNameAnchors: Bool {
         !isMemoryPressurePaused && settings.authorization == .enabled && settings.autocompleteEnabled
             && settings.ghostContextMode == .rawWithNameAnchor
@@ -797,7 +815,7 @@ public final class CompletionController: ObservableObject {
         generation += 1
         pendingTask?.cancel()
         pendingTask = nil
-        foregroundCompletionDidChange?(false)
+        notifyForegroundCompletion(false)
         pendingCaret = nil
         if isPredicting { isPredicting = false }
         guard !preservingSuggestion else { return }
@@ -822,11 +840,11 @@ public final class CompletionController: ObservableObject {
         expected: Int
     ) async {
         // 이 요청이 아직 최신일 때만 "예측 중"을 끈다 — 낡았다면 새 요청이 관리한다.
-        foregroundCompletionDidChange?(true)
+        notifyForegroundCompletion(true)
         defer {
             if expected == generation {
                 if isPredicting { isPredicting = false }
-                foregroundCompletionDidChange?(false)
+                notifyForegroundCompletion(false)
             }
         }
         // 조립은 예측 시점의 마지막 MainActor 작업 — 준비된 값(메타·카드·요약)을

@@ -17,10 +17,7 @@ enum ContentViewRoute: Equatable {
     }
 }
 
-/// MINT 에디터 v3 메인 화면 — 디자인 "MINT Editor v3.dc.html" 완전 이식.
-///
-/// 창 전체가 리퀴드 글래스(배경 블러 + 유리 톤), 좌측 사이드바(프로젝트 문서),
-/// 우측 에디터 컬럼(툴바 · Notion식 블록 에디터 · 단축키 필 · 상태 바).
+/// Project writing workspace with one authoritative session and editor bridge.
 public struct ContentView: View {
     @ObservedObject private var projectSession: ProjectSession
     @ObservedObject private var legacyWorkspace: LegacyWorkspaceController
@@ -30,6 +27,7 @@ public struct ContentView: View {
     @ObservedObject private var livingMargin: LivingMarginModel
     private let firstRunFlow: FirstRunFlow
     private let positionStore: WritingPositionStore
+    private let writingDiagnostics: WritingDiagnosticsRuntime?
     @State private var projectEditorBridge = ProjectEditorBridge()
     /// ""=시스템 따름 / "light" / "dark" — 설정에서 전환.
     @AppStorage("mint.appearance") private var appearance = ""
@@ -41,7 +39,8 @@ public struct ContentView: View {
         indexer: BackgroundIndexer,
         livingMargin: LivingMarginModel,
         firstRunFlow: FirstRunFlow,
-        positionStore: WritingPositionStore = .shared
+        positionStore: WritingPositionStore = .shared,
+        writingDiagnostics: WritingDiagnosticsRuntime? = nil
     ) {
         self.projectSession = projectSession
         self.legacyWorkspace = legacyWorkspace
@@ -50,7 +49,7 @@ public struct ContentView: View {
         self.indexer = indexer
         self.livingMargin = livingMargin
         self.firstRunFlow = firstRunFlow
-        self.positionStore = positionStore
+        self.positionStore = positionStore; self.writingDiagnostics = writingDiagnostics
     }
 
     public var body: some View {
@@ -126,20 +125,22 @@ public struct ContentView: View {
                 if let store = legacyWorkspace.legacyStore {
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
                 } else {
-                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer)
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
                 }
                 indexer.caretProvider = { [weak completion] in completion?.lastCaretLocation }
-                legacyWorkspace.didEnterLegacy = { [weak completion, weak indexer] store in
+                legacyWorkspace.didEnterLegacy = { [weak completion, weak indexer, weak writingDiagnostics] store in
                     guard let completion, let indexer else { return }
+                    writingDiagnostics?.prepareForProjectTransition()
+                    writingDiagnostics?.configure(currentSnapshot: { nil })
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)
                 }
                 legacyWorkspace.willFlushLegacy = Self.commitMarkedText
-                legacyWorkspace.willLeaveLegacy = { [weak projectSession, weak completion, weak indexer] in
+                legacyWorkspace.willLeaveLegacy = { [weak projectSession, weak completion, weak indexer, weak writingDiagnostics] in
                     guard let projectSession, let completion, let indexer else { return }
                     completion.prepareForProjectTransition()
-                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer)
+                    Self.connectProjectConsumers(session: projectSession, completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
                 }
-                projectSession.willTransition = { [weak projectEditorBridge, weak completion, weak indexer] in
+                projectSession.willTransition = { [weak projectEditorBridge, weak completion, weak indexer, weak writingDiagnostics] in
                     if let textView = projectEditorBridge?.editor {
                         if textView.hasMarkedText() {
                             textView.unmarkText()
@@ -148,11 +149,13 @@ public struct ContentView: View {
                         }
                         textView.isEditable = false
                     }
+                    writingDiagnostics?.prepareForProjectTransition()
                     completion?.prepareForProjectTransition()
                     indexer?.prepareForProjectTransition()
                 }
-                projectSession.documentDidChange = { [weak completion, weak indexer, weak projectEditorBridge] snapshot in
+                projectSession.documentDidChange = { [weak completion, weak indexer, weak projectEditorBridge, weak writingDiagnostics] snapshot in
                     projectEditorBridge?.noteSnapshot(snapshot)
+                    writingDiagnostics?.controller.noteSnapshot(snapshot)
                     completion?.noteDocumentChange(snapshot)
                     indexer?.noteDocumentChange(snapshot)
                 }
@@ -173,12 +176,14 @@ public struct ContentView: View {
     }
 
     static func connectProjectConsumers(
-        session: ProjectSession, completion: CompletionController, indexer: BackgroundIndexer
+        session: ProjectSession, completion: CompletionController, indexer: BackgroundIndexer,
+        writingDiagnostics: WritingDiagnosticsRuntime? = nil
     ) {
+        writingDiagnostics?.configure(currentSnapshot: { [weak session] in session?.selectedDocumentSnapshot })
         completion.documentContextProvider = nil
         completion.projectDocumentProvider = { [weak session] in session?.selectedDocumentSnapshot }
         indexer.attach(documentProvider: { [weak session] in session?.selectedDocumentSnapshot })
-        connectGhostContext(completion: completion, indexer: indexer)
+        connectGhostContext(completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
         completion.knowledgeProvider = { [weak session, weak indexer] in
             guard let identity = session?.runtimeIdentity,
                 indexer?.snapshotRuntimeIdentity == identity else { return nil }
@@ -196,10 +201,16 @@ public struct ContentView: View {
         }
     }
 
-    static func connectGhostContext(completion: CompletionController, indexer: BackgroundIndexer) {
+    static func connectGhostContext(completion: CompletionController, indexer: BackgroundIndexer,
+                                    writingDiagnostics: WritingDiagnosticsRuntime? = nil) {
         completion.originalNameAnchorsProvider = { [weak indexer] in indexer?.originalNameAnchors }
-        completion.foregroundCompletionDidChange = { [weak indexer] busy in
+        completion.observeForegroundCompletion(owner: indexer) { [weak indexer] busy in
             indexer?.setForegroundCompletionBusy(busy)
+        }
+        if let writingDiagnostics {
+            completion.observeForegroundCompletion(owner: writingDiagnostics) { [weak writingDiagnostics] busy in
+                writingDiagnostics?.setForegroundBusy(busy)
+            }
         }
         completion.contextConfigurationDidChange = { [weak completion, weak indexer] in
             indexer?.originalNameAnchorsEnabled = completion?.usesOriginalNameAnchors ?? false

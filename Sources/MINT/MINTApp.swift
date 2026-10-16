@@ -12,6 +12,7 @@ struct MINTApp: App {
     @StateObject private var completion = CompletionController(
         settings: .shared, engine: MINTApp.sharedEngine, metricsStorageLocation: .standard)
     @StateObject private var livingMargin = LivingMarginModel()
+    @StateObject private var writingDiagnostics = WritingDiagnosticsRuntime()
     private static let projectStore = ProjectStore(root: MintStorageLocation.standard.projectsDirectory)
     private static let knowledgeSidecars = KnowledgeSidecarRepository(
         projectStore: MINTApp.projectStore)
@@ -42,10 +43,10 @@ struct MINTApp: App {
                 firstRunFlow: FirstRunFlow(
                     session: projectSession,
                     store: MINTApp.projectStore,
-                    editorRequests: editorRequests))
+                    editorRequests: editorRequests), writingDiagnostics: writingDiagnostics)
                 .onAppear {
                     appDelegate.configure(session: projectSession, legacyWorkspace: legacyWorkspace,
-                        completion: completion, indexer: indexer)
+                        completion: completion, indexer: indexer, writingDiagnostics: writingDiagnostics)
                 }
         }
         // 에디터 v3 — 타이틀 바를 숨기고 사이드바가 창 상단까지 차오르게 한다.
@@ -78,21 +79,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var backgroundFlush: Task<Void, Never>?
 
     func configure(session: ProjectSession, legacyWorkspace: LegacyWorkspaceController,
-                   completion: CompletionController, indexer: BackgroundIndexer) {
+                   completion: CompletionController, indexer: BackgroundIndexer,
+                   writingDiagnostics: WritingDiagnosticsRuntime? = nil) {
         guard termination == nil else { return }
         projectSession = session
         self.legacyWorkspace = legacyWorkspace
         memoryPressure = MemoryPressureRuntime(completion: completion, indexer: indexer,
-            engine: MINTApp.sharedEngine)
+            engine: MINTApp.sharedEngine, writingDiagnostics: writingDiagnostics)
         termination = ProjectTerminationCoordinator(
             session: session, legacyWorkspace: legacyWorkspace,
             persistPositions: { WritingPositionStore.shared.persistNow() },
             shutdown: { [weak self] in
                 self?.memoryPressure?.stop()
+                writingDiagnostics?.stop()
                 completion.shutdown(); indexer.shutdown()
             },
             drain: { [weak self] in
                 await self?.memoryPressure?.drain()
+                await writingDiagnostics?.prepareForTermination()
                 // Yield the main actor until every engine operation has released its resources.
                 while MINTApp.sharedEngine.pendingOperationCount > 0 {
                     try? await Task.sleep(for: .milliseconds(50))

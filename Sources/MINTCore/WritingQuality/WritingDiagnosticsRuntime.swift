@@ -1,0 +1,101 @@
+import Combine
+import Foundation
+import MINTKoreanBackend
+
+/// App-owned offline diagnostics lifetime; the native model remains lazy until admitted work.
+@MainActor
+public final class WritingDiagnosticsRuntime: ObservableObject {
+    @Published private(set) var isReleasingNative = false
+    let controller: WritingDiagnosticsController
+    private let worker: KoreanNativeWorker
+    private let reader: WritingRuntimeSnapshotReader
+    private var releaseTask: Task<Void, Never>?
+    private var pressure = MemoryPressureLevel.normal
+    private var sharedBackgroundPaused = false
+    private var terminated = false
+    private var observations = Set<AnyCancellable>()
+
+    public convenience init() { self.init(observeEnergy: true) }
+    convenience init(observeEnergy: Bool) {
+        self.init(worker: KoreanNativeWorker(resources: KoreanNativeWorker.bundledResourcesURL), observeEnergy: observeEnergy)
+    }
+    init(worker: KoreanNativeWorker, observeEnergy: Bool, clock: any WritingDiagnosticsClock = ContinuousWritingDiagnosticsClock()) {
+        self.worker = worker
+        let reader = WritingRuntimeSnapshotReader(); self.reader = reader
+        let provider = KoreanDiagnosticsProvider(morphology: KoreanMorphology(worker: worker))
+        controller = WritingDiagnosticsController(engine: WritingDiagnosticsEngine(providers: [provider]), clock: clock,
+            currentSnapshot: { reader.current() }, ruleRevision: KoreanDiagnosticsProvider.ruleRevision, reportProvider: provider)
+        controller.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }.store(in: &observations)
+        if observeEnergy {
+            let names: [Notification.Name] = [.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification]
+            for name in names {
+                NotificationCenter.default.publisher(for: name).sink { [weak self] _ in
+                    Task { @MainActor in self?.refreshEnergyPolicy() }
+                }.store(in: &observations)
+            }
+            refreshEnergyPolicy()
+        }
+    }
+    func configure(currentSnapshot: @escaping @MainActor () -> ProjectDocumentSnapshot?) { reader.provider = currentSnapshot }
+    func setForegroundBusy(_ busy: Bool) { guard !terminated else { return }; controller.setForegroundBusy(busy) }
+    func setEnergyPolicy(thermal: ProcessInfo.ThermalState, lowPower: Bool) {
+        guard !terminated else { return }; controller.setEnergyPolicy(thermal: thermal, lowPower: lowPower)
+    }
+    private func refreshEnergyPolicy() {
+        setEnergyPolicy(thermal: ProcessInfo.processInfo.thermalState, lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled)
+    }
+    /// Synchronous event delivery closes admission before any release task can suspend.
+    func noteMemoryPressure(_ next: MemoryPressureLevel) {
+        guard !terminated else { return }
+        pressure = next
+        if next == .critical {
+            controller.setMemoryPressure(.critical)
+            worker.cancelPending()
+            guard releaseTask == nil else { return }
+            isReleasingNative = true
+            let worker = worker
+            releaseTask = Task { [weak self] in
+                await worker.release()
+                guard let self else { return }
+                self.releaseTask = nil; self.isReleasingNative = false
+                if !self.terminated { self.applyPressurePolicy() }
+            }
+        } else {
+            applyPressurePolicy()
+        }
+    }
+    func setSharedBackgroundPaused(_ paused: Bool) {
+        guard sharedBackgroundPaused != paused else { return }
+        sharedBackgroundPaused = paused; applyPressurePolicy()
+    }
+    private func applyPressurePolicy() {
+        if releaseTask != nil { controller.setMemoryPressure(.critical) }
+        else if sharedBackgroundPaused && pressure == .normal { controller.setMemoryPressure(.warning) }
+        else { controller.setMemoryPressure(pressure) }
+    }
+    func waitForNativeRelease() async { await releaseTask?.value }
+    func setMemoryPressure(_ level: MemoryPressureLevel) async {
+        noteMemoryPressure(level)
+        await releaseTask?.value
+    }
+    func prepareForProjectTransition() {
+        controller.clearContext(); worker.cancelPending()
+    }
+    public func stop() {
+        guard !terminated else { return }
+        terminated = true; observations.removeAll()
+        controller.clearContext(); worker.cancelPending(); reader.provider = nil
+    }
+    public func prepareForTermination() async {
+        stop()
+        if let releaseTask { await releaseTask.value }
+        await worker.release()
+        reader.provider = nil
+    }
+}
+
+@MainActor
+private final class WritingRuntimeSnapshotReader {
+    var provider: (@MainActor () -> ProjectDocumentSnapshot?)?
+    func current() -> ProjectDocumentSnapshot? { provider?() }
+}

@@ -8,12 +8,20 @@ public final class MemoryPressureRuntime {
 
     public init(completion: CompletionController, indexer: BackgroundIndexer,
                 engine: CompletionEngine,
-                source: any MemoryPressureEventSource = SystemMemoryPressureSource()) {
+                source: any MemoryPressureEventSource = SystemMemoryPressureSource(),
+                writingDiagnostics: WritingDiagnosticsRuntime? = nil) {
         coordinator = MemoryPressureCoordinator(
-            backgroundPause: { [weak indexer] in indexer?.setMemoryPressurePaused($0) },
+            backgroundPause: { [weak indexer, weak writingDiagnostics] paused in
+                indexer?.setMemoryPressurePaused(paused)
+                writingDiagnostics?.setSharedBackgroundPaused(paused)
+            },
             completionPause: { [weak completion] in completion?.setMemoryPressurePaused($0) },
-            releaseModel: { try await engine.unload() },
-            releaseFailed: { [weak completion] in completion?.noteMemoryReleaseFailure($0) })
+            releaseModel: {
+                await writingDiagnostics?.waitForNativeRelease()
+                try await engine.unload()
+            },
+            releaseFailed: { [weak completion] in completion?.noteMemoryReleaseFailure($0) },
+            pressureDidChange: { [weak writingDiagnostics] in writingDiagnostics?.noteMemoryPressure($0) })
         coordinator.start(source: source)
     }
 
