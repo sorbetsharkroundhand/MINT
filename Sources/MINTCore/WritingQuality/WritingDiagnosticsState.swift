@@ -31,6 +31,7 @@ struct WritingDiagnosticsFinding: Identifiable, Sendable {
     var sourceRanges: [WritingDiagnosticRange]
     var relatedSourceRanges: [[WritingDiagnosticRange]]
     var evidence: EvidenceAnchor
+    var relatedEvidence: [EvidenceAnchor] = []
     /// All input context can affect a pattern count, even outside representative evidence.
     var contextRange: WritingDiagnosticRange
     var stamp: WritingDiagnosticsStamp

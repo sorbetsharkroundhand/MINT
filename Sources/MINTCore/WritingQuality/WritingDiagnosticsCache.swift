@@ -52,6 +52,14 @@ final class WritingDiagnosticsCache {
         for text in value.alternatives { cost += stringCost(text) }
         return cost
     }
+    static func findingCost(_ finding: WritingDiagnosticsFinding) -> Int {
+        var cost = 512 + diagnosticCost(finding.diagnostic)
+        cost += stringCost(finding.evidence.quote)
+        cost += finding.sourceRanges.count * 32
+        for ranges in finding.relatedSourceRanges { cost += ranges.count * 32 }
+        for anchor in finding.relatedEvidence { cost += 256 + stringCost(anchor.quote) }
+        return cost
+    }
     private func unlink(_ entry: Entry) {
         let previous = entry.previous, next = entry.next
         if let previous { previous.next = next } else if first === entry { first = next }

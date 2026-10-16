@@ -8,6 +8,8 @@ public struct SettingsView: View {
     /// 고치지 않고 컨트롤러의 무효화(세대 상승·스트림 취소·리포트 폐기)를 함께
     /// 발화한다. nil이면 프리뷰처럼 값만 바뀐다.
     private let completion: CompletionController?
+    private let projectSession: ProjectSession?
+    private let writingDiagnostics: WritingDiagnosticsRuntime?
     /// 실사용 품질 지표 집계 (M7) — .task에서 백그라운드 로드.
     @State private var metrics = AcceptanceMetrics.Summary()
     /// 외형(다크 모드) — 상단바 스위치에서 옮겨 왔다. 키는 그대로 둬서 기존
@@ -27,10 +29,12 @@ public struct SettingsView: View {
 
     public init(
         settings: CompletionSettings = .shared,
-        completion: CompletionController? = nil
+        completion: CompletionController? = nil,
+        projectSession: ProjectSession? = nil, writingDiagnostics: WritingDiagnosticsRuntime? = nil
     ) {
         self._settings = ObservedObject(wrappedValue: settings)
         self.completion = completion
+        self.projectSession = projectSession; self.writingDiagnostics = writingDiagnostics
     }
 
     public var body: some View {
@@ -301,6 +305,14 @@ public struct SettingsView: View {
                     step: 1
                 )
                 caption("줄 사이 여백을 조절해요 — 낮추면 촘촘하게, 높이면 시원하게.")
+            }
+
+            if let projectSession, let writingDiagnostics {
+                WritingDiagnosticsSettingsView(session: projectSession, runtime: writingDiagnostics)
+            } else {
+                Section("문장 교정") {
+                    Text("프로젝트를 열면 교정 설정을 바꿀 수 있어요.").mintUIFont(11).foregroundStyle(.secondary)
+                }
             }
 
             Section("저자") {

@@ -64,7 +64,8 @@ struct MINTApp: App {
         // 컨트롤러를 함께 넘겨 설정 창의 스위치·모델 변경도 의유 API로 무효화를
         // 발화하게 한다 (이슈 #11).
         Settings {
-            SettingsView(settings: completion.settings, completion: completion)
+            SettingsView(settings: completion.settings, completion: completion,
+                projectSession: projectSession, writingDiagnostics: writingDiagnostics)
         }
     }
 }

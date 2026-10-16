@@ -172,6 +172,7 @@ struct WorkspaceSurface: View {
     @ObservedObject var livingMargin: LivingMarginModel
     var editorBridge: ProjectEditorBridge? = nil
     var positionStore: WritingPositionStore = .shared
+    var writingDiagnostics: WritingDiagnosticsRuntime? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
     @StateObject private var palette = PaletteSettings.shared
@@ -278,6 +279,12 @@ struct WorkspaceSurface: View {
                 theme.sepC.frame(height: 1)
                     .accessibilityHidden(true)
                 if section == SidebarSection.margin.rawValue {
+                    VStack(spacing: 0) {
+                        if let writingDiagnostics {
+                            WritingDiagnosticsStatusView(runtime: writingDiagnostics)
+                                .padding(.horizontal, 14).padding(.vertical, 8)
+                            theme.sepC.frame(height: 1).accessibilityHidden(true)
+                        }
                     LivingMarginView(
                         model: livingMargin,
                         mode: activeWritingMode,
@@ -293,7 +300,8 @@ struct WorkspaceSurface: View {
                                 documentID: jump.documentID,
                                 query: jump.query)
                         },
-                        onAction: nil)
+                        onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality })
+                    }
                 } else if let selectedSection = presentation.toolSection {
                     ProjectWriterToolsView(session: projectSession, completion: completion,
                         editorRequests: editorRequests, section: selectedSection, theme: theme)
@@ -306,6 +314,15 @@ struct WorkspaceSurface: View {
             WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
                 session: projectSession, requests: editorRequests, theme: theme,
                 openSettings: { openSettings() })
+        }
+    }
+
+    private var writingQualityAction: ((MarginInsight, MarginAction) -> Void)? {
+        guard let writingDiagnostics else { return nil }
+        return { insight, action in
+            guard insight.kind == .writingQuality else { return }
+            do { try writingDiagnostics.performMarginAction(insightID: insight.id, action: action) }
+            catch { } // The runtime publishes a safe, localized action status.
         }
     }
 
