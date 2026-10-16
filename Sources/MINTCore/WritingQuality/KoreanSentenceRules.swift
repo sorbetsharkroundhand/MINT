@@ -51,13 +51,23 @@ struct KoreanRuleSession {
     private var clauseUnsupported = false
     static let maximumFamilies = 1024
     static let maximumQuoteDepth = 32
-    var retainedOccurrenceCount: Int { current.count + runs.values.reduce(0) { $0 + $1.evidence.count } + (startRun?.run.evidence.count ?? 0) + (rhythmRun?.run.evidence.count ?? 0) + starts.count }
+    var retainedOccurrenceCount: Int {
+        var count = current.count + starts.count
+        for run in runs.values { count += run.evidence.count }
+        count += startRun?.run.evidence.count ?? 0
+        count += rhythmRun?.run.evidence.count ?? 0
+        return count
+    }
     var retainedQuoteDepth: Int { quotes.count }
     var retainedTextUTF16: Int {
         func size(_ values: [Evidence]) -> Int { values.reduce(0) { $0 + $1.label.utf16.count } }
-        return size(starts) + current.values.reduce(0) { $0 + $1.label.utf16.count }
-            + runs.values.reduce(0) { $0 + size($1.evidence) } + size(startRun?.run.evidence ?? [])
-            + size(rhythmRun?.run.evidence ?? []) + (causal?.label.utf16.count ?? 0)
+        var count = size(starts)
+        for value in current.values { count += value.label.utf16.count }
+        for run in runs.values { count += size(run.evidence) }
+        count += size(startRun?.run.evidence ?? [])
+        count += size(rhythmRun?.run.evidence ?? [])
+        count += causal?.label.utf16.count ?? 0
+        return count
     }
 
     init(profile: WritingStyleProfile) { self.profile = profile }
