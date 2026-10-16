@@ -94,7 +94,7 @@ final class WritingDiagnosticsTests: XCTestCase {
             },
         ])
 
-        var req = Self.request()
+        var req = Self.request(text: "검사 범위를 충분히 포함하는 합성 문장")
         req.styleProfile.ignoredRuleIDs.insert("ko.style.ignored")
         let snapshot = await engine.analyze(req)
 
@@ -140,6 +140,23 @@ final class WritingDiagnosticsTests: XCTestCase {
         XCTAssertEqual(second?.diagnostics.first?.message, "new")
     }
 
+    func testFailureOutcomeAndInvalidRangesNeverLookClean() async {
+        XCTAssertEqual(WritingDiagnosticRange(location: -1, length: 1).location, -1, "Keep invalid coordinates rejectable; never clamp them onto valid prose")
+        let engine = WritingDiagnosticsEngine(providers: [ThrowingDiagnosticsProvider()])
+        let snapshot = await engine.analyze(Self.request())
+        XCTAssertEqual(snapshot?.providerOutcomes.first?.status, .failed)
+        XCTAssertTrue(snapshot?.diagnostics.isEmpty == true)
+        let invalid = FixtureDiagnosticsProvider(id: "invalid", delayMilliseconds: 0) { _ in
+            var bad = WritingDiagnostic(id: "bad", ruleID: "bad", providerID: "invalid", category: .style, kind: .repeatedWord, severity: .suggestion,
+                                        range: .init(location: 0, length: 1), message: "Private text must not become a health error", languageTag: "ko")
+            bad.relatedRanges = [.init(location: Int.max, length: 2)]
+            return [bad]
+        }
+        let result = await WritingDiagnosticsEngine(providers: [invalid]).analyze(Self.request())
+        XCTAssertTrue(result?.diagnostics.isEmpty == true)
+        XCTAssertEqual(result?.providerOutcomes.first?.status, .failed)
+    }
+
     func testExplicitCancelPreventsPublication() async {
         let provider = FixtureDiagnosticsProvider(id: "slow", delayMilliseconds: 150) { _ in [] }
         let engine = WritingDiagnosticsEngine(providers: [provider])
@@ -152,4 +169,10 @@ final class WritingDiagnosticsTests: XCTestCase {
         let cancelledResult = await pending
         XCTAssertNil(cancelledResult)
     }
+}
+
+private struct ThrowingDiagnosticsProvider: WritingDiagnosticsProvider {
+    let id = "failed"
+    struct Failure: Error { }
+    func analyze(_ request: WritingDiagnosticsRequest) async throws -> [WritingDiagnostic] { throw Failure() }
 }

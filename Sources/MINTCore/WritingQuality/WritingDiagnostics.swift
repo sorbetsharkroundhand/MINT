@@ -41,8 +41,8 @@ public struct WritingDiagnosticRange: Codable, Hashable, Sendable {
     public var length: Int
 
     public init(location: Int, length: Int) {
-        self.location = max(0, location)
-        self.length = max(0, length)
+        self.location = location
+        self.length = length
     }
 
     public init(_ range: NSRange) {
@@ -189,13 +189,16 @@ public struct WritingDiagnosticsSnapshot: Sendable {
     public var projectID: WritingProjectID
     public var documentID: WritingDocumentID
     public var diagnostics: [WritingDiagnostic]
+    public var providerOutcomes: [WritingProviderOutcome]
 
     public init(
         generation: UInt64,
         projectID: WritingProjectID,
         documentID: WritingDocumentID,
-        diagnostics: [WritingDiagnostic]
+        diagnostics: [WritingDiagnostic],
+        providerOutcomes: [WritingProviderOutcome] = []
     ) {
+        self.providerOutcomes = providerOutcomes
         self.generation = generation
         self.projectID = projectID
         self.documentID = documentID
@@ -210,63 +213,62 @@ public struct WritingDiagnosticsSnapshot: Sendable {
 /// snapshot because generation ownership is checked after the awaited work completes.
 public actor WritingDiagnosticsEngine {
     private let providers: [any WritingDiagnosticsProvider]
+    nonisolated let configurationRevision: String
     private var generation: UInt64 = 0
     private var activeTask: Task<WritingDiagnosticsSnapshot?, Never>?
 
     public init(providers: [any WritingDiagnosticsProvider]) {
         self.providers = providers
+        configurationRevision = providers.map(\.id).sorted().joined(separator: "|")
     }
 
     public func analyze(_ request: WritingDiagnosticsRequest) async
         -> WritingDiagnosticsSnapshot?
     {
+        guard !Task.isCancelled else { return nil }
         generation &+= 1
         let ownedGeneration = generation
-
         activeTask?.cancel()
         let providers = self.providers
-
         let task = Task<WritingDiagnosticsSnapshot?, Never> {
-            let diagnostics = await withTaskGroup(
-                of: [WritingDiagnostic].self,
-                returning: [WritingDiagnostic].self
-            ) { group in
+            let results = await withTaskGroup(of: WritingProviderResult.self, returning: [WritingProviderResult].self) { group in
                 for provider in providers {
                     group.addTask {
                         do {
                             try Task.checkCancellation()
-                            let result = try await provider.analyze(request)
+                            let raw = try await provider.analyze(request)
                             try Task.checkCancellation()
-                            return result
+                            let validated = Self.normalized(raw, request: request)
+                            return .init(diagnostics: validated.diagnostics,
+                                outcome: .init(providerID: provider.id, status: validated.invalid ? .failed : .success,
+                                               reason: validated.invalid ? .provider : nil))
                         } catch {
-                            // Provider failure is isolated. Cancellation is still observed
-                            // by the parent task and by generation ownership below.
-                            return []
+                            let outcome = (provider as? any WritingDiagnosticsFailureClassifying)?.failureOutcome(error)
+                                ?? .init(providerID: provider.id, status: .failed, reason: .provider)
+                            return .init(diagnostics: [], outcome: outcome)
                         }
                     }
                 }
-
-                var merged: [WritingDiagnostic] = []
-                for await result in group {
-                    if Task.isCancelled {
-                        group.cancelAll()
-                        return []
-                    }
-                    merged.append(contentsOf: result)
+                var result: [WritingProviderResult] = []
+                for await value in group {
+                    if Task.isCancelled { group.cancelAll(); return [] }
+                    result.append(value)
                 }
-                return merged
+                return result
             }
-
             guard !Task.isCancelled else { return nil }
-            return WritingDiagnosticsSnapshot(
-                generation: ownedGeneration,
-                projectID: request.projectID,
-                documentID: request.documentID,
-                diagnostics: Self.normalized(diagnostics, profile: request.styleProfile))
+            var seen = Set<String>()
+            let diagnostics = results.flatMap(\.diagnostics).filter { seen.insert($0.id).inserted }.sorted {
+                if $0.range.location != $1.range.location { return $0.range.location < $1.range.location }
+                if $0.range.length != $1.range.length { return $0.range.length < $1.range.length }
+                return $0.id < $1.id
+            }
+            return WritingDiagnosticsSnapshot(generation: ownedGeneration, projectID: request.projectID, documentID: request.documentID,
+                diagnostics: diagnostics, providerOutcomes: results.map(\.outcome).sorted { $0.providerID < $1.providerID })
         }
 
         activeTask = task
-        let snapshot = await task.value
+        let snapshot = await withTaskCancellationHandler { await task.value } onCancel: { task.cancel() }
 
         guard generation == ownedGeneration else { return nil }
         activeTask = nil
@@ -279,22 +281,24 @@ public actor WritingDiagnosticsEngine {
         activeTask = nil
     }
 
-    nonisolated private static func normalized(
-        _ diagnostics: [WritingDiagnostic],
-        profile: WritingStyleProfile
-    ) -> [WritingDiagnostic] {
-        var seen = Set<String>()
-        return diagnostics
-            .filter { !profile.ignoredRuleIDs.contains($0.ruleID) }
-            .filter { seen.insert($0.id).inserted }
-            .sorted {
-                if $0.range.location != $1.range.location {
-                    return $0.range.location < $1.range.location
-                }
-                if $0.range.length != $1.range.length {
-                    return $0.range.length < $1.range.length
-                }
-                return $0.id < $1.id
-            }
+    nonisolated private static func normalized(_ diagnostics: [WritingDiagnostic], request: WritingDiagnosticsRequest)
+        -> (diagnostics: [WritingDiagnostic], invalid: Bool) {
+        let source = request.text as NSString
+        func valid(_ range: WritingDiagnosticRange) -> Bool {
+            guard range.location >= 0, range.location < source.length, range.length > 0,
+                  range.length <= source.length - range.location else { return false }
+            return source.rangeOfComposedCharacterSequences(for: range.nsRange) == range.nsRange
+        }
+        var result: [WritingDiagnostic] = [], invalid = false
+        for finding in diagnostics {
+            guard valid(finding.range), finding.relatedRanges.allSatisfy(valid) else { invalid = true; continue }
+            if !request.styleProfile.ignoredRuleIDs.contains(finding.ruleID) { result.append(finding) }
+        }
+        return (result, invalid)
     }
+}
+
+private struct WritingProviderResult: Sendable {
+    let diagnostics: [WritingDiagnostic]
+    let outcome: WritingProviderOutcome
 }
