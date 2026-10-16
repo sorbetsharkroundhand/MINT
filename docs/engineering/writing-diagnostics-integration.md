@@ -50,3 +50,14 @@ No local MINT product launch, UI smoke, signing account, Store validation or act
 Final review reproduced two unsafe loads before the fix: a different native body carrying the same typo/hint, and byte-identical text loaded through another document binding. Each RED test failed three authority/publication assertions. The bridge now proves both the native stable binding key and the loaded original UTF-16 source; a rejection clears capture ownership and queued projection work. The regression also verifies that ignored stale edits cannot restore authority and a correct explicit reload can recover. Existing runtime-key invalidation is preserved.
 
 After hardening, 94 focused tests and the full 1,144-test suite passed (2 existing full-suite skips), as did build and MINTBench. The unchanged native backend gate above remains applicable; clean bundle/archive validation must be repeated from this hardened committed source before PR delivery. No product launch or final native acceptance is claimed.
+
+## Final clean artifact evidence
+
+Ownership-hardened source `5424a260cd8d38f06fab4a836bfb01e14ec68b8f` passed fresh developer-bundle and unsigned-Xcode-archive validation under `build/task-12-package-verification-20261016-source-owner/`. Both support reports prove that exact clean revision and exclude synthetic manuscript/profile canaries and private paths. The standard rejection helper explicitly targeted this new archive and passed all 11 rejection cases. The earlier candidate, default app/archive and their metadata/executable hashes remained preserved. No MINT product was launched.
+
+The tracked code/resource SHA-256 (Sources, manifests, Distribution and scripts) is `1084b0f968e151540f922a0fa07bd75bf75ed1f687dbed0ffbfaf1f05da91f5c`. The following evidence-only documentation commit preserves that digest. Final PR/main CI and owner native acceptance remain separately recorded; these packages do not establish Store distribution proof.
+
+| Artifact | Executable SHA-256 |
+| --- | --- |
+| Final developer `MINT.app` | `a1daf3c676c36ef3e47a0858c1703b8e286596c5fe5663b3f9a94b36d437c42c` |
+| Final unsigned archive application | `507d49f0f712b49be9b54e6efc0b63c00231a152daf78d50b971cac79ba7d873` |
