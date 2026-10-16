@@ -142,6 +142,28 @@ final class WritingDiagnosticsController: ObservableObject {
         state.coverage.dirty = wholeSource; refreshState()
     }
 
+    func currentFinding(id: String) -> WritingDiagnosticsFinding? {
+        guard hasVerifiedNative, !awaitingCommit, profileReadable,
+              currentSnapshot()?.identity == boundIdentity,
+              let finding = state.findings.first(where: { $0.id == id }),
+              finding.stamp == stamp(digest: finding.stamp.windowDigest) else { return nil }
+        return finding
+    }
+
+    /// A refused action invalidates only its assessed input context, never reloads source.
+    func requestRecheck(findingID: String) {
+        let finding = currentFinding(id: findingID)
+        invalidateWork()
+        if let context = finding?.contextRange {
+            state.findings.removeAll { Self.intersects($0.contextRange.nsRange, context.nsRange) }
+            state.coverage.assessed = Self.subtract(context.nsRange, from: state.coverage.assessed)
+            assessedWindows = Set(assessedWindows.filter { !Self.intersects($0.nsRange, context.nsRange) })
+            state.coverage.dirty = Self.merged(state.coverage.dirty + [context])
+            cache.clear(); resultBudgetExhausted = false
+        }
+        schedule()
+    }
+
     func clearContext() {
         cancel(); cache.clear(); index.reset(source: "")
         snapshot = nil; boundIdentity = nil; hasVerifiedNative = false; awaitingCommit = true
