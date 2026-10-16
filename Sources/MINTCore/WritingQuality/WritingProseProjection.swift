@@ -54,10 +54,17 @@ enum WritingProseProjection {
     private static func rx(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }
 
     static func blocks(source: String) -> [WritingProseBlock] {
+        // The existing synchronous load path always admits its complete projection.
+        try! blocks(source: source, admission: { true })
+    }
+
+    static func blocks(source: String, admission: @Sendable () -> Bool) throws -> [WritingProseBlock] {
+        guard admission() else { throw CancellationError() }
         let ns = source as NSString
         guard ns.length > 0 else { return [] }
         var runs: [Run] = [], offset = 0, inCode = false, inMath = false
         while offset < ns.length {
+            guard admission() else { throw CancellationError() }
             let newline = ns.range(of: "\n", range: NSRange(location: offset, length: ns.length - offset))
             let end = newline.location == NSNotFound ? ns.length : newline.location
             let range = NSRange(location: offset, length: end - offset)
@@ -93,6 +100,7 @@ enum WritingProseProjection {
         runs.sort { $0.source.location < $1.source.location }
         var result: [WritingProseBlock] = [], firstRun = 0
         for piece in WritingWindowSplitter.pieces(in: source, maximum: 2048) {
+            guard admission() else { throw CancellationError() }
             let bounds = piece.nsRange
             if bounds.length > 2048 {
                 // A single oversized composed character cannot fit a native window.
@@ -104,6 +112,7 @@ enum WritingProseProjection {
             while firstRun < runs.count && runs[firstRun].source.upperBound <= bounds.location { firstRun += 1 }
             var prose = "", segments: [WritingProseSegment] = [], i = firstRun
             while i < runs.count && runs[i].source.location < bounds.upperBound {
+                guard admission() else { throw CancellationError() }
                 let run = runs[i], clipped = NSIntersectionRange(run.source, bounds)
                 if clipped.length > 0 {
                     let text = run.eligible ? ns.substring(with: clipped) : (clipped.location == run.source.location ? "\n" : "")

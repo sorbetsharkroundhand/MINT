@@ -22,16 +22,20 @@ struct WritingAnalysisWindows: Sequence, Sendable {
 }
 
 /// Immutable nodes share unchanged subtrees with already-issued window sequences.
-private final class WritingProjectionNode: Sendable {
+fileprivate final class WritingProjectionNode: Sendable {
     private final class Record: Sendable {
         let block: WritingProseBlock
-        init(_ block: WritingProseBlock) { self.block = block }
+        let eligibleProseLength: Int
+        init(_ block: WritingProseBlock) {
+            self.block = block
+            eligibleProseLength = block.segments.reduce(0) { $0 + ($1.eligible ? $1.prose.length : 0) }
+        }
     }
     private let record: Record
     var block: WritingProseBlock { record.block }
     let priority: UInt64
     let left: WritingProjectionNode?, right: WritingProjectionNode?
-    let count: Int, sourceLength: Int, proseLength: Int
+    let count: Int, sourceLength: Int, proseLength: Int, eligibleProseLength: Int
     convenience init(_ block: WritingProseBlock, priority: UInt64, left: WritingProjectionNode? = nil, right: WritingProjectionNode? = nil) {
         self.init(record: Record(block), priority: priority, left: left, right: right)
     }
@@ -41,6 +45,8 @@ private final class WritingProjectionNode: Sendable {
         count = 1 + (left?.count ?? 0) + (right?.count ?? 0)
         sourceLength = block.sourceLength + (left?.sourceLength ?? 0) + (right?.sourceLength ?? 0)
         proseLength = block.proseLength + (left?.proseLength ?? 0) + (right?.proseLength ?? 0)
+        let inheritedEligible = (left?.eligibleProseLength ?? 0) + (right?.eligibleProseLength ?? 0)
+        eligibleProseLength = record.eligibleProseLength + inheritedEligible
     }
     func copy(left: WritingProjectionNode?, right: WritingProjectionNode?) -> WritingProjectionNode {
         WritingProjectionNode(record: record, priority: priority, left: left, right: right)
@@ -84,13 +90,15 @@ private final class WritingProjectionNode: Sendable {
 }
 
 final class WritingProjectionIndex {
-    struct Piece { let block: WritingProseBlock; let range: WritingDiagnosticRange; let proseOffset: Int }
+    struct Piece: Sendable { let block: WritingProseBlock; let range: WritingDiagnosticRange; let proseOffset: Int }
     private var root: WritingProjectionNode?
     private var random: UInt64 = 0x6d696e742d70726f
     private(set) var resetCount = 0, lastMutationSourceUTF16 = 0, lastMutationVisits = 0
     private(set) var lastDiffVisits = 0
     var sourceLength: Int { root?.sourceLength ?? 0 }
     var proseLength: Int { root?.proseLength ?? 0 }
+    var eligibleProseLength: Int { root?.eligibleProseLength ?? 0 }
+    func freeze() -> WritingProjectionSnapshot { WritingProjectionSnapshot(root: root) }
 
     func snapshot() -> WritingProjectionIndex {
         let copy = WritingProjectionIndex()
@@ -166,7 +174,66 @@ final class WritingProjectionIndex {
         root = updated
         return true
     }
-    func sourcePiece(containing offset: Int) -> Piece? {
+    func sourcePiece(containing offset: Int) -> Piece? { freeze().sourcePiece(containing: offset) }
+    func windows(intersecting range: WritingDiagnosticRange) -> WritingAnalysisWindows { freeze().windows(intersecting: range) }
+    func sourceText(in range: WritingDiagnosticRange, maximum: Int = 8192) -> String? { freeze().sourceText(in: range, maximum: maximum) }
+
+    func sourceRanges(for range: WritingDiagnosticRange, in window: WritingAnalysisWindow) -> [WritingDiagnosticRange]? {
+        WritingRangeMapping.map(range.nsRange, length: window.text.utf16.count, segments: window.segments)
+    }
+    func sourceRanges(forProse range: WritingDiagnosticRange) -> [WritingDiagnosticRange]? { freeze().sourceRanges(forProse: range) }
+    private func node(_ block: WritingProseBlock) -> WritingProjectionNode {
+        random ^= random << 13; random ^= random >> 7; random ^= random << 17
+        return WritingProjectionNode(block, priority: random)
+    }
+    private func rank(_ offset: Int) -> Int? {
+        if offset == sourceLength { return root?.count ?? 0 }
+        var next = root, offset = offset, rank = 0
+        while let node = next {
+            lastMutationVisits += 1
+            let left = node.left?.sourceLength ?? 0, count = node.left?.count ?? 0
+            if offset < left { next = node.left }
+            else if offset == left { return rank + count }
+            else if offset < left + node.block.sourceLength { return nil }
+            else { offset -= left + node.block.sourceLength; rank += count + 1; next = node.right }
+        }
+        return nil
+    }
+    private func split(_ node: WritingProjectionNode?, count: Int) -> (WritingProjectionNode?, WritingProjectionNode?) {
+        guard let node else { return (nil, nil) }
+        lastMutationVisits += 1
+        let left = node.left?.count ?? 0
+        if count <= left {
+            let (before, after) = split(node.left, count: count)
+            return (before, node.copy(left: after, right: node.right))
+        }
+        let (before, after) = split(node.right, count: count - left - 1)
+        return (node.copy(left: node.left, right: before), after)
+    }
+    private func merge(_ left: WritingProjectionNode?, _ right: WritingProjectionNode?) -> WritingProjectionNode? {
+        guard let left else { return right }; guard let right else { return left }
+        lastMutationVisits += 1
+        if left.priority < right.priority { return left.copy(left: left.left, right: merge(left.right, right)) }
+        return right.copy(left: merge(left, right.left), right: right.right)
+    }
+}
+
+/// A report can prepare and map exact source without sharing a mutable index across actors.
+struct WritingProjectionSnapshot: Sendable {
+    private let root: WritingProjectionNode?
+    fileprivate init(root: WritingProjectionNode?) { self.root = root }
+    var sourceLength: Int { root?.sourceLength ?? 0 }
+    var proseLength: Int { root?.proseLength ?? 0 }
+    var eligibleProseLength: Int { root?.eligibleProseLength ?? 0 }
+    static func prepare(source: String, admission: @Sendable () -> Bool = { !Task.isCancelled }) throws -> WritingProjectionSnapshot {
+        let blocks = try WritingProseProjection.blocks(source: source, admission: admission)
+        let index = WritingProjectionIndex()
+        guard index.apply(.init(oldSourceRange: .init(location: 0, length: 0), replacement: blocks), admission: admission) else {
+            throw CancellationError()
+        }
+        return index.freeze()
+    }
+    func sourcePiece(containing offset: Int) -> WritingProjectionIndex.Piece? {
         guard sourceLength > 0, offset >= 0, offset <= sourceLength else { return nil }
         var next = root, source = 0, prose = 0
         let point = min(offset, sourceLength - 1)
@@ -174,7 +241,7 @@ final class WritingProjectionIndex {
             let s = source + (node.left?.sourceLength ?? 0), p = prose + (node.left?.proseLength ?? 0)
             if point < s { next = node.left }
             else if point < s + node.block.sourceLength {
-                return Piece(block: node.block, range: .init(location: s, length: node.block.sourceLength), proseOffset: p)
+                return WritingProjectionIndex.Piece(block: node.block, range: .init(location: s, length: node.block.sourceLength), proseOffset: p)
             } else {
                 source = s + node.block.sourceLength; prose = p + node.block.proseLength; next = node.right
             }
@@ -227,47 +294,33 @@ final class WritingProjectionIndex {
         return text.utf16.count == range.length ? text : nil
     }
 
-    func sourceRanges(for range: WritingDiagnosticRange, in window: WritingAnalysisWindow) -> [WritingDiagnosticRange]? {
-        WritingRangeMapping.map(range.nsRange, length: window.text.utf16.count, segments: window.segments)
+    /// Explicit-report evidence verification streams bounded pieces instead of joining a long quote.
+    func matchesSource(_ expected: String, in range: WritingDiagnosticRange) -> Bool {
+        guard WritingRangeMapping.valid(range.nsRange, in: sourceLength), expected.utf16.count == range.length else { return false }
+        if range.length == 0 { return expected.isEmpty }
+        guard let first = sourcePiece(containing: range.location) else { return false }
+        var blocks: [WritingProseBlock] = []
+        WritingProjectionNode.sourceBlocks(root, range: range.nsRange, into: &blocks)
+        var offset = first.range.location, units = expected.utf16.makeIterator()
+        for block in blocks {
+            let clipped = NSIntersectionRange(NSRange(location: offset, length: block.sourceLength), range.nsRange)
+            let local = NSRange(location: clipped.location - offset, length: clipped.length)
+            for unit in (block.sourceText as NSString).substring(with: local).utf16 {
+                guard units.next() == unit else { return false }
+            }
+            offset += block.sourceLength
+        }
+        return units.next() == nil
+    }
+
+    func segments(inProse range: WritingDiagnosticRange) -> [WritingProseSegment] {
+        guard WritingRangeMapping.valid(range.nsRange, in: proseLength) else { return [] }
+        return WritingProjectionNode.segments(root, range: range.nsRange)
     }
     func sourceRanges(forProse range: WritingDiagnosticRange) -> [WritingDiagnosticRange]? {
         guard WritingRangeMapping.valid(range.nsRange, in: proseLength) else { return nil }
         return WritingRangeMapping.map(NSRange(location: 0, length: range.length), length: range.length,
-                                       segments: WritingProjectionNode.segments(root, range: range.nsRange))
-    }
-    private func node(_ block: WritingProseBlock) -> WritingProjectionNode {
-        random ^= random << 13; random ^= random >> 7; random ^= random << 17
-        return WritingProjectionNode(block, priority: random)
-    }
-    private func rank(_ offset: Int) -> Int? {
-        if offset == sourceLength { return root?.count ?? 0 }
-        var next = root, offset = offset, rank = 0
-        while let node = next {
-            lastMutationVisits += 1
-            let left = node.left?.sourceLength ?? 0, count = node.left?.count ?? 0
-            if offset < left { next = node.left }
-            else if offset == left { return rank + count }
-            else if offset < left + node.block.sourceLength { return nil }
-            else { offset -= left + node.block.sourceLength; rank += count + 1; next = node.right }
-        }
-        return nil
-    }
-    private func split(_ node: WritingProjectionNode?, count: Int) -> (WritingProjectionNode?, WritingProjectionNode?) {
-        guard let node else { return (nil, nil) }
-        lastMutationVisits += 1
-        let left = node.left?.count ?? 0
-        if count <= left {
-            let (before, after) = split(node.left, count: count)
-            return (before, node.copy(left: after, right: node.right))
-        }
-        let (before, after) = split(node.right, count: count - left - 1)
-        return (node.copy(left: node.left, right: before), after)
-    }
-    private func merge(_ left: WritingProjectionNode?, _ right: WritingProjectionNode?) -> WritingProjectionNode? {
-        guard let left else { return right }; guard let right else { return left }
-        lastMutationVisits += 1
-        if left.priority < right.priority { return left.copy(left: left.left, right: merge(left.right, right)) }
-        return right.copy(left: merge(left, right.left), right: right.right)
+                                       segments: segments(inProse: range))
     }
 }
 

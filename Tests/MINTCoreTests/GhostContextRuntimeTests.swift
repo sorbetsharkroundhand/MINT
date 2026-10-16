@@ -11,12 +11,15 @@ final class GhostContextRuntimeTests: XCTestCase {
         try await session.saveAndActivate(projectFixture())
         let settings = CompletionSettings(defaults: defaults)
         let completion = CompletionController(settings: settings)
+        var foregroundEvents: [Bool] = []
+        completion.foregroundCompletionDidChange = { foregroundEvents.append($0) }
         let indexer = BackgroundIndexer(engine: CompletionEngine(), settings: settings,
             sidecarPersistence: KnowledgeSidecarRepository(projectStore: store, legacyDirectory: root))
         defer { indexer.shutdown() }
         ContentView.connectProjectConsumers(session: session, completion: completion, indexer: indexer)
         XCTAssertNotNil(completion.originalNameAnchorsProvider)
-        XCTAssertNotNil(completion.foregroundCompletionDidChange)
+        completion.prepareForProjectTransition()
+        XCTAssertEqual(foregroundEvents, [false], "Project composition preserves the existing foreground consumer")
         completion.changeContextMode(to: .rawWithNameAnchor)
         XCTAssertFalse(indexer.originalNameAnchorsEnabled)
         settings.setCompletionEnabled(true)

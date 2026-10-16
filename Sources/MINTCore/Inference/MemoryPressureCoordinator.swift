@@ -37,6 +37,7 @@ public final class MemoryPressureCoordinator {
     private let completionPause: (Bool) -> Void
     private let releaseModel: () async throws -> Void
     private let releaseFailed: (Error) -> Void
+    private let pressureDidChange: (MemoryPressureLevel) -> Void
     private var releaseTask: Task<Void, Never>?
     private var completionIsPaused = false
     private var source: (any MemoryPressureEventSource)?
@@ -46,9 +47,10 @@ public final class MemoryPressureCoordinator {
     public init(backgroundPause: @escaping (Bool) -> Void,
                 completionPause: @escaping (Bool) -> Void,
                 releaseModel: @escaping () async throws -> Void,
-                releaseFailed: @escaping (Error) -> Void = { _ in }) {
+                releaseFailed: @escaping (Error) -> Void = { _ in },
+                pressureDidChange: @escaping (MemoryPressureLevel) -> Void = { _ in }) {
         self.backgroundPause = backgroundPause; self.completionPause = completionPause
-        self.releaseModel = releaseModel; self.releaseFailed = releaseFailed
+        self.releaseModel = releaseModel; self.releaseFailed = releaseFailed; self.pressureDidChange = pressureDidChange
     }
 
     public func start(source: any MemoryPressureEventSource = SystemMemoryPressureSource()) {
@@ -78,6 +80,7 @@ public final class MemoryPressureCoordinator {
     public func handle(_ next: MemoryPressureLevel) {
         guard active, next != level else { return }
         level = next
+        pressureDidChange(next)
         backgroundPause(next != .normal || releaseTask != nil)
         if next == .critical {
             setCompletionPaused(true)
