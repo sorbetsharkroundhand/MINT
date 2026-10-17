@@ -20,9 +20,9 @@
 
 **Interfaces:** Public Codable/Equatable/Sendable `StoryInstant`, `StoryInterval`, `StoryFactOrigin`, typed character/knowledge/relationship/object/world-rule payloads and `StoryFact`. Interval overlap is a tri-state result (overlap/disjoint/unknown); different timeline IDs are never ordered. Fact validation checks original range/evidence document relation, required values/IDs and optional finite [0,1] confidence. Derived fact IDs are not persistent manuscript IDs. No changes to existing extractors/storage yet.
 
-- [ ] Write failing tests for known/unknown/cross-timeline overlap, malformed bounds/ranges/confidence, all typed value round-trips and original Unicode/evidence identity.
-- [ ] Run the new suite; retain genuine RED before implementation (use minimal compiling declarations if needed).
-- [ ] Implement immutable values/validation only; run focused new/EventLog/StateDelta/Narrative/hierarchy tests, build/full tests/MINTBench.
+- [x] Write failing tests for known/unknown/cross-timeline overlap, malformed bounds/ranges/confidence, all typed value round-trips and original Unicode/evidence identity.
+- [x] Run the new suite; retain genuine RED before implementation (use minimal compiling declarations if needed).
+- [x] Implement immutable values/validation only; run focused new/EventLog/StateDelta/Narrative/hierarchy tests, build/full tests/MINTBench.
 - [ ] Review inline, commit `feat: define atomic temporal story facts`, publish/attach only after quality-access predecessor main CI, merge on exact-head all-three checks, synchronize clean primary main and verify merged-main CI. This is partial #107.
 
 ### Task 2: Prepared temporal queries and exact entity resolution
