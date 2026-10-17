@@ -394,6 +394,8 @@ public final class BackgroundIndexer: ObservableObject {
     /// 본문 편집·문서 전환 알림 (EntryStore 훅) — 진행 중 패스를 선점하고
     /// 유휴 타이머를 다시 감는다.
     public func noteChange(entryID: UUID) {
+        // Original-backed actions retire synchronously, including while analysis is paused.
+        setWarnings([])
         guard !memoryPressurePaused else { return }
         prepareOriginalNameAnchors()
         // 선점: 백그라운드 생성은 예측(그리고 그 앞의 타이핑)에 항상 진다 (CLAUDE.md §2-6).
@@ -545,7 +547,7 @@ public final class BackgroundIndexer: ObservableObject {
                 sidecar: sidecar, sceneCount: outline.scenes.count,
                 loadMs: loadMs, deriveMs: deriveMs)
             let warnings = ConsistencyChecker.check(
-                snapshot: snapshot, characters: characters)
+                snapshot: snapshot, characters: characters, source: body)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // 늦은 이전 hydrate는 현재 문서에만, 자기 토큰이 유효할 때만 (#82).
@@ -836,7 +838,7 @@ public final class BackgroundIndexer: ObservableObject {
                 // 일관성 검사는 스냅샷과 같은 주기 — 백그라운드에서 계산하고
                 // 결과만 메인으로 (렌더 경로 재계산 금지, docs/editor-perf.md 4차).
                 let warnings = ConsistencyChecker.check(
-                    snapshot: snapshot, characters: characters)
+                    snapshot: snapshot, characters: characters, source: body)
                 Task { @MainActor in
                     // 이 새 Task는 부모 취소를 물려받지 않는다 — 소유권 가드가 대신
                     // 걸러낸다 (토큰·문서 일치, #82).
