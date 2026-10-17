@@ -54,6 +54,12 @@ actor ModelLifetimeCoordinator {
     private var switchWaiters: [Waiter] = []
     private var drainWaiters: [Waiter] = []
 
+    /// Reserve only an existing stable model; never wait for or initiate a model switch/load.
+    func reserveReadyOperation(modelID: String) -> Bool {
+        guard !Task.isCancelled, !switching, currentModelID == modelID else { return false }
+        operationCounter.add(1); return true
+    }
+
     func acquire(modelID: String, reservingOperation: Bool) async throws -> Admission {
         try Task.checkCancellation()
         while switching {
@@ -521,6 +527,43 @@ public actor CompletionEngine {
                 return Self.stripSurroundingQuotes(cleaned)
             }
         }
+    }
+
+    enum ReadyInstructionError: Error, Equatable { case modelUnavailable, promptTooLong, unsupportedResponse }
+
+    /// Optional explicit answers never trigger model setup and use fresh instruction state.
+    func streamInstructionIfReady(system: String, user: String, parameters: CompletionParameters,
+                                  onChunk: @escaping @Sendable (String) throws -> Void) async throws {
+        guard let loaded = container, !parameters.modelID.isEmpty, loadedModelID == parameters.modelID,
+              await modelLifetime.reserveReadyOperation(modelID: parameters.modelID) else { throw ReadyInstructionError.modelUnavailable }
+        do {
+            try Task.checkCancellation()
+            try await loaded.perform { context in
+                let input = try await context.processor.prepare(input: UserInput(
+                    chat: [.system(system), .user(user)], additionalContext: ["enable_thinking": false]))
+                guard ReadyInstructionLimits.promptFits(count: input.text.tokens.size, budget: parameters.maxPromptTokens) else { throw ReadyInstructionError.promptTooLong }
+                try Task.checkCancellation()
+                let generationParameters = GenerateParameters(maxTokens: 512, temperature: 0, topP: 1, prefillStepSize: 128)
+                let (stream, synchronizer) = try Self.generationTask(input: input, parameters: generationParameters, context: context)
+                var iterator = stream.makeAsyncIterator()
+                do {
+                    while let value = await iterator.next() {
+                        try Task.checkCancellation()
+                        switch value {
+                        case .chunk(let chunk): try onChunk(chunk)
+                        case .info: break
+                        case .toolCall: throw ReadyInstructionError.unsupportedResponse
+                        }
+                    }
+                } catch {
+                    _ = await synchronizer.cancelAndCollectInfo(from: &iterator)
+                    throw error
+                }
+                _ = await synchronizer.cancelAndCollectInfo(from: &iterator)
+                try Task.checkCancellation()
+            }
+            await modelLifetime.releaseOperation()
+        } catch { await modelLifetime.releaseOperation(); throw error }
     }
 
     // MARK: - 모델 로드 (1회, 교체 가능)
