@@ -3,6 +3,24 @@ import XCTest
 
 @MainActor
 final class DocumentOutlineControllerTests: XCTestCase {
+    func testCurrentHeadingRequiresPreparedIdentityAndClearsUnprovenPosition() async throws {
+        let snapshot = outlineSnapshot(body: "intro\n# One\nbody\n## Two\nlast")
+        let controller = DocumentOutlineController(observeEnergy: false, sleep: {})
+        controller.update(snapshot); await controller.waitForCurrentWork()
+        let headings = try XCTUnwrap(controller.prepared?.projection.headings)
+        controller.notePosition(headings[1].id + 1, identity: snapshot.identity)
+        XCTAssertEqual(controller.currentHeadingID, headings[1].id)
+        controller.notePosition(0, identity: snapshot.identity)
+        XCTAssertNil(controller.currentHeadingID)
+        controller.notePosition(headings[0].id, identity: snapshot.identity)
+        XCTAssertEqual(controller.currentHeadingID, headings[0].id)
+        controller.notePosition(headings[1].id, identity: outlineSnapshot().identity)
+        XCTAssertNil(controller.currentHeadingID)
+        controller.notePosition(nil, identity: snapshot.identity)
+        XCTAssertNil(controller.currentHeadingID)
+        controller.stop()
+    }
+
     func testStaleABAAndMetadataGenerationsCannotPublish() async throws {
         let gate = OutlinePreparationGate()
         let controller = DocumentOutlineController(observeEnergy: false, sleep: {}, project: { try await gate.project($0) })

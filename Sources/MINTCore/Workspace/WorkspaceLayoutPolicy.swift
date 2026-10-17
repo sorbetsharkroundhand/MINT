@@ -155,7 +155,7 @@ enum WorkspaceLayoutPolicy {
             projectedNavigatorWidth ?? savedWidth))
         let reservation = placement == .inline ? width + surfaceGap : 0
         let writingWidth = max(0, base - reservation)
-        let hasTool = presentation.toolSection != nil
+        let hasTool = presentation.contextVisible
         let dock = hasTool ? WorkspaceLayoutState.effectiveToolDock(preferred: presentation.toolDock,
             availableWidth: writingWidth, navigatorVisible: false, navigatorWidth: 0)
             : (presentation.toolDock == .automatic ? .right : presentation.toolDock)

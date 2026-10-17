@@ -297,7 +297,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             {
                 textView.restoreWritingPosition(persisted)
             }
-        } else if text != context.coordinator.lastSyncedText {
+        } else if !text.utf16.elementsEqual(context.coordinator.lastSyncedText.utf16) {
             // Same stable identity: synchronize external body state without severing native undo.
             context.coordinator.isDocumentTransitioning = true
             textView.load(markdown: text)

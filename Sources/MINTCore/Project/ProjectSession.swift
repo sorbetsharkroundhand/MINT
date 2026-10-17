@@ -318,7 +318,7 @@ public final class ProjectSession: ObservableObject {
         guard var project = activeProject,
             let selectedDocumentID,
             let index = project.documents.firstIndex(where: { $0.id == selectedDocumentID }),
-            project.documents[index].body != body
+            !project.documents[index].body.utf16.elementsEqual(body.utf16)
         else { return }
 
         project.documents[index].body = body

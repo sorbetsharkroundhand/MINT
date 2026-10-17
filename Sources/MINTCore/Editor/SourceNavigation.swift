@@ -11,10 +11,12 @@ struct SourceWritingPosition: Equatable, Sendable {
 
 enum SourceNavigationIntent: Equatable, Sendable {
     case passage(SourceSearchHit)
+    case heading(OutlineSourceTarget)
     case returnTo(SourceWritingPosition)
     var key: ProjectDocumentKey {
         switch self {
         case .passage(let hit): ProjectDocumentKey(projectID: hit.projectID, documentID: hit.documentID)
+        case .heading(let target): target.identity.key
         case .returnTo(let point): point.key
         }
     }
@@ -22,10 +24,30 @@ enum SourceNavigationIntent: Equatable, Sendable {
 
 @MainActor
 extension ProjectEditorRequests {
+    @discardableResult
+    func jump(to heading: DocumentOutlineProjection.Heading, prepared: PreparedDocumentOutline,
+              in session: ProjectSession) -> Bool {
+        let target = OutlineSourceTarget(identity: prepared.identity, revision: prepared.projection.revision,
+            evidence: .init(documentID: prepared.identity.key.documentID, quote: heading.quote, utf16Hint: heading.id),
+            level: heading.level, sourceOffset: heading.id)
+        guard session.runtimeIdentity == prepared.identity,
+              prepared.projection.headings.contains(heading),
+              let body = session.selectedDocument?.body, target.matchesSource(body),
+              let point = captureSourcePosition(in: session) else {
+            sourceNavigationError = "원문 위치를 확인할 수 없어요. 개요가 갱신된 뒤 다시 선택하세요."
+            return false
+        }
+        if sourceReturnPoint?.key.projectID != point.key.projectID { sourceReturnPoint = point }
+        sourceNavigationError = nil
+        issueSourceNavigation(.heading(target))
+        return true
+    }
+
     func captureSourcePosition(in session: ProjectSession) -> SourceWritingPosition? {
         guard session.isEditorEditable, let key = session.runtimeIdentity?.key,
             nativeEditorKey == key, let view = nativeEditor, !view.hasMarkedText(),
-            let manuscript = session.selectedDocument?.body, view.serialize() == manuscript else { return nil }
+            view.writingDocumentIdentity == .project(key),
+            let manuscript = session.selectedDocument?.body, view.serialize().utf16.elementsEqual(manuscript.utf16) else { return nil }
         return SourceWritingPosition(key: key, manuscript: manuscript, nativeText: view.string,
             selection: view.selectedRange(), scrollOrigin: view.enclosingScrollView?.contentView.bounds.origin ?? .zero,
             sourceCursor: view.sourceCursorOffset())
@@ -53,7 +75,8 @@ extension ProjectEditorRequests {
         guard session.isEditorEditable, nativeEditor?.hasMarkedText() == false,
             let point = sourceReturnPoint, let project = session.activeProject,
             point.key.projectID == project.id, !project.trashedDocumentIDs.contains(point.key.documentID),
-            project.documents.first(where: { $0.id == point.key.documentID })?.body == point.manuscript else {
+            let body = project.documents.first(where: { $0.id == point.key.documentID })?.body,
+            body.utf16.elementsEqual(point.manuscript.utf16) else {
             sourceNavigationError = "이전 집필 위치의 문서가 변경되었습니다."
             return false
         }
@@ -84,8 +107,11 @@ extension BlockTextView {
     func applySourceNavigation(_ intent: SourceNavigationIntent) -> Bool {
         guard !hasMarkedText() else { return false }
         switch intent {
+        case .heading(let target):
+            guard applyOutlineHeading(target) else { return false }
         case .returnTo(let point):
-            guard serialize() == point.manuscript, string == point.nativeText else { return false }
+            guard serialize().utf16.elementsEqual(point.manuscript.utf16),
+                string.utf16.elementsEqual(point.nativeText.utf16) else { return false }
             restoreSelection(to: point.selection)
             if let scroll = enclosingScrollView {
                 var bounds = scroll.contentView.bounds; bounds.origin = point.scrollOrigin

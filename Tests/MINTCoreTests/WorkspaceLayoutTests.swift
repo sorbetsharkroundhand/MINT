@@ -2,6 +2,21 @@ import XCTest
 @testable import MINTCore
 
 final class WorkspaceLayoutTests: XCTestCase {
+    func testOutlineReservesExistingDockWithoutOverwritingStoredTool() {
+        for section in ["files", "bible", "margin", "unknown"] {
+            for (visible, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
+                let state = WorkspacePresentationState(navigatorVisible: visible, navigatorWidth: 250,
+                    rawToolSection: section, rawToolDock: "right", chromeHidden: false, outlineVisible: true)
+                XCTAssertTrue(state.contextVisible)
+                XCTAssertEqual(state.rawToolSection, section)
+                let narrow = WorkspaceLayoutPolicy.resolve(availableWidth: boundary - 1, presentation: state)
+                let wide = WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: state)
+                XCTAssertEqual(narrow.toolDock, .bottom)
+                XCTAssertEqual(wide.toolDock, .right); XCTAssertEqual(wide.manuscriptWidth, 560)
+            }
+        }
+    }
+
     func testSideFitIncludesRenderedDivider() {
         for dock in [ToolDockPosition.automatic, .left, .right] {
             for (visible, boundary) in [(true, CGFloat(1151)), (false, CGFloat(901))] {
