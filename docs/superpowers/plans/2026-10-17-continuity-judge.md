@@ -21,9 +21,9 @@ No local MINT launch, actual model selection/download/inference, native acceptan
 **Files:** Create `Knowledge/JudgeEvidencePacket.swift`, `Knowledge/JudgeDecision.swift`, `Tests/MINTCoreTests/ContinuityJudgePacketTests.swift`.
 **Consumes:** ContinuityCandidate, ProjectDocumentSnapshot, EvidenceAnchor and current original hashes.
 **Produces:** `JudgeEvidencePacket.prepare(candidate:document:) throws`, `.userMessage()` and `JudgeDecision.decode(_:packet:) throws`, with `.visibleConflict` and real `.evidence` anchors.
-- [ ] Write/run failing literal source/scope/time/origin/nonce/bounds, closed root/duplicate JSON, confidence/citation/verdict/partial/size tests; include flashback noConflict and intentionalPossible cases.
-- [ ] Implement private factory, complete-line excerpt, bounded numbered originals/JSON data and strict single-object decoder. No model/controller/UI work yet.
-- [ ] Run focused/full/build/bench and separate inline review; fix Important findings RED→GREEN.
+- [x] Write/run failing literal source/scope/time/origin/nonce/bounds, closed root/duplicate JSON, confidence/citation/verdict/partial/size tests; include flashback noConflict and intentionalPossible cases.
+- [x] Implement private factory, complete-line excerpt, bounded numbered originals/JSON data and strict single-object decoder. No model/controller/UI work yet.
+- [x] Run focused/full/build/bench and separate inline review; fix Important findings RED→GREEN.
 - [ ] Commit bounded PR after predecessor merge, attach; require all predecessor-main, exact-head and merged-main CI plus fresh feedback.
 
 ### Task 2: Explicit cancellable request and real runtime support
