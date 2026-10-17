@@ -21,9 +21,9 @@ No local product launch, shipping-model operation, user-data mutation, hot-path 
 **Files:** Create `Knowledge/ContinuityCandidate.swift`, `Tests/MINTCoreTests/AtomicContinuityTests.swift`; extend StoryKnowledge.CharacterKnowledge.Stance.
 **Consumes:** `StoryKnowledgeSnapshot.observations(before:)`, validated original scopes/evidence/time and explicit stances.
 **Produces:** private-construction `ContinuityCandidate`; `ContinuityCandidate.prepare(snapshot: StoryKnowledgeSnapshot, before: Int) -> [ContinuityCandidate]`.
-- [ ] Write/run failing knowledge/location/relationship/object cases with original snapshots, unknown/time/future/weak/repair/dedup/cancellation/output-limit assertions.
-- [ ] Implement explicit unaware stance and deterministic evidence-backed bounded kernels; same-calendar age follows Task2. Candidate keys/order are stable and independent of Dictionary traversal.
-- [ ] Run atomic/query/legacy focused tests, build/full tests/MINTBench and separate inline review; retain Important regression fixes.
+- [x] Write/run failing knowledge/location/relationship/object cases with original snapshots, unknown/time/future/weak/repair/dedup/cancellation/output-limit assertions.
+- [x] Implement explicit unaware stance and deterministic evidence-backed bounded kernels; same-calendar age follows Task2. Candidate keys/order are stable and independent of Dictionary traversal.
+- [x] Run atomic/query/legacy focused tests, build/full tests/MINTBench and separate inline review; retain Important regression fixes.
 - [ ] Commit/publish/attach bounded PR after predecessor merge; require all predecessor-main, exact-head and merged-main CI plus fresh feedback.
 
 ### Task 2: Explicit age arithmetic and actual scoped preparation
