@@ -3,7 +3,7 @@ import CryptoKit
 
 public enum StoryFactResolution: Equatable, Sendable { case resolved(StoryFact), unknown }
 
-public struct StoryKnowledgeSnapshot: Sendable {
+public struct StoryKnowledgeSnapshot: Equatable, Sendable {
     public let scope: StoryMemoryScope
     public let sourceRevision: String
     public let sourceLength: Int
@@ -123,5 +123,9 @@ public struct StoryKnowledgeSnapshot: Sendable {
     private static func sameOriginal(_ a: EvidenceAnchor, _ b: EvidenceAnchor) -> Bool {
         a.documentID == b.documentID && a.sceneHash == b.sceneHash && a.utf16Hint == b.utf16Hint
             && a.quote.utf16.elementsEqual(b.quote.utf16)
+    }
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.scope == rhs.scope && lhs.sourceRevision == rhs.sourceRevision && lhs.sourceLength == rhs.sourceLength
+            && lhs.facts == rhs.facts
     }
 }

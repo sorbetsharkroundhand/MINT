@@ -1814,6 +1814,9 @@ public final class BackgroundIndexer: ObservableObject {
             documentID: WritingDocumentID(rawValue: entryID))
         let storyMemory = StoryMemorySnapshot.make(
             scope: memoryScope, outline: outline, sidecar: sidecar, body: body)
+        let storyKnowledge = StoryKnowledgeProjection.make(
+            scope: memoryScope, body: body, outline: outline, sidecar: sidecar,
+            characters: characters, overrides: rekeyed)
         let freshSceneSummaries = Dictionary(
             uniqueKeysWithValues: storyMemory.sceneSummaries.map {
                 ($0.key.rawValue, $0.value)
@@ -1829,6 +1832,7 @@ public final class BackgroundIndexer: ObservableObject {
             chapterSummariesByPath: freshChapterSummaries,
             workSummary: storyMemory.workSummary?.summary,
             storyMemory: storyMemory,
+            storyKnowledge: storyKnowledge,
             events: sidecar.events,
             utterances: utterances,
             sceneSummaries: freshSceneSummaries,

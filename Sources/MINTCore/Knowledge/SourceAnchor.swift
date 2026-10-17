@@ -11,6 +11,20 @@ import Foundation
 /// (요구사항 §28). 호출부는 nil이면 점프를 포기하거나 씬 시작으로 폴백한다.
 public enum SourceAnchor {
 
+    /// One literal original occurrence in a captured context; ambiguity and invalid bounds refuse.
+    public static func uniqueOriginalRange(for quote: String, in body: String, within: NSRange) -> NSRange? {
+        let text = body as NSString, units = Array(quote.utf16)
+        guard !units.isEmpty, within.location >= 0, within.location <= text.length,
+              within.length >= units.count, within.length <= text.length - within.location else { return nil }
+        let first = text.range(of: quote, options: .literal, range: within)
+        guard first.location != NSNotFound, first.length == units.count,
+              units.indices.allSatisfy({ units[$0] == text.character(at: first.location + $0) }) else { return nil }
+        // Start one unit after the first match so overlapping occurrences also refuse.
+        let next = first.location + 1, end = within.location + within.length
+        guard text.range(of: quote, options: .literal, range: NSRange(location: next, length: end - next)).location == NSNotFound else { return nil }
+        return first
+    }
+
     /// Exact original evidence only. Offsets disambiguate solely on the captured revision;
     /// edited duplicate quotes remain stale instead of silently choosing the first match.
     public static func exactRange(for anchor: EvidenceAnchor, in body: String, revision: String) -> NSRange? {

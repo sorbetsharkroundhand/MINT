@@ -38,13 +38,15 @@
 
 ### Task 3: Verified existing producer adapter and snapshot integration
 
-**Files:** Create `Knowledge/StoryKnowledgeProjection.swift`, `Tests/MINTCoreTests/StoryKnowledgeProjectionTests.swift`; extend `Knowledge/KnowledgeStore.swift`, `Knowledge/BackgroundIndexer.swift` at the existing makeSnapshot seam and relevant scoped snapshot tests only.
+**Files:** Create `Knowledge/StoryKnowledgeProjection.swift`, `Tests/MINTCoreTests/StoryKnowledgeProjectionTests.swift`; extend `Knowledge/SourceAnchor.swift` with bounded literal original lookup, `Knowledge/StoryKnowledgeSnapshot.swift` for the existing KnowledgeSnapshot Equatable contract, `Knowledge/KnowledgeStore.swift`, `Knowledge/BackgroundIndexer.swift` at the existing makeSnapshot seam and relevant scoped snapshot tests only.
 
 **Interfaces:** Projection consumes immutable body/outline/actual sidecar events+insights/current registered characters and explicit StoryMemoryScope. Exact original unique scene-local quotes become EvidenceAnchors; legacy records retain whole-scene discourse visibility and unknown story time/confidence. KnowledgeSnapshot gains a compatible optional/default prepared StoryKnowledgeSnapshot property. Writer-owned records are neither copied into the derived cache nor mutated.
 
-- [ ] Write/run failing actual-sidecar projection/publication tests for tombstones, missing/ambiguous/repeated/Unicode quotes, registered-ID filtering, coarse future cutoff and project isolation.
-- [ ] Implement projection at existing background preparation/publication, no new inference pass or persistence/schema change.
-- [ ] Run all Story/EventLog/StateDelta/hierarchy/project-context regressions, build/full tests/MINTBench and separate whole-feature inline review; important findings require RED→GREEN fixes.
+SourceAnchor.uniqueOriginalRange(for:in:within:) checks bounded literal UTF-16 uniqueness, including overlapping matches and final raw-unit proof. Projection rechecks current scene content versions and per-record ownership. Derived IDs hash exact scope/context/content/evidence, keeping repeated scene occurrences separate without treating hashes as persistent IDs. NarrativeOverride has a string identity, so it cannot grant WriterDecision UUID authority: omit model event/deltas superseded by an eventSummary override from this raw projection while preserving existing effective legacy queries and durable records. Canon projection remains downstream.
+
+- [x] Write/run failing actual-sidecar projection/publication tests for tombstones, missing/ambiguous/repeated/Unicode quotes, registered-ID filtering, coarse future cutoff and project isolation.
+- [x] Implement projection at existing background preparation/publication, no new inference pass or persistence/schema change.
+- [x] Run all Story/EventLog/StateDelta/hierarchy/project-context regressions, build/full tests/MINTBench and separate whole-feature inline review; important findings require RED→GREEN fixes.
 - [ ] Commit/publish/attach bounded integration PR after Task2 merge (merge gated on Task2 main CI), merge only on exact all-three checks and verify merged main. Record #107's completed core evidence, remaining producer/UI scope and final acceptance truthfully; preserve #110/#113/#115/#270/#119 contracts.
 
 Inline plan review: Task1 values feed Task2 snapshot indexes; Task3 uses those exact types and the existing StoryMemoryScope/source evidence seam. Legacy arrays/public queries remain compatible. No type/access/scope conflict or need for a new durable schema was found. Retain local evidence/ledgers and owner artifacts.
