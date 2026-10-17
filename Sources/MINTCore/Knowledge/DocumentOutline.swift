@@ -337,7 +337,7 @@ public struct DocumentOutline: Equatable, Sendable {
 
     /// `#{1,3} 제목` 꼴이면 (레벨, 제목). `####` 이상·공백 없는 `#텍스트`는 본문.
     /// 에디터의 제목 파생(`EntryStore.derivedTitle`)과 같은 판정 기준이다.
-    private static func headingLine(_ line: Substring) -> (Int, String)? {
+    static func headingLine(_ line: Substring) -> (Int, String)? {
         var level = 0
         var index = line.startIndex
         while index < line.endIndex, line[index] == "#", level < 4 {
