@@ -171,7 +171,7 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
         resultTable.reloadData()
         openButton.isEnabled = !model.hits.isEmpty && !model.isInvalidated
         askButton.isEnabled = requests.askSupport?.available == true && model.preparedInput != nil && !model.hits.isEmpty && !model.isInvalidated
-        askButton.toolTip = requests.askSupport?.available == true ? "검색 원문에서 직접 질문해요." : "선택한 로컬 모델이 준비되면 질문할 수 있어요. 원문 검색은 계속 사용할 수 있어요."
+        askButton.toolTip = requests.askSupport?.available == true ? "검색 원문에서 직접 질문해요." : "AI가 켜지고 선택한 로컬 모델이 준비되면 질문할 수 있어요. 원문 검색은 계속 사용할 수 있어요."
         if !model.hits.isEmpty { resultTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
         statusLabel.stringValue = model.errorMessage ?? (model.isSearching ? "검색 중…" :
             searchField.stringValue.isEmpty ? "단어나 이름으로 원문을 찾아보세요." : "\(model.hits.count)개 결과")
@@ -195,6 +195,7 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
         window?.makeFirstResponder(view.questionField)
     }
     private func showSearch() {
+        questionView?.answerView.update(packet: nil, blocks: [])
         questionView?.model.didChange = nil; questionView?.model.dismiss()
         questionView?.removeFromSuperview(); questionView = nil
         searchStack?.isHidden = false; window?.title = "원문 검색"; window?.contentMinSize.height = 300
@@ -218,6 +219,7 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
     override func close() { if !isClosing { window?.close() } }
     func windowWillClose(_ notification: Notification) {
         guard !isClosing else { return }; isClosing = true
+        questionView?.answerView.update(packet: nil, blocks: [])
         questionView?.model.didChange = nil; questionView?.model.dismiss(); subscriptions.removeAll()
         model.didInvalidate = nil; model.dismiss()
         if let observer = parentCloseObserver { NotificationCenter.default.removeObserver(observer) }

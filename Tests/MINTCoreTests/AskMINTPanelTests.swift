@@ -80,6 +80,40 @@ final class AskMINTPanelTests: XCTestCase {
         XCTAssertNil(panel.questionView); XCTAssertEqual(panel.model.hits.count, 2)
         XCTAssertEqual(editor.selectedRange(), selection)
     }
+
+    func testCancelKeepsNativePartialButDocumentRetirementRemovesAllSourceActions() async throws {
+        let h = try await SourceNavigationHarness(short: true); defer { h.close() }
+        _ = try await h.editor()
+        let started = expectation(description: "Native answer started"), cancelled = expectation(description: "Native answer cancelled")
+        let pause = AskTestPause(started, cancelled: cancelled)
+        var packet: AskEvidencePacket?
+        h.requests.askSupport = AskMINTSupport(available: true) { value, _ in
+            packet = value; return AskAnswerGeneration { emit in await pause.run(emit: emit) }
+        }
+        let panel = try XCTUnwrap(SourceSearchPanel.present(session: h.fixture.session, requests: h.requests)); defer { panel.close() }
+        await search(panel); panel.askButton.performClick(nil)
+        let question = try XCTUnwrap(panel.questionView)
+        question.questionField.stringValue = "Question"
+        question.controlTextDidChange(Notification(name: NSControl.textDidChangeNotification, object: question.questionField))
+        question.sendButton.performClick(nil)
+        await fulfillment(of: [started], timeout: 2)
+        let partial = expectation(description: "Native validated partial")
+        let sub = question.model.$blocks.filter { $0.count == 1 }.prefix(1).sink { _ in partial.fulfill() }
+        let original = try XCTUnwrap(packet)
+        try await pause.send(line(original))
+        await fulfillment(of: [partial], timeout: 2)
+        question.answerView.textView.cancelOperation(nil)
+        await fulfillment(of: [cancelled], timeout: 2)
+        XCTAssertEqual(question.model.status, .cancelled); XCTAssertEqual(question.model.blocks.count, 1)
+        XCTAssertTrue(question.answerView.textView.string.contains("Answer"))
+        await pause.release()
+        h.fixture.session.updateSelectedDocumentBody("Changed source")
+        await h.layout()
+        XCTAssertFalse(panel.window?.isVisible == true)
+        XCTAssertFalse(question.answerView.activateSourceLink(AskAnswerView.sourceURL(packetID: original.id, sourceID: "S1")))
+        XCTAssertTrue(question.answerView.textView.string.isEmpty)
+        withExtendedLifetime(sub) {}
+    }
 }
 
 @MainActor

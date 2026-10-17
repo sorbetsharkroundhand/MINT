@@ -53,7 +53,7 @@ final class AskQuestionView: NSView, NSTextFieldDelegate {
     @objc private func back() { onBack?() }
     func showNavigationError() { status.stringValue = "원문을 열 수 없어요. 입력을 마치거나 다시 검색해 주세요." }
     private func reload() {
-        if model.status == .invalidated { onInvalidated?(); return }
+        if model.status == .invalidated { answerView.update(packet: nil, blocks: []); onInvalidated?(); return }
         sendButton.isEnabled = model.canAsk && !model.isRunning && !questionField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         cancelButton.isEnabled = model.isRunning; questionField.isEnabled = !model.isRunning
         answerView.update(packet: model.packet, blocks: model.blocks)
