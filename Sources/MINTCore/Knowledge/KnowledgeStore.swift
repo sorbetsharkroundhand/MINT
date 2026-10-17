@@ -230,6 +230,8 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
     /// Fresh, scope-bound hierarchy used for retrieval routing and evidence drill-down.
     /// Event/state arrays remain on this snapshot and are not duplicated here.
     public let storyMemory: StoryMemorySnapshot?
+    /// Source-verified atomic observations prepared by the existing background reader.
+    public let storyKnowledge: StoryKnowledgeSnapshot?
     /// 담화 순서(Pos = 씬 배열 인덱스)로 정렬된 사건들 (PLAN §6.3).
     /// 아웃라인에 없는 해시(톰스톤)는 여기서 이미 빠져 있다.
     public let events: [StoryEvent]
@@ -306,6 +308,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         chapterSummariesByPath: [String: String] = [:],
         workSummary: String? = nil,
         storyMemory: StoryMemorySnapshot? = nil,
+        storyKnowledge: StoryKnowledgeSnapshot? = nil,
         events: [String: [StoryEvent]] = [:],
         utterances: [Utterance] = [],
         sceneSummaries: [String: KnowledgeSidecar.SceneSummary] = [:],
@@ -325,6 +328,10 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         self.chapterSummariesByPath = chapterSummariesByPath
         self.workSummary = workSummary
         self.storyMemory = storyMemory
+        if let prepared = storyKnowledge, prepared.scope.documentID.rawValue == entryID,
+           storyMemory.map({ $0.scope == prepared.scope }) ?? true {
+            self.storyKnowledge = prepared
+        } else { self.storyKnowledge = nil }
         self.utterances = utterances
         self.overrides = overrides
         self.staleOverrides = staleOverrides
