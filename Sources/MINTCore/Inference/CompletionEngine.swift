@@ -656,10 +656,9 @@ public actor CompletionEngine {
             let input: LMInput
             let style: PromptStyle
             var kvCache: [KVCache]?
-            var promptTokens: [Int] = []
             var promptTokenCount = 0
             var reusedPromptTokens = 0
-            var cacheInUse = false
+            var cacheLease: PromptCacheBox.Lease?
 
             switch prompt {
             case .continuation(let text):
@@ -674,7 +673,6 @@ public actor CompletionEngine {
                     let drop = min(((overflow + 511) / 512) * 512, tokens.count - 1)
                     tokens = Array(tokens.dropFirst(drop))
                 }
-                promptTokens = tokens
                 promptTokenCount = tokens.count
                 if parameters.kvCacheEnabled,
                     let reuse = promptCache.begin(
@@ -683,7 +681,7 @@ public actor CompletionEngine {
                 {
                     kvCache = reuse.cache
                     reusedPromptTokens = reuse.reusedTokens
-                    cacheInUse = true
+                    cacheLease = reuse.lease
                     input = LMInput(tokens: MLXArray(reuse.suffix))
                 } else {
                     input = LMInput(tokens: MLXArray(tokens))
@@ -734,13 +732,11 @@ public actor CompletionEngine {
                 // Join before handing off the cache/container. Final timing is
                 // retained even when sentence cutting stops text consumption.
                 let finalInfo = await synchronizer.cancelAndCollectInfo(from: &iterator)
-                // 조기 종료·협조 취소여도 캐시엔 "프롬프트 + α"가 앞에서부터 순서대로
-                // 들어가 있다 — 기록해 두면 다음 요청이 LCP까지 재사용한다.
-                if cacheInUse {
-                    promptCache.commit(tokens: promptTokens)
-                    // 동기화 뒤 이미 안전하게 commit했다. 뒤이은 취소 검사가 throw해도
-                    // catch에서 같은 캐시를 다시 abandon하지 않는다.
-                    cacheInUse = false
+                // Only the drained lease can publish its captured prompt prefix.
+                if let lease = cacheLease {
+                    promptCache.commit(lease: lease)
+                    // A later cancellation check must not abandon an already retired lease.
+                    cacheLease = nil
                 }
                 try Task.checkCancellation()
 
@@ -757,17 +753,14 @@ public actor CompletionEngine {
                     timeToFirstToken: (info ?? finalInfo)?.benchmarkTimeToFirstToken
                 )
             } catch {
-                // 협조 취소는 문장 경계 조기 종료와 같은 그림이다 — 스트림을 중간에
-                // 닫았을 뿐, 프리필·생성이 토큰 순서대로 진행하는 이상 캐시 앞부분은
-                // 기록된 프롬프트 접두와 일치하고 다음 요청의 trim이 초과분(offset−lcp,
-                // 생성 토큰 포함)을 정리한다. 버리면 빠른 타이핑의 잦은 선점마다 웜
-                // 이득이 증발하므로 commit으로 짝을 맞춘다 (PLAN §16 부채 해소).
-                // 반면 실제 실패(GPU 오류 등)는 캐시 상태를 신뢰할 수 없으니 버린다.
-                if cacheInUse {
+                // Cooperative cancellation may preserve this lease's proven prefix;
+                // other failures discard it. Reset/model retirement makes either operation
+                // a no-op for an obsolete lease, protecting any newer generation's state.
+                if let lease = cacheLease {
                     if error is CancellationError {
-                        promptCache.commit(tokens: promptTokens)
+                        promptCache.commit(lease: lease)
                     } else {
-                        promptCache.abandon()
+                        promptCache.abandon(lease: lease)
                     }
                 }
                 throw error

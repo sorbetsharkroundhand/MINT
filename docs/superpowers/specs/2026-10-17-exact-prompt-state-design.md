@@ -1,0 +1,17 @@
+# Exact prompt-state ownership and capability boundary
+
+Issue #149 reactivates explicit cache ownership and safe unsupported-topology fallback. The owner delegates UI/internal decisions and inline review without subagents or repeated approval. Shipping-model selection/performance evidence remains manual; this change requires no model download, inference or local product launch.
+
+## Current seam and decision
+PromptCacheBox serializes begin/commit with a busy flag and tracks only a model string and prompt tokens. Invalidation can retire a busy cache and admit another request, but an old token-only commit/abandon can then affect the new request. Existing trimming reads the first layer's offset and MLX's helper reports only the first trim result. Unsupported recurrent/nested/windowed state cannot prove an exact shared prefix from that metadata.
+
+Use an opaque per-request lease, capturing the exact requested tokens and owner at begin. Owner includes model string, actual model object identity and cache-shaping parameters (maxKVSize, kvBits/group/start). Sampling settings do not change prefix identity. Invalidation retires every lease and cache record; old commit/abandon become no-ops, including for the same model name. The engine returns the lease only after its existing generation synchronizer drains GPU work. Overlapping requests retain the current uncached fallback.
+
+Admit reuse only for exact supported full-prefix cache classes in the pinned MLX implementation: plain KVCacheSimple and QuantizedKVCache, with no maximum window, nonnegative uniform offsets and trim support on every layer. Unknown subclasses, rotating, recurrent, nested, empty or mixed-offset layouts fall back to fresh prefill. Do not infer support from isTrimmable alone. This is a capability boundary, not a claim of hybrid warm reuse.
+
+Keep existing longest-common-prefix math, minimum-one-token input, partial prefill and generated-token cleanup. Before sharing a trimmed state, require every layer to return the requested trim amount and every final offset to equal the exact prefix. Partial/lying trim discards the state and creates a fresh cache. Unsupported committed states are released rather than retained for an advertised reuse path. No state copying, broad cache abstraction, dependency change or model registry/tier decision is needed.
+
+## Verification and delivery
+Deterministic fixtures cover supported exact classes, unsupported topology families, divergent offsets, partial/lying trim, partial prefill, generation tails, same-name different model/config, busy fallback, stale commit/abandon after reset and failed generation. Tests use unallocated cache metadata/fakes only; no MLX tensor evaluation or shipping model is required. Existing PromptCacheMath and generation-drain tests stay green. Run locked-resolution focused/full tests, build and MINTBench with an isolated CFFIXED_USER_HOME; review all ownership paths inline. Deliver one bounded PR after prior sequential deliveries, with predecessor-main and exact-head all-three CI, then merged-main evidence. Final native/model/Store acceptance remains separate.
+
+Inline design review: a lease and measured layer capability are sufficient for the current exact prefix contract. Copying unsupported hybrid state would require topology-specific semantics and real-model evidence; accepting its trim flag alone cannot establish prefix correctness. The chosen fallback preserves writing and generation without unsupported reuse claims. No unresolved owner decision remains.
