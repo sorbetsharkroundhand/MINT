@@ -372,7 +372,9 @@ final class FramedWorkspaceHarness {
 
     init(width: CGFloat = 1180, presentationDefaults: [String: Any] = [:],
          appearance: ColorScheme = .light, reduceMotion: Bool = false,
-         reduceTransparency: Bool = false, projectTitle: String = "Project") async throws {
+         reduceTransparency: Bool = false, projectTitle: String = "Project",
+         writingDiagnostics: WritingDiagnosticsRuntime? = nil,
+         livingMargin: LivingMarginModel? = nil) async throws {
         fixture = try await LegacyBoundaryFixture(projectTitle: projectTitle)
         initialProject = fixture.session.activeProject
         initialDocumentID = fixture.session.selectedDocumentID
@@ -388,9 +390,9 @@ final class FramedWorkspaceHarness {
         window.appearance = NSAppearance(named: appearance == .dark ? .darkAqua : .aqua)
         host = NSHostingView(rootView: ContentView(projectSession: fixture.session,
             legacyWorkspace: fixture.controller(), editorRequests: requests, completion: completion,
-            indexer: indexer, livingMargin: LivingMarginModel(), firstRunFlow: FirstRunFlow(
+            indexer: indexer, livingMargin: livingMargin ?? LivingMarginModel(), firstRunFlow: FirstRunFlow(
                 session: fixture.session, store: fixture.store, editorRequests: requests),
-            positionStore: WritingPositionStore(defaults: fixture.defaults))
+            positionStore: WritingPositionStore(defaults: fixture.defaults), writingDiagnostics: writingDiagnostics)
             .defaultAppStorage(fixture.defaults)
             .environment(\.colorScheme, appearance)
             .environment(\.mintWorkspaceAccessibilityOptions, WorkspaceAccessibilityOptions(

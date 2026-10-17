@@ -66,6 +66,13 @@ final class WritingDiagnosticsWorkspaceBinding {
         margin?.replace(writingQuality: insights)
     }
     func waitForPublication() async { while let current = publication { await current.value } }
+    func navigate(insightID: String, evidence: EvidenceAnchor, requests: ProjectEditorRequests) -> Bool {
+        guard active, let margin, !margin.dismissedIDs.contains(insightID),
+              let insight = margin.insights.first(where: { $0.id == insightID }), insight.kind == .writingQuality,
+              insight.evidence.contains(where: { WritingDiagnosticsActions.sameEvidence($0, evidence) }),
+              let findingID = findingIDs[insightID] else { return false }
+        return actions.navigate(findingID: findingID, evidence: evidence, requests: requests)
+    }
     @discardableResult
     func perform(insightID: String, action: MarginAction) throws -> WritingCorrectionResult? {
         guard active, let margin, !margin.dismissedIDs.contains(insightID),

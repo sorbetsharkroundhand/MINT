@@ -7,6 +7,8 @@ struct WorkspaceRail: View {
     let requests: ProjectEditorRequests
     let theme: MintTheme
     let openSettings: () -> Void
+    var onShowLivingMargin: (() -> Void)? = nil
+    var marginSelected = false
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.mintWorkspaceAccessibilityOptions) private var accessibilityOptions
 
@@ -25,6 +27,14 @@ struct WorkspaceRail: View {
                     .fill(navigatorVisible ? theme.activeBgC : .clear))
             SourceSearchToolbarButton(session: session, requests: requests, compact: true)
                 .frame(width: 32, height: 32)
+            if let onShowLivingMargin {
+                WorkspaceActionButton(identifier: "mint.workspace.margin", label: "문장 제안",
+                    symbol: "text.badge.checkmark", theme: theme, selected: marginSelected,
+                    action: onShowLivingMargin)
+                    .frame(width: 32, height: 32)
+                    .background(RoundedRectangle(cornerRadius: MintRadius.sm)
+                        .fill(marginSelected ? theme.activeBgC : .clear))
+            }
             WriterCompatibilityMenu(section: $section).frame(width: 32, height: 32)
             Spacer(minLength: 12)
             WorkspaceActionButton(identifier: "mint.workspace.settings", label: "설정",

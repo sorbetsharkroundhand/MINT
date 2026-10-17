@@ -177,6 +177,7 @@ struct WorkspaceSurface: View {
     @Environment(\.openSettings) private var openSettings
     @StateObject private var palette = PaletteSettings.shared
     @StateObject private var outline = DocumentOutlineController()
+    @State private var marginOpened = false
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
@@ -188,7 +189,8 @@ struct WorkspaceSurface: View {
         let theme = palette.theme(for: colorScheme)
         let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
             navigatorWidth: sidebarWidth, rawToolSection: section,
-            rawToolDock: toolDockRaw, chromeHidden: chromeHidden, outlineVisible: outlineVisible)
+            rawToolDock: toolDockRaw, chromeHidden: chromeHidden, outlineVisible: outlineVisible,
+            marginVisible: marginVisible)
         VStack(spacing: 0) {
             WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
             workspace(presentation: presentation, theme: theme)
@@ -213,11 +215,28 @@ struct WorkspaceSurface: View {
         }
         .onChange(of: section) { _, _ in
             if outlineVisible { projectSession.selectWorkspaceMode(.write) }
+            if section != SidebarSection.margin.rawValue { marginOpened = false }
         }
+        .onChange(of: projectSession.runtimeIdentity?.key.projectID) { _, _ in marginOpened = false }
     }
 
     private var outlineVisible: Bool {
         activeWritingMode == .general && projectSession.workspaceMode == .outline
+    }
+    private var marginAvailable: Bool {
+        writingDiagnostics != nil || marginOpened || !livingMargin.visibleInsights(for: activeWritingMode).isEmpty
+    }
+    private var marginVisible: Bool {
+        marginOpened && section == SidebarSection.margin.rawValue && !outlineVisible
+    }
+    private func toggleMargin() {
+        if marginVisible {
+            marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section)
+        } else {
+            projectSession.selectWorkspaceMode(.write)
+            WorkspaceToolSelection.showLivingMargin(currentSection: &section); marginOpened = true
+        }
+        editorRequests.focusEditor()
     }
 
     private func updateOutlinePosition(identity: ProjectRuntimeIdentity?) {
@@ -293,7 +312,7 @@ struct WorkspaceSurface: View {
                     .help("글 도구 위치")
                     Button {
                         if outlineVisible { projectSession.selectWorkspaceMode(.write) }
-                        else { WorkspaceToolSelection.hide(currentSection: &section) }
+                        else { marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section) }
                         editorRequests.focusEditor()
                     } label: {
                         Image(systemName: "xmark")
@@ -314,29 +333,7 @@ struct WorkspaceSurface: View {
                     DocumentOutlineView(controller: outline, requests: editorRequests,
                         session: projectSession, theme: theme)
                 } else if section == SidebarSection.margin.rawValue {
-                    VStack(spacing: 0) {
-                        if let writingDiagnostics {
-                            WritingDiagnosticsStatusView(runtime: writingDiagnostics)
-                                .padding(.horizontal, 14).padding(.vertical, 8)
-                            theme.sepC.frame(height: 1).accessibilityHidden(true)
-                        }
-                    LivingMarginView(
-                        model: livingMargin,
-                        mode: activeWritingMode,
-                        theme: theme,
-                        onJumpToEvidence: { anchor in
-                            let sequence = (editorRequests.searchJump?.sequence ?? 0) + 1
-                            guard let jump = LivingMarginWorkspaceBridge.jump(
-                                to: anchor,
-                                in: projectSession,
-                                sequence: sequence)
-                            else { return }
-                            editorRequests.issueJump(
-                                documentID: jump.documentID,
-                                query: jump.query)
-                        },
-                        onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality })
-                    }
+                    livingMarginPanel(theme: theme)
                 } else if let selectedSection = presentation.toolSection {
                     ProjectWriterToolsView(session: projectSession, completion: completion,
                         editorRequests: editorRequests, section: selectedSection, theme: theme)
@@ -348,7 +345,50 @@ struct WorkspaceSurface: View {
         } rail: {
             WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
                 session: projectSession, requests: editorRequests, theme: theme,
-                openSettings: { openSettings() })
+                openSettings: { openSettings() }, onShowLivingMargin: livingMarginOpenAction,
+                marginSelected: marginVisible)
+        }
+    }
+
+    private var livingMarginOpenAction: (() -> Void)? {
+        guard marginAvailable else { return nil }
+        return { toggleMargin() }
+    }
+
+    private func livingMarginPanel(theme: MintTheme) -> some View {
+        VStack(spacing: 0) {
+            if let writingDiagnostics {
+                WritingDiagnosticsStatusView(runtime: writingDiagnostics)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                theme.sepC.frame(height: 1).accessibilityHidden(true)
+            }
+            LivingMarginView(model: livingMargin, mode: activeWritingMode, theme: theme,
+                onJumpToEvidence: navigateMarginEvidence,
+                onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality })
+            if let error = editorRequests.sourceNavigationError {
+                Text(error).mintUIFont(11).foregroundStyle(theme.ink3C).padding(12)
+            }
+            if editorRequests.sourceReturnPoint?.key.projectID == projectSession.activeProject?.id {
+                Button("집필 위치로 돌아가기") { editorRequests.returnToWriting(in: projectSession) }
+                    .mintUIFont(11).padding(12)
+                    .accessibilityIdentifier("mint.living-margin.return")
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(WorkspacePaperSurface(theme: theme, identifier: "mint.living-margin"))
+    }
+
+    private func navigateMarginEvidence(_ insight: MarginInsight, _ anchor: EvidenceAnchor) {
+        if insight.kind == .writingQuality {
+            guard let writingDiagnostics else {
+                editorRequests.sourceNavigationError = "원문 위치를 확인할 수 없어요. 새 제안을 확인해 주세요."
+                return
+            }
+            _ = writingDiagnostics.navigateMarginEvidence(insightID: insight.id, evidence: anchor, requests: editorRequests)
+        } else {
+            let sequence = (editorRequests.searchJump?.sequence ?? 0) + 1
+            guard let jump = LivingMarginWorkspaceBridge.jump(to: anchor, in: projectSession, sequence: sequence) else { return }
+            editorRequests.issueJump(documentID: jump.documentID, query: jump.query)
         }
     }
 
