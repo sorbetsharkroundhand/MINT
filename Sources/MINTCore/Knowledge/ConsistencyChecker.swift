@@ -1,7 +1,6 @@
 import Foundation
 
-/// 일관성 경고 하나 (M7, PLAN §14 "공저자") — 본문 위치를 물고 있어 UI가
-/// 해당 자리를 가리킬 수 있다.
+/// A derived candidate; production visibility requires verified original evidence.
 public struct ConsistencyWarning: Equatable, Sendable, Identifiable {
     public enum Kind: String, Equatable, Sendable {
         case deadSpeaker = "죽은 인물 발화"
@@ -14,19 +13,15 @@ public struct ConsistencyWarning: Equatable, Sendable, Identifiable {
     public var utf16Position: Int
     /// 사용자에게 보여줄 한 줄 설명 — 단정이 아니라 확인 요청의 어조.
     public var message: String
+    public var evidence: [EvidenceAnchor] = []
+    public var sourceRevision: String? = nil
 
     public var id: String { "\(kind.rawValue)-\(characterID.uuidString)-\(utf16Position)" }
 }
 
-/// 일관성 검사기 (M7, PLAN §14) — **결정적, LLM 없음** (CLAUDE.md §2-5).
-///
-/// 예측 우선순위 1번 "일관성 유지"(CLAUDE.md §3)의 열람 면이다: 죽은 인물이
-/// 말하거나 확립된 존대가 무너지는 것은 유창해도 실패다 — 프롬프트가 막는 것
-/// (카드의 생사 상태·존대쌍 주입)과 같은 지식으로, 이미 쓰인 원문도 검사한다.
-///
-/// **비침습 원칙**: 경고는 사이드바 배지·목록으로만 보인다. 본문에 밑줄을 긋거나
-/// 팝업을 띄우지 않는다 — 회상·의도적 반말 트기처럼 **작가가 옳은 경우**가
-/// 항상 있으므로, 경고는 단정이 아니라 "확인해 보세요"다 (품질 > 적극성).
+/// Deterministic, non-mutating consistency checks. Production uses the captured-source
+/// overload so only original-backed, non-shifted candidates can reach presentation.
+/// Legacy detection remains for compatibility; it never grants visibility by itself.
 public enum ConsistencyChecker {
 
     /// 존대 붕괴 판정에 필요한 최소 선행 발화 수 — 두어 번의 우연으로
@@ -36,9 +31,10 @@ public enum ConsistencyChecker {
     /// 생사 델타 값에서 사망을 읽는 닫힌 규칙 — "죽을 뻔했다" 같은 서술을
     /// 사망으로 오판하지 않게 보수적으로 잡는다.
     static func isDead(_ vitality: String) -> Bool {
-        vitality.contains("사망") || vitality == "죽음" || vitality.hasPrefix("죽었")
+        ["사망", "사고로 사망", "죽음", "죽었다", "죽었음"].contains(vitality.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// Legacy unverified detector; production must use the captured-source overload.
     /// 스냅샷 전체 검사 — 발화 수에 선형. 스냅샷 발행 시 백그라운드에서 한 번
     /// 돌고 결과만 UI로 간다 (키 입력·렌더 경로에서 재계산 금지).
     public static func check(

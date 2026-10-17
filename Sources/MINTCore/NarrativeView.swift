@@ -679,7 +679,10 @@ struct NarrativeView: View {
     @ViewBuilder private func warningsList(_ warnings: [ConsistencyWarning]) -> some View {
         ForEach(warnings) { warning in
             Button {
-                jump(toUTF16: warning.utf16Position)
+                guard let body = store.activeEntry?.body,
+                    warning.sourcePosition(in: body, documentID: .init(rawValue: store.activeID)) != nil,
+                    let quote = warning.evidence.last?.quote else { return }
+                store.requestSearchJump(store.activeID, query: quote)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "exclamationmark.triangle")
