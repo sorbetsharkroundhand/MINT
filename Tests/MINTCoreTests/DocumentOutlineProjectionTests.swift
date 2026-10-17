@@ -4,6 +4,18 @@ import XCTest
 
 @MainActor
 final class DocumentOutlineProjectionTests: XCTestCase {
+    func testLongHeadingWhitespaceKeepsFullGrammarAndBoundedOriginalEvidence() async throws {
+        let line = "## " + String(repeating: " \t", count: 5_000) + "한🙂 제목" + String(repeating: " ", count: 5_000)
+        let source = line + "\n# Next"
+        let result = try await DocumentOutlineProjection.build(source)
+        XCTAssertEqual(result.headings.map(\.title), ["한🙂 제목", "Next"])
+        XCTAssertEqual(result.headings.map(\.level), [2, 1])
+        let first = try XCTUnwrap(result.headings.first)
+        XCTAssertEqual(first.sourceRange, 0..<line.utf16.count)
+        XCTAssertLessThanOrEqual(first.quote.utf16.count, 256)
+        XCTAssertTrue(source.utf16.starts(with: first.quote.utf16))
+    }
+
     func testOrderedDuplicateHeadingsRetainOriginalUnicodeOffsets() async throws {
         let source = "서두🙂\r\n# 한 제목\r\n본문\n## 같은 제목\n내용\n## 같은 제목\n끝"
         let result = try await DocumentOutlineProjection.build(source)

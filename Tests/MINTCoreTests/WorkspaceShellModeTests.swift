@@ -83,6 +83,7 @@ final class WorkspaceShellModeTests: XCTestCase {
             WorkspaceModePresentation.options(for: .general),
             [
                 WorkspaceModeOption(mode: .write, label: "쓰기"),
+                WorkspaceModeOption(mode: .outline, label: "개요"),
             ])
     }
 

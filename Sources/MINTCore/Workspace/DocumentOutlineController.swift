@@ -74,5 +74,12 @@ final class DocumentOutlineController: ObservableObject {
         }
     }
     func stop() { snapshot = nil; invalidate(); status = .idle }
+    func notePosition(_ offset: Int?, identity: ProjectRuntimeIdentity?) {
+        let next: Int?
+        if let prepared, prepared.identity == identity, let offset, offset >= 0 {
+            next = prepared.projection.currentHeading(at: offset)?.id
+        } else { next = nil }
+        if currentHeadingID != next { currentHeadingID = next }
+    }
     func waitForCurrentWork() async { while let task = workTask { await task.value } }
 }

@@ -25,7 +25,7 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: Vi
             let layout = WorkspaceLayoutPolicy.resolve(availableWidth: geometry.size.width,
                 presentation: presentation, railWidth: railWidth,
                 projectedNavigatorWidth: navigatorDragProjectedWidth)
-            let contextVisible = presentation.toolSection != nil
+            let contextVisible = presentation.contextVisible
             let effectiveDock = layout.toolDock
             let height = max(0, geometry.size.height - 2 * WorkspaceLayoutPolicy.outerInset)
             let railReservation = railWidth > 0 ? railWidth + WorkspaceLayoutPolicy.surfaceGap : 0
@@ -176,6 +176,7 @@ struct WorkspaceSurface: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openSettings) private var openSettings
     @StateObject private var palette = PaletteSettings.shared
+    @StateObject private var outline = DocumentOutlineController()
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
@@ -187,13 +188,41 @@ struct WorkspaceSurface: View {
         let theme = palette.theme(for: colorScheme)
         let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
             navigatorWidth: sidebarWidth, rawToolSection: section,
-            rawToolDock: toolDockRaw, chromeHidden: chromeHidden)
+            rawToolDock: toolDockRaw, chromeHidden: chromeHidden, outlineVisible: outlineVisible)
         VStack(spacing: 0) {
             WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
             workspace(presentation: presentation, theme: theme)
         }
         .tint(theme.blueC)
         .ignoresSafeArea(.container, edges: .top)
+        .task(id: projectSession.runtimeIdentity) {
+            outline.update(activeWritingMode == .general ? projectSession.selectedDocumentSnapshot : nil)
+        }
+        .onAppear {
+            completion.observeForegroundCompletion(owner: outline) { [weak outline] busy in
+                outline?.setForegroundBusy(busy)
+            }
+        }
+        .onDisappear { outline.stop() }
+        .onChange(of: outline.prepared) { _, prepared in
+            updateOutlinePosition(identity: prepared?.identity)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { notification in
+            guard let editor = notification.object as? BlockTextView, editor === editorRequests.nativeEditor else { return }
+            updateOutlinePosition(identity: projectSession.runtimeIdentity)
+        }
+        .onChange(of: section) { _, _ in
+            if outlineVisible { projectSession.selectWorkspaceMode(.write) }
+        }
+    }
+
+    private var outlineVisible: Bool {
+        activeWritingMode == .general && projectSession.workspaceMode == .outline
+    }
+
+    private func updateOutlinePosition(identity: ProjectRuntimeIdentity?) {
+        let offset = identity.flatMap { editorRequests.nativeEditor?.outlineSourcePosition(identity: $0) }
+        outline.notePosition(offset, identity: identity)
     }
 
     private func workspace(presentation: WorkspacePresentationState, theme: MintTheme) -> some View {
@@ -218,7 +247,9 @@ struct WorkspaceSurface: View {
                 editorBridge: editorBridge,
                 positionStore: positionStore)
         } context: {
-            let tool = WorkspaceToolPresentation.descriptor(for: section)
+            let tool = outlineVisible
+                ? WorkspaceToolDescriptor(title: "문서 개요", subtitle: "원고의 제목과 현재 위치", systemImage: "list.bullet.indent")
+                : WorkspaceToolPresentation.descriptor(for: section)
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: tool.systemImage)
@@ -261,7 +292,8 @@ struct WorkspaceSurface: View {
                     .accessibilityLabel("글 도구 위치")
                     .help("글 도구 위치")
                     Button {
-                        WorkspaceToolSelection.hide(currentSection: &section)
+                        if outlineVisible { projectSession.selectWorkspaceMode(.write) }
+                        else { WorkspaceToolSelection.hide(currentSection: &section) }
                         editorRequests.focusEditor()
                     } label: {
                         Image(systemName: "xmark")
@@ -278,7 +310,10 @@ struct WorkspaceSurface: View {
                 .padding(.vertical, 11)
                 theme.sepC.frame(height: 1)
                     .accessibilityHidden(true)
-                if section == SidebarSection.margin.rawValue {
+                if outlineVisible {
+                    DocumentOutlineView(controller: outline, requests: editorRequests,
+                        session: projectSession, theme: theme)
+                } else if section == SidebarSection.margin.rawValue {
                     VStack(spacing: 0) {
                         if let writingDiagnostics {
                             WritingDiagnosticsStatusView(runtime: writingDiagnostics)

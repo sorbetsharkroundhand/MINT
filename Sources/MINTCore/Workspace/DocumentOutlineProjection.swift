@@ -17,14 +17,20 @@ struct DocumentOutlineProjection: Equatable, Sendable {
         var fence: (marker: Unicode.Scalar, count: Int)?
         var math = false
         var lineStart = source.startIndex, lineOffset = 0, offset = 0, budget = 0
-        func finishLine(at end: String.Index, offset endOffset: Int) {
+        func finishLine(at end: String.Index, offset endOffset: Int) async throws {
             let line = source[lineStart..<end]
-            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmed = try await trimWhitespace(line)
             let marker = trimmed.unicodeScalars.first
-            let fenceCount = marker.map { character in trimmed.unicodeScalars.prefix { $0 == character }.count } ?? 0
+            var fenceEnd = trimmed.unicodeScalars.startIndex, fenceCount = 0
+            if let marker, marker == "`" || marker == "~" {
+                while fenceEnd < trimmed.unicodeScalars.endIndex, trimmed.unicodeScalars[fenceEnd] == marker {
+                    if fenceCount > 0, fenceCount.isMultiple(of: 2048) { await Task.yield(); try Task.checkCancellation() }
+                    fenceCount += 1; fenceEnd = trimmed.unicodeScalars.index(after: fenceEnd)
+                }
+            }
             if let open = fence {
                 if marker == open.marker, fenceCount >= open.count,
-                   trimmed.unicodeScalars.dropFirst(fenceCount).allSatisfy({ CharacterSet.whitespaces.contains($0) }) {
+                   fenceEnd == trimmed.unicodeScalars.endIndex {
                     fence = nil
                 }
                 return
@@ -41,8 +47,11 @@ struct DocumentOutlineProjection: Equatable, Sendable {
                 return
             }
             let quote = boundedPrefix(line)
-            guard let (level, title) = DocumentOutline.headingLine(quote[...]), !title.isEmpty else { return }
-            headings.append(Heading(id: lineOffset, level: level, title: boundedPrefix(title),
+            guard let (level, _) = DocumentOutline.headingLine(quote[...]) else { return }
+            let titleStart = line.index(line.startIndex, offsetBy: level + 1)
+            let title = boundedPrefix(try await trimWhitespace(line[titleStart...]))
+            guard !title.isEmpty else { return }
+            headings.append(Heading(id: lineOffset, level: level, title: title,
                 quote: quote, sourceRange: lineOffset..<endOffset))
         }
         let scalars = source.unicodeScalars
@@ -54,14 +63,32 @@ struct DocumentOutlineProjection: Equatable, Sendable {
             }
             let next = scalars.index(after: index)
             if scalar == "\n" {
-                finishLine(at: index, offset: offset)
+                try await finishLine(at: index, offset: offset)
                 lineStart = next; lineOffset = offset + width
             }
             offset += width; budget += width; index = next
         }
-        finishLine(at: source.endIndex, offset: offset)
+        try await finishLine(at: source.endIndex, offset: offset)
         try Task.checkCancellation()
         return Self(revision: revision ?? DocumentOutline.stableHash(source), headings: headings)
+    }
+    /// Keep the original slice and yield even for a giant run of heading/fence whitespace.
+    private static func trimWhitespace(_ text: Substring) async throws -> Substring {
+        try Task.checkCancellation()
+        let scalars = text.unicodeScalars
+        var start = scalars.startIndex, end = scalars.endIndex, budget = 0
+        func checkpoint() async throws {
+            if budget == 2048 { await Task.yield(); try Task.checkCancellation(); budget = 0 }
+        }
+        while start < end, CharacterSet.whitespacesAndNewlines.contains(scalars[start]) {
+            try await checkpoint(); start = scalars.index(after: start); budget += 1
+        }
+        while start < end {
+            let previous = scalars.index(before: end)
+            guard CharacterSet.whitespacesAndNewlines.contains(scalars[previous]) else { break }
+            try await checkpoint(); end = previous; budget += 1
+        }
+        return text[start..<end]
     }
     private static func boundedPrefix(_ text: some StringProtocol) -> String {
         var result = "", length = 0

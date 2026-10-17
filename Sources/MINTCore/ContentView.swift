@@ -532,7 +532,10 @@ struct EditorToolbar: View {
 
     private var workspaceModeBinding: Binding<WorkspaceMode> {
         Binding(
-            get: { projectSession.workspaceMode },
+            get: {
+                let options = WorkspaceModePresentation.options(for: projectSession.activeProject?.mode ?? .general)
+                return options.contains(where: { $0.mode == projectSession.workspaceMode }) ? projectSession.workspaceMode : .write
+            },
             set: { mode in
                 WorkspaceModeSelection.select(
                     mode,
