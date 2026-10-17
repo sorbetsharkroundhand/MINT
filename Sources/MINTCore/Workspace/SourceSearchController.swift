@@ -16,6 +16,7 @@ final class SourceSearchController: ObservableObject {
     @Published private(set) var hits: [SourceSearchHit] = []
     @Published private(set) var isSearching = false
     @Published private(set) var isInvalidated = false
+    private(set) var preparedInput: SourceSearchInput?
     private(set) var errorMessage: String?
     var didChange: (() -> Void)?
     var didInvalidate: (() -> Void)?
@@ -66,7 +67,7 @@ final class SourceSearchController: ObservableObject {
                 try Task.checkCancellation()
                 guard let self, self.ticket == current, !self.isInvalidated,
                     self.session.runtimeIdentity == input.origin else { return }
-                self.task = nil; self.isSearching = false; self.hits = result
+                self.task = nil; self.isSearching = false; self.preparedInput = input; self.hits = result
                 self.didChange?()
             } catch {
                 guard let self, self.ticket == current, !self.isInvalidated else { return }
@@ -81,7 +82,7 @@ final class SourceSearchController: ObservableObject {
 
     private func cancelRequest() {
         ticket += 1; task?.cancel(); task = nil
-        hits = []; isSearching = false; errorMessage = nil
+        hits = []; preparedInput = nil; isSearching = false; errorMessage = nil
     }
 
     private func invalidate() {

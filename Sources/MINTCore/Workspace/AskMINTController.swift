@@ -88,8 +88,8 @@ final class AskMINTController: ObservableObject {
     }
 
     func cancel() { retire(as: .cancelled) }
-    func setForegroundBusy(_ value: Bool) { foregroundBusy = value; if value, isRunning { retire(as: .paused) } else { didChange?() } }
-    func setPolicyPaused(_ value: Bool) { policyPaused = value; if value, isRunning { retire(as: .paused) } else { didChange?() } }
+    func setForegroundBusy(_ value: Bool) { foregroundBusy = value; if value, !invalidated { retire(as: .paused) } else { didChange?() } }
+    func setPolicyPaused(_ value: Bool) { policyPaused = value; if value, !invalidated { retire(as: .paused) } else { didChange?() } }
     func setModelAvailable(_ value: Bool) { modelAvailable = value; if !value { retire(as: .unavailable) } else { didChange?() } }
     func dismiss() { invalidate(); subscriptions.removeAll(); didChange = nil }
     private func owns(_ value: Int) -> Bool { !invalidated && ticket == value && session.runtimeIdentity == origin && session.isEditorEditable }

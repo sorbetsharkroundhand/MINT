@@ -121,6 +121,7 @@ public struct ContentView: View {
             .preferredColorScheme(preferredScheme)
             .onAppear {
                 // The controller itself enforces explicit completion authorization.
+                editorRequests.askSupport = completion.makeAskMINTSupport()
                 completion.preloadEngine()
                 if let store = legacyWorkspace.legacyStore {
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)

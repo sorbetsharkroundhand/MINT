@@ -215,6 +215,15 @@ public final class CompletionController: ObservableObject {
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
+    func makeAskMINTSupport() -> AskMINTSupport {
+        let support = AskMINTSupport(available: false) { [weak self] packet, question in
+            guard let self, self.settings.authorization == .enabled, self.settings.autocompleteEnabled, self.engineState == .ready,
+                  !self.isMemoryPressurePaused, !self.isManagingModel else { throw CompletionEngine.ReadyInstructionError.modelUnavailable }
+            return try AskAnswerGeneration.local(engine: self.engine, packet: packet, question: question, parameters: self.settings.parameters)
+        }
+        support.observe(self); return support
+    }
+
     /// 앱 수명 동안의 컨트롤러 — 종료 훅(AppDelegate)이 접근하려고 둔다.
     /// EntryStore.current와 같은 패턴. 테스트가 여러 인스턴스를 만들면 마지막이
     /// 이기지만, current를 쓰는 곳은 앱 종료뿐이라 무해하다.
