@@ -56,7 +56,12 @@ final class WritingDiagnosticsIntegrationTests: XCTestCase {
             let id = "writing-quality:" + finding.id, requests = ProjectEditorRequests()
             requests.nativeEditor = fixture.editor; requests.nativeEditorKey = fixture.session.runtimeIdentity?.key
             let selection = fixture.editor.selectedRange()
-            var altered = finding.evidence; altered.utf16Hint = Int.max
+            var altered = finding.evidence
+            altered.quote = altered.quote.decomposedStringWithCanonicalMapping
+            XCTAssertEqual(altered.quote, finding.evidence.quote)
+            XCTAssertFalse(altered.quote.utf16.elementsEqual(finding.evidence.quote.utf16))
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: altered, requests: requests))
+            altered = finding.evidence; altered.utf16Hint = Int.max
             XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: altered, requests: requests))
             fixture.margin.dismiss(id)
             XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: finding.evidence, requests: requests))
