@@ -30,9 +30,9 @@ No local product launch, shipping-model operation, user-data mutation, hot-path 
 **Files:** Extend Knowledge/StoryKnowledge.swift, StoryEntityResolver.swift, StoryKnowledgeSnapshot.swift, ContinuityCandidate.swift, BackgroundIndexer.swift and age/indexer ownership tests.
 **Consumes:** Task1 candidate factory and current source-backed legacy warning factory.
 **Produces:** `CharacterAge(characterID:completedYears:calendarYear:calendarID:)`, `.characterAge`, and `BackgroundIndexer.continuityCandidates` owned by existing snapshot publication.
-- [ ] Write/run failing age/calendar/overflow/unknown convention, prepared legacy candidate evidence and edit/project/paused/stale publication tests.
-- [ ] Add typed age validation/indexing and checked birth-year comparison; connect both real background candidate publications and synchronous edit/transition retirement without inference or source work in views/prediction.
-- [ ] Run focused/full/build/bench and separate whole-feature inline review of all five conditions. Record generation-only versus judge/UI/native evidence accurately.
+- [x] Write/run failing age/calendar/overflow/unknown convention, prepared legacy candidate evidence and edit/project/paused/stale publication tests.
+- [x] Add typed age validation/indexing and checked birth-year comparison; connect both real background candidate publications and synchronous edit/transition retirement without inference or source work in views/prediction.
+- [x] Run focused/full/build/bench and separate whole-feature inline review of all five conditions. Record generation-only versus judge/UI/native evidence accurately.
 - [ ] Deliver bounded PR with exact CI evidence; update #109 implementation scope only after main proof. #110/#270 own remaining judge/visible insights.
 
 Plan review: both tasks have independent testable kernels and no orphan interfaces; all constraints map to a task. No schema migration, unregistered object creation, invented time units or absent-state inference is permitted.

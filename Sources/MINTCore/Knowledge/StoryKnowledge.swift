@@ -48,6 +48,17 @@ public struct CharacterState: Codable, Equatable, Sendable {
     }
 }
 
+/// Explicit completed-year age on a named calendar; StoryInstant ticks have no assumed unit.
+public struct CharacterAge: Codable, Equatable, Sendable {
+    public let characterID: UUID
+    public let completedYears: Int64
+    public let calendarYear: Int64
+    public let calendarID: String
+    public init(characterID: UUID, completedYears: Int64, calendarYear: Int64, calendarID: String) {
+        self.characterID = characterID; self.completedYears = completedYears; self.calendarYear = calendarYear; self.calendarID = calendarID
+    }
+}
+
 public struct CharacterKnowledge: Codable, Equatable, Sendable {
     /// An explicit unknown can retire a prior assertion without asserting its negation.
     public enum Stance: String, Codable, Sendable { case knows, suspects, misbelieves, hides, unknown, unaware }
@@ -89,6 +100,7 @@ public struct StoryFact: Codable, Equatable, Sendable, Identifiable {
     public enum Content: Codable, Equatable, Sendable {
         case event(summary: String, participants: [UUID])
         case characterState(CharacterState)
+        case characterAge(CharacterAge)
         case characterKnowledge(CharacterKnowledge)
         case relationship(RelationshipState)
         case objectState(ObjectState)
@@ -128,6 +140,9 @@ public struct StoryFact: Codable, Equatable, Sendable, Identifiable {
         case .event(let summary, let participants):
             return Self.validText(summary) && participants.count <= 64 && Set(participants).count == participants.count
         case .characterState(let value): return Self.validText(value.value)
+        case .characterAge(let value):
+            return value.completedYears >= 0 && !value.calendarID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && value.calendarID.utf8.count <= 128
         case .characterKnowledge(let value): return Self.validText(value.fact)
         case .relationship(let value): return Self.validText(value.value)
         case .objectState(let value): return Self.validText(value.value)

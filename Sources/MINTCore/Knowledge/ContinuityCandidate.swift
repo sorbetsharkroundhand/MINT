@@ -12,6 +12,17 @@ public struct ContinuityCandidate: Equatable, Sendable, Identifiable {
     public let evidence: [EvidenceAnchor]
     public let factIDs: [String]
     public let requiresJudging: Bool
+    public var explanation: String {
+        switch kind {
+        case .deadSpeaker: "사망 기록 뒤의 발화인지 원문을 확인해 보세요."
+        case .honorificBreak: "상대에게 쓰던 말투가 바뀌었는지 확인해 보세요."
+        case .knowledgeLeak: "같은 시점에 아는 기록과 모르는 기록이 함께 있어요."
+        case .locationOverlap: "같은 시점에 다른 위치가 기록되어 있어요."
+        case .ageArithmetic: "기록된 연도와 만 나이의 관계를 확인해 보세요."
+        case .objectReappearance: "사라지거나 파괴된 물건의 복구 과정을 확인해 보세요."
+        case .relationshipIdentity: "같은 시점의 관계나 정체 기록을 확인해 보세요."
+        }
+    }
     private init(id: String, scope: StoryMemoryScope, sourceRevision: String, kind: Kind, subjectID: UUID, evidence: [EvidenceAnchor], factIDs: [String], requiresJudging: Bool) {
         self.id = id; self.scope = scope; self.sourceRevision = sourceRevision; self.kind = kind; self.subjectID = subjectID; self.evidence = evidence; self.factIDs = factIDs; self.requiresJudging = requiresJudging
     }
@@ -80,6 +91,12 @@ public struct ContinuityCandidate: Equatable, Sendable, Identifiable {
                     // An over-budget pass publishes nothing rather than an incomplete claim set.
                     guard !Task.isCancelled, comparisons <= 65536 else { return [] }
                     let a = unique[index], b = unique[other]
+                    if case .characterAge(let x) = a.content, case .characterAge(let y) = b.content {
+                        if let left = birthYears(x), let right = birthYears(y), !left.overlaps(right) {
+                            append(.ageArithmetic, subject: x.characterID, a, b)
+                        }
+                        continue
+                    }
                     guard a.storyInterval.overlap(with: b.storyInterval) == .overlapping else { continue }
                     switch (a.content, b.content) {
                     case (.characterKnowledge(let x), .characterKnowledge(let y)):
@@ -98,12 +115,55 @@ public struct ContinuityCandidate: Equatable, Sendable, Identifiable {
         return Task.isCancelled ? [] : output
     }
 
+    /// Full captured-document preparation, called only by the background snapshot owner.
+    public static func prepare(snapshot: KnowledgeSnapshot, warnings: [ConsistencyWarning], scope: StoryMemoryScope, source: String) -> [Self] {
+        guard !Task.isCancelled, warnings.count <= 8192, snapshot.entryID == scope.documentID.rawValue,
+              DocumentOutline.parse(source) == snapshot.outline,
+              snapshot.storyKnowledge != nil || snapshot.storyMemory != nil,
+              snapshot.storyKnowledge.map({ $0.scope == scope }) != false,
+              snapshot.storyMemory.map({ $0.scope == scope }) != false else { return [] }
+        let revision = SHA256.hash(data: Data(source.utf8)).map { String(format: "%02x", $0) }.joined()
+        guard snapshot.storyKnowledge.map({ $0.sourceRevision == revision }) != false else { return [] }
+        let legacyRevision = DocumentOutline.stableHash(source), length = source.utf16.count
+        var result = snapshot.storyKnowledge.map { prepare(snapshot: $0, before: length) } ?? []
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
+        for warning in warnings {
+            guard !Task.isCancelled else { return [] }
+            guard warning.sourceRevision == legacyRevision, warning.evidence.count >= 2,
+                  warning.evidence.allSatisfy({ anchor in
+                      guard anchor.documentID == scope.documentID, let hint = anchor.utf16Hint,
+                            hint >= 0, hint <= length, anchor.quote.utf16.count <= length - hint else { return false }
+                      return SourceAnchor.uniqueOriginalRange(for: anchor.quote, in: source,
+                          within: .init(location: hint, length: anchor.quote.utf16.count)) != nil
+                  }) else { continue }
+            let kind: Kind = warning.kind == .deadSpeaker ? .deadSpeaker : .honorificBreak
+            let scopeKey = (try? encoder.encode(scope)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+            let identity = [scopeKey, kind.rawValue, warning.characterID.uuidString, warning.message] + warning.evidence.map(\.quote)
+            guard let data = try? encoder.encode(identity) else { continue }
+            let id = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+            guard !result.contains(where: { $0.id == id }) else { continue }
+            result.append(.init(id: id, scope: scope, sourceRevision: revision, kind: kind,
+                subjectID: warning.characterID, evidence: warning.evidence, factIDs: [], requiresJudging: false))
+            result.sort(by: ordered)
+            if result.count > 128 { result.removeLast() }
+        }
+        return Task.isCancelled ? [] : result
+    }
+
+    private static func birthYears(_ age: CharacterAge) -> ClosedRange<Int64>? {
+        let (last, firstOverflow) = age.calendarYear.subtractingReportingOverflow(age.completedYears)
+        let (first, secondOverflow) = last.subtractingReportingOverflow(1)
+        guard !firstOverflow, !secondOverflow else { return nil }
+        return first...last
+    }
+
     private static func authoritative(_ fact: StoryFact) -> Bool {
         if case .writerDecision = fact.origin { return true }
         return fact.confidence.map { $0 >= 0.8 } ?? false
     }
     private static func slot(_ content: StoryFact.Content) -> String? {
         switch content {
+        case .characterAge(let x): "age:\(x.characterID):\(x.calendarID)"
         case .characterKnowledge(let x): "knowledge:\(x.characterID):\(x.fact)"
         case .characterState(let x) where x.field == .location: "location:\(x.characterID)"
         case .relationship(let x): "relationship:\(x.fromID):\(x.toID)"
