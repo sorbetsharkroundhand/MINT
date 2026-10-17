@@ -97,17 +97,18 @@ public struct StoryFact: Codable, Equatable, Sendable, Identifiable {
     /// Caller-supplied derived cache key, never a persistent manuscript identity.
     public let derivedID: String
     public var id: String { derivedID }
-    public let documentID: WritingDocumentID
+    public let scope: StoryMemoryScope
+    public var documentID: WritingDocumentID { scope.documentID }
     public let content: Content
     public let evidence: EvidenceAnchor
     public let discourseRange: Range<Int>
     public let storyInterval: StoryInterval
     public let confidence: Double?
     public let origin: StoryFactOrigin
-    public init(derivedID: String, documentID: WritingDocumentID, content: Content, evidence: EvidenceAnchor,
+    public init(derivedID: String, scope: StoryMemoryScope, content: Content, evidence: EvidenceAnchor,
                 discourseRange: Range<Int>, storyInterval: StoryInterval = .unknown,
                 confidence: Double? = nil, origin: StoryFactOrigin) {
-        self.derivedID = derivedID; self.documentID = documentID; self.content = content; self.evidence = evidence
+        self.derivedID = derivedID; self.scope = scope; self.content = content; self.evidence = evidence
         self.discourseRange = discourseRange; self.storyInterval = storyInterval; self.confidence = confidence; self.origin = origin
     }
     public var isWellFormed: Bool {
@@ -140,7 +141,7 @@ public struct StoryFact: Codable, Equatable, Sendable, Identifiable {
         value.utf16.count <= 4096 && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
     public static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.derivedID == rhs.derivedID && lhs.documentID == rhs.documentID && lhs.content == rhs.content
+        lhs.derivedID == rhs.derivedID && lhs.scope == rhs.scope && lhs.content == rhs.content
             && lhs.discourseRange == rhs.discourseRange && lhs.storyInterval == rhs.storyInterval
             && lhs.confidence == rhs.confidence && lhs.origin == rhs.origin
             && lhs.evidence.documentID == rhs.evidence.documentID && lhs.evidence.sceneHash == rhs.evidence.sceneHash

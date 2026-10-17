@@ -18,7 +18,7 @@
 
 **Files:** Create `Knowledge/StoryKnowledge.swift`, `Tests/MINTCoreTests/StoryKnowledgeTests.swift`.
 
-**Interfaces:** Public Codable/Equatable/Sendable `StoryInstant`, `StoryInterval`, `StoryFactOrigin`, typed character/knowledge/relationship/object/world-rule payloads and `StoryFact`. Interval overlap is a tri-state result (overlap/disjoint/unknown); different timeline IDs are never ordered. Fact validation checks original range/evidence document relation, required values/IDs and optional finite [0,1] confidence. Derived fact IDs are not persistent manuscript IDs. No changes to existing extractors/storage yet.
+**Interfaces:** Public Codable/Equatable/Sendable `StoryInstant`, `StoryInterval`, `StoryFactOrigin`, typed character/knowledge/relationship/object/world-rule payloads and `StoryFact`. Interval overlap is a tri-state result (overlap/disjoint/unknown); different timeline IDs are never ordered. Fact construction requires explicit StoryMemoryScope, and equality preserves project/legacy identity even for the same document UUID and original. Validation checks original range/evidence document relation, required values/IDs and optional finite [0,1] confidence. Derived fact IDs are not persistent manuscript IDs. No changes to existing extractors/storage yet.
 
 - [x] Write failing tests for known/unknown/cross-timeline overlap, malformed bounds/ranges/confidence, all typed value round-trips and original Unicode/evidence identity.
 - [x] Run the new suite; retain genuine RED before implementation (use minimal compiling declarations if needed).

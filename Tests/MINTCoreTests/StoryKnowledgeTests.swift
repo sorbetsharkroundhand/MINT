@@ -89,6 +89,20 @@ final class StoryKnowledgeTests: XCTestCase {
         XCTAssertNotEqual(decomposed, composed)
     }
 
+    func testByteIdenticalDocumentsRetainProjectAndLegacyScope() {
+        func fact(_ scope: StoryMemoryScope) -> StoryFact {
+            .init(derivedID: "same-derived-id", scope: scope, content: .event(summary: "Same event", participants: []),
+                  evidence: .init(documentID: documentID, quote: "Same original", utf16Hint: 0),
+                  discourseRange: 0..<30, origin: .model(providerID: "fixture"))
+        }
+        let aScope = StoryMemoryScope.project(projectID: WritingProjectID(), documentID: documentID)
+        let bScope = StoryMemoryScope.project(projectID: WritingProjectID(), documentID: documentID)
+        let a = fact(aScope), b = fact(bScope), legacy = fact(.legacy(documentID: documentID))
+        XCTAssertTrue(a.isWellFormed); XCTAssertTrue(b.isWellFormed)
+        XCTAssertEqual(a.documentID, b.documentID); XCTAssertEqual(a.evidence, b.evidence)
+        XCTAssertEqual(a.scope, aScope); XCTAssertNotEqual(a, b); XCTAssertNotEqual(a, legacy)
+    }
+
     func testBoundedRecordsRefuseOversizeWithoutTruncatingOriginalEvidence() {
         let original = String(repeating: "🙂", count: 2048)
         let valid = makeFact(quote: original, range: 0..<4096)
@@ -107,7 +121,7 @@ final class StoryKnowledgeTests: XCTestCase {
                           quote: String = "Original evidence", range: Range<Int> = 0..<100, hint: Int? = 0,
                           evidenceDocument: WritingDocumentID? = nil, derivedID: String = "derived-fact-1",
                           confidence: Double? = nil, origin: StoryFactOrigin = .model(providerID: "fixture")) -> StoryFact {
-        .init(derivedID: derivedID, documentID: documentID, content: content,
+        .init(derivedID: derivedID, scope: .legacy(documentID: documentID), content: content,
               evidence: .init(documentID: evidenceDocument ?? documentID, quote: quote, utf16Hint: hint),
               discourseRange: range, storyInterval: .unknown, confidence: confidence, origin: origin)
     }
