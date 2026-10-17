@@ -20,9 +20,9 @@
 
 **Interfaces:** Internal LivingMarginView evidence callback receives `(MarginInsight, EvidenceAnchor)`. Runtime exposes `navigateMarginEvidence(insightID: String, evidence: EvidenceAnchor, requests: ProjectEditorRequests) -> Bool`; binding resolves only active published owned findings and actions resolve exact source/native ranges. Presentation accepts `marginVisible: Bool = false`; context visibility includes that flag. Rail accepts an optional open action and current selection flag. Workspace owns a transient explicit-open state, project-scoped and independent of source preparation.
 
-- [ ] Write failing whole-workspace access/focus/Undo/no-analysis tests using an injected paused counting backend, plus native duplicate/return/stale/marked/altered evidence navigation regressions.
-- [ ] Run focused suites and read genuine absence/behavior failures; retain RED logs.
-- [ ] Implement explicit rail/panel state and exact prepared navigation. Never fall back to generic quote search for quality insights. Reuse existing prepared UI, health/actions and exact source return.
+- [x] Write failing whole-workspace access/focus/Undo/no-analysis tests using an injected paused counting backend, plus native duplicate/return/stale/marked/altered evidence navigation regressions.
+- [x] Run focused suites and read genuine absence/behavior failures; retain RED logs.
+- [x] Implement explicit rail/panel state and exact prepared navigation. Never fall back to generic quote search for quality insights. Reuse existing prepared UI, health/actions and exact source return.
 - [ ] Run focused suites, build, full tests and MINTBench with locked resolution and isolated user home. Review all four focus conditions inline; fix important findings with RED→GREEN coverage.
 - [ ] Commit, publish/attach the bounded PR after predecessor main CI, inspect owner feedback, merge on exact-head all-three CI, synchronize clean primary main and verify merged-main CI. Record partial implementation and correct the earlier reachability claim on #126/#270/#158; keep acceptance/remaining producers open.
 

@@ -35,6 +35,38 @@ final class WritingDiagnosticsActions {
          currentSnapshot: @escaping () -> ProjectDocumentSnapshot?, session: ProjectSession? = nil) {
         self.controller = controller; self.editor = editor; self.currentSnapshot = currentSnapshot; self.session = session
     }
+    static func sameEvidence(_ lhs: EvidenceAnchor, _ rhs: EvidenceAnchor) -> Bool {
+        lhs.documentID == rhs.documentID && lhs.sceneHash == rhs.sceneHash && lhs.utf16Hint == rhs.utf16Hint
+            && lhs.quote.utf16.elementsEqual(rhs.quote.utf16)
+    }
+    /// Explicit navigation uses the finding's captured ranges, never a quote search.
+    func navigate(findingID: String, evidence: EvidenceAnchor, requests: ProjectEditorRequests) -> Bool {
+        guard let finding = controller.currentFinding(id: findingID), let snapshot = currentSnapshot(),
+              let session, snapshot.identity == finding.stamp.runtime, session.runtimeIdentity == snapshot.identity,
+              let editor = editor(), requests.nativeEditor === editor, !editor.hasMarkedText(),
+              editor.writingDocumentIdentity == .project(snapshot.identity.key),
+              editor.writingRuntimeIdentityProvider?() == snapshot.identity,
+              editor.writingNativeRevision == finding.stamp.nativeRevision else { return false }
+        let ranges: [WritingDiagnosticRange]
+        if Self.sameEvidence(finding.evidence, evidence) { ranges = finding.sourceRanges }
+        else if let index = finding.relatedEvidence.firstIndex(where: { Self.sameEvidence($0, evidence) }),
+                finding.relatedSourceRanges.indices.contains(index) { ranges = finding.relatedSourceRanges[index] }
+        else { return false }
+        let source = snapshot.body as NSString, count = evidence.quote.utf16.count
+        guard evidence.documentID == snapshot.identity.key.documentID, let offset = evidence.utf16Hint,
+              offset >= 0, offset <= source.length, count > 0, count <= source.length - offset,
+              source.substring(with: NSRange(location: offset, length: count)).utf16.elementsEqual(evidence.quote.utf16),
+              !ranges.isEmpty else { return false }
+        let mapped = ranges.compactMap { editor.nativeRange(forSource: $0, revision: finding.stamp.nativeRevision) }
+        guard mapped.count == ranges.count, let start = mapped.map(\.location).min(),
+              let end = mapped.map({ $0.location + $0.length }).max(), end > start,
+              let point = requests.captureSourcePosition(in: session) else { return false }
+        if requests.sourceReturnPoint?.key.projectID != point.key.projectID { requests.sourceReturnPoint = point }
+        requests.sourceNavigationError = nil
+        editor.restoreSelection(to: NSRange(location: start, length: end - start))
+        editor.window?.makeFirstResponder(editor); editor.refreshActiveLineHighlight()
+        return true
+    }
     @discardableResult
     func perform(_ action: MarginAction, findingID: String) throws -> WritingCorrectionResult? {
         guard let finding = controller.currentFinding(id: findingID), let snapshot = currentSnapshot(),

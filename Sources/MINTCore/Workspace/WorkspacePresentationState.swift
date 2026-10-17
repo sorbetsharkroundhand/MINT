@@ -7,8 +7,9 @@ struct WorkspacePresentationState {
     let rawToolDock: String
     let chromeHidden: Bool
     var outlineVisible = false
+    var marginVisible = false
 
-    var contextVisible: Bool { outlineVisible || toolSection != nil }
+    var contextVisible: Bool { outlineVisible || marginVisible || toolSection != nil }
 
     var toolSection: SidebarSection? {
         switch SidebarSection(rawValue: rawToolSection) {

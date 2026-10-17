@@ -50,6 +50,11 @@ public final class WritingDiagnosticsRuntime: ObservableObject {
         workspaceBinding = binding; binding.connect()
     }
     func waitForPresentation() async { await workspaceBinding?.waitForPublication() }
+    func navigateMarginEvidence(insightID: String, evidence: EvidenceAnchor, requests: ProjectEditorRequests) -> Bool {
+        let succeeded = workspaceBinding?.navigate(insightID: insightID, evidence: evidence, requests: requests) == true
+        actionMessage = succeeded ? nil : "원문 위치를 확인할 수 없어요. 새 제안을 확인해 주세요."
+        return succeeded
+    }
     @discardableResult
     func performMarginAction(insightID: String, action: MarginAction) throws -> WritingCorrectionResult? {
         guard let workspaceBinding else { throw WritingDiagnosticsActionError.stale }

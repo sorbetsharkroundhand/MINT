@@ -6,13 +6,98 @@ import XCTest
 
 @MainActor
 final class WritingDiagnosticsIntegrationTests: XCTestCase {
+    func testMarginEvidenceSelectsSecondFormattedDuplicateAndCapturesExactReturn() async throws {
+        try await withDiagnosticsFixture(body: "🙂 한 `됬다`. **됬다**.") { fixture in
+            fixture.edit(" 끝", range: .init(location: fixture.editor.string.utf16.count, length: 0))
+            try await fixture.settle()
+            let findings = fixture.runtime.controller.state.findings.filter { $0.diagnostic.kind == .spelling }
+                .sorted { ($0.evidence.utf16Hint ?? 0) < ($1.evidence.utf16Hint ?? 0) }
+            let finding = try XCTUnwrap(findings.last)
+            let body = try XCTUnwrap(fixture.session.selectedDocument?.body)
+            XCTAssertEqual(finding.evidence.utf16Hint, (body as NSString).range(of: "됬다", options: .backwards).location,
+                "The earlier inline-code duplicate intentionally has no correctness finding")
+            let insight = try XCTUnwrap(fixture.margin.visibleInsights(for: .general).first { $0.id == "writing-quality:" + finding.id })
+            let requests = ProjectEditorRequests()
+            requests.nativeEditor = fixture.editor; requests.nativeEditorKey = fixture.session.runtimeIdentity?.key
+            fixture.editor.setSelectedRange(NSRange(location: 3, length: 1))
+            let selection = fixture.editor.selectedRange(), original = fixture.editor.serialize()
+            let undo = fixture.editor.undoManager
+            XCTAssertTrue(fixture.runtime.navigateMarginEvidence(insightID: insight.id, evidence: finding.evidence, requests: requests))
+            XCTAssertEqual(fixture.editor.selectedRange(), (fixture.editor.string as NSString).range(of: "됬다", options: .backwards))
+            let point = try XCTUnwrap(requests.sourceReturnPoint)
+            XCTAssertEqual(point.selection, selection)
+            XCTAssertTrue(fixture.editor.applySourceNavigation(.returnTo(point)))
+            XCTAssertEqual(fixture.editor.selectedRange(), selection)
+            XCTAssertTrue(fixture.editor.serialize().utf16.elementsEqual(original.utf16))
+            XCTAssertTrue(fixture.editor.undoManager === undo); XCTAssertTrue(undo?.canUndo == true)
+            fixture.window.testUndo.undo()
+            XCTAssertFalse(fixture.session.selectedDocument?.body.hasSuffix(" 끝") == true)
+        }
+    }
+
+    func testMarginRelatedEvidenceUsesItsOwnMappedOccurrence() async throws {
+        try await withDiagnosticsFixture(body: "그 사람은 걸었다. 그 사람은 웃었다. 그 사람은 떠났다. 됬다.") { fixture in
+            try await fixture.settle()
+            let finding = try XCTUnwrap(fixture.runtime.controller.state.findings.first { !$0.relatedEvidence.isEmpty })
+            let evidence = try XCTUnwrap(finding.relatedEvidence.last)
+            let requests = ProjectEditorRequests()
+            requests.nativeEditor = fixture.editor; requests.nativeEditorKey = fixture.session.runtimeIdentity?.key
+            XCTAssertTrue(fixture.runtime.navigateMarginEvidence(insightID: "writing-quality:" + finding.id,
+                evidence: evidence, requests: requests))
+            let expected = NSRange(location: try XCTUnwrap(evidence.utf16Hint), length: evidence.quote.utf16.count)
+            XCTAssertEqual(fixture.editor.selectedRange(), expected)
+        }
+    }
+
+    func testMarginNavigationRefusesAlteredDismissedStaleAndWrongNativeOwners() async throws {
+        try await withDiagnosticsFixture { fixture in
+            try await fixture.settle()
+            let finding = try XCTUnwrap(fixture.runtime.controller.state.findings.first { $0.diagnostic.kind == .spelling })
+            let id = "writing-quality:" + finding.id, requests = ProjectEditorRequests()
+            requests.nativeEditor = fixture.editor; requests.nativeEditorKey = fixture.session.runtimeIdentity?.key
+            let selection = fixture.editor.selectedRange()
+            var altered = finding.evidence; altered.utf16Hint = Int.max
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: altered, requests: requests))
+            fixture.margin.dismiss(id)
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: finding.evidence, requests: requests))
+            fixture.margin.restoreDismissed()
+            XCTAssertTrue(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: finding.evidence, requests: requests))
+            fixture.editor.setSelectedRange(selection)
+            fixture.replaceFromSession("Changed " + (fixture.session.selectedDocument?.body ?? ""))
+            let afterEdit = fixture.editor.selectedRange()
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: finding.evidence, requests: requests))
+            let key = try XCTUnwrap(fixture.session.runtimeIdentity?.key)
+            fixture.loadUnownedNativeSource(fixture.session.selectedDocument?.body ?? "",
+                documentKey: .init(projectID: WritingProjectID(), documentID: key.documentID))
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: id, evidence: finding.evidence, requests: requests))
+            XCTAssertEqual(fixture.editor.selectedRange(), afterEdit)
+        }
+    }
+
+    func testMarginNavigationRefusesCompositionWithoutCommittingIt() async throws {
+        try await withDiagnosticsFixture { fixture in
+            try await fixture.settle()
+            let finding = try XCTUnwrap(fixture.runtime.controller.state.findings.first { $0.diagnostic.kind == .spelling })
+            let requests = ProjectEditorRequests()
+            requests.nativeEditor = fixture.editor; requests.nativeEditorKey = fixture.session.runtimeIdentity?.key
+            fixture.window.testUndo.beginUndoGrouping()
+            fixture.editor.setMarkedText("한", selectedRange: .init(location: 1, length: 0), replacementRange: .init(location: 0, length: 0))
+            let selection = fixture.editor.selectedRange(), source = fixture.session.selectedDocument?.body
+            XCTAssertFalse(fixture.runtime.navigateMarginEvidence(insightID: "writing-quality:" + finding.id,
+                evidence: finding.evidence, requests: requests))
+            XCTAssertTrue(fixture.editor.hasMarkedText()); XCTAssertEqual(fixture.editor.selectedRange(), selection)
+            XCTAssertTrue(fixture.session.selectedDocument?.body.utf16.elementsEqual((source ?? "").utf16) == true)
+            fixture.window.testUndo.endUndoGrouping()
+        }
+    }
+
     func testPreparedMarginOpenDoesNotAnalyzeOrMoveFocus() async throws {
         let gate = WritingReportNativeGate(blockFirst: false)
         let worker = KoreanNativeWorker(resources: URL(fileURLWithPath: "/unused"), factory: gate)
         try await withDiagnosticsFixture(worker: worker) { fixture in
             let responder = fixture.window.firstResponder
             let before = gate.counts.analyzed
-            _ = LivingMarginView(model: fixture.margin, mode: .general, theme: .dark, onJumpToEvidence: { _ in }).body
+            _ = LivingMarginView(model: fixture.margin, mode: .general, theme: .dark, onJumpToEvidence: { _, _ in }).body
             _ = WritingDiagnosticsSettingsView(session: fixture.session, runtime: fixture.runtime).body
             XCTAssertEqual(gate.counts.analyzed, before)
             XCTAssertEqual(before, 0, "Opening prepared surfaces does not admit native analysis")

@@ -86,7 +86,7 @@ struct LivingMarginView: View {
     @ObservedObject var model: LivingMarginModel
     let mode: WritingMode
     let theme: MintTheme
-    var onJumpToEvidence: (EvidenceAnchor) -> Void
+    var onJumpToEvidence: (MarginInsight, EvidenceAnchor) -> Void
     var onAction: ((MarginInsight, MarginAction) -> Void)?
     var supportsAction: ((MarginInsight) -> Bool)? = nil
 
@@ -181,7 +181,7 @@ struct LivingMarginView: View {
                 VStack(alignment: .leading, spacing: MintSpacing.sm) {
                     ForEach(Array(insight.evidence.enumerated()), id: \.offset) { index, anchor in
                         Button {
-                            onJumpToEvidence(anchor)
+                            onJumpToEvidence(insight, anchor)
                         } label: {
                             Label(
                                 LivingMarginRenderer.evidenceActionLabel(at: index),
@@ -209,7 +209,7 @@ struct LivingMarginView: View {
 
         if let firstEvidence = insight.evidence.first {
             row.accessibilityAction(named: Text("원문 보기")) {
-                onJumpToEvidence(firstEvidence)
+                onJumpToEvidence(insight, firstEvidence)
             }
         } else {
             row

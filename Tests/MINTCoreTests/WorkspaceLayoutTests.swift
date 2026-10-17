@@ -2,6 +2,22 @@ import XCTest
 @testable import MINTCore
 
 final class WorkspaceLayoutTests: XCTestCase {
+    func testExplicitMarginUsesExistingDockAndKeepsStoredEmptyChoiceQuiet() {
+        for (navigator, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
+            let closed = WorkspacePresentationState(navigatorVisible: navigator, navigatorWidth: 250,
+                rawToolSection: "margin", rawToolDock: "right", chromeHidden: false)
+            var opened = closed; opened.marginVisible = true
+            XCTAssertFalse(closed.contextVisible); XCTAssertTrue(opened.contextVisible)
+            XCTAssertEqual(opened.rawToolSection, closed.rawToolSection)
+            XCTAssertEqual(opened.rawToolDock, closed.rawToolDock)
+            let narrow = WorkspaceLayoutPolicy.resolve(availableWidth: boundary - 1, presentation: opened)
+            let wide = WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: opened)
+            XCTAssertEqual(narrow.toolDock, .bottom)
+            XCTAssertEqual(wide.toolDock, .right); XCTAssertEqual(wide.manuscriptWidth, 560)
+            XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: closed).manuscriptWidth, 901)
+        }
+    }
+
     func testOutlineReservesExistingDockWithoutOverwritingStoredTool() {
         for section in ["files", "bible", "margin", "unknown"] {
             for (visible, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
