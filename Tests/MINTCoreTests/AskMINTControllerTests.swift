@@ -88,6 +88,7 @@ final class AskMINTControllerTests: XCTestCase {
         defer { model.dismiss() }
         model.ask(question: "Question"); XCTAssertEqual(model.status, .unavailable)
         model.setModelAvailable(true); model.setForegroundBusy(true)
+        XCTAssertEqual(model.status, .paused, "An idle question must explain its disabled priority gate")
         model.ask(question: "Question"); XCTAssertEqual(model.status, .paused)
         model.setForegroundBusy(false); model.setPolicyPaused(true)
         model.ask(question: "Question"); XCTAssertEqual(model.status, .paused)

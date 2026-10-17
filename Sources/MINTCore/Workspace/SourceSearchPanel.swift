@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 
 /// Temporary original-source inspection. The manuscript keeps its native view and undo owner.
 @MainActor
@@ -10,6 +11,10 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
     let resultTable = SourceResultTable()
     let statusLabel = NSTextField(labelWithString: "")
     let model: SourceSearchController
+    let askButton = NSButton(title: "이 결과로 질문", target: nil, action: nil)
+    private(set) var questionView: AskQuestionView?
+    private var searchStack: NSStackView?
+    private var subscriptions: Set<AnyCancellable> = []
     private let session: ProjectSession
     private let requests: ProjectEditorRequests
     private let identity: ProjectRuntimeIdentity
@@ -52,6 +57,9 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
         super.init(window: window)
         window.delegate = self
         configure()
+        requests.askSupport?.$available.sink { [weak self] _ in
+            Task { @MainActor [weak self] in self?.reload() }
+        }.store(in: &subscriptions)
         model.didChange = { [weak self] in self?.reload() }
         model.didInvalidate = { [weak self] in self?.close() }
         reload()
@@ -89,10 +97,13 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
         cancel.setAccessibilityIdentifier("mint.source-search.close")
         openButton.title = "원문 열기"; openButton.target = self; openButton.action = #selector(openSelected)
         openButton.keyEquivalent = "\r"; openButton.setAccessibilityIdentifier("mint.source-search.open")
-        let buttons = NSStackView(views: [cancel, openButton]); buttons.orientation = .horizontal
+        askButton.target = self; askButton.action = #selector(openQuestion)
+        askButton.setAccessibilityIdentifier("mint.ask.open")
+        let buttons = NSStackView(views: [cancel, askButton, openButton]); buttons.orientation = .horizontal
         let teaching = NSTextField(labelWithString: "↑↓ 선택 · Return 원문 열기 · Esc 닫기")
         teaching.font = .systemFont(ofSize: 11); teaching.textColor = .secondaryLabelColor
         let stack = NSStackView(views: [header, scroll, statusLabel, teaching, buttons])
+        searchStack = stack
         stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 10
         stack.translatesAutoresizingMaskIntoConstraints = false
         guard let content = window?.contentView else { return }
@@ -159,14 +170,55 @@ final class SourceSearchPanel: NSWindowController, NSWindowDelegate, NSSearchFie
     private func reload() {
         resultTable.reloadData()
         openButton.isEnabled = !model.hits.isEmpty && !model.isInvalidated
+        askButton.isEnabled = requests.askSupport?.available == true && model.preparedInput != nil && !model.hits.isEmpty && !model.isInvalidated
+        askButton.toolTip = requests.askSupport?.available == true ? "검색 원문에서 직접 질문해요." : "선택한 로컬 모델이 준비되면 질문할 수 있어요. 원문 검색은 계속 사용할 수 있어요."
         if !model.hits.isEmpty { resultTable.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
         statusLabel.stringValue = model.errorMessage ?? (model.isSearching ? "검색 중…" :
             searchField.stringValue.isEmpty ? "단어나 이름으로 원문을 찾아보세요." : "\(model.hits.count)개 결과")
     }
     @objc private func closeSearch() { close() }
+    @objc private func openQuestion() {
+        guard questionView == nil, let support = requests.askSupport, support.available,
+              let input = model.preparedInput, !model.isInvalidated else { return }
+        let view = AskQuestionView(model: support.makeController(session: session, input: input), scope: input.scope)
+        view.onBack = { [weak self] in self?.showSearch() }
+        view.onInvalidated = { [weak self] in self?.close() }
+        view.answerView.onSource = { [weak self] packetID, id in self?.openAnswerSource(packetID: packetID, id: id) }
+        guard let content = window?.contentView else { view.model.dismiss(); return }
+        questionView = view; searchStack?.isHidden = true
+        view.translatesAutoresizingMaskIntoConstraints = false; content.addSubview(view)
+        NSLayoutConstraint.activate([view.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
+            view.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
+            view.topAnchor.constraint(equalTo: content.topAnchor, constant: 16), view.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -16)])
+        window?.title = "Ask MINT"; window?.contentMinSize.height = 420
+        if let size = window?.contentView?.bounds.size { window?.setContentSize(NSSize(width: size.width, height: max(460, size.height))) }
+        window?.makeFirstResponder(view.questionField)
+    }
+    private func showSearch() {
+        questionView?.model.didChange = nil; questionView?.model.dismiss()
+        questionView?.removeFromSuperview(); questionView = nil
+        searchStack?.isHidden = false; window?.title = "원문 검색"; window?.contentMinSize.height = 300
+        window?.makeFirstResponder(searchField); reload()
+    }
+    private func openAnswerSource(packetID: UUID, id: String) {
+        guard let questionView, questionView.model.status != .invalidated,
+              let packet = questionView.model.packet, packet.id == packetID, session.runtimeIdentity == packet.origin,
+              let hit = packet.sources.first(where: { $0.id == id })?.hit,
+              let project = session.activeProject, project.id == hit.projectID,
+              let document = project.documents.first(where: { $0.id == hit.documentID }),
+              !project.trashedDocumentIDs.contains(document.id), DocumentOutline.stableHash(document.body) == hit.revision,
+              let hint = hit.evidence.utf16Hint,
+              SourceAnchor.uniqueOriginalRange(for: hit.evidence.quote, in: document.body,
+                within: NSRange(location: hint, length: hit.evidence.quote.utf16.count))?.location == hint,
+              requests.jump(to: hit, in: session) else {
+            self.questionView?.showNavigationError(); return
+        }
+        close()
+    }
     override func close() { if !isClosing { window?.close() } }
     func windowWillClose(_ notification: Notification) {
         guard !isClosing else { return }; isClosing = true
+        questionView?.model.didChange = nil; questionView?.model.dismiss(); subscriptions.removeAll()
         model.didInvalidate = nil; model.dismiss()
         if let observer = parentCloseObserver { NotificationCenter.default.removeObserver(observer) }
         if let window { window.parent?.removeChildWindow(window) }

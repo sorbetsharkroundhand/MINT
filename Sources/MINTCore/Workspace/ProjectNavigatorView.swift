@@ -12,6 +12,7 @@ public final class ProjectEditorRequests: ObservableObject {
     @Published internal var sourceNavigationError: String?
     weak var nativeEditor: BlockTextView?
     var nativeEditorKey: ProjectDocumentKey?
+    var askSupport: AskMINTSupport?
     private var consumedSearchFocusRequest = 0
 
     public init() {}
