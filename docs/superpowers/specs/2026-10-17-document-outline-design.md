@@ -1,0 +1,38 @@
+# Model-free document outline
+
+Issue: #271. Baseline: main `75526f1e306a40200a802a0e3c17ecae0235d733` (required main CI green).
+
+## Intent and execution authority
+The owner wants all remaining UI and internal functionality implemented, with no additional local product launches. On 2026-10-17, after the outstanding design-choice gate was explained, the owner directed: perform all UI and internal functionality work. This is the execution authority for agent-selected recommended UI/internal choices and inline design/plan review. It is not a fabricated claim that the owner reviewed documents that did not yet exist. Retain written specs, plans, RED/GREEN regressions, bounded sequential PRs, exact-head required CI and the standing green-CI merge authorization. Owner-only model/hardware/license/Apple-account choices and final native acceptance remain separate. No subagents.
+
+## User outcome
+General writing exposes `쓰기` and `개요`. Outline shows manuscript headings in source order in the existing dockable tool area, highlights the current section and supports exact heading jumps and return to the previous writing position. The existing editor remains mounted. Closing Outline returns to writing and restores the previous saved tool selection; opening it never overwrites that selection. Fiction's existing surfaces remain reusable and unchanged until their own work is implemented.
+
+Alternatives considered: a replacement full-screen outline would detach the editor/Undo owner; putting headings in the file list would mix document selection with section navigation. Use the existing dock and mode selector. No drag reorder, scene identity inference, network, LLM or persistent outline data is added. Unstructured documents show `제목이 있는 문단이 여기에 보여요.` with writing still available.
+
+## Prepared source projection
+Add a generic Foundation-only `DocumentOutlineProjection` and immutable `Heading` values in Workspace. Reuse the existing `DocumentOutline.headingLine` grammar for source headings (`#`, `##`, `###`); retain the existing scene parser and its content hashes unchanged. The outline-only scanner excludes fenced code and display-math bodies, preserves exact original UTF-16 offsets including emoji/decomposed Hangul, never treats bounded scene segments as heading identities, and checks cancellation/yields at least every 2,048 input UTF-16 units. Stable row identity is the heading's original offset within the prepared revision, not a persistent manuscript identity. Bound retained title/evidence prefixes to 256 UTF-16 units without replacing original scalars. Keep the full original line range separately.
+
+A background actor hashes immutable source with `DocumentOutline.stableHash(_:)`, memoizes the last two project/document revisions and builds only changed input. A main-actor `DocumentOutlineController` publishes a prepared value tagged with the full `ProjectRuntimeIdentity`; every update immediately clears stale publication and increments an epoch. Debounce normal edits by 350 ms. Cancellation, project/document/generation changes, foreground Ghost, serious/critical thermal state and Low Power Mode retire admission and work; policy recovery reschedules the latest snapshot. No source scan/hash or disk/model work runs in typing, selection, view-body or navigation rendering paths. Opening the outline consumes the already-prepared result. Keep only bounded memoized derived values and the current task.
+
+## Exact navigation and current section
+Extend the existing source-navigation intent with a heading target carrying the full runtime identity, prepared source revision, original `EvidenceAnchor`, heading level and source offset. The project request validates that the target still belongs to the current document/revision before issuing it. Explicit navigation may capture/serialize source; ordinary selection may not.
+
+Native navigation requires the actual `writingDocumentIdentity`, current capture identity/revision, no marked text and an exact row in the existing `WritingNativeRowIndex`. Its source text start and native heading style must match the target. Do not find the first matching title or guess offsets through Markdown. Select the heading's native start and keep normal focus/Undo ownership. Stale or noncanonical/unmapped input refuses quietly with a localized status and no manuscript edit.
+
+Reuse the existing source return transaction for exact document identity, selection and scroll. Strengthen its source/native comparisons to exact UTF-16, so canonical Unicode equality cannot approve a different original. A return after intervening source edits refuses; no fuzzy re-anchor is introduced. Preserve existing source-search behavior.
+
+For current-section highlighting, read the already-captured native row's source start in logarithmic time, under the same identity/revision/IME gates, then binary-search prepared heading offsets. Never call `sourceCursorOffset()` or serialize on selection. Missing proof clears the highlight. Selecting a row or Return is explicit navigation; automatic publication never moves focus or changes selection.
+
+## Presentation and lifecycle
+Own one controller in the workspace surface; feed immutable selected-document snapshots through an asynchronous lifecycle hook and subscribe to foreground-completion policy. Selection notifications only update current-section lookup for the exact native editor. Project/route disappearance cancels work; stale tasks cannot publish on reentry. Preparation remains independent of model/completion authorization.
+
+Add a presentation-only outline visibility flag rather than writing a new saved sidebar section. Layout uses this flag to reserve the existing left/right/bottom/floating dock with its existing minimum manuscript width. The panel uses plain native buttons, a lazy heading list, hierarchy indentation, current-section text/accessibility value, an explicit `집필 위치로 돌아가기` action and quiet loading/paused/error states. Keyboard/VoiceOver labels include level, title and current-section status. No color-only state, stacked material or new animation is required.
+
+## Verification and acceptance boundaries
+Pin deterministic source ordering, duplicate headings, long split scenes, fenced code/math, emoji/NFD/CRLF offsets, empty/huge titles and cancellation. Pin worker memoization, stale generation/project A→B→A, foreground/energy cancellation and stop/reentry. Hidden AppKit integration covers duplicate formatted headings, exact native jumps, source return with caret/scroll/Undo preservation, marked text, mismatched stable editor key, edited target and NFD-vs-NFC refusal. Pin General mode availability, dock layout, persisted tools and no extra serialization/reset on repeated caret updates.
+
+Run isolated focused tests, full tests, build and MINTBench with locked resolution. Preserve required PR/main CI, including its cloud package/smoke/archive jobs. No local MINT launch, smoke/UI script or shipping-LLM operation. #271 stays open until new-feature native acceptance is associated with the owner's final #119 candidate; implementation completion is recorded separately. Preserve all earlier packages/models/backups and the execution ledger.
+
+## Inline design review
+The design preserves source/native ownership, Generic/Fiction separation, no-model editing and stable editor lifetime. Read-only navigation creates no durable state or data migration. Source hashing/grammar preparation has an explicit background owner; current position uses the existing native row index. Every failure is a refusal/quiet state, never a manuscript rewrite. No unresolved product choice or new dependency remains for this bounded sub-project under the owner's execution directive.
