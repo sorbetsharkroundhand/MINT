@@ -1,4 +1,5 @@
 import Foundation
+import MLX
 import MLXLMCommon
 import XCTest
 @testable import MINTCore
@@ -42,7 +43,7 @@ final class PromptCacheOwnershipTests: XCTestCase {
         box.commit(lease: first.lease)
         let next = try XCTUnwrap(box.begin(owner: owner(), tokens: [1, 2, 3, 4, 5], makeCache: { XCTFail("Must reuse proven prefix"); return [] }))
         XCTAssertEqual(next.reusedTokens, 4); XCTAssertEqual(next.suffix, [5])
-        XCTAssertTrue(next.cache[0] === a); XCTAssertEqual(a.offset, 4); XCTAssertEqual(b.offset, 4)
+        XCTAssertTrue((next.cache.first as? KVCacheSimple) === a); XCTAssertEqual(a.offset, 4); XCTAssertEqual(b.offset, 4)
         box.abandon(lease: next.lease)
     }
 
@@ -70,7 +71,7 @@ final class PromptCacheOwnershipTests: XCTestCase {
         box.abandon(lease: old.lease)
         box.commit(lease: fresh.lease)
         let reused = try XCTUnwrap(box.begin(owner: owner(), tokens: [9, 8, 7], makeCache: { XCTFail("Stale abandon must preserve new state"); return [] }))
-        XCTAssertEqual(reused.reusedTokens, 2); XCTAssertTrue(reused.cache[0] === current)
+        XCTAssertEqual(reused.reusedTokens, 2); XCTAssertTrue((reused.cache.first as? KVCacheSimple) === current)
         box.abandon(lease: reused.lease)
     }
 
@@ -113,12 +114,22 @@ final class PromptCacheOwnershipTests: XCTestCase {
     }
 }
 
-private final class MetadataTrimCache: BaseKVCache {
+private final class MetadataTrimCache: KVCache {
+    var offset = 0
+    var maxSize: Int? { nil }
+    var state: [MLXArray] = []
+    var metaState: [String] = []
     var refuse = false, lie = false
-    override var isTrimmable: Bool { true }
-    override func trim(_ n: Int) -> Int {
+    var isTrimmable: Bool { true }
+    func trim(_ n: Int) -> Int {
         if refuse { return 0 }
         if lie { return n }
         offset -= n; return n
     }
+    func innerState() -> [MLXArray] { [] }
+    func update(keys: MLXArray, values: MLXArray) -> (MLXArray, MLXArray) { fatalError("Metadata fixture never evaluates tensors") }
+    func makeMask(n: Int, windowSize: Int?, returnArray: Bool) -> MLXFast.ScaledDotProductAttentionMaskMode {
+        fatalError("Metadata fixture never evaluates tensors")
+    }
+    func copy() -> any KVCache { fatalError("Metadata fixture never copies tensors") }
 }
