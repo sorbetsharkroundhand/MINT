@@ -64,11 +64,15 @@ public final class BackgroundIndexer: ObservableObject {
     /// 일관성 경고 (M7) — 스냅샷과 같은 주기로 갱신. **비침습**: 사이드바
     /// 배지·목록만, 본문엔 아무것도 긋지 않는다 (ConsistencyChecker 참조).
     @Published public private(set) var warnings: [ConsistencyWarning] = []
+    @Published public private(set) var continuityCandidates: [ContinuityCandidate] = []
 
     /// 동일 값 발행 가드 — 같은 경고 배열을 다시 대입해도 objectWillChange가
     /// 울리지 않는다 (#48: 관찰 fan-out의 3번째 축, @Published 쓰기 최소화).
     private func setWarnings(_ newValue: [ConsistencyWarning]) {
         if warnings != newValue { warnings = newValue }
+    }
+    private func setContinuityCandidates(_ newValue: [ContinuityCandidate]) {
+        if continuityCandidates != newValue { continuityCandidates = newValue }
     }
 
     /// 사이드카·스냅샷 성능 측정 (요구사항 §33) — 로컬 전용, SQLite 이관 시점
@@ -117,6 +121,7 @@ public final class BackgroundIndexer: ObservableObject {
         guard memoryPressurePaused != paused else { return }
         memoryPressurePaused = paused
         if paused {
+            setContinuityCandidates([])
             let hadManualWork = manualPassToken != nil
             shutdown()
             manualPassToken = nil
@@ -394,6 +399,7 @@ public final class BackgroundIndexer: ObservableObject {
     /// 본문 편집·문서 전환 알림 (EntryStore 훅) — 진행 중 패스를 선점하고
     /// 유휴 타이머를 다시 감는다.
     public func noteChange(entryID: UUID) {
+        setContinuityCandidates([])
         // Original-backed actions retire synchronously, including while analysis is paused.
         setWarnings([])
         guard !memoryPressurePaused else { return }
@@ -450,6 +456,7 @@ public final class BackgroundIndexer: ObservableObject {
 
     /// Cancels old ownership without reading the session before its next publication.
     public func prepareForProjectTransition() {
+        setContinuityCandidates([])
         cancelProfiles()
         originalNamePreparation.shutdown()
         passGeneration += 1
@@ -548,6 +555,7 @@ public final class BackgroundIndexer: ObservableObject {
                 loadMs: loadMs, deriveMs: deriveMs)
             let warnings = ConsistencyChecker.check(
                 snapshot: snapshot, characters: characters, source: body)
+            let candidates = ContinuityCandidate.prepare(snapshot: snapshot, warnings: warnings, scope: scope, source: body)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 // 늦은 이전 hydrate는 현재 문서에만, 자기 토큰이 유효할 때만 (#82).
@@ -561,10 +569,12 @@ public final class BackgroundIndexer: ObservableObject {
                     || self.snapshotRuntimeIdentity != runtimeIdentity
                 else { return }
                 if runtimeIdentity != nil { self.preparedProjectSidecar = sidecar }
+                self.setContinuityCandidates([])
                 self.snapshotRuntimeIdentity = runtimeIdentity
                 self.snapshot = snapshot
-                self.snapshotGeneration += 1
                 self.setWarnings(warnings)
+                self.setContinuityCandidates(candidates)
+                self.snapshotGeneration += 1
                 if self.metrics != metrics { self.metrics = metrics }
             }
         }
@@ -839,14 +849,17 @@ public final class BackgroundIndexer: ObservableObject {
                 // 결과만 메인으로 (렌더 경로 재계산 금지, docs/editor-perf.md 4차).
                 let warnings = ConsistencyChecker.check(
                     snapshot: snapshot, characters: characters, source: body)
+                let candidates = ContinuityCandidate.prepare(snapshot: snapshot, warnings: warnings, scope: identity.scope, source: body)
                 Task { @MainActor in
                     // 이 새 Task는 부모 취소를 물려받지 않는다 — 소유권 가드가 대신
                     // 걸러낸다 (토큰·문서 일치, #82).
                     guard self.owns(identity) else { return }
+                    self.setContinuityCandidates([])
                     self.snapshotRuntimeIdentity = identity.runtimeIdentity
                     self.snapshot = snapshot
-                    self.snapshotGeneration += 1
                     self.setWarnings(warnings)
+                    self.setContinuityCandidates(candidates)
+                    self.snapshotGeneration += 1
                 }
             } publishMetrics: { metrics in
                 Task { @MainActor in

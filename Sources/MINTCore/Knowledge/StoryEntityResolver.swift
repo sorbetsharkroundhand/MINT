@@ -28,6 +28,7 @@ public struct StoryEntityResolver: Sendable {
         switch content {
         case .event(_, let participants): participants.allSatisfy { characterIDs.contains($0) }
         case .characterState(let value): characterIDs.contains(value.characterID)
+        case .characterAge(let value): characterIDs.contains(value.characterID)
         case .characterKnowledge(let value): characterIDs.contains(value.characterID)
         case .relationship(let value): characterIDs.contains(value.fromID) && characterIDs.contains(value.toID)
         case .objectState(let value): objectIDs.contains(value.objectID)

@@ -14,7 +14,7 @@ public struct StoryKnowledgeSnapshot: Equatable, Sendable {
         case state(UUID, String), knowledge(UUID, String), relationship(UUID, UUID), object(UUID, String), rule(UUID)
         init?(_ content: StoryFact.Content) {
             switch content {
-            case .event: return nil
+            case .event, .characterAge: return nil
             case .characterState(let value): self = .state(value.characterID, value.field.rawValue)
             case .characterKnowledge(let value): self = .knowledge(value.characterID, value.fact)
             case .relationship(let value): self = .relationship(value.fromID, value.toID)
@@ -59,6 +59,7 @@ public struct StoryKnowledgeSnapshot: Equatable, Sendable {
             switch fact.content {
             case .event(_, let participants): ids = participants
             case .characterState(let value): ids = [value.characterID]
+            case .characterAge(let value): ids = [value.characterID]
             case .characterKnowledge(let value): ids = [value.characterID]
             case .relationship(let value): ids = Array(Set([value.fromID, value.toID]))
             case .objectState, .worldRule: ids = []
