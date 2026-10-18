@@ -50,7 +50,7 @@ public struct CharacterState: Codable, Equatable, Sendable {
 
 public struct CharacterKnowledge: Codable, Equatable, Sendable {
     /// An explicit unknown can retire a prior assertion without asserting its negation.
-    public enum Stance: String, Codable, Sendable { case knows, suspects, misbelieves, hides, unknown }
+    public enum Stance: String, Codable, Sendable { case knows, suspects, misbelieves, hides, unknown, unaware }
     public let characterID: UUID
     public let fact: String
     public let stance: Stance
