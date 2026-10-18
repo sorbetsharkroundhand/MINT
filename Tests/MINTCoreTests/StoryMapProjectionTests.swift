@@ -7,7 +7,7 @@ final class StoryMapProjectionTests: XCTestCase {
         .init(identity: .init(key: .init(projectID: WritingProjectID(), documentID: WritingDocumentID()), generation: 1),
               title: "Novel", body: source, kind: .manuscript, mode: .fiction, userData: [:])
     }
-    private func fixture(source: String = "# 밤\n민준은 문을 열었다.\n# 아침\n민준은 떠났다.\n", quote: String? = nil, wrongScope: Bool = false, reverse: Bool = false, firstOnly: Bool = false) -> (ProjectDocumentSnapshot, KnowledgeSnapshot) {
+    private func fixture(source: String = "# 밤\n민준은 문을 열었다.\n# 아침\n민준은 떠났다.\n", quote: String? = nil, wrongScope: Bool = false, reverse: Bool = false, firstOnly: Bool = false, customSceneTitle: String? = nil) -> (ProjectDocumentSnapshot, KnowledgeSnapshot) {
         let identity = ProjectRuntimeIdentity(key: .init(projectID: WritingProjectID(), documentID: WritingDocumentID()), generation: 1)
         let document = ProjectDocumentSnapshot(identity: identity, title: "Novel", body: source, kind: .manuscript, mode: .fiction, userData: [:])
         let scope = StoryMemoryScope.project(projectID: wrongScope ? WritingProjectID() : identity.key.projectID, documentID: identity.key.documentID)
@@ -20,7 +20,8 @@ final class StoryMapProjectionTests: XCTestCase {
         let knowledge = KnowledgeSnapshot(entryID: identity.key.documentID.rawValue, outline: outline, summariesByHash: [:],
             storyKnowledge: .init(scope: scope, source: source, facts: [], entities: .init(characters: [person])),
             events: Dictionary(grouping: events, by: \.sceneHash),
-            eventGraph: reverse ? .init(chronoEdges: [.init(aKey: events[1].stableKey, bKey: events[0].stableKey, relation: .before)]) : nil, plotThreadAnalysis: threads, characters: [person])
+            eventGraph: reverse ? .init(chronoEdges: [.init(aKey: events[1].stableKey, bKey: events[0].stableKey, relation: .before)]) : nil, plotThreadAnalysis: threads, characters: [person],
+            overrides: customSceneTitle.map { .init([.init(kind: .sceneTitle, key: outline.scenes[0].contentHash, value: $0)]) } ?? .empty)
         return (document, knowledge)
     }
     func testReusesNarrativeGraphDeterministicallyWithOriginalEventsAndLaneMembership() async throws {
@@ -34,6 +35,15 @@ final class StoryMapProjectionTests: XCTestCase {
         XCTAssertTrue(events.allSatisfy { !$0.laneSlots.isEmpty && $0.threadIDs.contains("plot") })
         XCTAssertEqual(first.characters.map(\.id), [person.id])
         XCTAssertEqual(first.scenes.count, 2)
+    }
+    func testVerifiedWriterSceneTitleSurvivesReadOnlyProjectionWithoutChangingSourceIdentity() async throws {
+        let (document, knowledge) = fixture(customSceneTitle: "작가가 정한 장면")
+        let result = try await StoryMapProjection.build(document, knowledge: knowledge, knowledgeOrigin: document.identity)
+        XCTAssertEqual(result.scenes.first?.title, "작가가 정한 장면")
+        XCTAssertEqual(result.scenes.first?.id, "scene:0")
+        XCTAssertEqual(result.scenes.first?.evidence.quote, "# 밤\n")
+        let unowned = try await StoryMapProjection.build(document, knowledge: knowledge)
+        XCTAssertEqual(unowned.scenes.first?.title, "밤")
     }
     func testFiltersIntersectWithoutChangingSourceOrProjectionOrder() async throws {
         let (document, knowledge) = fixture()

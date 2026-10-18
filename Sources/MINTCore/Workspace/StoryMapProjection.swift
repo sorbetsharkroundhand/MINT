@@ -56,7 +56,11 @@ struct StoryMapProjection: Equatable, Sendable {
             }
             guard !quote.isEmpty else { continue }
             let id = "scene:\(range.lowerBound)", path = scene.headingPath.filter { !$0.isEmpty }.joined(separator: " › ")
-            scenes.append(.init(id: id, kind: .scene, title: path.isEmpty ? "장면 \(index + 1)" : path,
+            let meta = verified?.sceneMetaByHash[scene.contentHash]
+            let writerTitle = meta?.titleUserEdited == true ? meta?.title : nil
+            let title = writerTitle.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
+                ?? (path.isEmpty ? "장면 \(index + 1)" : path)
+            scenes.append(.init(id: id, kind: .scene, title: title,
                 sceneID: id, sourceRange: range,
                 evidence: .init(documentID: scope.documentID, quote: quote, utf16Hint: range.lowerBound),
                 characterIDs: [], threadIDs: [], laneSlots: []))

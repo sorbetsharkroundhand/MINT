@@ -8,9 +8,9 @@ struct WorkspaceModeOption: Equatable, Identifiable {
 }
 
 enum WorkspaceModePresentation {
-    /// Show implemented surfaces while retaining stored choices for deferred modes.
+    /// Expose implemented surfaces while retaining stored choices for remaining modes.
     static func options(for mode: WritingMode) -> [WorkspaceModeOption] {
-        (mode == .general ? [WorkspaceMode.write, .outline] : [.write])
+        (mode == .general ? [WorkspaceMode.write, .outline] : [.write, .map])
             .map { WorkspaceModeOption(mode: $0, label: label(for: $0)) }
     }
 

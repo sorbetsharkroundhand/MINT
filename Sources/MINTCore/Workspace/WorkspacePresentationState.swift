@@ -8,8 +8,9 @@ struct WorkspacePresentationState {
     let chromeHidden: Bool
     var outlineVisible = false
     var marginVisible = false
+    var mapVisible = false
 
-    var contextVisible: Bool { outlineVisible || marginVisible || toolSection != nil }
+    var contextVisible: Bool { outlineVisible || marginVisible || mapVisible || toolSection != nil }
 
     var toolSection: SidebarSection? {
         switch SidebarSection(rawValue: rawToolSection) {

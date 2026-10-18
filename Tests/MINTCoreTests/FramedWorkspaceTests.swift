@@ -374,8 +374,8 @@ final class FramedWorkspaceHarness {
          appearance: ColorScheme = .light, reduceMotion: Bool = false,
          reduceTransparency: Bool = false, projectTitle: String = "Project",
          writingDiagnostics: WritingDiagnosticsRuntime? = nil,
-         livingMargin: LivingMarginModel? = nil) async throws {
-        fixture = try await LegacyBoundaryFixture(projectTitle: projectTitle)
+         livingMargin: LivingMarginModel? = nil, mode: WritingMode = .general) async throws {
+        fixture = try await LegacyBoundaryFixture(projectTitle: projectTitle, mode: mode)
         initialProject = fixture.session.activeProject
         initialDocumentID = fixture.session.selectedDocumentID
         for (key, value) in presentationDefaults { fixture.defaults.set(value, forKey: key) }

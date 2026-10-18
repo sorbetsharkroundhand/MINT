@@ -170,6 +170,7 @@ struct WorkspaceSurface: View {
     @ObservedObject var editorRequests: ProjectEditorRequests
     @ObservedObject var completion: CompletionController
     @ObservedObject var livingMargin: LivingMarginModel
+    let indexer: BackgroundIndexer
     var editorBridge: ProjectEditorBridge? = nil
     var positionStore: WritingPositionStore = .shared
     var writingDiagnostics: WritingDiagnosticsRuntime? = nil
@@ -190,7 +191,7 @@ struct WorkspaceSurface: View {
         let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
             navigatorWidth: sidebarWidth, rawToolSection: section,
             rawToolDock: toolDockRaw, chromeHidden: chromeHidden, outlineVisible: outlineVisible,
-            marginVisible: marginVisible)
+            marginVisible: marginVisible, mapVisible: mapVisible)
         VStack(spacing: 0) {
             WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
             workspace(presentation: presentation, theme: theme)
@@ -214,7 +215,7 @@ struct WorkspaceSurface: View {
             updateOutlinePosition(identity: projectSession.runtimeIdentity)
         }
         .onChange(of: section) { _, _ in
-            if outlineVisible { projectSession.selectWorkspaceMode(.write) }
+            if outlineVisible || mapVisible { projectSession.selectWorkspaceMode(.write) }
             if section != SidebarSection.margin.rawValue { marginOpened = false }
         }
         .onChange(of: projectSession.runtimeIdentity?.key.projectID) { _, _ in marginOpened = false }
@@ -223,11 +224,12 @@ struct WorkspaceSurface: View {
     private var outlineVisible: Bool {
         activeWritingMode == .general && projectSession.workspaceMode == .outline
     }
+    private var mapVisible: Bool { activeWritingMode == .fiction && projectSession.workspaceMode == .map }
     private var marginAvailable: Bool {
         writingDiagnostics != nil || marginOpened || !livingMargin.visibleInsights(for: activeWritingMode).isEmpty
     }
     private var marginVisible: Bool {
-        marginOpened && section == SidebarSection.margin.rawValue && !outlineVisible
+        marginOpened && section == SidebarSection.margin.rawValue && !outlineVisible && !mapVisible
     }
     private func toggleMargin() {
         if marginVisible {
@@ -266,9 +268,11 @@ struct WorkspaceSurface: View {
                 editorBridge: editorBridge,
                 positionStore: positionStore)
         } context: {
-            let tool = outlineVisible
-                ? WorkspaceToolDescriptor(title: "문서 개요", subtitle: "원고의 제목과 현재 위치", systemImage: "list.bullet.indent")
-                : WorkspaceToolPresentation.descriptor(for: section)
+            let tool = mapVisible
+                ? WorkspaceToolDescriptor(title: "이야기 지도", subtitle: "장면과 사건을 원문에서 살펴보기", systemImage: "point.3.connected.trianglepath.dotted")
+                : (outlineVisible
+                    ? WorkspaceToolDescriptor(title: "문서 개요", subtitle: "원고의 제목과 현재 위치", systemImage: "list.bullet.indent")
+                    : WorkspaceToolPresentation.descriptor(for: section))
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: tool.systemImage)
@@ -310,18 +314,28 @@ struct WorkspaceSurface: View {
                     .fixedSize()
                     .accessibilityLabel("글 도구 위치")
                     .help("글 도구 위치")
-                    Button {
-                        if outlineVisible { projectSession.selectWorkspaceMode(.write) }
-                        else { marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section) }
-                        editorRequests.focusEditor()
-                    } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 11, weight: .semibold))
-                            .frame(width: 26, height: 26)
-                            .contentShape(Rectangle())
+                    Group {
+                        if mapVisible {
+                            WorkspaceActionButton(identifier: "mint.story-map.close", label: "문서로 돌아가기",
+                                symbol: "xmark", theme: theme) {
+                                    projectSession.selectWorkspaceMode(.write); editorRequests.focusEditor()
+                                }.frame(width: 26, height: 26)
+                        } else {
+                            Button {
+                                if outlineVisible { projectSession.selectWorkspaceMode(.write) }
+                                else { marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section) }
+                                editorRequests.focusEditor()
+                            } label: {
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .frame(width: 26, height: 26)
+                                    .contentShape(Rectangle())
+                            }
+                        }
                     }
                     .buttonStyle(.plain)
                     .foregroundStyle(theme.ink2C)
+                    .accessibilityIdentifier(mapVisible ? "mint.story-map.close" : "mint.context.close")
                     .accessibilityLabel("문서로 돌아가기")
                     .help("문서로 돌아가기")
                 }
@@ -329,7 +343,10 @@ struct WorkspaceSurface: View {
                 .padding(.vertical, 11)
                 theme.sepC.frame(height: 1)
                     .accessibilityHidden(true)
-                if outlineVisible {
+                if mapVisible {
+                    StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
+                        requests: editorRequests, theme: theme)
+                } else if outlineVisible {
                     DocumentOutlineView(controller: outline, requests: editorRequests,
                         session: projectSession, theme: theme)
                 } else if section == SidebarSection.margin.rawValue {
