@@ -11,9 +11,10 @@ Create Workspace/Review/ReviewIssue.swift, FictionReviewProjection.swift and foc
 
 ## Task2: Durable Review disposition via the existing writer owner
 Create ReviewDisposition.swift/service and tests; keep existing WriterDocumentData schema/ProjectWriterEditing. Consume prepared issue and current runtime; produce explicit namespaced intentional/dismissed decisions, matching suppression/history and restore.
-- [ ] RED→GREEN reload/reindex/source-offset/project/ABA behavior, unrelated decisions retained, restored issues, selected-document/full-original/stale/corrupt-schema refusal and unchanged manuscript/style data.
-- [ ] Use only current owner writes and preserve durable original decisions; never automatic canon or style preferences.
-- [ ] Focused/full/build/bench, component review and bounded sequential PR/main CI.
+- [x] RED→GREEN reload/reindex/source-offset/project/ABA behavior, unrelated decisions retained, restored issues, selected-document/full-original/stale/corrupt-schema refusal and unchanged manuscript/style data.
+- [x] Use only current owner writes and preserve durable original decisions; never automatic canon or style preferences.
+- [x] Focused/full/build/bench and component review.
+- [ ] Bounded sequential PR/main CI.
 
 ## Task3: Generic exact original native navigation
 Extract Map's source target/mapping into generic Editor original-source types; retain Map wrappers and existing tests. Add Review source actions with inspected-epoch/project/original checks and fresh runtime after explicit document selection.
