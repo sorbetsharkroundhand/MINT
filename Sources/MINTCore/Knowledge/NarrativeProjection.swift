@@ -215,15 +215,14 @@ enum GraphRow: Identifiable {
     static func chronoRows(from snapshot: KnowledgeSnapshot) -> [GraphRow] {
         let byKey = Dictionary(
             uniqueKeysWithValues: snapshot.canonicalEvents.map { ($0.canonicalKey, $0) })
-        let startByScene = Dictionary(
-            uniqueKeysWithValues: snapshot.outline.scenes.map {
-                ($0.contentHash, $0.utf16Range.lowerBound)
-            })
+        let startByScene = snapshot.outline.unambiguousSceneIndicesByHash.mapValues {
+            snapshot.outline.scenes[$0].utf16Range.lowerBound
+        }
         return snapshot.eventChronoOrder.enumerated().compactMap { offset, key in
-            guard let event = byKey[key] else { return nil }
+            guard let event = byKey[key], let start = startByScene[event.sceneHash] else { return nil }
             return .event(
                 id: "c-\(offset)", event: event,
-                start: startByScene[event.sceneHash] ?? 0)
+                start: start)
         }
     }
 }
