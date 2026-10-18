@@ -24,7 +24,7 @@ No local product launch, shipping-model operation, user-data mutation, hot-path 
 - [x] Write/run failing knowledge/location/relationship/object cases with original snapshots, unknown/time/future/weak/repair/dedup/cancellation/output-limit assertions.
 - [x] Implement explicit unaware stance and deterministic evidence-backed bounded kernels; same-calendar age follows Task2. Candidate keys/order are stable and independent of Dictionary traversal.
 - [x] Run atomic/query/legacy focused tests, build/full tests/MINTBench and separate inline review; retain Important regression fixes.
-- [ ] Commit/publish/attach bounded PR after predecessor merge; require all predecessor-main, exact-head and merged-main CI plus fresh feedback.
+- [x] Commit/publish/attach bounded PR after predecessor merge; require all predecessor-main, exact-head and merged-main CI plus fresh feedback.
 
 ### Task 2: Explicit age arithmetic and actual scoped preparation
 **Files:** Extend Knowledge/StoryKnowledge.swift, StoryEntityResolver.swift, StoryKnowledgeSnapshot.swift, ContinuityCandidate.swift, BackgroundIndexer.swift and age/indexer ownership tests.
@@ -33,6 +33,6 @@ No local product launch, shipping-model operation, user-data mutation, hot-path 
 - [x] Write/run failing age/calendar/overflow/unknown convention, prepared legacy candidate evidence and edit/project/paused/stale publication tests.
 - [x] Add typed age validation/indexing and checked birth-year comparison; connect both real background candidate publications and synchronous edit/transition retirement without inference or source work in views/prediction.
 - [x] Run focused/full/build/bench and separate whole-feature inline review of all five conditions. Record generation-only versus judge/UI/native evidence accurately.
-- [ ] Deliver bounded PR with exact CI evidence; update #109 implementation scope only after main proof. #110/#270 own remaining judge/visible insights.
+- [x] Deliver bounded PR with exact CI evidence; update #109 implementation scope only after main proof. #110/#270 own remaining judge/visible insights.
 
 Plan review: both tasks have independent testable kernels and no orphan interfaces; all constraints map to a task. No schema migration, unregistered object creation, invented time units or absent-state inference is permitted.
