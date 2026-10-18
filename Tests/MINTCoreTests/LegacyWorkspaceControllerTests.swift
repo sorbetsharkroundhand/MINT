@@ -223,14 +223,14 @@ struct LegacyBoundaryFixture {
     let session: ProjectSession
     let project: WritingProject
 
-    init(failProjectWrites: Bool = false, projectTitle: String = "Project") async throws {
+    init(failProjectWrites: Bool = false, projectTitle: String = "Project", mode: WritingMode = .general) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent("MINT-LegacyBoundary-\(UUID())")
         legacyRoot = root.appendingPathComponent("Legacy")
         try FileManager.default.createDirectory(at: legacyRoot, withIntermediateDirectories: true)
         suite = "MINT-LegacyBoundary-\(UUID())"
         defaults = UserDefaults(suiteName: suite)!
         store = ProjectStore(root: root.appendingPathComponent("Projects"))
-        project = WritingProject(id: WritingProjectID(), title: projectTitle, mode: .general, documents: [
+        project = WritingProject(id: WritingProjectID(), title: projectTitle, mode: mode, documents: [
             WritingDocument(id: WritingDocumentID(), title: "Manuscript", body: "original project", kind: .manuscript)])
         try await store.save(project)
         try await store.activate(id: project.id)

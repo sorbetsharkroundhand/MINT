@@ -56,7 +56,7 @@ actor ModelLifetimeCoordinator {
 
     /// Reserve only an existing stable model; never wait for or initiate a model switch/load.
     func reserveReadyOperation(modelID: String) -> Bool {
-        guard !Task.isCancelled, !switching, currentModelID == modelID else { return false }
+        guard !Task.isCancelled, !switching, currentModelID == modelID, operationCounter.snapshot == 0 else { return false }
         operationCounter.add(1); return true
     }
 
@@ -537,6 +537,8 @@ public actor CompletionEngine {
         guard let loaded = container, !parameters.modelID.isEmpty, loadedModelID == parameters.modelID,
               await modelLifetime.reserveReadyOperation(modelID: parameters.modelID) else { throw ReadyInstructionError.modelUnavailable }
         do {
+            // Reservation is an actor hop: a same-ID reset may have replaced the container.
+            guard container === loaded, loadedModelID == parameters.modelID else { throw ReadyInstructionError.modelUnavailable }
             try Task.checkCancellation()
             try await loaded.perform { context in
                 let input = try await context.processor.prepare(input: UserInput(
