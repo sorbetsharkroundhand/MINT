@@ -13,6 +13,7 @@ public final class ProjectEditorRequests: ObservableObject {
     weak var nativeEditor: BlockTextView?
     var nativeEditorKey: ProjectDocumentKey?
     var askSupport: AskMINTSupport?
+    var judgeSupport: ContinuityJudgeSupport?
     private var consumedSearchFocusRequest = 0
 
     public init() {}

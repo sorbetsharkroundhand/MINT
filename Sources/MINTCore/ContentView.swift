@@ -122,6 +122,7 @@ public struct ContentView: View {
             .onAppear {
                 // The controller itself enforces explicit completion authorization.
                 editorRequests.askSupport = completion.makeAskMINTSupport()
+                editorRequests.judgeSupport = completion.makeContinuityJudgeSupport()
                 completion.preloadEngine()
                 if let store = legacyWorkspace.legacyStore {
                     LegacyWorkspaceView.connect(store: store, completion: completion, indexer: indexer)

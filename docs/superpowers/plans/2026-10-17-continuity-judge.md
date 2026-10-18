@@ -30,9 +30,9 @@ No local MINT launch, actual model selection/download/inference, native acceptan
 **Files:** Create `Knowledge/ContinuityJudgeController.swift`, `Knowledge/ContinuityJudgeSupport.swift`, focused controller/lifetime tests; extend CompletionController/ProjectEditorRequests/ContentView ready-support attachment and ModelLifetimeCoordinator supplemental admission only.
 **Consumes:** Task1 packet/decision and existing AskAnswerGeneration ordered/drain transport plus CompletionEngine.streamInstructionIfReady.
 **Produces:** ticketed single-candidate controller, `.makeContinuityJudgeSupport()` from the actual private engine and optional requests support for #114/#270.
-- [ ] Write/run failing valid/quiet/malformed stream, noncooperative cancellation/drain, A→B→A, edit/master/model/policy/foreground, active ready-operation refusal and unloaded-engine tests.
-- [ ] Implement explicit request ownership and complete-only publication; observe runtime/gates and attach the same already-ready engine without inference on open. Ready admission refuses nonzero active operations.
-- [ ] Run final focused/full/build/bench and whole-feature inline review of all five conditions. Keep semantic/native/actual-visible-workflow evidence separate.
+- [x] Write/run failing valid/quiet/malformed stream, noncooperative cancellation/drain, A→B→A, edit/master/model/policy/foreground, active ready-operation refusal and unloaded-engine tests.
+- [x] Implement explicit request ownership and complete-only publication; observe runtime/gates and attach the same already-ready engine without inference on open. Ready admission refuses nonzero active operations.
+- [x] Run final focused/full/build/bench and whole-feature inline review of all five conditions. Keep semantic/native/actual-visible-workflow evidence separate.
 - [ ] Deliver sequential PR/main CI and record #110 implementation only on verified main; preserve #114/#270/#119 remaining UI/native evidence.
 
 Plan review: no orphan packet/decoder/support interface, no autonomous exploration or writer action. Every review-focus class maps to an explicit regression gate. The real backend is required alongside fake stream coverage; actual model/native quality remains owner-later.

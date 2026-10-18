@@ -215,6 +215,22 @@ public final class CompletionController: ObservableObject {
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
+    private weak var currentJudgeSupport: ContinuityJudgeSupport?
+    func makeContinuityJudgeSupport() -> ContinuityJudgeSupport {
+        currentJudgeSupport?.shutdown()
+        let support = ContinuityJudgeSupport(available: false) { [weak self] packet in
+            let process = ProcessInfo.processInfo
+            guard let self, self.settings.authorization == .enabled, self.settings.autocompleteEnabled, self.engineState == .ready,
+                  !self.isMemoryPressurePaused, !self.isManagingModel, !process.isLowPowerModeEnabled,
+                  process.thermalState != .serious, process.thermalState != .critical else { throw CompletionEngine.ReadyInstructionError.modelUnavailable }
+            let engine = self.engine, parameters = self.settings.parameters, user = try packet.userMessage()
+            return AskAnswerGeneration { emit in
+                try await engine.streamInstructionIfReady(system: JudgeEvidencePacket.systemMessage, user: user, parameters: parameters, onChunk: emit)
+            }
+        }
+        currentJudgeSupport = support; support.observe(self); return support
+    }
+
     func makeAskMINTSupport() -> AskMINTSupport {
         let support = AskMINTSupport(available: false) { [weak self] packet, question in
             guard let self, self.settings.authorization == .enabled, self.settings.autocompleteEnabled, self.engineState == .ready,
@@ -816,6 +832,7 @@ public final class CompletionController: ObservableObject {
     /// 길어지지 않게 한다 (이슈 #65 Gate 0 teardown 세그폴트 수정). 고스트 UI
     /// 정리도 겸하지만 종료 직후라 화면은 신경 쓰지 않는다.
     public func shutdown() {
+        currentJudgeSupport?.shutdown()
         invalidate()
         cancelAllFolderNaming()
     }
