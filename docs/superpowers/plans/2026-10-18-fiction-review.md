@@ -4,9 +4,10 @@ Execute inline with superpowers:executing-plans, regression-first and inline aut
 
 ## Task1: Prepared original-backed Fiction Review issues
 Create Workspace/Review/ReviewIssue.swift, FictionReviewProjection.swift and focused tests. Consume captured ProjectDocumentSnapshot, matching KnowledgeSnapshot and current ContinuityCandidates; produce private immutable issues/category counts/stable ordering.
-- [ ] Compile/run regression RED for all six real producers, neutral semantic/open-thread/uncertain-structure handling, raw original/scope/revision/duplicate/cap/cancellation refusal and stable ordering/dedup across reindex.
-- [ ] Implement literal original factories and bounded pure prepared projection; no view, model or writer mutation.
-- [ ] Focused/full/build/bench, separate inline review and bounded sequential PR/main CI.
+- [x] Compile/run regression RED for all six real producers, neutral semantic/open-thread/uncertain-structure handling, raw original/scope/revision/duplicate/cap/cancellation refusal and stable ordering/dedup across reindex.
+- [x] Implement literal original factories and bounded pure prepared projection; no view, model or writer mutation.
+- [x] Focused/full/build/bench and separate inline review.
+- [ ] Bounded sequential PR/main CI.
 
 ## Task2: Durable Review disposition via the existing writer owner
 Create ReviewDisposition.swift/service and tests; keep existing WriterDocumentData schema/ProjectWriterEditing. Consume prepared issue and current runtime; produce explicit namespaced intentional/dismissed decisions, matching suppression/history and restore.
