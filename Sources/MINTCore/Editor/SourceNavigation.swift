@@ -13,12 +13,14 @@ enum SourceNavigationIntent: Equatable, Sendable {
     case passage(SourceSearchHit)
     case heading(OutlineSourceTarget)
     case storyMap(StoryMapSourceTarget)
+    case original(OriginalSourceTarget)
     case returnTo(SourceWritingPosition)
     var key: ProjectDocumentKey {
         switch self {
         case .passage(let hit): ProjectDocumentKey(projectID: hit.projectID, documentID: hit.documentID)
         case .heading(let target): target.identity.key
         case .storyMap(let target): target.identity.key
+        case .original(let target): target.identity.key
         case .returnTo(let point): point.key
         }
     }
@@ -102,7 +104,7 @@ extension ProjectEditorRequests {
         return true
     }
 
-    private func issueSourceNavigation(_ source: SourceNavigationIntent) {
+    func issueSourceNavigation(_ source: SourceNavigationIntent) {
         searchJump = EditorSearchJump(documentID: source.key.documentID, query: "",
             sequence: (searchJump?.sequence ?? 0) + 1, source: source)
         focusEditor()
@@ -127,6 +129,8 @@ extension BlockTextView {
             guard applyOutlineHeading(target) else { return false }
         case .storyMap(let target):
             guard applyStoryMapSource(target) else { return false }
+        case .original(let target):
+            guard applyOriginalSource(target) else { return false }
         case .returnTo(let point):
             guard serialize().utf16.elementsEqual(point.manuscript.utf16),
                 string.utf16.elementsEqual(point.nativeText.utf16) else { return false }

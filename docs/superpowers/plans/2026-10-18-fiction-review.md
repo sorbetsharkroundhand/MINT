@@ -18,9 +18,10 @@ Create ReviewDisposition.swift/service and tests; keep existing WriterDocumentDa
 
 ## Task3: Generic exact original native navigation
 Extract Map's source target/mapping into generic Editor original-source types; retain Map wrappers and existing tests. Add Review source actions with inspected-epoch/project/original checks and fresh runtime after explicit document selection.
-- [ ] RED→GREEN exact same/cross-document original passage and duplicate/formatted/Unicode source jump/return, stale/native/IME/ABA refusal, unchanged editor/Undo/selection and complete source errors.
-- [ ] No fuzzy source authority, Markdown/native coordinate substitution or unrelated behavior.
-- [ ] Focused/full/build/bench, component review and bounded sequential PR/main CI.
+- [x] RED→GREEN exact same/cross-document original passage and duplicate/formatted/Unicode source jump/return, stale/native/IME/ABA refusal, unchanged editor/Undo/selection and complete source errors.
+- [x] No fuzzy source authority, Markdown/native coordinate substitution or unrelated behavior.
+- [x] Focused/full/build/bench and component review.
+- [ ] Bounded sequential PR/main CI.
 
 ## Task4: Project-owned pinned inspector and real bounded judge connection
 Create FictionReviewController/runtime tests. Consume real session activeProject mutation epochs, optional inspected-document indexer snapshots/candidates, dispositions and requests.judgeSupport; produce cancellable prepared inspection, category/selected-position state and explicit judged result.
