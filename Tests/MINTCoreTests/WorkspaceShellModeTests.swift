@@ -78,6 +78,7 @@ final class WorkspaceShellModeTests: XCTestCase {
             WorkspaceModePresentation.options(for: .fiction),
             [
                 WorkspaceModeOption(mode: .write, label: "쓰기"),
+                WorkspaceModeOption(mode: .map, label: "지도"),
             ])
         XCTAssertEqual(
             WorkspaceModePresentation.options(for: .general),

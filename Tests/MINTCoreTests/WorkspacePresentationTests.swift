@@ -22,6 +22,14 @@ final class WorkspacePresentationTests: XCTestCase {
         }
     }
 
+    func testStoryMapReservesTheExistingContextWithoutChangingSavedToolSelection() {
+        let state = WorkspacePresentationState(navigatorVisible: true, navigatorWidth: 250,
+            rawToolSection: "files", rawToolDock: "right", chromeHidden: false, mapVisible: true)
+        XCTAssertTrue(state.contextVisible)
+        XCTAssertEqual(state.rawToolSection, "files")
+        XCTAssertEqual(state.toolDock, .right)
+    }
+
     private func snapshot(section: String, dock: String) -> WorkspacePresentationState {
         WorkspacePresentationState(navigatorVisible: false, navigatorWidth: -10,
             rawToolSection: section, rawToolDock: dock, chromeHidden: true)

@@ -89,6 +89,7 @@ public struct ContentView: View {
                     editorRequests: editorRequests,
                     completion: completion,
                     livingMargin: livingMargin,
+                    indexer: indexer,
                     editorBridge: projectEditorBridge,
                     positionStore: positionStore, writingDiagnostics: writingDiagnostics)
             case .error:

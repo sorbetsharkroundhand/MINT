@@ -36,6 +36,8 @@ final class StoryMapController: ObservableObject {
     private var input: StoryMapInput?
     private var currentKey: ProjectDocumentKey?
     private var threadID: String?, characterID: UUID?
+    var selectedThreadID: String? { threadID }
+    var selectedCharacterID: UUID? { characterID }
     private var foregroundBusy = false, policyPaused = false, energyPaused = false
     private var epoch: UInt64 = 0
     private var workTask: Task<Void, Never>?
