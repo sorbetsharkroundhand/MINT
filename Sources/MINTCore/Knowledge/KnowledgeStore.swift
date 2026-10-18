@@ -583,8 +583,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
         for branch in self.branches {
             for index in branch.sceneRange { branchChrono[index] = branch.chrono }
         }
-        let sceneIndexByHash = Dictionary(
-            uniqueKeysWithValues: outline.scenes.enumerated().map { ($0.element.contentHash, $0.offset) })
+        let sceneIndexByHash = outline.unambiguousSceneIndicesByHash
         for canonical in canonicals {
             guard let sceneIndex = sceneIndexByHash[canonical.sceneHash],
                 branchChrono[sceneIndex] == .before
@@ -1086,10 +1085,7 @@ public struct KnowledgeSnapshot: Sendable, Equatable {
             }
         }
 
-        let indexByHash = Dictionary(
-            uniqueKeysWithValues: outline.scenes.enumerated().map {
-                ($0.element.contentHash, $0.offset)
-            })
+        let indexByHash = outline.unambiguousSceneIndicesByHash
         var castByHash: [String: Set<UUID>] = [:]
         for event in events {
             castByHash[event.sceneHash, default: []].formUnion(event.participants)

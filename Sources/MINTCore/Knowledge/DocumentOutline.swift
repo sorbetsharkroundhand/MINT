@@ -351,6 +351,16 @@ public struct DocumentOutline: Equatable, Sendable {
         return (level, title)
     }
 
+    /// Content revisions cannot identify repeated source occurrences. Omit ambiguous keys.
+    var unambiguousSceneIndicesByHash: [String: Int] {
+        var indices: [String: Int] = [:], repeated: Set<String> = []
+        for (index, scene) in scenes.enumerated() {
+            if indices.updateValue(index, forKey: scene.contentHash) != nil { repeated.insert(scene.contentHash) }
+        }
+        for hash in repeated { indices[hash] = nil }
+        return indices
+    }
+
     private static func hash(_ text: Substring) -> String {
         stableHash(String(text))
     }
