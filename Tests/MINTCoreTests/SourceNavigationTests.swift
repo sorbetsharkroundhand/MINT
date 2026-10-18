@@ -132,8 +132,8 @@ final class SourceNavigationHarness {
     let host: NSView
     let completion: CompletionController
     let indexer: BackgroundIndexer
-    init(short: Bool = false) async throws {
-        fixture = try await LegacyBoundaryFixture()
+    init(short: Bool = false, mode: WritingMode = .general) async throws {
+        fixture = try await LegacyBoundaryFixture(mode: mode)
         fixture.session.updateSelectedDocumentBody(short ? "# Here\nneedle and **needle**." :
             (0..<150).map { "Paragraph \($0) retains original writing selection and native scroll position." }.joined(separator: "\n"))
         if !short {

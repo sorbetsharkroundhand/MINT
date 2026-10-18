@@ -12,11 +12,13 @@ struct SourceWritingPosition: Equatable, Sendable {
 enum SourceNavigationIntent: Equatable, Sendable {
     case passage(SourceSearchHit)
     case heading(OutlineSourceTarget)
+    case storyMap(StoryMapSourceTarget)
     case returnTo(SourceWritingPosition)
     var key: ProjectDocumentKey {
         switch self {
         case .passage(let hit): ProjectDocumentKey(projectID: hit.projectID, documentID: hit.documentID)
         case .heading(let target): target.identity.key
+        case .storyMap(let target): target.identity.key
         case .returnTo(let point): point.key
         }
     }
@@ -24,6 +26,20 @@ enum SourceNavigationIntent: Equatable, Sendable {
 
 @MainActor
 extension ProjectEditorRequests {
+    @discardableResult
+    func jump(to row: StoryMapProjection.Row, prepared: PreparedStoryMap, in session: ProjectSession) -> Bool {
+        let target = StoryMapSourceTarget(identity: prepared.identity, revision: prepared.projection.revision, row: row)
+        guard session.workspaceMode == .map, session.activeProject?.mode == .fiction,
+              session.runtimeIdentity == prepared.identity, prepared.projection.rows.contains(row),
+              let body = session.selectedDocument?.body, target.matchesSource(body),
+              let point = captureSourcePosition(in: session) else {
+            sourceNavigationError = "원문 위치를 확인할 수 없어요. 지도가 갱신된 뒤 다시 선택하세요."
+            return false
+        }
+        if sourceReturnPoint?.key.projectID != point.key.projectID { sourceReturnPoint = point }
+        sourceNavigationError = nil; issueSourceNavigation(.storyMap(target)); return true
+    }
+
     @discardableResult
     func jump(to heading: DocumentOutlineProjection.Heading, prepared: PreparedDocumentOutline,
               in session: ProjectSession) -> Bool {
@@ -109,6 +125,8 @@ extension BlockTextView {
         switch intent {
         case .heading(let target):
             guard applyOutlineHeading(target) else { return false }
+        case .storyMap(let target):
+            guard applyStoryMapSource(target) else { return false }
         case .returnTo(let point):
             guard serialize().utf16.elementsEqual(point.manuscript.utf16),
                 string.utf16.elementsEqual(point.nativeText.utf16) else { return false }
