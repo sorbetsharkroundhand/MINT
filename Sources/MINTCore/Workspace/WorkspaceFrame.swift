@@ -8,10 +8,6 @@ struct WorkspaceFrame<Content: View>: View {
     var body: some View {
         content()
             .background(WorkspacePaperSurface(theme: theme))
-            .overlay {
-                RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                    .strokeBorder(theme.sepC).allowsHitTesting(false).accessibilityHidden(true)
-            }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("mint.workspace.frame")
     }
@@ -21,13 +17,14 @@ struct WorkspaceFrame<Content: View>: View {
 struct WorkspacePaperSurface: NSViewRepresentable {
     let theme: MintTheme
     var identifier = "mint.workspace.frame"
+    var surface: NSColor? = nil
     func makeNSView(context: Context) -> SurfaceView {
         let view = SurfaceView(); view.wantsLayer = true
         view.setAccessibilityIdentifier(identifier)
         return view
     }
     func updateNSView(_ view: SurfaceView, context: Context) {
-        view.layer?.backgroundColor = theme.editorSurface.cgColor
+        view.layer?.backgroundColor = (surface ?? theme.editorSurface).cgColor
         view.layer?.cornerRadius = MintRadius.lg
         view.layer?.masksToBounds = false
     }
@@ -58,7 +55,7 @@ private struct WorkspaceProjectTitle: NSViewRepresentable {
     let theme: MintTheme
     func makeNSView(context: Context) -> NSTextField {
         let field = TitleField(labelWithString: title)
-        field.font = MintFonts.ui(12, weight: .medium)
+        field.font = MintFonts.serif(11.5, weight: .medium)
         field.maximumNumberOfLines = 1; field.lineBreakMode = .byTruncatingMiddle
         field.setAccessibilityIdentifier("mint.workspace.chrome.title")
         field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)

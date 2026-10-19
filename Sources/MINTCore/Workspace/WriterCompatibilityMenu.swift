@@ -4,6 +4,7 @@ import SwiftUI
 /// Search cannot replace stored author decisions. Keep their existing routes secondary.
 struct WriterCompatibilityMenu: NSViewRepresentable {
     @Binding var section: String
+    var theme: MintTheme? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(section: $section) }
 
@@ -32,6 +33,7 @@ struct WriterCompatibilityMenu: NSViewRepresentable {
 
     func updateNSView(_ button: NSPopUpButton, context: Context) {
         context.coordinator.section = $section
+        button.contentTintColor = theme?.ink2 ?? .secondaryLabelColor
     }
 
     @MainActor final class Coordinator: NSObject {

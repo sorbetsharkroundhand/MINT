@@ -37,7 +37,7 @@ final class PaletteTests: XCTestCase {
     /// 원색 그대로 썼다면 읽히지 않았을 것 — 파생이 실제로 일을 하는지 확인.
     func test_지정색을_그대로_썼다면_라이트에서_안보였다() {
         let raw = NSColor(hex: MintTheme.accentSeed).contrastRatio(against: .white)
-        XCTAssertLessThan(raw, 2.0, "이 테스트의 전제(지정색은 흰 배경에서 안 보임)가 깨졌다")
+        XCTAssertLessThan(raw, 4.5, "The unadjusted dark accent must not be used as small text on paper")
     }
 
     // MARK: - 기본값

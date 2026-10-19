@@ -6,6 +6,7 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
     @ObservedObject var session: ProjectSession
     let requests: ProjectEditorRequests
     let compact: Bool
+    var theme: MintTheme? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(session: session, requests: requests) }
 
@@ -27,6 +28,7 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
         button.title = compact ? "" : "원문 검색"
         button.imagePosition = compact ? .imageOnly : .imageLeading
         button.isEnabled = session.isEditorEditable
+        button.contentTintColor = theme?.ink2 ?? .secondaryLabelColor
     }
 
     @MainActor final class Coordinator: NSObject {

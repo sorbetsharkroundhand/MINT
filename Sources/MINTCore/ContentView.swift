@@ -345,11 +345,9 @@ struct EditorPane: View {
                     completion: completion,
                     settings: settings,
                     theme: theme)
-                theme.sepC.frame(height: 1)
             }
             editor
             if !chromeHidden {
-                theme.sepC.frame(height: 1)
                 EditorStatusBar(
                     projectSession: projectSession,
                     completion: completion,
@@ -469,15 +467,16 @@ struct EditorToolbar: View {
         GeometryReader { geometry in
             toolbar(density: WorkspaceLayoutState.toolbarDensity(forEditorWidth: geometry.size.width))
         }
-        .frame(height: 52)
-        .background(theme.toolbarC)
+        .frame(height: 36)
     }
 
     private func toolbar(density: WorkspaceToolbarDensity) -> some View {
         HStack(spacing: density == .compact ? 6 : 10) {
+            Circle().fill(theme.novelC).frame(width: 5, height: 5)
+                .accessibilityHidden(true)
             Text(projectSession.selectedDocument?.title ?? "문서")
-                .mintUIFont(12, .medium)
-                .foregroundStyle(theme.inkC)
+                .mintUIFont(11.5, .medium)
+                .foregroundStyle(theme.ink2C)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: density == .compact ? 150 : 260, alignment: .leading)
@@ -490,6 +489,7 @@ struct EditorToolbar: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
                     .fixedSize()
                     .accessibilityIdentifier("mint.workspace-mode")
                     .accessibilityLabel("작업 공간")
@@ -820,11 +820,10 @@ struct EditorStatusBar: View {
             separator
             Text("Markdown")
         }
-        .font(MintFonts.monoUI(11))
+        .font(MintFonts.monoUI(10))
         .foregroundStyle(theme.ink3C)
-        .padding(.horizontal, 22)
-        .frame(height: 34)
-        .background(theme.statusbarC)
+        .padding(.horizontal, 16)
+        .frame(height: 26)
         // 통계 재계산 — 키가 바뀌고(편집·문서 전환) 0.25s 조용해진 뒤에만.
         // 그 사이 새 키 입력이 오면 이 task가 취소되고 새로 걸린다(디바운스).
         // 계산은 detached — 88k자 한 패스가 메인 프레임을 막지 않는다.

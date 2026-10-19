@@ -78,9 +78,7 @@ struct ProjectNavigatorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            theme.sepC.frame(height: 1)
             searchField
-            theme.sepC.frame(height: 1)
             if let error = session.lastErrorMessage {
                 Text(error)
                     .mintUIFont(11)
@@ -96,8 +94,7 @@ struct ProjectNavigatorView: View {
                 .padding(8)
             }
         }
-        .background(theme.sidebarTintC)
-        .overlay(alignment: .trailing) { theme.sepC.frame(width: 1) }
+        .background(theme.cardSurfaceC)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mint.navigator")
         .accessibilityLabel("문서 탐색기")
@@ -168,7 +165,7 @@ struct ProjectNavigatorView: View {
         .foregroundStyle(theme.ink2C)
         .padding(.leading, 12)
         .padding(.trailing, 12)
-        .frame(height: 52)
+        .frame(height: 36)
     }
 
     private var recentProjectsMenu: some View {
@@ -200,7 +197,7 @@ struct ProjectNavigatorView: View {
                     .lineLimit(1).truncationMode(.middle)
                 Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
             }
-            .mintUIFont(12, .semibold)
+            .mintUIFont(11.5, .medium)
         }
         .menuStyle(.borderlessButton)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -284,7 +281,7 @@ struct ProjectNavigatorView: View {
                     .onExitCommand { cancelRename() }
             } else {
                 Text(document.title)
-                    .mintUIFont(13, selected ? .semibold : .regular)
+                    .mintUIFont(12, selected ? .medium : .regular)
                     .foregroundStyle(selected ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
             }

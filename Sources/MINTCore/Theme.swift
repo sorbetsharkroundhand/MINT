@@ -2,14 +2,16 @@ import AppKit
 import CoreText
 import SwiftUI
 
-/// 디자인 "MINT Editor v3"의 색·폰트 토큰.
-///
-/// 값은 목업의 CSS 변수(themeVars)를 그대로 옮긴 것 — 라이트/다크 두 벌.
-/// 에디터(NSTextView)와 SwiftUI 크롬이 같은 팔레트를 공유한다.
+/// Editorial paper and botanical mint, shared by AppKit and SwiftUI.
+/// Small meaningful text retains AA contrast rather than the mockup's decorative opacity.
 public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보관만 하므로 안전
     /// Manuscript surfaces remain opaque, including with a custom palette.
     public var editorSurface: NSColor { glassWin.withAlphaComponent(1) }
     public var editorSurfaceC: Color { Color(nsColor: editorSurface) }
+    public var workspaceSurface: NSColor { toolbar.withAlphaComponent(1) }
+    public var workspaceSurfaceC: Color { Color(nsColor: workspaceSurface) }
+    public var cardSurface: NSColor { sidebarTint.withAlphaComponent(1) }
+    public var cardSurfaceC: Color { Color(nsColor: cardSurface) }
 
     public let ink: NSColor
     public let ink2: NSColor
@@ -55,42 +57,38 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     /// 그림자는 정의상 항상 검정 알파라 토큰으로 만들지 않는다 (예외, #56).
     public let knob: NSColor
 
-    /// Owner-approved release accents (#153), chosen for each surface brightness.
-    public static let accentSeed: UInt32 = 0x4DE0D6
-    static let accentLight = NSColor(hex: 0x00857D)
+    /// The supplied redesign uses a deeper botanical mint on warm paper.
+    public static let accentSeed: UInt32 = 0x4CC9BD
+    static let accentLight = NSColor(hex: 0x0F6E63)
 
     public static let light = MintTheme(
-        ink: NSColor(hex: 0x1C1C1E),
-        ink2: NSColor(hex: 0x6B6B70),
-        // 4.5:1 (흰 배경) — 작은 의미 텍스트의 WCAG AA 최소치 (#29).
-        // 과거 0x9A9A9F는 2.8:1로 캡션·힌트가 읽히지 않았다.
-        ink3: NSColor(hex: 0x76767B),
-        // ghost는 **장식 전용**(플레이스홀더·비의미 틴트) — 의미 텍스트에 쓰지
-        // 않는다는 것이 토큰 계약이다 (#29). 대비 하한은 적용하지 않는다.
-        ghost: NSColor(hex: 0xB4B4B9),
-        ghostSuggestion: NSColor(hex: 0x6B6B70),
+        ink: NSColor(hex: 0x191816),
+        ink2: NSColor(hex: 0x57544E),
+        ink3: NSColor(hex: 0x716D65),
+        // Decorative only; suggestions use a separate readable foreground.
+        ghost: NSColor(hex: 0xA8A298),
+        ghostSuggestion: NSColor(hex: 0x57544E),
         blue: accentLight,
-        sep: NSColor(white: 0, alpha: 0.08),
-        sepStrong: NSColor(white: 0, alpha: 0.12),
-        hover: NSColor(white: 0, alpha: 0.05),
+        sep: NSColor(hex: 0x191816, alpha: 0.07),
+        sepStrong: NSColor(hex: 0x191816, alpha: 0.13),
+        hover: NSColor(hex: 0x191816, alpha: 0.04),
         activeBg: accentLight.withAlphaComponent(0.10),
-        chip: NSColor(white: 0, alpha: 0.05),
-        chipBorder: NSColor(white: 0, alpha: 0.09),
-        pill: NSColor(white: 1, alpha: 0.74),
-        pillBorder: NSColor(white: 1, alpha: 0.85),
-        kbd: NSColor.white,
-        codeBg: NSColor(white: 0, alpha: 0.05),
-        glassWin: NSColor(white: 1, alpha: 0.52),
-        toolbar: NSColor(white: 1, alpha: 0.28),
-        sidebarTint: NSColor(white: 0, alpha: 0.018),
-        statusbar: NSColor(white: 1, alpha: 0.24),
-        // 현재 줄 인식이 실제로 느껴지도록 아주 옅던 값을 살짝 올린다 (L3).
-        activeLine: NSColor(white: 0, alpha: 0.055),
+        chip: NSColor(hex: 0x191816, alpha: 0.028),
+        chipBorder: .clear,
+        pill: NSColor(hex: 0xFBF9F4, alpha: 0.92),
+        pillBorder: NSColor(white: 1, alpha: 0.45),
+        kbd: NSColor(hex: 0xF4F1EA),
+        codeBg: NSColor(hex: 0x191816, alpha: 0.04),
+        glassWin: NSColor(hex: 0xFAF8F3),
+        toolbar: NSColor(hex: 0xF5F2EA, alpha: 0.78),
+        sidebarTint: NSColor(hex: 0xF4F1EA),
+        statusbar: NSColor(hex: 0xF4F1E9, alpha: 0.80),
+        activeLine: NSColor(hex: 0x191816, alpha: 0.038),
         activeLineOutline: nil,
         selection: accentLight.withAlphaComponent(0.16),
         selectionBorder: accentLight.withAlphaComponent(0.45),
         novel: accentLight,
-        novelBg: accentLight.withAlphaComponent(0.10),
+        novelBg: accentLight.withAlphaComponent(0.08),
         danger: NSColor(hex: 0xD93025),
         dangerBg: NSColor(hex: 0xD93025, alpha: 0.14),
         warning: NSColor(hex: 0xC77800),
@@ -98,36 +96,32 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     )
 
     public static let dark = MintTheme(
-        ink: NSColor(hex: 0xF2F2F0),
-        ink2: NSColor(hex: 0x9A9A9F),
-        // 4.5:1 (어두운 유리 합성 배경 ~0x1B1B1E 기준) — #29.
-        // 과거 0x6E6E74는 3.4:1.
-        ink3: NSColor(hex: 0x838389),
-        // 본문(0xF2F2F0)보다는 확실히 흐리되, 어두운 유리 배경 위에서 읽히는 밝기.
-        ghost: NSColor(hex: 0x8E8E96),
-        ghostSuggestion: NSColor(hex: 0x9A9A9F),
+        ink: NSColor(hex: 0xF2EFE9),
+        ink2: NSColor(hex: 0xA8A39A),
+        ink3: NSColor(hex: 0x969188),
+        ghost: NSColor(hex: 0x5C5953),
+        ghostSuggestion: NSColor(hex: 0xA8A39A),
         blue: NSColor(hex: accentSeed),
-        sep: NSColor(white: 1, alpha: 0.09),
-        sepStrong: NSColor(white: 1, alpha: 0.16),
-        hover: NSColor(white: 1, alpha: 0.06),
-        activeBg: NSColor(hex: accentSeed, alpha: 0.18),
-        chip: NSColor(white: 1, alpha: 0.07),
-        chipBorder: NSColor(white: 1, alpha: 0.12),
-        pill: NSColor(red: 44 / 255, green: 44 / 255, blue: 48 / 255, alpha: 0.72),
-        pillBorder: NSColor(white: 1, alpha: 0.14),
-        kbd: NSColor(white: 1, alpha: 0.1),
-        codeBg: NSColor(white: 1, alpha: 0.07),
-        glassWin: NSColor(red: 20 / 255, green: 20 / 255, blue: 22 / 255, alpha: 0.55),
-        toolbar: NSColor(white: 1, alpha: 0.04),
-        sidebarTint: NSColor(white: 1, alpha: 0.028),
-        statusbar: NSColor(white: 1, alpha: 0.03),
-        // 어두운 유리 위에서 현재 줄이 또렷하도록 살짝 올린다 (L3).
-        activeLine: NSColor(white: 1, alpha: 0.075),
+        sep: NSColor(hex: 0xF2EFE9, alpha: 0.062),
+        sepStrong: NSColor(hex: 0xF2EFE9, alpha: 0.115),
+        hover: NSColor(hex: 0xF2EFE9, alpha: 0.045),
+        activeBg: NSColor(hex: accentSeed, alpha: 0.13),
+        chip: NSColor(hex: 0xF2EFE9, alpha: 0.028),
+        chipBorder: .clear,
+        pill: NSColor(hex: 0x1C1C1A, alpha: 0.94),
+        pillBorder: NSColor(white: 1, alpha: 0.07),
+        kbd: NSColor(hex: 0xF2EFE9, alpha: 0.06),
+        codeBg: NSColor(hex: 0xF2EFE9, alpha: 0.045),
+        glassWin: NSColor(hex: 0x171715),
+        toolbar: NSColor(hex: 0x151513, alpha: 0.80),
+        sidebarTint: NSColor(hex: 0x141413),
+        statusbar: NSColor(hex: 0x141412, alpha: 0.82),
+        activeLine: NSColor(hex: 0xF2EFE9, alpha: 0.038),
         activeLineOutline: nil,
         selection: NSColor(hex: accentSeed, alpha: 0.26),
         selectionBorder: NSColor(hex: accentSeed, alpha: 0.55),
         novel: NSColor(hex: accentSeed),
-        novelBg: NSColor(hex: accentSeed, alpha: 0.18),
+        novelBg: NSColor(hex: accentSeed, alpha: 0.11),
         danger: NSColor(hex: 0xFF453A),
         dangerBg: NSColor(hex: 0xFF453A, alpha: 0.18),
         warning: NSColor(hex: 0xFF9F0A),
@@ -550,11 +544,11 @@ public enum MintRadius {
     /// 헤어라인 요소(작은 배지·삽입선 캡).
     public static let xs: CGFloat = 4
     /// 작은 칩·툴팁.
-    public static let sm: CGFloat = 6
+    public static let sm: CGFloat = 7
     /// 행·카드 기본 (8–10을 흡수).
     public static let md: CGFloat = 9
     /// 패널·시트 (11–12를 흡수).
-    public static let lg: CGFloat = 12
+    public static let lg: CGFloat = 13
 }
 
 /// 간격 단위 토큰 (#32) — 4pt 그리드 기준. 패딩 숫자의 의미를 통일한다.

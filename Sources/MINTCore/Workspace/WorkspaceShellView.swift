@@ -40,27 +40,30 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: Vi
                 }
                 // This allocation changes width; the actual navigator keeps one overlay slot.
                 Color.clear.frame(width: layout.navigatorReservation)
-                WorkspaceFrame(theme: theme) {
-                    HStack(spacing: 0) {
-                        if contextVisible && effectiveDock == .left {
-                            context().frame(width: WorkspaceLayoutState.toolWidth)
-                                .background(WorkspaceToolSurface(theme: theme, floating: false))
-                            theme.sepC.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
-                        }
-                        VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    if contextVisible && effectiveDock == .left {
+                        context().frame(width: WorkspaceLayoutState.toolWidth)
+                            .background(WorkspaceToolSurface(theme: theme, floating: false))
+                            .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
+                        Color.clear.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
+                    }
+                    VStack(spacing: 0) {
+                        WorkspaceFrame(theme: theme) {
                             editor().frame(maxWidth: .infinity, maxHeight: .infinity)
-                            if contextVisible && effectiveDock == .bottom {
-                                theme.sepC.frame(height: 1)
-                                context().frame(height: min(WorkspaceLayoutState.bottomToolMaxHeight, height * 0.4))
-                                    .background(WorkspaceToolSurface(theme: theme, floating: false))
-                            }
                         }
-                        .frame(width: layout.manuscriptWidth, height: height)
-                        if contextVisible && effectiveDock == .right {
-                            theme.sepC.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
-                            context().frame(width: WorkspaceLayoutState.toolWidth)
+                        if contextVisible && effectiveDock == .bottom {
+                            Color.clear.frame(height: WorkspaceLayoutPolicy.surfaceGap)
+                            context().frame(height: min(WorkspaceLayoutState.bottomToolMaxHeight, height * 0.4))
                                 .background(WorkspaceToolSurface(theme: theme, floating: false))
+                                .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
                         }
+                    }
+                    .frame(width: layout.manuscriptWidth, height: height)
+                    if contextVisible && effectiveDock == .right {
+                        Color.clear.frame(width: WorkspaceLayoutPolicy.toolSeparatorWidth)
+                        context().frame(width: WorkspaceLayoutState.toolWidth)
+                            .background(WorkspaceToolSurface(theme: theme, floating: false))
+                            .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -71,12 +74,8 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: Vi
                     navigator()
                         .frame(width: layout.navigatorWidth, height: height)
                         .opacity(navigatorDragOpacity)
-                        .background(theme.editorSurfaceC)
+                        .background(theme.cardSurfaceC)
                         .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                                .strokeBorder(theme.sepC).allowsHitTesting(false).accessibilityHidden(true)
-                        }
                         .offset(x: navigatorLeading, y: WorkspaceLayoutPolicy.outerInset)
                         .transition(.move(edge: .leading).combined(with: .opacity))
                 }
@@ -104,17 +103,13 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: Vi
                             height: min(WorkspaceLayoutState.floatingToolMaxHeight, max(240, geometry.size.height - 36)))
                         .background(WorkspaceToolSurface(theme: theme, floating: true))
                         .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                                .strokeBorder(theme.sepC).allowsHitTesting(false).accessibilityHidden(true)
-                        }
                         .shadow(color: .black.opacity(MintElevation.floating.opacity),
                             radius: MintElevation.floating.radius, y: MintElevation.floating.y)
                         .padding(18)
                 }
             }
         }
-        .background(theme.editorSurfaceC)
+        .background(theme.workspaceSurfaceC)
     }
 
     private var navigatorDragOpacity: Double {
@@ -147,9 +142,9 @@ struct WorkspaceChromeSurface: View {
 
     var body: some View {
         if systemReduceTransparency || accessibilityOptions.reduceTransparency {
-            theme.editorSurfaceC
+            theme.workspaceSurfaceC
         } else {
-            Rectangle().fill(.thinMaterial)
+            Rectangle().fill(.thinMaterial).overlay(theme.toolbarC)
         }
     }
 }
@@ -158,9 +153,8 @@ struct WorkspaceToolSurface: View {
     let theme: MintTheme
     let floating: Bool
     var body: some View {
-        if floating {
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous).fill(theme.editorSurfaceC)
-        } else { theme.editorSurfaceC }
+        WorkspacePaperSurface(theme: theme, identifier: "mint.workspace.tool",
+            surface: floating ? theme.pill.withAlphaComponent(1) : theme.cardSurface)
     }
 }
 
@@ -274,25 +268,16 @@ struct WorkspaceSurface: View {
                     ? WorkspaceToolDescriptor(title: "문서 개요", subtitle: "원고의 제목과 현재 위치", systemImage: "list.bullet.indent")
                     : WorkspaceToolPresentation.descriptor(for: section))
             VStack(spacing: 0) {
-                HStack(spacing: 10) {
+                HStack(spacing: 6) {
                     Image(systemName: tool.systemImage)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundStyle(theme.ink2C)
-                        .frame(width: 28, height: 28)
-                        .background(
-                            RoundedRectangle(cornerRadius: MintRadius.sm, style: .continuous)
-                                .fill(theme.chipC)
-                        )
+                        .font(.system(size: 11, weight: .regular))
+                        .foregroundStyle(theme.ink3C)
                         .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(tool.title)
-                            .mintUIFont(12, .semibold)
-                            .foregroundStyle(theme.inkC)
-                        Text(tool.subtitle)
-                            .mintUIFont(10.5)
-                            .foregroundStyle(theme.ink3C)
-                            .lineLimit(1)
-                    }
+                    Text(tool.title)
+                        .mintUIFont(11.5, .medium)
+                        .foregroundStyle(theme.ink2C)
+                        .lineLimit(1)
+                        .help(tool.subtitle)
                     Spacer(minLength: 8)
                     Menu {
                         ForEach(ToolDockPosition.allCases, id: \.self) { position in
@@ -339,10 +324,8 @@ struct WorkspaceSurface: View {
                     .accessibilityLabel("문서로 돌아가기")
                     .help("문서로 돌아가기")
                 }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 11)
-                theme.sepC.frame(height: 1)
-                    .accessibilityHidden(true)
+                .padding(.horizontal, 12)
+                .frame(height: 36)
                 if mapVisible {
                     StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
                         requests: editorRequests, theme: theme)
