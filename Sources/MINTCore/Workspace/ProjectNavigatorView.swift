@@ -15,6 +15,7 @@ public final class ProjectEditorRequests: ObservableObject {
     var askSupport: AskMINTSupport?
     var judgeSupport: ContinuityJudgeSupport?
     weak var spatialWorkspace: SpatialWorkspaceController?
+    weak var pouch: WorkspacePouchController?
     private final class EditorReference { weak var editor: BlockTextView?; init(_ editor: BlockTextView) { self.editor = editor } }
     private var editors: [ProjectDocumentKey: EditorReference] = [:]
     func register(_ editor: BlockTextView, for key: ProjectDocumentKey) {

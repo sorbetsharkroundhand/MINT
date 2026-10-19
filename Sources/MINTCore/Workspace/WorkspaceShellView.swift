@@ -174,6 +174,8 @@ struct WorkspaceSurface: View {
     @StateObject private var outline = DocumentOutlineController()
     @StateObject private var spatial = SpatialWorkspaceController()
     @State private var marginOpened = false
+    @State private var seededSpatialProject: WritingProjectID?
+    @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
@@ -193,6 +195,7 @@ struct WorkspaceSurface: View {
         }
         .tint(theme.blueC)
         .ignoresSafeArea(.container, edges: .top)
+        .background(pouchBridge(theme: theme).frame(width: 0, height: 0))
         .task(id: projectSession.runtimeIdentity) {
             outline.update(activeWritingMode == .general ? projectSession.selectedDocumentSnapshot : nil)
         }
@@ -267,7 +270,10 @@ struct WorkspaceSurface: View {
         case SidebarSection.context.rawValue: stored = .context
         default: stored = nil
         }
-        if let stored, !spatial.layout.contains(stored) { spatial.toggle(stored) }
+        if seededSpatialProject != project.id {
+            seededSpatialProject = project.id
+            if let stored, !spatial.layout.contains(stored) { spatial.toggle(stored) }
+        }
     }
 
     private func spatialWorkspace(theme: MintTheme) -> some View {
@@ -285,12 +291,35 @@ struct WorkspaceSurface: View {
             }
         }
         .background(theme.workspaceSurfaceC)
-        .overlay(alignment: .leading) {
-            WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
-                session: projectSession, requests: editorRequests, theme: theme,
-                openSettings: { openSettings() }, onShowLivingMargin: { spatial.toggle(.margin) },
-                marginSelected: spatial.layout.contains(.margin))
-                .fixedSize().padding(.leading, 8)
+    }
+
+    private func pouchBridge(theme: MintTheme) -> some View {
+        WorkspacePouchBridge(model: spatial, requests: editorRequests, defaults: projectSession.presentationPreferences,
+            theme: theme, actions: [
+                pouchTool(.navigator, id: "mint.workspace.navigator-toggle", label: "문서 목록", symbol: "folder"),
+                pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
+                pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
+                pouchTool(.margin, id: "mint.workspace.margin", label: "마진 노트", symbol: "sparkles"),
+                WorkspacePouchAction(id: "mint.source-search.show", label: "빠른 검색 및 명령 (⌘K)", symbol: "magnifyingglass") {
+                    SourceSearchPanel.present(session: projectSession, requests: editorRequests)
+                },
+                WorkspacePouchAction(id: "mint.workspace.theme", label: "테마 전환", symbol: "circle.lefthalf.filled") {
+                    appearance = colorScheme == .dark ? "light" : "dark"
+                }
+            ], extraActions: [
+                WorkspacePouchAction(id: "mint.workspace.settings", label: "설정", symbol: "gearshape") { openSettings() },
+                pouchTool(.context, id: "mint.workspace.context", label: "참고 기록", symbol: "text.alignleft"),
+                WorkspacePouchAction(id: "mint.workspace.source-search", label: "원문 검색", symbol: "doc.text.magnifyingglass") {
+                    SourceSearchPanel.present(session: projectSession, requests: editorRequests)
+                }
+            ])
+    }
+
+    private func pouchTool(_ tile: WorkspaceTileID, id: String, label: String, symbol: String) -> WorkspacePouchAction {
+        WorkspacePouchAction(id: id, label: label, symbol: symbol, selected: { spatial.layout.contains(tile) }) {
+            spatial.toggle(tile)
+            if tile == .navigator { sidebarVisible = spatial.layout.contains(.navigator) }
+            editorRequests.focusEditor()
         }
     }
 
