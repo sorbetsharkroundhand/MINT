@@ -53,6 +53,19 @@ Those remain the existing release checks documented in
 
 ## Candidate and results
 
-Final build, full-suite, bundle and isolated application results are recorded here
-after the candidate has been verified. No release approval or issue closure is
-implied by this feature-branch delivery.
+Verification date: 2026-10-20 (Asia/Seoul).
+
+- Code candidate: `d42887004b0f3ae9616d6b9441559ee6d4f96d96`; packaged source dirty flag: `false`.
+- Developer app: version 0.1.0, build 1; arm64, OS 27.0.1 (26A434).
+- Executable SHA-256: `7c70fbccebb22d29e204068bf5868e1895c85cded6f7c6933e0bcfca1cc6eedf`.
+- Notice inventory SHA-256: `7d5a19807b00480f32d3a0c6a93e8227958b4c8ae71aa98302878a6c4d60cf91`; 31 dependencies, 37 vendored/resource components, no bundled model weights.
+- Full isolated suite: **1,379 tests, zero failures, no skips** (179.37 seconds). Synthetic journal and native screenshot fixtures explicitly enabled.
+- Explicit `swift build` and `swift build --product MINTBench`: passed.
+- Standard `scripts/build-mint-app.sh`: passed, including Korean backend, matching Metal library, resources, privacy and notice validation.
+- Standard isolated `scripts/smoke-mint-app.sh`: passed, no-model boot, normal termination and no crash; no download directory or legacy journal created.
+- Standard `scripts/ui-smoke-mint-app.sh`: passed on this candidate. Real keyboard Undo/Redo, document switches, writer record persistence/edit/delete, image-only clipboard paste with managed-asset hash checks, image/math Undo/Redo and relaunch, focus, invalid recovery, cancel and recovered-copy preservation all passed. Both manuscripts and durable writer data were verified against project manifests.
+
+The UI script copies the identified developer bundle to a unique app identity and
+isolated home for automation. It never opens the owner's workspace. Native captures
+and allowlisted candidate metadata are retained locally outside tracked source.
+This is feature-branch evidence, not release approval or issue closure.
