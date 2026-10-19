@@ -11,6 +11,7 @@ final class WorkspacePouchView: NSView {
     override var isFlipped: Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
+        setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
         grip.isBordered = false; grip.refusesFirstResponder = false
         addSubview(grip)

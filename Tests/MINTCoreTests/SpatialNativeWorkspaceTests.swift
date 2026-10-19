@@ -3,6 +3,17 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class SpatialNativeWorkspaceTests: XCTestCase {
+    func testCanvasAndPouchExposeNamedNativeAccessibilityGroups() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let canvas = try XCTUnwrap(descendant(h.host, SpatialWorkspaceCanvasView.self))
+        XCTAssertTrue(canvas.isAccessibilityElement())
+        XCTAssertEqual(canvas.accessibilityRole(), .group)
+        XCTAssertEqual(canvas.accessibilityIdentifier(), "mint.workspace.tiles")
+        let pouch = try XCTUnwrap(h.requests.pouch?.panel?.contentView)
+        XCTAssertTrue(pouch.isAccessibilityElement())
+        XCTAssertEqual(pouch.accessibilityRole(), .group)
+        XCTAssertEqual(pouch.accessibilityIdentifier(), "mint.workspace.rail")
+    }
     func testFirstGripPressInAnInitiallyInactiveTileActivatesAndStartsTheDrag() async throws {
         let h = try await SourceNavigationHarness(); defer { h.close() }
         let b = try XCTUnwrap(h.fixture.session.activeProject?.documents.last?.id)

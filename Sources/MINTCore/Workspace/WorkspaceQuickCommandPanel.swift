@@ -55,9 +55,9 @@ import Combine
             stack.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -16),
             stack.topAnchor.constraint(equalTo: content.topAnchor, constant: 14), stack.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -12),
             searchField.widthAnchor.constraint(equalTo: stack.widthAnchor), scroll.widthAnchor.constraint(equalTo: stack.widthAnchor)]) }
-        if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) { [weak self] event in
+        if let monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown], handler: { [weak self] event in
             if let self, event.window !== self.window { self.close() }; return event
-        } { monitors.append(monitor) }
+        }) { monitors.append(monitor) }
         NotificationCenter.default.publisher(for: NSWindow.willCloseNotification).sink { [weak self] notification in
             guard let self, let parent = notification.object as? NSWindow, parent === self.window?.parent else { return }
             self.close()

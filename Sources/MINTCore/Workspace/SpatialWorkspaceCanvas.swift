@@ -16,6 +16,9 @@ struct SpatialWorkspaceCanvas: NSViewRepresentable {
         scroll.borderType = .noBorder; scroll.automaticallyAdjustsContentInsets = false
         scroll.documentView = scroll.canvas
         scroll.canvas.setAccessibilityIdentifier("mint.workspace.tiles")
+        scroll.canvas.setAccessibilityElement(true)
+        scroll.canvas.setAccessibilityRole(.group)
+        scroll.canvas.setAccessibilityLabel("문서와 도구 타일 작업 공간")
         return scroll
     }
     func updateNSView(_ view: SpatialCanvasScrollView, context: Context) {
