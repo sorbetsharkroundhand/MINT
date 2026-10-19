@@ -59,6 +59,51 @@ public final class ProjectSession: ObservableObject {
         phase == .ready && selectedDocument != nil && !isTransitioning
     }
 
+    /// Project-scoped presentation preferences do not belong in manuscript storage.
+    var presentationPreferences: UserDefaults { defaults }
+    private(set) var activationEpoch: UInt64 = 0
+
+    func document(_ id: WritingDocumentID) -> WritingDocument? {
+        guard let project = activeProject, !project.trashedDocumentIDs.contains(id) else { return nil }
+        return project.documents.first { $0.id == id }
+    }
+
+    func updateDocumentBody(_ body: String, for key: ProjectDocumentKey, activationEpoch: UInt64? = nil) {
+        guard activationEpoch == nil || activationEpoch == self.activationEpoch else { return }
+        try? applyDocumentEdits([ProjectDocumentEdit(key: key, expectedBody: nil, body: body)])
+    }
+
+    /// Validate every source before publishing any replacement. Selection is not a write address.
+    func applyDocumentEdits(_ edits: [ProjectDocumentEdit]) throws {
+        guard phase == .ready, !isTransitioning, var project = activeProject,
+              Set(edits.map(\.key)).count == edits.count else { throw ProjectSessionError.staleRuntime }
+        var replacements: [(Int, String)] = []
+        for edit in edits {
+            guard edit.key.projectID == project.id,
+                  !project.trashedDocumentIDs.contains(edit.key.documentID),
+                  let index = project.documents.firstIndex(where: { $0.id == edit.key.documentID }),
+                  edit.expectedBody.map({ project.documents[index].body.utf16.elementsEqual($0.utf16) }) != false
+            else { throw ProjectSessionError.staleRuntime }
+            if !project.documents[index].body.utf16.elementsEqual(edit.body.utf16) {
+                replacements.append((index, edit.body))
+            }
+        }
+        guard !replacements.isEmpty else { return }
+        for (index, body) in replacements { project.documents[index].body = body }
+        activeProject = project
+        noteDocumentChange(); markDirty()
+    }
+
+    func reorderDocuments(_ ids: some Sequence<WritingDocumentID>, projectID: WritingProjectID) {
+        let ids = Array(ids)
+        guard phase == .ready, !isTransitioning, var project = activeProject, project.id == projectID,
+              ids.count == project.documents.count, Set(ids).count == ids.count,
+              Set(ids) == Set(project.documents.map(\.id)), ids != project.documents.map(\.id) else { return }
+        let documents = Dictionary(uniqueKeysWithValues: project.documents.map { ($0.id, $0) })
+        project.documents = ids.compactMap { documents[$0] }
+        activeProject = project; noteDocumentChange(); markDirty()
+    }
+
     public var selectedDocumentSnapshot: ProjectDocumentSnapshot? {
         guard let runtimeIdentity, let selectedDocument, let activeProject else { return nil }
         return ProjectDocumentSnapshot(
@@ -505,6 +550,7 @@ public final class ProjectSession: ObservableObject {
     }
 
     private func adopt(_ project: WritingProject?) {
+        activationEpoch &+= 1
         cancelAutosave()
         dirtyGeneration = nil
         activeProject = project
