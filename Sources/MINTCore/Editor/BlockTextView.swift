@@ -61,6 +61,8 @@ public struct MintBlockEditor: NSViewRepresentable {
     private let onEditorWindowChange: ((NSTextView) -> Void)?
     private let onSourceNavigation: ((Bool, EditorSearchJump) -> Void)?
     private let isEditable: Bool
+    private var isActiveEditor: Bool
+    private let onEditorActivation: ((NSTextView) -> Void)?
 
     public init(
         text: Binding<String>,
@@ -77,7 +79,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         assetCatalog: ProjectAssetCatalog? = nil,
         assetImporter: (@MainActor (Data, String) async throws -> ProjectAssetCatalog)? = nil,
         onEditorWindowChange: ((NSTextView) -> Void)? = nil,
-        onSourceNavigation: ((Bool, EditorSearchJump) -> Void)? = nil
+        onSourceNavigation: ((Bool, EditorSearchJump) -> Void)? = nil,
+        isActiveEditor: Bool = true,
+        onEditorActivation: ((NSTextView) -> Void)? = nil
     ) {
         self._text = text
         self.controller = controller
@@ -94,6 +98,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         self.onEditorWindowChange = onEditorWindowChange
         self.onSourceNavigation = onSourceNavigation
         self.isEditable = isEditable
+        self.isActiveEditor = isActiveEditor
+        self.onEditorActivation = onEditorActivation
     }
 
     /// Explicit legacy-workspace bridge. Project workspace composition uses the neutral primary
@@ -139,6 +145,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
+        textView.documentUndoManager = UndoManager()
+        textView.automaticallyFocusOnAttachment = isActiveEditor
         textView.writingDocumentIdentity = documentIdentity
         textView.setAccessibilityIdentifier("mint.editor")
         // 편집 범위를 알아야 수식·이미지 마커 검사를 증분으로 할 수 있다
@@ -181,6 +189,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.baseFontSize = baseFontSize
         textView.proseLayout = proseLayout
         textView.editorWindowDidChange = onEditorWindowChange
+        configureActivation(textView, coordinator: context.coordinator)
         configureAssets(textView)
         textView.load(markdown: text)
         context.coordinator.lastSyncedText = text
@@ -221,6 +230,7 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? BlockTextView else { return }
+        let activationChanged = context.coordinator.parent.isActiveEditor != isActiveEditor
         textView.writingDocumentIdentity = documentIdentity
         if !isEditable, textView.hasMarkedText() {
             textView.unmarkText()
@@ -235,6 +245,11 @@ public struct MintBlockEditor: NSViewRepresentable {
             context.coordinator.isDocumentTransitioning = true
         } else {
             context.coordinator.parent = self
+        }
+        configureActivation(textView, coordinator: context.coordinator)
+        if activationChanged {
+            if isActiveEditor { context.coordinator.attach(to: textView) }
+            else { textView.ghostText = nil; textView.showConversationPrompt(nil) }
         }
 
         if textView.proseLayout != proseLayout {
@@ -318,7 +333,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             controller?.refreshLongParagraphDetection()
         }
         // 새 저널 등 포커스 요청 — reload 뒤에 first responder로 만든다.
-        if focusRequest != context.coordinator.lastFocusRequest {
+        if isActiveEditor, focusRequest != context.coordinator.lastFocusRequest {
             context.coordinator.lastFocusRequest = focusRequest
             let requestedIdentity = documentIdentity
             let requestedEpoch = context.coordinator.callbackEpoch
@@ -347,6 +362,16 @@ public struct MintBlockEditor: NSViewRepresentable {
 
     public func makeCoordinator() -> Coordinator {
         Coordinator(self)
+    }
+
+    private func configureActivation(_ view: BlockTextView, coordinator: Coordinator) {
+        view.automaticallyFocusOnAttachment = isActiveEditor
+        view.editorDidActivate = { [weak coordinator, weak view] in
+            guard let coordinator, let view else { return }
+            coordinator.parent.onEditorActivation?(view)
+            coordinator.parent.isActiveEditor = true
+            coordinator.attach(to: view)
+        }
     }
 
     private func configureAssets(_ view: BlockTextView) {
@@ -404,6 +429,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         func attach(to textView: BlockTextView) {
             textView.writingDocumentIdentity = parent.documentIdentity
             callbackEpoch &+= 1
+            guard parent.isActiveEditor else { return }
             let attachedEpoch = callbackEpoch
             let attachedIdentity = parent.documentIdentity
             parent.controller?.suggestionDidChange = { [weak self, weak textView] suggestion in
@@ -541,7 +567,8 @@ public struct MintBlockEditor: NSViewRepresentable {
                     snapshot, body: textView.string, for: identity,
                     in: parent.positionStore)
             }
-            guard let controller = parent.controller else { return }
+            guard parent.isActiveEditor, let controller = parent.controller,
+                  textView.window?.firstResponder === textView else { return }
             let range = textView.selectedRange()
             if range.length > 0 {
                 controller.dismissSuggestion()
@@ -551,7 +578,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         }
 
         public func textDidEndEditing(_ notification: Notification) {
-            parent.controller?.dismissSuggestion()
+            if parent.isActiveEditor { parent.controller?.dismissSuggestion() }
         }
 
         /// Tab 수락 / → 한 단어 / Esc 거부 (PLAN §5, 에디터 v3) +
@@ -561,7 +588,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         ///   리턴) — 글쓰기 흐름이 끊기지 않는다.
         /// - Esc: 고스트가 먼저, 다음이 대화 제안 (겹치면 고스트부터 닫는다).
         public func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-            guard let controller = parent.controller else { return false }
+            guard parent.isActiveEditor, let controller = parent.controller else { return false }
 
             if commandSelector == #selector(NSStandardKeyBindingResponding.insertTab(_:)) {
                 guard let accepted = controller.acceptSuggestion() else { return false }
@@ -614,7 +641,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         // MARK: 컨트롤러 이벤트 전달
 
         private func forwardEditEvent(_ textView: BlockTextView) {
-            guard let controller = parent.controller else { return }
+            guard parent.isActiveEditor, let controller = parent.controller,
+                  textView.window?.firstResponder === textView else { return }
             let storage = textView.string as NSString
             let caret = textView.selectedRange().location
             guard caret != NSNotFound, caret <= storage.length else { return }
@@ -810,6 +838,10 @@ extension NSAttributedString.Key {
 
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
+    var documentUndoManager: UndoManager?
+    override var undoManager: UndoManager? { documentUndoManager ?? super.undoManager }
+    var automaticallyFocusOnAttachment = true
+    var editorDidActivate: (() -> Void)?
     let writingProjectionCapture = WritingEditorProjectionCapture()
     /// Native binding ownership is independent of the session's current runtime generation.
     var writingDocumentIdentity: EditorDocumentIdentity? {
@@ -1166,7 +1198,7 @@ final class BlockTextView: NSTextView {
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         editorWindowDidChange?(self)
-        guard !didInitialFocus, window != nil else { return }
+        guard automaticallyFocusOnAttachment, !didInitialFocus, window != nil else { return }
         didInitialFocus = true
         DispatchQueue.main.async { [weak self] in
             guard let self, let window = self.window else { return }
@@ -1177,6 +1209,7 @@ final class BlockTextView: NSTextView {
     override func becomeFirstResponder() -> Bool {
         let ok = super.becomeFirstResponder()
         if ok {
+            editorDidActivate?()
             // AppKit may provide the window undo manager only after editor activation.
             editorWindowDidChange?(self)
             DispatchQueue.main.async { [weak self] in

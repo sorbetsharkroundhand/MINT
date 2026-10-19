@@ -3,6 +3,7 @@ import Foundation
 enum WorkspaceTileID: Hashable, Codable, Sendable, Identifiable {
     case document(WritingDocumentID)
     case navigator, characters, narrative, margin, context, outline, map, review
+    case insertionPreview
 
     var id: String {
         switch self {
@@ -15,19 +16,20 @@ enum WorkspaceTileID: Hashable, Codable, Sendable, Identifiable {
         case .outline: "outline"
         case .map: "map"
         case .review: "review"
+        case .insertionPreview: "insertion-preview"
         }
     }
     var documentID: WritingDocumentID? {
         if case .document(let id) = self { id } else { nil }
     }
     var minimumWidth: Double {
-        switch self { case .navigator: 165; case .document: 260; default: 210 }
+        switch self { case .navigator: 165; case .document, .insertionPreview: 260; default: 210 }
     }
     var maximumWidth: Double {
         switch self { case .navigator: 320; case .document: 1600; default: 420 }
     }
     var idealWidth: Double? {
-        switch self { case .navigator: 204; case .document: nil; default: 256 }
+        switch self { case .navigator: 204; case .document, .insertionPreview: nil; default: 256 }
     }
 }
 
@@ -195,6 +197,7 @@ struct SpatialWorkspaceLayout: Equatable, Codable, Sendable {
         for index in columns.indices {
             if !columnIDs.insert(columns[index].id).inserted { columns[index].id = UUID() }
             columns[index].slots.removeAll {
+                if $0.tile == .insertionPreview { return true }
                 if let id = $0.tile.documentID, !validDocuments.contains(id) { return true }
                 return !seen.insert($0.tile).inserted
             }

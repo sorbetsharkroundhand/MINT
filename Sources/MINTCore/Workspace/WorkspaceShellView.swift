@@ -172,6 +172,7 @@ struct WorkspaceSurface: View {
     @Environment(\.openSettings) private var openSettings
     @StateObject private var palette = PaletteSettings.shared
     @StateObject private var outline = DocumentOutlineController()
+    @StateObject private var spatial = SpatialWorkspaceController()
     @State private var marginOpened = false
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
@@ -188,7 +189,7 @@ struct WorkspaceSurface: View {
             marginVisible: marginVisible, mapVisible: mapVisible)
         VStack(spacing: 0) {
             WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
-            workspace(presentation: presentation, theme: theme)
+            spatialWorkspace(theme: theme)
         }
         .tint(theme.blueC)
         .ignoresSafeArea(.container, edges: .top)
@@ -196,11 +197,33 @@ struct WorkspaceSurface: View {
             outline.update(activeWritingMode == .general ? projectSession.selectedDocumentSnapshot : nil)
         }
         .onAppear {
+            configureSpatial()
             completion.observeForegroundCompletion(owner: outline) { [weak outline] busy in
                 outline?.setForegroundBusy(busy)
             }
         }
         .onDisappear { outline.stop() }
+        .onChange(of: projectSession.selectedDocumentID) { _, _ in configureSpatial() }
+        .onChange(of: projectSession.activeProject?.id) { _, _ in configureSpatial() }
+        .onChange(of: projectSession.activeProject?.trashedDocumentIDs) { _, _ in configureSpatial() }
+        .onChange(of: section) { _, value in
+            let tile: WorkspaceTileID?
+            switch value {
+            case SidebarSection.bible.rawValue: tile = .characters
+            case SidebarSection.narrative.rawValue: tile = .narrative
+            case SidebarSection.context.rawValue: tile = .context
+            case SidebarSection.margin.rawValue: tile = .margin
+            default: tile = nil
+            }
+            if let tile, !spatial.layout.contains(tile) { spatial.toggle(tile) }
+        }
+        .onChange(of: sidebarVisible) { _, value in
+            if spatial.layout.contains(.navigator) != value { spatial.toggle(.navigator) }
+        }
+        .onChange(of: projectSession.workspaceMode) { _, mode in
+            if mode == .map && !spatial.layout.contains(.map) { spatial.toggle(.map) }
+            if mode == .outline && !spatial.layout.contains(.outline) { spatial.toggle(.outline) }
+        }
         .onChange(of: outline.prepared) { _, prepared in
             updateOutlinePosition(identity: prepared?.identity)
         }
@@ -213,6 +236,100 @@ struct WorkspaceSurface: View {
             if section != SidebarSection.margin.rawValue { marginOpened = false }
         }
         .onChange(of: projectSession.runtimeIdentity?.key.projectID) { _, _ in marginOpened = false }
+    }
+
+    private func configureSpatial() {
+        guard let project = projectSession.activeProject else { return }
+        spatial.configure(project: project, selected: projectSession.selectedDocumentID,
+            defaults: projectSession.presentationPreferences)
+        editorRequests.spatialWorkspace = spatial
+        spatial.onActivate = { [weak projectSession, weak editorRequests] id in
+            projectSession?.selectDocument(id); editorRequests?.focusEditor()
+        }
+        spatial.onCommit = { [weak projectSession] layout in
+            guard let project = projectSession?.activeProject else { return }
+            projectSession?.reorderDocuments(layout.reorderedDocuments(project.documents.map(\.id)), projectID: project.id)
+            if let selected = projectSession?.selectedDocumentID, !layout.openDocuments.contains(selected),
+               let next = layout.openDocuments.first { projectSession?.selectDocument(next) }
+        }
+        spatial.onNavigationOrder = { [weak projectSession] order in
+            guard let project = projectSession?.activeProject else { return }
+            var next = order.makeIterator()
+            let ids = project.documents.map { document in
+                project.trashedDocumentIDs.contains(document.id) ? document.id : (next.next() ?? document.id)
+            }
+            projectSession?.reorderDocuments(ids, projectID: project.id)
+        }
+        let stored: WorkspaceTileID?
+        switch section {
+        case SidebarSection.bible.rawValue: stored = .characters
+        case SidebarSection.narrative.rawValue: stored = .narrative
+        case SidebarSection.context.rawValue: stored = .context
+        default: stored = nil
+        }
+        if let stored, !spatial.layout.contains(stored) { spatial.toggle(stored) }
+    }
+
+    private func spatialWorkspace(theme: MintTheme) -> some View {
+        SpatialWorkspaceCanvas(model: spatial, theme: theme) { tile in
+            switch tile {
+            case .document(let id):
+                return AnyView(SpatialDocumentTile(session: projectSession, requests: editorRequests,
+                    completion: completion, model: spatial, documentID: id, theme: theme,
+                    editorBridge: editorBridge, positionStore: positionStore))
+            case .navigator:
+                return AnyView(SpatialNavigatorPane(session: projectSession, requests: editorRequests, model: spatial,
+                    theme: theme, onClose: { spatial.toggle(.navigator); sidebarVisible = false; editorRequests.focusEditor() }))
+            default:
+                return AnyView(spatialTool(tile, theme: theme))
+            }
+        }
+        .background(theme.workspaceSurfaceC)
+        .overlay(alignment: .leading) {
+            WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
+                session: projectSession, requests: editorRequests, theme: theme,
+                openSettings: { openSettings() }, onShowLivingMargin: { spatial.toggle(.margin) },
+                marginSelected: spatial.layout.contains(.margin))
+                .fixedSize().padding(.leading, 8)
+        }
+    }
+
+    private func spatialTool(_ tile: WorkspaceTileID, theme: MintTheme) -> some View {
+        VStack(spacing: 0) {
+            SpatialTileHeader(tile: tile, title: spatialToolTitle(tile), theme: theme, actions: [
+                SpatialHeaderAction(id: "mint.tile.close.\(tile.id)", label: "주머니에 넣기", symbol: "xmark") {
+                    _ = spatial.close(tile)
+                    if tile == .map || tile == .outline { projectSession.selectWorkspaceMode(.write) }
+                    editorRequests.focusEditor()
+                }
+            ]).frame(height: 32)
+            Group {
+                switch tile {
+                case .margin: livingMarginPanel(theme: theme)
+                case .map:
+                    StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
+                        requests: editorRequests, theme: theme)
+                case .outline:
+                    DocumentOutlineView(controller: outline, requests: editorRequests, session: projectSession, theme: theme)
+                default:
+                    ProjectWriterToolsView(session: projectSession, completion: completion, editorRequests: editorRequests,
+                        section: tile == .characters ? .bible : (tile == .narrative ? .narrative : .context), theme: theme)
+                }
+            }.frame(maxWidth: .infinity, maxHeight: .infinity)
+        }.background(theme.cardSurfaceC)
+            .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg))
+    }
+
+    private func spatialToolTitle(_ tile: WorkspaceTileID) -> String {
+        switch tile {
+        case .characters: "인물"
+        case .narrative: "서사 흐름"
+        case .margin: "마진 노트"
+        case .map: "이야기 지도"
+        case .outline: "문서 개요"
+        case .review: "검토"
+        default: "참고 기록"
+        }
     }
 
     private var outlineVisible: Bool {

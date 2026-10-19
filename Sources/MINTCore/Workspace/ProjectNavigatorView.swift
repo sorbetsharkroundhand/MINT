@@ -14,6 +14,14 @@ public final class ProjectEditorRequests: ObservableObject {
     var nativeEditorKey: ProjectDocumentKey?
     var askSupport: AskMINTSupport?
     var judgeSupport: ContinuityJudgeSupport?
+    weak var spatialWorkspace: SpatialWorkspaceController?
+    private final class EditorReference { weak var editor: BlockTextView?; init(_ editor: BlockTextView) { self.editor = editor } }
+    private var editors: [ProjectDocumentKey: EditorReference] = [:]
+    func register(_ editor: BlockTextView, for key: ProjectDocumentKey) {
+        editors = editors.filter { $0.value.editor != nil }
+        editors[key] = EditorReference(editor)
+    }
+    func editor(for key: ProjectDocumentKey) -> BlockTextView? { editors[key]?.editor }
     private var consumedSearchFocusRequest = 0
 
     public init() {}
@@ -52,6 +60,7 @@ struct ProjectNavigatorView: View {
     @ObservedObject var editorRequests: ProjectEditorRequests
     let theme: MintTheme
     let onClose: () -> Void
+    var spatial: SpatialWorkspaceController? = nil
 
     @State private var searchText = ""
     @State private var searchResults: [ProjectSearchResult] = []
@@ -140,6 +149,23 @@ struct ProjectNavigatorView: View {
     }
 
     private var header: some View {
+        if spatial != nil {
+            return AnyView(SpatialTileHeader(tile: .navigator, title: "문서", theme: theme, actions: [
+                SpatialHeaderAction(id: "mint.navigator.new", label: "새 문서", symbol: "plus") {
+                    ProjectCommandActions(session: session).newDocument(.manuscript); editorRequests.focusEditor()
+                },
+                SpatialHeaderAction(id: "mint.navigator.close", label: "파일 목록 숨기기", symbol: "xmark", perform: onClose)
+            ]).frame(height: 32).contextMenu {
+                ForEach(session.recentProjects) { recent in
+                    Button(recent.title) { Task { try? await session.activateProject(id: recent.id); editorRequests.focusEditor() } }
+                }
+                if !trashedDocuments.isEmpty { Button("휴지통") { showingTrash = true } }
+            })
+        }
+        return AnyView(legacyHeader)
+    }
+
+    private var legacyHeader: some View {
         HStack(spacing: 8) {
             recentProjectsMenu
             Spacer(minLength: 8)
@@ -286,16 +312,36 @@ struct ProjectNavigatorView: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if let spatial, !editingName {
+                let open = spatial.layout.contains(.document(document.id))
+                WorkspaceActionButton(identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)",
+                    label: open ? "이 문서 창 닫기" : "나란히 열기", symbol: open ? "xmark" : "plus", theme: theme) {
+                    if open { _ = spatial.close(.document(document.id)) }
+                    else { spatial.open(document.id) }
+                    editorRequests.focusEditor()
+                }.frame(width: 20, height: 20)
+                .opacity(open && spatial.layout.openDocuments.count == 1 ? 0 : 1)
+                .disabled(open && spatial.layout.openDocuments.count == 1)
+            }
         }
         .padding(.vertical, 7)
         .padding(.horizontal, 9)
         .background(
             RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
                 .fill(selected ? theme.activeBgC : .clear))
+        .overlay {
+            if spatial != nil && !editingName {
+                SpatialNavigatorDragRegion(documentID: document.id) {
+                    spatial?.open(document.id)
+                }.padding(.trailing, 28)
+            }
+        }
+        .padding(.top, spatial?.navigatorDrop?.target == document.id && spatial?.navigatorDrop?.after == false ? 14 : 0)
+        .padding(.bottom, spatial?.navigatorDrop?.target == document.id && spatial?.navigatorDrop?.after == true ? 14 : 0)
         .contentShape(Rectangle())
         .onTapGesture {
             guard !editingName else { return }
-            session.selectDocument(document.id)
+            if let spatial { spatial.open(document.id) } else { session.selectDocument(document.id) }
             editorRequests.focusEditor()
         }
         .accessibilityElement(children: editingName ? .contain : .combine)
@@ -304,7 +350,7 @@ struct ProjectNavigatorView: View {
         .accessibilityAddTraits(editingName ? [] : .isButton)
         .accessibilityAction {
             guard !editingName else { return }
-            session.selectDocument(document.id)
+            if let spatial { spatial.open(document.id) } else { session.selectDocument(document.id) }
             editorRequests.focusEditor()
         }
         .contextMenu {

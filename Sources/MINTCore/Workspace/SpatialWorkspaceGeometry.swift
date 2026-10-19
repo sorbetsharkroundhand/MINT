@@ -48,7 +48,7 @@ struct SpatialWorkspaceGeometry {
         if columns.isEmpty { return .end }
         if point.x < Self.inset + 36 { return .start }
         if point.x > contentSize.width - Self.inset - 36 { return .end }
-        for (tile, rect) in tiles where tile != dragging && !(fromNavigator && tile == .navigator) {
+        for (tile, rect) in tiles where tile != dragging && tile != .insertionPreview && !(fromNavigator && tile == .navigator) {
             guard rect.contains(point), rect.width > 0, rect.height > 0 else { continue }
             let y = (point.y - rect.minY) / rect.height
             if y < 0.28 { return .above(tile) }

@@ -1,6 +1,12 @@
 import AppKit
 import Combine
 
+struct SpatialNavigatorDrop: Equatable {
+    let source: WritingDocumentID
+    let target: WritingDocumentID
+    let after: Bool
+}
+
 @MainActor final class SpatialWorkspaceController: ObservableObject {
     @Published private(set) var layout = SpatialWorkspaceLayout(documents: [], selected: nil)
     @Published private(set) var previewTarget: SpatialDropTarget?
@@ -10,8 +16,10 @@ import Combine
     @Published var focusDimming = false { didSet { persist() } }
     @Published var whisperTyping = false
     @Published var expandedItem: String?
+    @Published var navigatorDrop: SpatialNavigatorDrop?
     var onCommit: ((SpatialWorkspaceLayout) -> Void)?
     var onActivate: ((WritingDocumentID) -> Void)?
+    var onNavigationOrder: (([WritingDocumentID]) -> Void)?
     private(set) var projectID: WritingProjectID?
     private var defaults: UserDefaults
     private var validDocuments: [WritingDocumentID] = []
@@ -38,9 +46,9 @@ import Combine
     var presentationLayout: SpatialWorkspaceLayout {
         guard isDragging, let drag, let previewTarget else { return layout }
         var preview = layout
-        preview.move(drag.tile, to: previewTarget)
+        preview.move(.insertionPreview, to: previewTarget)
         if drag.tile.documentID == nil,
-           let index = preview.columns.firstIndex(where: { $0.slots.count == 1 && $0.slots[0].tile == drag.tile }) {
+           let index = preview.columns.firstIndex(where: { $0.slots.count == 1 && $0.slots[0].tile == .insertionPreview }) {
             preview.columns[index].width = 204
         }
         return preview
@@ -98,7 +106,7 @@ import Combine
             isDragging = true
             if !drag.fromNavigator { layout.remove(drag.tile) }
         }
-        if let previewTarget, let gap = geometry.tiles[drag.tile],
+        if let previewTarget, let gap = geometry.tiles[.insertionPreview],
            gap.insetBy(dx: -8, dy: 0).contains(point) {
             self.drag = drag; self.previewTarget = previewTarget; return
         }
@@ -109,17 +117,30 @@ import Combine
     func endDrag() {
         guard let drag else { return }
         guard isDragging else { self.drag = nil; return }
+        if drag.fromNavigator, let navigatorDrop {
+            var order = validDocuments.filter { $0 != navigatorDrop.source }
+            if let target = order.firstIndex(of: navigatorDrop.target) {
+                order.insert(navigatorDrop.source, at: target + (navigatorDrop.after ? 1 : 0))
+                validDocuments = order; layout = drag.origin
+                self.drag = nil; isDragging = false; previewTarget = nil; self.navigatorDrop = nil
+                persist(); onNavigationOrder?(order); return
+            }
+        }
         if let target = previewTarget ?? drag.lastTarget {
             layout.move(drag.tile, to: target, swapSingleColumns: drag.fromNavigator)
         } else if !drag.fromNavigator { layout = drag.origin }
         else if let id = drag.tile.documentID { layout.openDocument(id) }
-        self.drag = nil; isDragging = false; previewTarget = nil
+        self.drag = nil; isDragging = false; previewTarget = nil; navigatorDrop = nil
         commit()
         if let id = drag.tile.documentID { onActivate?(id) }
     }
     func cancelDrag() {
         if let drag, isDragging { layout = drag.origin }
-        drag = nil; isDragging = false; previewTarget = nil
+        drag = nil; isDragging = false; previewTarget = nil; navigatorDrop = nil
+    }
+    func previewNavigator(_ drop: SpatialNavigatorDrop?) {
+        navigatorDrop = drop
+        if drop != nil { previewTarget = nil }
     }
     func commit() { persist(); onCommit?(layout) }
     private var preferenceKey: String { "mint.spatial-workspace.\(projectID?.rawValue.uuidString ?? "none")" }

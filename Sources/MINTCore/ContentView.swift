@@ -332,13 +332,15 @@ struct EditorPane: View {
     let theme: MintTheme
     var editorBridge: ProjectEditorBridge? = nil
     var positionStore: WritingPositionStore = .shared
+    var documentID: WritingDocumentID? = nil
+    var showsChrome = true
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if !chromeHidden {
+            if showsChrome && !chromeHidden {
                 EditorToolbar(
                     projectSession: projectSession,
                     editorRequests: editorRequests,
@@ -347,7 +349,7 @@ struct EditorPane: View {
                     theme: theme)
             }
             editor
-            if !chromeHidden {
+            if showsChrome && !chromeHidden {
                 EditorStatusBar(
                     projectSession: projectSession,
                     completion: completion,
@@ -367,10 +369,10 @@ struct EditorPane: View {
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
                     proseLayout: projectSession.activeProject?.mode == .fiction
-                        && projectSession.selectedDocument?.kind == .manuscript ? .indented : .spaced,
+                        && displayedDocument?.kind == .manuscript ? .indented : .spaced,
                     documentIdentity: identity,
                     positionStore: positionStore,
-                    isEditable: projectSession.isEditorEditable,
+                    isEditable: projectSession.phase == .ready && !projectSession.isTransitioning,
                     focusRequest: editorRequests.editorFocusRequest,
                     searchJump: editorRequests.searchJump,
                     assetCatalog: projectSession.assetCatalog,
@@ -383,6 +385,10 @@ struct EditorPane: View {
                     onEditorWindowChange: { [weak projectSession, weak editorBridge, weak editorRequests] view in
                         guard let editor = view as? BlockTextView else { return }
                         if view.window != nil {
+                            if case .project(let key) = editor.writingDocumentIdentity {
+                                editorRequests?.register(editor, for: key)
+                            }
+                            guard editor.writingDocumentIdentity?.documentID == projectSession?.selectedDocumentID else { return }
                             editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in
                                 projectSession?.selectedDocumentSnapshot
                             })
@@ -397,6 +403,15 @@ struct EditorPane: View {
                     },
                     onSourceNavigation: { [weak editorRequests] succeeded, jump in
                         editorRequests?.didNavigateSource(succeeded, jump: jump)
+                    }, isActiveEditor: displayedDocument?.id == projectSession.selectedDocumentID,
+                    onEditorActivation: { [weak projectSession, weak editorBridge, weak editorRequests] view in
+                        guard let editor = view as? BlockTextView,
+                              case .project(let key) = editor.writingDocumentIdentity,
+                              key.projectID == projectSession?.activeProject?.id else { return }
+                        projectSession?.selectDocument(key.documentID)
+                        editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in projectSession?.selectedDocumentSnapshot })
+                        editorRequests?.nativeEditor = editor; editorRequests?.nativeEditorKey = key
+                        editor.isEditable = projectSession?.isEditorEditable == true
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
@@ -406,7 +421,7 @@ struct EditorPane: View {
             }
         }
             .overlay(alignment: .topLeading) {
-                if projectSession.selectedDocument?.body.isEmpty == true {
+                if displayedDocument?.body.isEmpty == true {
                     // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
                     // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
                     GeometryReader { geo in
@@ -420,7 +435,7 @@ struct EditorPane: View {
                 }
             }
             .overlay(alignment: .bottom) {
-                if settings.autocompleteEnabled {
+                if settings.autocompleteEnabled && displayedDocument?.id == projectSession.selectedDocumentID {
                     ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
                         .padding(.bottom, 20)
                 }
@@ -438,15 +453,22 @@ struct EditorPane: View {
     }
 
     private var bodyBinding: Binding<String> {
-        Binding(
-            get: { projectSession.selectedDocument?.body ?? "" },
-            set: { projectSession.updateSelectedDocumentBody($0) }
-        )
+        let id = displayedDocument?.id
+        let projectID = projectSession.activeProject?.id
+        let epoch = projectSession.activationEpoch
+        return Binding(get: { id.flatMap { projectSession.document($0)?.body } ?? "" }, set: { body in
+            guard let id, let projectID else { return }
+            projectSession.updateDocumentBody(body, for: .init(projectID: projectID, documentID: id), activationEpoch: epoch)
+        })
+    }
+
+    private var displayedDocument: WritingDocument? {
+        (documentID ?? projectSession.selectedDocumentID).flatMap { projectSession.document($0) }
     }
 
     private var editorIdentity: EditorDocumentIdentity? {
         guard let projectID = projectSession.activeProject?.id,
-            let documentID = projectSession.selectedDocumentID
+            let documentID = displayedDocument?.id
         else { return nil }
         return .project(ProjectDocumentKey(projectID: projectID, documentID: documentID))
     }
