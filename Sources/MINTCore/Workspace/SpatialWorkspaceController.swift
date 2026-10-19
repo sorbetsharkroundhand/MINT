@@ -17,6 +17,14 @@ struct SpatialNavigatorDrop: Equatable {
     @Published var whisperTyping = false
     @Published var expandedItem: String?
     @Published var navigatorDrop: SpatialNavigatorDrop?
+    @Published var resonatingTerm: String?
+    @Published var activeParagraph = ""
+    private(set) var restoredPreference = false
+    private var whisperOrigin = CGPoint.zero
+    func noteTyping(at point: CGPoint) { whisperOrigin = point; whisperTyping = true }
+    func notePointer(at point: CGPoint) {
+        if whisperTyping && hypot(point.x - whisperOrigin.x, point.y - whisperOrigin.y) > 8 { whisperTyping = false }
+    }
     var onCommit: ((SpatialWorkspaceLayout) -> Void)?
     var onActivate: ((WritingDocumentID) -> Void)?
     var onNavigationOrder: (([WritingDocumentID]) -> Void)?
@@ -62,7 +70,9 @@ struct SpatialNavigatorDrop: Equatable {
             if let data = self.defaults.data(forKey: preferenceKey),
                let saved = try? JSONDecoder().decode(Preference.self, from: data), saved.version == 1 {
                 layout = saved.layout; typewriter = saved.typewriter; focusDimming = saved.focusDimming
+                restoredPreference = true
             } else {
+                restoredPreference = false
                 layout = SpatialWorkspaceLayout(documents: validDocuments, selected: selected,
                     navigatorVisible: self.defaults.object(forKey: "mint.sidebarVisible") as? Bool ?? true)
                 typewriter = false; focusDimming = false
@@ -95,6 +105,8 @@ struct SpatialNavigatorDrop: Equatable {
 
     func beginDrag(_ tile: WorkspaceTileID, at point: CGPoint, fromNavigator: Bool = false) {
         cancelDrag()
+        if let id = tile.documentID { guard validDocuments.contains(id), fromNavigator || layout.contains(tile) else { return } }
+        else { guard layout.contains(tile) else { return } }
         drag = Drag(tile: tile, origin: layout, start: point, fromNavigator: fromNavigator)
         pointer = point
     }

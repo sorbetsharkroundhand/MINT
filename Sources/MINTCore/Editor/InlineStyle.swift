@@ -71,8 +71,26 @@ enum InlineMarkdown {
     static func serialize(_ storage: NSAttributedString, in range: NSRange,
                           capture: ((SerializedSpan) -> Void)? = nil) -> String {
         guard range.length > 0 else { return "" }
+        // TextKit splits presentation runs for fallback fonts (notably emoji).
+        // Source formatting follows writer attributes, not those display boundaries.
+        struct Run { let attrs: [NSAttributedString.Key: Any]; var range: NSRange }
+        func style(_ attrs: [NSAttributedString.Key: Any]) -> MarkdownInlineScanner.Style {
+            var value = MarkdownInlineScanner.Style()
+            value.code = attrs[.mintCode] as? Bool == true
+            if !value.code { value.bold = attrs[.mintBold] as? Bool == true; value.italic = attrs[.mintItalic] as? Bool == true }
+            value.color = attrs[.mintColor] as? String; value.fontSize = attrs[.mintFontSize] as? Double
+            return value
+        }
+        var runs: [Run] = []
+        storage.enumerateAttributes(in: range, options: []) { attrs, range, _ in
+            if let last = runs.last, last.range.upperBound == range.location,
+               attrs[.attachment] == nil, last.attrs[.attachment] == nil, style(attrs) == style(last.attrs) {
+                runs[runs.count - 1].range.length += range.length
+            } else { runs.append(Run(attrs: attrs, range: range)) }
+        }
         var out = "", sourceOffset = 0
-        storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
+        for item in runs {
+            let attrs = item.attrs, run = item.range
             var text = (storage.string as NSString).substring(with: run)
             if let atom = attrs[.attachment] as? MathAtomAttachment {
                 let fragment = "$\(atom.latex)$"
@@ -83,7 +101,7 @@ enum InlineMarkdown {
                     sourceOffset += length
                 }
                 out += fragment
-                return
+                continue
             }
             var style = MarkdownInlineScanner.Style()
             style.code = attrs[.mintCode] as? Bool == true

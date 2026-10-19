@@ -7,6 +7,7 @@ struct WorkspacePouchAction {
     let label: String
     let symbol: String
     var selected: () -> Bool = { false }
+    var enabled: () -> Bool = { true }
     let perform: () -> Void
 }
 
@@ -15,6 +16,7 @@ struct WorkspacePouchAction {
     private(set) var isCollapsed = false
     private(set) var isDragging = false
     var reduceMotion = false
+    var reduceTransparency = false
     var theme: MintTheme = .light { didSet { refresh() } }
     var actions: [WorkspacePouchAction] = [] { didSet { refresh() } }
     var extraActions: [WorkspacePouchAction] = []
@@ -46,7 +48,10 @@ struct WorkspacePouchAction {
     }
 
     func attach(to window: NSWindow) {
-        guard self.window !== window else { refresh(); return }
+        guard self.window !== window else {
+            let changed = loadedKey != preferenceKey
+            refresh(); if changed { dock(immediate: true) }; return
+        }
         detach(); self.window = window
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "MINT 주머니"; panel.isReleasedWhenClosed = false; panel.isOpaque = false
@@ -134,16 +139,13 @@ struct WorkspacePouchAction {
     }
     func restore() {
         guard isCollapsed, let window else { return }
+        let origin = panel?.frame ?? CGRect(origin: target, size: CGSize(width: 44, height: 44))
         isCollapsed = false; isDragging = false; start = nil
         window.makeKeyAndOrderFront(nil)
         if let previousResponder { window.makeFirstResponder(previousResponder) }
         refresh(); dock(immediate: false)
         if !reduceMotion {
-            window.alphaValue = 0
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.38; context.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1)
-                window.animator().alphaValue = 1
-            }
+            animateSnapshot(of: window, toward: window.frame, expandingFrom: origin)
         }
     }
 
@@ -157,7 +159,7 @@ struct WorkspacePouchAction {
         }
         content.configure(orb: isCollapsed || isDragging, horizontal: edge == .top || edge == .bottom,
             actions: actions, theme: theme)
-        panel.alphaValue = model.whisperTyping && !isCollapsed ? 0.06 : 0.84
+        panel.alphaValue = model.whisperTyping && !isCollapsed ? 0.06 : (reduceTransparency ? 1 : 0.84)
         panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed
         if isCollapsed || isDragging { panel.setContentSize(CGSize(width: 44, height: 44)) }
         else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
@@ -169,6 +171,9 @@ struct WorkspacePouchAction {
         refresh()
         if !isCollapsed && !isDragging {
             target = WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).origin
+            let screen = screenFrame(for: CGPoint(x: window.frame.midX, y: window.frame.midY))
+            target.x = min(max(screen.minX + 6, target.x), screen.maxX - panel.frame.width - 6)
+            target.y = min(max(screen.minY + 6, target.y), screen.maxY - panel.frame.height - 6)
         } else if isCollapsed { target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target)) }
         if immediate { spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target) }
         else { moveTowardTarget() }
@@ -194,6 +199,9 @@ struct WorkspacePouchAction {
             ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
     }
     func showMoreMenu(in view: NSView) {
+        moreMenu().popUp(positioning: nil, at: CGPoint(x: view.bounds.maxX, y: view.bounds.midY), in: view)
+    }
+    func moreMenu() -> NSMenu {
         let menu = NSMenu()
         for (index, action) in extraActions.enumerated() {
             let item = NSMenuItem(title: action.label, action: #selector(invokeExtra(_:)), keyEquivalent: "")
@@ -201,12 +209,12 @@ struct WorkspacePouchAction {
             item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
             item.setAccessibilityIdentifier(action.id); menu.addItem(item)
         }
-        menu.popUp(positioning: nil, at: CGPoint(x: view.bounds.maxX, y: view.bounds.midY), in: view)
+        return menu
     }
     @objc private func invokeExtra(_ item: NSMenuItem) {
         guard extraActions.indices.contains(item.tag) else { return }; extraActions[item.tag].perform()
     }
-    private func animateSnapshot(of window: NSWindow, toward rect: CGRect) {
+    private func animateSnapshot(of window: NSWindow, toward rect: CGRect, expandingFrom origin: CGRect? = nil) {
         guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: bitmap)
         let image = NSImage(size: view.bounds.size); image.addRepresentation(bitmap)
@@ -215,12 +223,19 @@ struct WorkspacePouchAction {
         ghost.isOpaque = false; ghost.backgroundColor = .clear
         let imageView = NSImageView(frame: CGRect(origin: .zero, size: window.frame.size))
         imageView.image = image; imageView.imageScaling = .scaleAxesIndependently
-        ghost.contentView = imageView; transition = ghost; ghost.orderFrontRegardless()
+        transition?.orderOut(nil); transition?.close()
+        ghost.contentView = imageView; transition = ghost
+        if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
+        ghost.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.36; context.timingFunction = CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1)
-            ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = 0
-        } completionHandler: { [weak ghost] in
-            MainActor.assumeIsolated { ghost?.orderOut(nil); ghost?.close() }
+            context.duration = origin == nil ? 0.36 : 0.38
+            context.timingFunction = CAMediaTimingFunction(controlPoints: origin == nil ? 0.4 : 0.25, 0, origin == nil ? 0.2 : 0.5, 1)
+            ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = origin == nil ? 0 : 1
+        } completionHandler: { [weak self, weak ghost, weak window] in
+            MainActor.assumeIsolated {
+                window?.alphaValue = 1; ghost?.orderOut(nil); ghost?.close()
+                if self?.transition === ghost { self?.transition = nil }
+            }
         }
     }
 }

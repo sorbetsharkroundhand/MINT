@@ -3,6 +3,102 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class SpatialNativeWorkspaceTests: XCTestCase {
+    func testFirstGripPressInAnInitiallyInactiveTileActivatesAndStartsTheDrag() async throws {
+        let h = try await SourceNavigationHarness(); defer { h.close() }
+        let b = try XCTUnwrap(h.fixture.session.activeProject?.documents.last?.id)
+        let key = ProjectDocumentKey(projectID: h.fixture.project.id, documentID: b)
+        let editor = try XCTUnwrap(h.requests.editor(for: key))
+        XCTAssertNotEqual(h.fixture.session.selectedDocumentID, b)
+        let interaction = try XCTUnwrap(editor.workspaceInteraction as? WorkspaceEditorInteraction)
+        let grip = try XCTUnwrap(interaction.paragraphGrip(at: 0))
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: editor.convert(CGPoint(x: grip.midX, y: grip.midY), to: nil), modifierFlags: [], timestamp: 1,
+            windowNumber: h.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        XCTAssertTrue(interaction.mouseDown(event))
+        XCTAssertEqual(h.fixture.session.selectedDocumentID, b)
+        interaction.detach()
+    }
+    func testQueuedResizeFromPreviousProjectCannotRestoreItsTiles() async throws {
+        let h = try await FramedWorkspaceHarness(reduceMotion: true); defer { h.close() }
+        let canvas = try XCTUnwrap(descendant(h.host, SpatialWorkspaceCanvasView.self))
+        func event(_ type: NSEvent.EventType, _ x: CGFloat) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: CGPoint(x: x, y: 200), modifierFlags: [], timestamp: 1,
+                windowNumber: h.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        }
+        canvas.beginResize(.column(0), event: try event(.leftMouseDown, 210))
+        let id = WritingDocumentID()
+        let next = WritingProject(id: WritingProjectID(), title: "Next", mode: .general,
+            documents: [.init(id: id, title: "Next", body: "Only next project", kind: .manuscript)])
+        try await h.fixture.session.saveAndActivate(next); await h.layout()
+        canvas.continueResize(try event(.leftMouseDragged, 260)); canvas.finishResize(); await h.layout()
+        XCTAssertEqual(h.requests.spatialWorkspace?.layout.openDocuments, [id])
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, "Only next project")
+    }
+    func testAccessibilityIdentifiesOnlyTheSelectedEditorAsTheCommandTarget() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let first = try await h.editor()
+        let b = try XCTUnwrap(h.fixture.session.createDocument(title: "Second"))
+        await h.layout()
+        let second = try await h.editor()
+        XCTAssertEqual(second.accessibilityIdentifier(), "mint.editor")
+        XCTAssertNotEqual(first.accessibilityIdentifier(), "mint.editor")
+        XCTAssertNotNil(h.element("mint.tile.continue.\(b.rawValue.uuidString)"))
+    }
+    func testParagraphGripMovesRichSourceAcrossLiveEditorsAndUndoesBoth() async throws {
+        let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
+        defer { h.close() }
+        let a = try XCTUnwrap(h.fixture.session.selectedDocumentID)
+        let original = "First\n**이동🙂** $x$\n\n![](images/a.png)\nLast\n"
+        h.fixture.session.updateSelectedDocumentBody(original)
+        let b = try XCTUnwrap(h.fixture.session.createDocument(title: "Paragraph target"))
+        h.fixture.session.updateSelectedDocumentBody("> Target\n"); await h.layout()
+        let source = try XCTUnwrap(allEditors(h.host).first { $0.writingDocumentIdentity?.documentID == a })
+        let target = try XCTUnwrap(allEditors(h.host).first { $0.writingDocumentIdentity?.documentID == b })
+        let interaction = try XCTUnwrap(source.workspaceInteraction as? WorkspaceEditorInteraction)
+        let targetInteraction = try XCTUnwrap(target.workspaceInteraction as? WorkspaceEditorInteraction)
+        let offset = (source.string as NSString).range(of: "이동🙂").location
+        let grip = try XCTUnwrap(interaction.paragraphGrip(at: offset))
+        let targetRect = try XCTUnwrap(targetInteraction.paragraphRect(at: 0))
+        func event(_ type: NSEvent.EventType, view: NSView, point: CGPoint) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: view.convert(point, to: nil), modifierFlags: [],
+                timestamp: 1, windowNumber: h.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
+        }
+        source.mouseMoved(with: try event(.mouseMoved, view: source, point: CGPoint(x: grip.midX, y: grip.midY)))
+        let press = try event(.leftMouseDown, view: source, point: CGPoint(x: grip.midX, y: grip.midY))
+        let handled = interaction.mouseDown(press)
+        XCTAssertTrue(handled, "The paragraph gutter must hit the paragraph at its Y coordinate")
+        guard handled else { return }
+        source.mouseDown(with: press)
+        source.mouseDragged(with: try event(.leftMouseDragged, view: target, point: CGPoint(x: targetRect.midX, y: targetRect.minY + 1)))
+        source.mouseUp(with: try event(.leftMouseUp, view: target, point: CGPoint(x: targetRect.midX, y: targetRect.minY + 1)))
+        await h.layout()
+        XCTAssertEqual(h.fixture.session.document(a)?.body, "First\n\n![](images/a.png)\nLast\n")
+        XCTAssertEqual(h.fixture.session.document(b)?.body, "**이동🙂** $x$\n> Target\n")
+        target.undoManager?.undo(); await h.layout()
+        XCTAssertEqual(h.fixture.session.document(a)?.body, original)
+        XCTAssertEqual(h.fixture.session.document(b)?.body, "> Target\n")
+        XCTAssertEqual(source.serialize(), original)
+    }
+
+    func testTypewriterAndFocusArePresentationOnly() async throws {
+        let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("First paragraph\nSecond paragraph\nThird paragraph")
+        await h.layout()
+        let editor = try await h.editor()
+        let interaction = try XCTUnwrap(editor.workspaceInteraction as? WorkspaceEditorInteraction)
+        let model = try XCTUnwrap(h.requests.spatialWorkspace)
+        let before = editor.serialize()
+        editor.setSelectedRange(NSRange(location: 0, length: 0))
+        model.typewriter = true; model.focusDimming = true; await h.layout()
+        let scroll = try XCTUnwrap(editor.enclosingScrollView)
+        XCTAssertEqual(scroll.contentInsets.top, scroll.bounds.height * 0.26, accuracy: 1)
+        XCTAssertEqual(scroll.contentInsets.bottom, scroll.bounds.height * 0.38, accuracy: 1)
+        XCTAssertEqual(interaction.paragraphOpacity(at: 0), 1)
+        XCTAssertEqual(interaction.paragraphOpacity(at: 17), 0.24, accuracy: 0.001)
+        XCTAssertEqual(editor.serialize(), before)
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, before)
+    }
+
     func testNavigatorNativeDragReordersWithoutReplacingOrClosingEditors() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
         defer { h.close() }

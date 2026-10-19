@@ -9,6 +9,16 @@ struct OriginalSourceReference: Equatable, Sendable {
     let revision: String
     let evidence: EvidenceAnchor
     let selection: Selection
+    static func exact(_ evidence: EvidenceAnchor, in project: WritingProject) -> Self? {
+        guard !project.trashedDocumentIDs.contains(evidence.documentID),
+            let document = project.documents.first(where: { $0.id == evidence.documentID }),
+            let range = SourceAnchor.uniqueOriginalRange(for: evidence.quote, in: document.body,
+                within: NSRange(location: 0, length: document.body.utf16.count)), range.length <= 2048 else { return nil }
+        var anchor = evidence; anchor.utf16Hint = range.location
+        return .init(key: .init(projectID: project.id, documentID: document.id),
+            revision: SHA256.hash(data: Data(document.body.utf8)).map { String(format: "%02x", $0) }.joined(),
+            evidence: anchor, selection: .passage)
+    }
     func matchesSource(_ source: String) -> Bool {
         let text = source as NSString, quote = Array(evidence.quote.utf16)
         guard evidence.documentID == key.documentID, (1...2048).contains(quote.count),

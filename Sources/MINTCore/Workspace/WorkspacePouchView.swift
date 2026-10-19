@@ -12,7 +12,7 @@ final class WorkspacePouchView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         grip.target = self; grip.action = #selector(activateGrip)
-        grip.isBordered = false; grip.refusesFirstResponder = true
+        grip.isBordered = false; grip.refusesFirstResponder = false
         addSubview(grip)
     }
     required init?(coder: NSCoder) { nil }
@@ -24,6 +24,7 @@ final class WorkspacePouchView: NSView {
         grip.font = MintFonts.serif(14, weight: .bold); grip.contentTintColor = theme.blue
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
         grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "도구 더 보기 · 드래그하여 주머니 이동")
+        grip.menu = controller?.moreMenu()
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
             let button = WorkspacePouchButton(title: "", target: self, action: #selector(invoke(_:)))
@@ -35,6 +36,7 @@ final class WorkspacePouchView: NSView {
             button.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.label)
             let selected = action.selected()
             button.setButtonType(.toggle); button.state = selected ? .on : .off
+            button.isEnabled = action.enabled()
             button.contentTintColor = selected ? theme.blue : theme.ink2
             button.layer?.backgroundColor = (selected ? theme.activeBg : NSColor.clear).cgColor
             button.layer?.cornerRadius = MintRadius.sm
@@ -50,13 +52,14 @@ final class WorkspacePouchView: NSView {
         var position: CGFloat = 18
         for (index, button) in buttons.enumerated() {
             if index == 4 { position += 12 }
-            button.frame = horizontal ? CGRect(x: position, y: 5, width: 28, height: 28)
-                : CGRect(x: 5, y: position, width: 28, height: 28)
+            button.frame = horizontal ? CGRect(x: position - 2, y: 3, width: 32, height: 32)
+                : CGRect(x: 3, y: position - 2, width: 32, height: 32)
             position += 32
         }
     }
     override func draw(_ dirtyRect: NSRect) {
-        theme.pill.setFill(); NSBezierPath(roundedRect: bounds, xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).fill()
+        (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill).setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).fill()
         guard !orb else { return }
         theme.ink3.withAlphaComponent(0.35).setFill()
         let gripRect = horizontal ? CGRect(x: 8, y: 12, width: 3, height: 14) : CGRect(x: 12, y: 7, width: 14, height: 3)
@@ -108,6 +111,7 @@ struct WorkspacePouchBridge: NSViewRepresentable {
     func updateNSView(_ view: Probe, context: Context) {
         let controller = context.coordinator.controller
         controller.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
+        controller.reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency || accessibilityOptions.reduceTransparency
         controller.theme = theme; controller.actions = actions; controller.extraActions = extraActions
         requests.pouch = controller
         if let window = view.window { controller.attach(to: window) }

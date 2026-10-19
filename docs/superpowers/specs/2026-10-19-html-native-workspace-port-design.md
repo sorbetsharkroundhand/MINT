@@ -113,9 +113,9 @@ window metrics replace simulated desktop padding and traffic-light geometry.
 ## Conflicts and deliberate correctness repairs
 
 - The HTML calls Gemini externally; the repository requires local inference. The
-  owner was asked whether to retain local AI or authorize Gemini. Layout/editor work
-  is independent. Default design retains the same AI interactions with MINT's local
-  engine; no remote client is introduced without an explicit owner answer.
+  owner explicitly chose the existing local AI. Coauthor, polish and margin keep
+  their explicit generation/review/apply interactions through the ready local
+  engine. No remote client, automatic model setup or sample fallback is introduced.
 - HTML uses translucent manuscript cards; the repository explicitly requires opaque
   manuscripts. Match the composited color and active state with opaque native paper.
 - Duplicate `startNavigatorFileDrag` definitions (1950 and 1971), the slip Y update

@@ -12,6 +12,30 @@ final class SpatialResizeHandle: NSView {
     private var hovered = false
     private var area: NSTrackingArea?
     override var isFlipped: Bool { true }
+    override var acceptsFirstResponder: Bool { true }
+    override func accessibilityPerformIncrement() -> Bool { adjust(1) }
+    override func accessibilityPerformDecrement() -> Bool { adjust(-1) }
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 124 || event.keyCode == 125 { _ = adjust(1) }
+        else if event.keyCode == 123 || event.keyCode == 126 { _ = adjust(-1) }
+        else { super.keyDown(with: event) }
+    }
+    private func adjust(_ direction: Double) -> Bool {
+        guard let canvas, let model = canvas.model, !model.isDragging else { return false }
+        var layout = model.layout
+        switch axis {
+        case .column(let left):
+            guard layout.columns.indices.contains(left + 1) else { return false }
+            let rightFixed = layout.columns[left].width == nil && layout.columns[left + 1].width != nil
+            let index = rightFixed ? left + 1 : left
+            layout.setColumnWidth(index, width: (layout.columns[index].width ?? canvas.geometry.columns[index].width) + 16 * direction * (rightFixed ? -1 : 1))
+        case .row(let column, let row):
+            guard canvas.geometry.columns.indices.contains(column) else { return false }
+            let height = canvas.geometry.columns[column].height
+            layout.resizeRows(column: column, row: row, delta: height * 0.05 * direction, height: height)
+        }
+        model.setLayout(layout); canvas.layoutTiles(); return true
+    }
     override func resetCursorRects() {
         let cursor: NSCursor
         if case .column = axis { cursor = .resizeLeftRight } else { cursor = .resizeUpDown }

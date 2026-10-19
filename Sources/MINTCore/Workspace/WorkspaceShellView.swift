@@ -173,24 +173,18 @@ struct WorkspaceSurface: View {
     @StateObject private var palette = PaletteSettings.shared
     @StateObject private var outline = DocumentOutlineController()
     @StateObject private var spatial = SpatialWorkspaceController()
-    @State private var marginOpened = false
     @State private var seededSpatialProject: WritingProjectID?
+    @State private var assistance: WorkspaceAssistance?
+    @State private var entities: WorkspaceEntityController?
     @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
-    @AppStorage("mint.sidebarWidth") private var sidebarWidth = 250.0
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
-    @AppStorage("mint.toolDockPosition")
-    private var toolDockRaw = ToolDockPosition.automatic.rawValue
-    @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     var body: some View {
         let theme = palette.theme(for: colorScheme)
-        let presentation = WorkspacePresentationState(navigatorVisible: sidebarVisible,
-            navigatorWidth: sidebarWidth, rawToolSection: section,
-            rawToolDock: toolDockRaw, chromeHidden: chromeHidden, outlineVisible: outlineVisible,
-            marginVisible: marginVisible, mapVisible: mapVisible)
         VStack(spacing: 0) {
-            WorkspaceWindowChrome(projectTitle: projectSession.activeProject?.title ?? "프로젝트", theme: theme)
+            WorkspaceSpatialChrome(session: projectSession, model: spatial, completion: completion, theme: theme,
+                search: { showCommands(theme: theme) }, coauthor: { showAssistance(.coauthor, theme: theme) })
             spatialWorkspace(theme: theme)
         }
         .tint(theme.blueC)
@@ -224,6 +218,10 @@ struct WorkspaceSurface: View {
             if spatial.layout.contains(.navigator) != value { spatial.toggle(.navigator) }
         }
         .onChange(of: projectSession.workspaceMode) { _, mode in
+            if mode == .write {
+                if spatial.layout.contains(.map) { _ = spatial.close(.map) }
+                if spatial.layout.contains(.outline) { _ = spatial.close(.outline) }
+            }
             if mode == .map && !spatial.layout.contains(.map) { spatial.toggle(.map) }
             if mode == .outline && !spatial.layout.contains(.outline) { spatial.toggle(.outline) }
         }
@@ -236,9 +234,7 @@ struct WorkspaceSurface: View {
         }
         .onChange(of: section) { _, _ in
             if outlineVisible || mapVisible { projectSession.selectWorkspaceMode(.write) }
-            if section != SidebarSection.margin.rawValue { marginOpened = false }
         }
-        .onChange(of: projectSession.runtimeIdentity?.key.projectID) { _, _ in marginOpened = false }
     }
 
     private func configureSpatial() {
@@ -246,6 +242,21 @@ struct WorkspaceSurface: View {
         spatial.configure(project: project, selected: projectSession.selectedDocumentID,
             defaults: projectSession.presentationPreferences)
         editorRequests.spatialWorkspace = spatial
+        if assistance == nil { assistance = completion.makeWorkspaceAssistance(session: projectSession, requests: editorRequests, margin: livingMargin) }
+        if entities == nil { entities = WorkspaceEntityController(session: projectSession, requests: editorRequests) }
+        editorRequests.workspaceHover = { [weak entities] editor, key, offset in entities?.hover(editor: editor, key: key, nativeOffset: offset) }
+        editorRequests.workspaceHoverEnd = { [weak entities] in entities?.scheduleHide() }
+        let currentTheme = palette.theme(for: colorScheme)
+        editorRequests.workspacePolish = { [weak assistance, weak editorRequests] _ in
+            guard let assistance, let editorRequests else { return }
+            WorkspaceAssistancePanel.present(.polish, model: assistance, requests: editorRequests, theme: currentTheme)
+        }
+        editorRequests.workspaceExcerpt = { [weak assistance, weak projectSession] editor in
+            do { try assistance?.excerpt(editor: editor) } catch { projectSession?.reportError(error) }
+        }
+        for (key, editor) in editorRequests.registeredEditors {
+            editorRequests.installSpatialInteraction(editor, key: key, session: projectSession)
+        }
         spatial.onActivate = { [weak projectSession, weak editorRequests] id in
             projectSession?.selectDocument(id); editorRequests?.focusEditor()
         }
@@ -272,7 +283,7 @@ struct WorkspaceSurface: View {
         }
         if seededSpatialProject != project.id {
             seededSpatialProject = project.id
-            if let stored, !spatial.layout.contains(stored) { spatial.toggle(stored) }
+            if !spatial.restoredPreference, let stored, !spatial.layout.contains(stored) { spatial.toggle(stored) }
         }
     }
 
@@ -300,15 +311,17 @@ struct WorkspaceSurface: View {
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
                 pouchTool(.margin, id: "mint.workspace.margin", label: "마진 노트", symbol: "sparkles"),
-                WorkspacePouchAction(id: "mint.source-search.show", label: "빠른 검색 및 명령 (⌘K)", symbol: "magnifyingglass") {
-                    SourceSearchPanel.present(session: projectSession, requests: editorRequests)
+                WorkspacePouchAction(id: "mint.source-search.show", label: "빠른 검색 및 명령 (⌘K)", symbol: "magnifyingglass", enabled: { projectSession.isEditorEditable && projectSession.selectedDocumentID != nil }) {
+                    showCommands(theme: theme)
                 },
                 WorkspacePouchAction(id: "mint.workspace.theme", label: "테마 전환", symbol: "circle.lefthalf.filled") {
                     appearance = colorScheme == .dark ? "light" : "dark"
                 }
             ], extraActions: [
+                pouchTool(.characters, id: "mint.workspace.more.characters", label: "인물과 작품 정보", symbol: "person.2"),
+                pouchTool(.narrative, id: "mint.workspace.more.narrative", label: "작가 수정과 기록", symbol: "text.book.closed"),
                 WorkspacePouchAction(id: "mint.workspace.settings", label: "설정", symbol: "gearshape") { openSettings() },
-                pouchTool(.context, id: "mint.workspace.context", label: "참고 기록", symbol: "text.alignleft"),
+                pouchTool(.context, id: "mint.workspace.context", label: "제안에 쓰인 내용", symbol: "text.alignleft"),
                 WorkspacePouchAction(id: "mint.workspace.source-search", label: "원문 검색", symbol: "doc.text.magnifyingglass") {
                     SourceSearchPanel.present(session: projectSession, requests: editorRequests)
                 }
@@ -316,7 +329,7 @@ struct WorkspaceSurface: View {
     }
 
     private func pouchTool(_ tile: WorkspaceTileID, id: String, label: String, symbol: String) -> WorkspacePouchAction {
-        WorkspacePouchAction(id: id, label: label, symbol: symbol, selected: { spatial.layout.contains(tile) }) {
+        WorkspacePouchAction(id: id, label: tile == .navigator ? (spatial.layout.contains(.navigator) ? "파일 목록 숨기기" : "파일 목록 보이기") : label, symbol: symbol, selected: { spatial.layout.contains(tile) }) {
             spatial.toggle(tile)
             if tile == .navigator { sidebarVisible = spatial.layout.contains(.navigator) }
             editorRequests.focusEditor()
@@ -326,23 +339,29 @@ struct WorkspaceSurface: View {
     private func spatialTool(_ tile: WorkspaceTileID, theme: MintTheme) -> some View {
         VStack(spacing: 0) {
             SpatialTileHeader(tile: tile, title: spatialToolTitle(tile), theme: theme, actions: [
-                SpatialHeaderAction(id: "mint.tile.close.\(tile.id)", label: "주머니에 넣기", symbol: "xmark") {
+                SpatialHeaderAction(id: tile == .map ? "mint.story-map.close" : "mint.tile.close.\(tile.id)", label: "주머니에 넣기", symbol: "xmark") {
                     _ = spatial.close(tile)
                     if tile == .map || tile == .outline { projectSession.selectWorkspaceMode(.write) }
                     editorRequests.focusEditor()
                 }
-            ]).frame(height: 32)
+            ]).frame(height: 32).opacity(spatial.whisperTyping ? 0.08 : 1)
             Group {
                 switch tile {
-                case .margin: livingMarginPanel(theme: theme)
+                case .margin:
+                    VStack(spacing: 0) {
+                        Button("마진 노트 생성") { showAssistance(.margin, theme: theme) }.buttonStyle(.plain).mintUIFont(10).padding(10)
+                        livingMarginPanel(theme: theme)
+                    }
                 case .map:
                     StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
                         requests: editorRequests, theme: theme)
                 case .outline:
                     DocumentOutlineView(controller: outline, requests: editorRequests, session: projectSession, theme: theme)
+                case .narrative:
+                    WorkspaceNarrativeCards(session: projectSession, requests: editorRequests, indexer: indexer, completion: completion, model: spatial, theme: theme)
                 default:
                     ProjectWriterToolsView(session: projectSession, completion: completion, editorRequests: editorRequests,
-                        section: tile == .characters ? .bible : (tile == .narrative ? .narrative : .context), theme: theme)
+                        section: tile == .characters ? .bible : (tile == .narrative ? .narrative : .context), theme: theme, spatial: spatial)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.background(theme.cardSurfaceC)
@@ -361,144 +380,23 @@ struct WorkspaceSurface: View {
         }
     }
 
+    private func showCommands(theme: MintTheme) {
+        WorkspaceQuickCommandPanel.present(session: projectSession, requests: editorRequests, theme: theme) {
+            appearance = colorScheme == .dark ? "light" : "dark"
+        }
+    }
+    private func showAssistance(_ mode: WorkspaceAssistance.Mode, theme: MintTheme) {
+        guard let assistance else { return }
+        WorkspaceAssistancePanel.present(mode, model: assistance, requests: editorRequests, theme: theme)
+    }
+
     private var outlineVisible: Bool {
         activeWritingMode == .general && projectSession.workspaceMode == .outline
     }
     private var mapVisible: Bool { activeWritingMode == .fiction && projectSession.workspaceMode == .map }
-    private var marginAvailable: Bool {
-        writingDiagnostics != nil || marginOpened || !livingMargin.visibleInsights(for: activeWritingMode).isEmpty
-    }
-    private var marginVisible: Bool {
-        marginOpened && section == SidebarSection.margin.rawValue && !outlineVisible && !mapVisible
-    }
-    private func toggleMargin() {
-        if marginVisible {
-            marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section)
-        } else {
-            projectSession.selectWorkspaceMode(.write)
-            WorkspaceToolSelection.showLivingMargin(currentSection: &section); marginOpened = true
-        }
-        editorRequests.focusEditor()
-    }
-
     private func updateOutlinePosition(identity: ProjectRuntimeIdentity?) {
         let offset = identity.flatMap { editorRequests.nativeEditor?.outlineSourcePosition(identity: $0) }
         outline.notePosition(offset, identity: identity)
-    }
-
-    private func workspace(presentation: WorkspacePresentationState, theme: MintTheme) -> some View {
-        WorkspaceShellView(
-            navigatorWidth: $sidebarWidth,
-            presentation: presentation,
-            onNavigatorCollapse: hideNavigator,
-            railWidth: WorkspaceLayoutPolicy.railWidth,
-            theme: theme
-        ) {
-            ProjectNavigatorView(
-                session: projectSession,
-                editorRequests: editorRequests,
-                theme: theme, onClose: hideNavigator)
-        } editor: {
-            EditorPane(
-                projectSession: projectSession,
-                editorRequests: editorRequests,
-                completion: completion,
-                settings: completion.settings,
-                theme: theme,
-                editorBridge: editorBridge,
-                positionStore: positionStore)
-        } context: {
-            let tool = mapVisible
-                ? WorkspaceToolDescriptor(title: "이야기 지도", subtitle: "장면과 사건을 원문에서 살펴보기", systemImage: "point.3.connected.trianglepath.dotted")
-                : (outlineVisible
-                    ? WorkspaceToolDescriptor(title: "문서 개요", subtitle: "원고의 제목과 현재 위치", systemImage: "list.bullet.indent")
-                    : WorkspaceToolPresentation.descriptor(for: section))
-            VStack(spacing: 0) {
-                HStack(spacing: 6) {
-                    Image(systemName: tool.systemImage)
-                        .font(.system(size: 11, weight: .regular))
-                        .foregroundStyle(theme.ink3C)
-                        .accessibilityHidden(true)
-                    Text(tool.title)
-                        .mintUIFont(11.5, .medium)
-                        .foregroundStyle(theme.ink2C)
-                        .lineLimit(1)
-                        .help(tool.subtitle)
-                    Spacer(minLength: 8)
-                    Menu {
-                        ForEach(ToolDockPosition.allCases, id: \.self) { position in
-                            Button {
-                                toolDockRaw = position.rawValue
-                                editorRequests.focusEditor()
-                            } label: {
-                                Label(position.label, systemImage: position.systemImage)
-                                if presentation.toolDock == position {
-                                    Image(systemName: "checkmark")
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "rectangle.3.group")
-                            .mintUIFont(12)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .accessibilityLabel("글 도구 위치")
-                    .help("글 도구 위치")
-                    Group {
-                        if mapVisible {
-                            WorkspaceActionButton(identifier: "mint.story-map.close", label: "문서로 돌아가기",
-                                symbol: "xmark", theme: theme) {
-                                    projectSession.selectWorkspaceMode(.write); editorRequests.focusEditor()
-                                }.frame(width: 26, height: 26)
-                        } else {
-                            Button {
-                                if outlineVisible { projectSession.selectWorkspaceMode(.write) }
-                                else { marginOpened = false; WorkspaceToolSelection.hide(currentSection: &section) }
-                                editorRequests.focusEditor()
-                            } label: {
-                                Image(systemName: "xmark")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .frame(width: 26, height: 26)
-                                    .contentShape(Rectangle())
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(theme.ink2C)
-                    .accessibilityIdentifier(mapVisible ? "mint.story-map.close" : "mint.context.close")
-                    .accessibilityLabel("문서로 돌아가기")
-                    .help("문서로 돌아가기")
-                }
-                .padding(.horizontal, 12)
-                .frame(height: 36)
-                if mapVisible {
-                    StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
-                        requests: editorRequests, theme: theme)
-                } else if outlineVisible {
-                    DocumentOutlineView(controller: outline, requests: editorRequests,
-                        session: projectSession, theme: theme)
-                } else if section == SidebarSection.margin.rawValue {
-                    livingMarginPanel(theme: theme)
-                } else if let selectedSection = presentation.toolSection {
-                    ProjectWriterToolsView(session: projectSession, completion: completion,
-                        editorRequests: editorRequests, section: selectedSection, theme: theme)
-                        .id(projectSession.runtimeIdentity?.key)
-                } else {
-                    ProjectToolUnavailableView(theme: theme)
-                }
-            }
-        } rail: {
-            WorkspaceRail(navigatorVisible: $sidebarVisible, section: $section,
-                session: projectSession, requests: editorRequests, theme: theme,
-                openSettings: { openSettings() }, onShowLivingMargin: livingMarginOpenAction,
-                marginSelected: marginVisible)
-        }
-    }
-
-    private var livingMarginOpenAction: (() -> Void)? {
-        guard marginAvailable else { return nil }
-        return { toggleMargin() }
     }
 
     private func livingMarginPanel(theme: MintTheme) -> some View {
@@ -510,7 +408,7 @@ struct WorkspaceSurface: View {
             }
             LivingMarginView(model: livingMargin, mode: activeWritingMode, theme: theme,
                 onJumpToEvidence: navigateMarginEvidence,
-                onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality })
+                onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality }, spatial: spatial)
             if let error = editorRequests.sourceNavigationError {
                 Text(error).mintUIFont(11).foregroundStyle(theme.ink3C).padding(12)
             }
@@ -532,9 +430,9 @@ struct WorkspaceSurface: View {
             }
             _ = writingDiagnostics.navigateMarginEvidence(insightID: insight.id, evidence: anchor, requests: editorRequests)
         } else {
-            let sequence = (editorRequests.searchJump?.sequence ?? 0) + 1
-            guard let jump = LivingMarginWorkspaceBridge.jump(to: anchor, in: projectSession, sequence: sequence) else { return }
-            editorRequests.issueJump(documentID: jump.documentID, query: jump.query)
+            guard let project = projectSession.activeProject, let reference = OriginalSourceReference.exact(anchor, in: project) else { return }
+            let inspection = ProjectSourceInspection(session: projectSession)
+            if let token = inspection.capture() { editorRequests.jump(to: reference, inspection: inspection, token: token, in: projectSession) }
         }
     }
 
@@ -545,11 +443,6 @@ struct WorkspaceSurface: View {
             do { try writingDiagnostics.performMarginAction(insightID: insight.id, action: action) }
             catch { } // The runtime publishes a safe, localized action status.
         }
-    }
-
-    private func hideNavigator() {
-        sidebarVisible = false
-        editorRequests.focusEditor()
     }
 
     private var activeWritingMode: WritingMode {

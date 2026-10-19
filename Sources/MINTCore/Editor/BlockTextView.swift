@@ -145,10 +145,10 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
-        textView.documentUndoManager = UndoManager()
+        if case .project = documentIdentity { textView.documentUndoManager = UndoManager() }
         textView.automaticallyFocusOnAttachment = isActiveEditor
         textView.writingDocumentIdentity = documentIdentity
-        textView.setAccessibilityIdentifier("mint.editor")
+        textView.setAccessibilityIdentifier(isActiveEditor ? "mint.editor" : "mint.editor.\(documentIdentity.documentID.rawValue.uuidString)")
         // 편집 범위를 알아야 수식·이미지 마커 검사를 증분으로 할 수 있다
         // (전체 문자열 검색은 30만 자에서 16.9ms — docs/editor-perf.md).
         storage.delegate = textView
@@ -231,6 +231,7 @@ public struct MintBlockEditor: NSViewRepresentable {
     public func updateNSView(_ scrollView: NSScrollView, context: Context) {
         guard let textView = scrollView.documentView as? BlockTextView else { return }
         let activationChanged = context.coordinator.parent.isActiveEditor != isActiveEditor
+        textView.setAccessibilityIdentifier(isActiveEditor ? "mint.editor" : "mint.editor.\(documentIdentity.documentID.rawValue.uuidString)")
         textView.writingDocumentIdentity = documentIdentity
         if !isEditable, textView.hasMarkedText() {
             textView.unmarkText()
@@ -409,6 +410,12 @@ public struct MintBlockEditor: NSViewRepresentable {
             self.parent = parent
         }
 
+        func applyWorkspaceSource(_ body: String, to editor: BlockTextView) {
+            isDocumentTransitioning = true
+            editor.load(markdown: body); lastSyncedText = body
+            isDocumentTransitioning = false
+        }
+
         func markSearchJumpConsumed(
             _ jump: EditorSearchJump?, for identity: EditorDocumentIdentity
         ) {
@@ -466,7 +473,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         func ownsCallback(
             _ identity: EditorDocumentIdentity, epoch: UInt64
         ) -> Bool {
-            loadedDocumentIdentity == identity && callbackEpoch == epoch
+            loadedDocumentIdentity == identity && callbackEpoch == epoch && parent.isActiveEditor
         }
 
         public func textDidChange(_ notification: Notification) {
@@ -560,6 +567,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.refreshRenderedBlocks()
             // 드래그 선택 위 서식 툴바 표시/숨김.
             textView.updateSelectionToolbar()
+            textView.workspaceInteraction?.selectionDidChange()
             if let identity = loadedDocumentIdentity,
                 let snapshot = textView.writingPositionSnapshot(), !snapshot.marked
             {
@@ -640,6 +648,12 @@ public struct MintBlockEditor: NSViewRepresentable {
 
         // MARK: 컨트롤러 이벤트 전달
 
+        func requestExplicitCompletion(_ textView: BlockTextView) {
+            guard !textView.hasMarkedText(), parent.isActiveEditor,
+                parent.controller?.engineState == .ready else { return }
+            forwardEditEvent(textView)
+        }
+
         private func forwardEditEvent(_ textView: BlockTextView) {
             guard parent.isActiveEditor, let controller = parent.controller,
                   textView.window?.firstResponder === textView else { return }
@@ -710,12 +724,21 @@ public struct MintBlockEditor: NSViewRepresentable {
 /// 활성 줄이 대략 화면 75% 지점에 park하게 한다 — iA Writer·Ulysses의 차분한
 /// 글쓰기 존과 같은 감각. 한 화면 안에 드는 짧은 글엔 스크롤이 없어 영향이 없다.
 final class WritingScrollView: NSScrollView {
+    var workspacePresentationEnabled = false
+    var workspaceTypewriter = false
+    func updateWorkspaceInsets() {
+        guard workspacePresentationEnabled else { return }
+        let next = NSEdgeInsets(top: workspaceTypewriter ? bounds.height * 0.26 : 0, left: 0,
+            bottom: workspaceTypewriter ? bounds.height * 0.38 : 0, right: 0)
+        if abs(contentInsets.top - next.top) > 0.5 || abs(contentInsets.bottom - next.bottom) > 0.5 { contentInsets = next }
+    }
     /// 활성 줄이 park할 지점을 남기기 위해 뷰 높이에 곱하는 하단 여백 비율.
     /// 0.25 → 커서가 바닥(≈93%)이 아니라 화면 75% 지점에 머문다(약 4~5줄 여유).
     private let gutterFraction: CGFloat = 0.25
 
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
+        if workspacePresentationEnabled { updateWorkspaceInsets(); return }
         // 높이에 비례해 여백을 갱신 — 작은 창에선 작게, 큰 창에선 크게.
         let gutter = (newSize.height * gutterFraction).rounded()
         guard abs(contentInsets.bottom - gutter) > 0.5 else { return }
@@ -838,6 +861,8 @@ extension NSAttributedString.Key {
 
 /// 블록 변환·직렬화·고스트 렌더를 담당하는 NSTextView.
 final class BlockTextView: NSTextView {
+    var workspaceInteraction: (any EditorWorkspaceInteraction)?
+    private var workspaceTrackingArea: NSTrackingArea?
     var documentUndoManager: UndoManager?
     override var undoManager: UndoManager? { documentUndoManager ?? super.undoManager }
     var automaticallyFocusOnAttachment = true
@@ -1197,6 +1222,7 @@ final class BlockTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil { workspaceInteraction?.detach() }
         editorWindowDidChange?(self)
         guard automaticallyFocusOnAttachment, !didInitialFocus, window != nil else { return }
         didInitialFocus = true
@@ -1232,6 +1258,24 @@ final class BlockTextView: NSTextView {
             }
         }
         return ok
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let workspaceTrackingArea { removeTrackingArea(workspaceTrackingArea); self.workspaceTrackingArea = nil }
+        guard workspaceInteraction != nil else { return }
+        let area = NSTrackingArea(rect: bounds, options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
+        addTrackingArea(area); workspaceTrackingArea = area
+    }
+    override func mouseMoved(with event: NSEvent) { super.mouseMoved(with: event); workspaceInteraction?.mouseMoved(event) }
+    override func mouseExited(with event: NSEvent) { super.mouseExited(with: event); workspaceInteraction?.mouseExited() }
+    override func mouseDragged(with event: NSEvent) {
+        if workspaceInteraction?.mouseDragged(event) == true { return }
+        super.mouseDragged(with: event)
+    }
+    override func mouseUp(with event: NSEvent) {
+        if workspaceInteraction?.mouseUp(event) == true { return }
+        super.mouseUp(with: event)
     }
 
     // MARK: 마크다운 ↔ 블록 변환
@@ -1515,8 +1559,8 @@ final class BlockTextView: NSTextView {
 
     /// Explicit inspection maps the native caret to original Markdown coordinates.
     /// Consumed block markers and code fences contribute only to source coordinates.
-    func sourceCursorOffset() -> Int {
-        let ns = string as NSString, caret = min(selectedRange().location, ns.length)
+    func sourceCursorOffset(at requestedOffset: Int? = nil) -> Int {
+        let ns = string as NSString, caret = min(max(0, requestedOffset ?? selectedRange().location), ns.length)
         var nativeOffset = 0, sourceOffset = 0, inCode = false
         repeat {
             let para = ns.paragraphRange(for: NSRange(location: nativeOffset, length: 0))
@@ -1563,6 +1607,36 @@ final class BlockTextView: NSTextView {
             nativeOffset = NSMaxRange(para)
         } while nativeOffset < ns.length
         return sourceOffset
+    }
+
+    /// Read-only original coverage for complete native paragraphs. Unlike a caret,
+    /// a block owns its opening/closing fences and consumed Markdown prefixes.
+    /// This also works before an inactive tile has attached a diagnostics runtime.
+    func originalParagraphRange(forNative range: NSRange) -> NSRange? {
+        let ns = string as NSString
+        guard range.location >= 0, range.length > 0, range.location <= ns.length,
+              range.length <= ns.length - range.location else { return nil }
+        var native = 0, source = 0, inCode = false, start: Int?
+        while native < ns.length {
+            let paragraph = ns.paragraphRange(for: NSRange(location: native, length: 0))
+            let line = serializedLine(of: paragraph), wasCode = inCode, beforeFence = source
+            if line.isCode != inCode { source += 4; inCode = line.isCode }
+            if paragraph.location == range.location { start = line.isCode && !wasCode ? beforeFence : source }
+            source += line.text.utf16.count + (ns.character(at: paragraph.upperBound - 1) == 10 ? 1 : 0)
+            if paragraph.upperBound == range.upperBound, let start {
+                if line.isCode {
+                    let nextCode: Bool
+                    if paragraph.upperBound < ns.length {
+                        let next = ns.paragraphRange(for: NSRange(location: paragraph.upperBound, length: 0))
+                        nextCode = serializedLine(of: next).isCode
+                    } else { nextCode = false }
+                    if !nextCode { source += 4 }
+                }
+                return NSRange(location: start, length: source - start)
+            }
+            native = paragraph.upperBound
+        }
+        return nil
     }
 
     /// 문단 하나가 직렬화에 기여하는 줄과 코드 여부. 전체 재구축·증분 갱신이
@@ -2665,6 +2739,7 @@ final class BlockTextView: NSTextView {
     private var lastTypingKeyTimestamp: TimeInterval?
 
     override func keyDown(with event: NSEvent) {
+        workspaceInteraction?.keyDown(event)
         if selectedImageLocation != nil, handleObjectKey(event) { return }
         if handleMathEditingKey(event) { return }
         // AppKit coalesces adjacent typing even across idle time and event groups.
@@ -2766,6 +2841,7 @@ final class BlockTextView: NSTextView {
     // MARK: 체크박스 클릭
 
     override func mouseDown(with event: NSEvent) {
+        if workspaceInteraction?.mouseDown(event) == true { return }
         let point = convert(event.locationInWindow, from: nil)
         // 인라인 수식 원자 더블클릭 — 소스(`$latex$`)로 펼쳐 편집한다 (이슈 #20).
         if event.clickCount == 2, revealInlineMathSource(at: point) { return }
@@ -4400,7 +4476,9 @@ final class BlockTextView: NSTextView {
             mathPreviewHost = host
         }
         let size = host.fittingSize
-        guard size.width <= availableWidth, size.height <= rect.height else {
+        // SwiftUI rounds intrinsic sizes to whole points. The reserved trailing
+        // margin already protects the source; fractional rounding must not hide it.
+        guard size.width <= ceil(availableWidth), size.height <= rect.height else {
             hideMathPreview()
             return
         }
@@ -4662,9 +4740,11 @@ final class BlockTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
+        workspaceInteraction?.layoutDidChange()
         guard widthChanged else { return }
         // 가독 폭 유지 — 넓어진 만큼 좌우 여백(inset)을 키워 본문을 가운데로 모은다.
-        let inset = EditorMetrics.sideInset(forWidth: newSize.width)
+        let inset = workspaceInteraction == nil ? EditorMetrics.sideInset(forWidth: newSize.width)
+            : max(newSize.width < 640 ? 28 : 48, (newSize.width - 680) / 2)
         if abs(textContainerInset.width - inset) > 0.5 {
             textContainerInset = NSSize(width: inset, height: textContainerInset.height)
         }
@@ -4719,10 +4799,9 @@ final class BlockTextView: NSTextView {
         rect.origin.y += textContainerOrigin.y
 
         let view = SelectionToolbarView(
-            theme: palette, state: currentSelectionState()
-        ) { [weak self] action in
-            self?.perform(action)
-        }
+            theme: palette, state: currentSelectionState(), onAction: { [weak self] action in self?.perform(action) },
+            onPolish: workspaceInteraction.map { interaction in { [weak interaction] in interaction?.polishSelection() } },
+            onExcerpt: workspaceInteraction.map { interaction in { [weak interaction] in interaction?.excerptSelection() } })
         let host: NSHostingView<SelectionToolbarView>
         if let existing = toolbarHost {
             existing.rootView = view
@@ -5239,7 +5318,10 @@ final class BlockTextView: NSTextView {
         // 대화 기록 제안 중인 블록의 은은한 하이라이트 (요구사항 §20).
         drawConversationHighlight(in: dirtyRect)
 
+        workspaceInteraction?.drawBackground(dirtyRect)
+
         super.draw(dirtyRect)
+        workspaceInteraction?.draw(dirtyRect)
 
         // 이미지 이동 드래그 중 드롭 위치 표시선 (요구 B).
         if let y = imageDropIndicatorY {

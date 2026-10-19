@@ -144,9 +144,11 @@ final class SerializationTests: XCTestCase {
     // MARK: - 기존 문서 포맷 호환 (실제 저널)
 
     private func realJournalBodies() throws -> [(String, String)] {
-        let url = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MINT/entries.json")
+        // Native verification must never discover a user's manuscripts implicitly.
+        guard let path = ProcessInfo.processInfo.environment["MINT_TEST_JOURNAL_FIXTURE"] else {
+            throw XCTSkip("No explicit synthetic journal fixture")
+        }
+        let url = URL(fileURLWithPath: path)
         guard let data = try? Data(contentsOf: url),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let entries = json["entries"] as? [[String: Any]]

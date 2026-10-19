@@ -308,11 +308,15 @@ on run argv
                     error "Writer field mismatch: " & expectedValue
                 end if
             end if
+        else if operation is "press-containing" then
+            set targetElement to my findElementContaining(rootElement, "AXIdentifier", expectedValue, 30)
+            if targetElement is missing value then error "Spatial card missing"
+            click targetElement
         else if operation is "press" or operation is "present" or operation is "absent" then
-            set targetElement to my findElement(rootElement, "AXIdentifier", expectedValue, 30)
-            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXDescription", expectedValue, 30)
-            if targetElement is missing value then set targetElement to my findElement(rootElement, "AXTitle", expectedValue, 30)
-            if targetElement is missing value then set targetElement to my findElementContaining(rootElement, "AXHelp", expectedValue, 30)
+            set targetElement to my findElement(targetProcess, "AXIdentifier", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(targetProcess, "AXDescription", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElement(targetProcess, "AXTitle", expectedValue, 30)
+            if targetElement is missing value then set targetElement to my findElementContaining(targetProcess, "AXHelp", expectedValue, 30)
             if operation is "absent" then
                 if targetElement is not missing value then error "숨겨야 할 컨트롤이 표시됨: " & expectedValue
             else
@@ -454,9 +458,8 @@ wait_ui() {
 }
 
 open_writer_information() {
-    ui press "mint.writer-tools.compatibility"
-    wait_ui present "인물과 작품 정보"
-    ui press "인물과 작품 정보"
+    ui press "mint.workspace.characters"
+    wait_ui present "mint.tile.close.characters"
 }
 
 assert_isolated_project_mode() {
@@ -519,13 +522,13 @@ ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
 ui field-set "mint.writer.character.name." "$WRITER_NAME"
 ui field-set "mint.writer.character.note." "$WRITER_NOTE"
-ui press "문서로 돌아가기"
+ui press "mint.tile.close.characters"
 ui focused
 ui resize 860
 wait_ui autocomplete ""
 open_writer_information
 ui absent "리빙 마진"
-ui press "문서로 돌아가기"
+ui press "mint.tile.close.characters"
 ui focused
 ui navigator
 ui press "새 문서"
@@ -539,7 +542,7 @@ wait_ui equals "$NEW_BODY"
 open_writer_information
 ui field-equals "mint.writer.genre" ""
 ui field-absent "mint.writer.character.name."
-ui press "문서로 돌아가기"
+ui press "mint.tile.close.characters"
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 # Address the generated document by its persisted identity, not a localized AX label.
@@ -570,12 +573,13 @@ ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 open_writer_information
 ui field-equals "mint.writer.genre" "$WRITER_GENRE"
+ui press-containing "mint.card."
 ui field-equals "mint.writer.character.name." "$WRITER_NAME"
 ui field-equals "mint.writer.character.note." "$WRITER_NOTE"
 ui press "인물 삭제"
 ui field-absent "mint.writer.character.name."
 ui field-set "mint.writer.genre" ""
-ui press "문서로 돌아가기"
+ui press "mint.tile.close.characters"
 ui focused
 terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null

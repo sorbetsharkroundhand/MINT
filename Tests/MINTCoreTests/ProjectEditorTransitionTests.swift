@@ -137,6 +137,7 @@ final class ProjectEditorTransitionTests: XCTestCase {
         XCTAssertTrue(window.firstResponder === editor)
         XCTAssertTrue(editor.isEditable, "Ordinary ready project editing must remain enabled")
         let manager = try XCTUnwrap(editor.undoManager)
+        manager.groupsByEvent = false
         manager.beginUndoGrouping()
         editor.insertText("!", replacementRange: NSRange(location: editor.string.utf16.count, length: 0))
         manager.endUndoGrouping()

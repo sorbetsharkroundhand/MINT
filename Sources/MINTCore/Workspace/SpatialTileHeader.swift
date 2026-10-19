@@ -6,6 +6,7 @@ struct SpatialHeaderAction {
     let label: String
     let symbol: String
     var selected = false
+    var enabled = true
     let perform: () -> Void
 }
 
@@ -57,6 +58,7 @@ final class SpatialTileHeaderView: NSView {
             button.setAccessibilityIdentifier(action.id)
             button.contentTintColor = action.selected ? theme.blue : theme.ink3
             button.setAccessibilityValue(NSNumber(value: action.selected))
+            button.isEnabled = action.enabled
         }
     }
     @objc private func invoke(_ button: NSButton) {
@@ -67,7 +69,7 @@ final class SpatialTileHeaderView: NSView {
         super.layout()
         let leading: CGFloat = tile.documentID == nil ? 12 : 24
         var x = bounds.width - 6
-        for button in buttons.reversed() { x -= 26; button.frame = CGRect(x: x, y: 3, width: 26, height: 26) }
+        for button in buttons.reversed() { x -= 32; button.frame = CGRect(x: x, y: 0, width: 32, height: 32) }
         title.frame = CGRect(x: leading, y: 8, width: max(0, x - leading - 5), height: 18)
     }
     override func draw(_ dirtyRect: NSRect) {

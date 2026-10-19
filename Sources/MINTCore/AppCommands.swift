@@ -200,8 +200,15 @@ public struct MintCommands: Commands {
 
         // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
-            Button("원문 검색…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
+            Button("빠른 검색 및 명령…") {
+                WorkspaceQuickCommandPanel.present(session: session, requests: editorRequests, theme: appearance == "dark" ? .dark : .light) {
+                    appearance = appearance == "dark" ? "light" : "dark"
+                }
+            }
                 .keyboardShortcut("k", modifiers: .command)
+                .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
+            Button("원문 검색…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
+                .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("이전 집필 위치로 돌아가기") { editorRequests.returnToWriting(in: session) }
                 .keyboardShortcut("k", modifiers: [.command, .shift])

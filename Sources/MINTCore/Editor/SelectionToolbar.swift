@@ -37,6 +37,8 @@ struct SelectionToolbarView: View {
     let theme: MintTheme
     let state: SelectionStyleState
     let onAction: (SelectionToolbarAction) -> Void
+    var onPolish: (() -> Void)? = nil
+    var onExcerpt: (() -> Void)? = nil
 
     /// 인라인 색 프리셋 (시스템 팔레트 계열).
     /// ⚠️ Theme 토큰 규칙의 **문서화된 예외** (이슈 #56): 사용자가 본문에 칠하는
@@ -60,6 +62,19 @@ struct SelectionToolbarView: View {
             textButton("I", italic: true, active: state.italic, help: "기울임 (⌘I / *텍스트*)") {
                 onAction(.toggleItalic)
             }
+            if let onPolish, let onExcerpt {
+                iconButton("text.quote", active: state.block == .quote, help: "인용") { onAction(.block(.quote)) }
+                divider
+                iconButton("sparkles", active: false, help: "선택한 문장 다듬기") { onPolish() }
+                iconButton("arrow.up.forward.square", active: false, help: "참고 기록에 발췌") { onExcerpt() }
+                Menu {
+                    Button("인라인 코드") { onAction(.toggleCode) }
+                    Button("글자 작게") { onAction(.fontSize(max(Self.minFontSize, state.fontSize - 2))) }
+                    Button("글자 크게") { onAction(.fontSize(min(Self.maxFontSize, state.fontSize + 2))) }
+                    ForEach(Self.colorPresets, id: \.self) { hex in Button(hex) { onAction(.color(hex)) } }
+                    Button("기본색") { onAction(.color(nil)) }
+                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }.menuStyle(.borderlessButton).fixedSize()
+            } else {
             iconButton(
                 "chevron.left.forwardslash.chevron.right",
                 active: state.code, help: "인라인 코드 (⌘⇧C / `텍스트`)"
@@ -80,6 +95,7 @@ struct SelectionToolbarView: View {
             colorDot(nil)
             ForEach(Self.colorPresets, id: \.self) { hex in
                 colorDot(hex)
+            }
             }
         }
         .padding(.horizontal, 7)

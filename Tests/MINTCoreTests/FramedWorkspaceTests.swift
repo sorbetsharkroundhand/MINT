@@ -14,17 +14,18 @@ final class FramedWorkspaceTests: XCTestCase {
         editor.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0),
             replacementRange: NSRange(location: 0, length: 0))
         let selection = editor.selectedRange(), text = editor.string
-        for (identifier, section) in [("mint.workspace.characters", "bible"),
-                                       ("mint.workspace.narrative", "timeline")] {
+        for (identifier, tile) in [("mint.workspace.characters", WorkspaceTileID.characters),
+                                       ("mint.workspace.narrative", .narrative)] {
             let button = try XCTUnwrap(h.element(identifier) as? NSButton)
             button.performClick(nil); await h.layout()
-            XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), section)
+            XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(tile) == true)
+            XCTAssertNotNil(h.fixture.defaults.data(forKey: "mint.spatial-workspace.\(h.fixture.project.id.rawValue.uuidString)"))
             XCTAssertEqual((button.accessibilityValue() as? NSNumber)?.boolValue, true)
             XCTAssertTrue(h.window.firstResponder === editor)
             XCTAssertTrue(editor.hasMarkedText()); XCTAssertEqual(editor.string, text)
             XCTAssertEqual(editor.selectedRange(), selection)
             button.performClick(nil); await h.layout()
-            XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), "files")
+            XCTAssertFalse(h.requests.spatialWorkspace?.layout.contains(tile) == true)
             XCTAssertEqual((button.accessibilityValue() as? NSNumber)?.boolValue, false)
         }
         editor.unmarkText(); editor.didChangeText()
@@ -39,12 +40,12 @@ final class FramedWorkspaceTests: XCTestCase {
             let editor = try await h.editor()
             for width: CGFloat in [860, 1180, 1440] {
                 h.window.setContentSize(NSSize(width: width, height: 760)); await h.layout()
-                let rail = try XCTUnwrap(h.element("mint.workspace.rail") as? NSView)
+                let navigator = try XCTUnwrap(h.element("mint.tile.navigator") as? NSView)
                 let close = try XCTUnwrap(h.element("mint.navigator.close") as? NSButton)
-                let navigatorLeading = rail.convert(rail.bounds, to: nil).maxX + 8
+                let navigatorRect = navigator.convert(navigator.bounds, to: nil)
                 let closeRect = close.convert(close.bounds, to: nil)
-                XCTAssertGreaterThanOrEqual(closeRect.minX, navigatorLeading + 12)
-                XCTAssertLessThanOrEqual(closeRect.maxX, navigatorLeading + navigatorWidth,
+                XCTAssertGreaterThanOrEqual(closeRect.minX, navigatorRect.minX + 12)
+                XCTAssertLessThanOrEqual(closeRect.maxX, navigatorRect.maxX,
                     "Long titles must not push the close button outside the clipped navigator")
                 XCTAssertEqual(close.bounds.width, 32, accuracy: 0.5)
                 XCTAssertEqual(h.fixture.session.activeProject?.title, title)
@@ -60,9 +61,9 @@ final class FramedWorkspaceTests: XCTestCase {
         defer { h.close() }
         XCTAssertEqual(h.elements().filter { $0.accessibilityIdentifier() == "mint.workspace.rail" }.count, 1)
         let rail = try XCTUnwrap(h.element("mint.workspace.rail") as? NSView)
-        XCTAssertEqual(rail.bounds.width, 44, accuracy: 0.5)
-        for identifier in ["mint.workspace.navigator-toggle", "mint.source-search.show",
-                           "mint.writer-tools.compatibility", "mint.workspace.settings"] {
+        XCTAssertEqual(rail.bounds.width, 38, accuracy: 0.5)
+        XCTAssertEqual(rail.bounds.height, 236, accuracy: 0.5)
+        for identifier in ["mint.workspace.navigator-toggle", "mint.source-search.show"] {
             let button = try XCTUnwrap(h.element(identifier) as? NSButton)
             XCTAssertGreaterThanOrEqual(button.bounds.width, 32)
             XCTAssertGreaterThanOrEqual(button.bounds.height, 32)
@@ -71,6 +72,10 @@ final class FramedWorkspaceTests: XCTestCase {
             } else { XCTAssertNotNil(button.target, identifier); XCTAssertNotNil(button.action, identifier) }
             XCTAssertEqual(h.elements().filter { $0.accessibilityIdentifier() == identifier }.count, 1)
         }
+        let grip = try XCTUnwrap(h.element("mint.writer-tools.compatibility") as? NSButton)
+        let menu = try XCTUnwrap(grip.menu)
+        XCTAssertTrue(menu.items.contains { $0.accessibilityIdentifier() == "mint.workspace.settings" })
+        for item in menu.items { XCTAssertNotNil(item.target); XCTAssertNotNil(item.action) }
         let files = try XCTUnwrap(h.element("mint.workspace.navigator-toggle") as? NSButton)
         XCTAssertEqual(files.accessibilityLabel(), "파일 목록 숨기기")
         XCTAssertEqual((files.accessibilityValue() as? NSNumber)?.boolValue, true)
@@ -129,10 +134,10 @@ final class FramedWorkspaceTests: XCTestCase {
         editor.setMarkedText("한", selectedRange: NSRange(location: 1, length: 0),
             replacementRange: NSRange(location: 0, length: 0))
         let selection = editor.selectedRange()
-        let panels = NSApp.windows.filter { $0.title == "원문 검색" && $0.isVisible }.count
+        let panels = NSApp.windows.filter { $0.title == "빠른 검색 및 명령" && $0.isVisible }.count
         search.performClick(nil); await h.layout()
         XCTAssertTrue(editor.hasMarkedText()); XCTAssertEqual(editor.selectedRange(), selection)
-        XCTAssertEqual(NSApp.windows.filter { $0.title == "원문 검색" && $0.isVisible }.count, panels)
+        XCTAssertEqual(NSApp.windows.filter { $0.title == "빠른 검색 및 명령" && $0.isVisible }.count, panels)
         editor.unmarkText(); editor.didChangeText(); manager.endUndoGrouping()
         h.fixture.session.selectDocument(nil); await h.layout()
         XCTAssertFalse(search.isEnabled)
@@ -158,33 +163,33 @@ final class FramedWorkspaceTests: XCTestCase {
 
     }
 
-    func testNavigatorOverlayAnchorsToManuscriptBesideLeftTool() async throws {
+    func testNavigatorAndToolReserveIndependentSpatialColumns() async throws {
         let h = try await FramedWorkspaceHarness(width: 1000, presentationDefaults: [
             "mint.sidebarSection": "bible", "mint.toolDockPosition": "left"])
         defer { h.close() }
         let editor = try await h.editor(), scroll = try XCTUnwrap(editor.enclosingScrollView)
-        XCTAssertEqual(scroll.bounds.width, 584, accuracy: 1)
+        XCTAssertEqual(scroll.bounds.width, 508, accuracy: 1)
         let close = try XCTUnwrap(h.element("mint.navigator.close") as? NSButton)
         let manuscriptRect = scroll.convert(scroll.bounds, to: nil)
         let closeRect = close.convert(close.bounds, to: nil)
-        XCTAssertGreaterThanOrEqual(closeRect.minX, manuscriptRect.minX)
-        XCTAssertLessThanOrEqual(closeRect.maxX, manuscriptRect.minX + 250)
+        XCTAssertLessThanOrEqual(closeRect.maxX, manuscriptRect.minX - 8)
+        XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(.characters) == true)
         XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.toolDockPosition"), "left")
     }
 
-    func testNavigatorOverlayKeepsEditorAllocationAtNarrowWidths() async throws {
+    func testNavigatorColumnKeepsEditorAllocationAndIdentityAtNarrowWidths() async throws {
         let h = try await FramedWorkspaceHarness(presentationDefaults: [
             "mint.sidebarVisible": true, "mint.sidebarWidth": 250.0, "mint.toolDockPosition": "left"])
         defer { h.close() }
         let editor = try await h.editor()
-        for (width, expected): (CGFloat, CGFloat) in [(860, 792), (1023, 955),
-                                                      (1024, 698), (1180, 854), (1440, 1114)] {
+        for width: CGFloat in [860, 1023, 1024, 1180, 1440] {
+            let expected = width - 228
             h.window.setContentSize(NSSize(width: width, height: 760)); await h.layout()
             let current = try await h.editor(); XCTAssertTrue(current === editor)
             XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, expected, accuracy: 1)
             try XCTUnwrap(h.element("mint.navigator.close") as? NSButton).performClick(nil)
             await h.layout()
-            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, width - 68, accuracy: 1)
+            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, width - 16, accuracy: 1)
             h.fixture.defaults.set(true, forKey: "mint.sidebarVisible"); await h.layout()
             XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, expected, accuracy: 1)
         }
@@ -286,7 +291,7 @@ final class FramedWorkspaceTests: XCTestCase {
         XCTAssertEqual(frame.layer?.cornerRadius, 13)
         XCTAssertEqual(frame.layer?.masksToBounds, false, "Decoration must not clip editor transients")
         XCTAssertTrue(chrome.mouseDownCanMoveWindow)
-        XCTAssertEqual(title.stringValue, project.title)
+        XCTAssertEqual(title.stringValue, project.title + " · " + (h.fixture.session.selectedDocument?.title ?? ""))
         let buttonsMaxX = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { h.window.standardWindowButton($0) }
             .map { $0.convert($0.bounds, to: nil).maxX }.max() ?? 0
@@ -301,18 +306,16 @@ final class FramedWorkspaceTests: XCTestCase {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let chrome = try XCTUnwrap(h.element("mint.workspace.chrome") as? NSView)
         let title = try XCTUnwrap(h.element("mint.workspace.chrome.title") as? NSTextField)
-        for view in [chrome, title] {
-            let center = NSPoint(x: view.bounds.midX, y: view.bounds.midY)
-            let point = view.convert(center, to: h.host.superview)
-            let receiver = h.host.hitTest(point)
-            XCTAssertTrue(receiver === chrome,
-                "Title pointer must reach the native drag view, got \(String(describing: receiver))")
-        }
+        let point = title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: h.host.superview)
+        XCTAssertTrue(h.host.hitTest(point) === title, "Title click opens commands; its native drag still moves the window")
+        let empty = chrome.convert(NSPoint(x: 2, y: 2), to: h.host.superview)
+        XCTAssertTrue(h.host.hitTest(empty) === chrome)
     }
 
-    func testWindowTitlePressDelegatesToNativeWindowDragging() async throws {
+    func testWindowTitleDragDelegatesOriginalPressToNativeWindowDragging() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let chrome = try XCTUnwrap(h.element("mint.workspace.chrome") as? NSView)
+        let title = try XCTUnwrap(h.element("mint.workspace.chrome.title") as? NSTextField)
         let editor = try await h.editor()
         editor.setSelectedRange(NSRange(location: 3, length: 4))
         let originalStyle = h.window.styleMask
@@ -320,12 +323,17 @@ final class FramedWorkspaceTests: XCTestCase {
         h.window.makeKeyAndOrderFront(nil)
         h.window.makeFirstResponder(editor)
         let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown,
-            location: chrome.convert(NSPoint(x: chrome.bounds.midX, y: chrome.bounds.midY), to: nil),
+            location: title.convert(NSPoint(x: title.bounds.midX, y: title.bounds.midY), to: nil),
             modifierFlags: [], timestamp: 1, windowNumber: h.window.windowNumber,
             context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         XCTAssertTrue(chrome.acceptsFirstMouse(for: event),
             "An inactive title region must accept the first press")
-        h.window.sendEvent(event)
+        title.mouseDown(with: event)
+        let moved = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDragged,
+            location: NSPoint(x: event.locationInWindow.x + 10, y: event.locationInWindow.y),
+            modifierFlags: [], timestamp: 1.1, windowNumber: h.window.windowNumber,
+            context: nil, eventNumber: 2, clickCount: 1, pressure: 1))
+        title.mouseDragged(with: moved)
         XCTAssertTrue(h.window.lastDragEvent === event,
             "A title press must hand the original event to native window dragging")
         XCTAssertEqual(h.window.styleMask, originalStyle)
@@ -359,7 +367,7 @@ final class FramedWorkspaceTests: XCTestCase {
             await h.layout()
             XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), section)
             let editor = try await h.editor()
-            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 766, accuracy: 1,
+            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 948, accuracy: 1,
                 "The saved tool must reserve its visible side pane")
             XCTAssertEqual(h.fixture.session.activeProject, project)
             XCTAssertEqual(h.fixture.session.selectedDocumentID, selected)
@@ -375,7 +383,7 @@ final class FramedWorkspaceTests: XCTestCase {
             await h.layout()
             XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), section)
             let editor = try await h.editor()
-            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 854, accuracy: 1,
+            XCTAssertEqual(try XCTUnwrap(editor.enclosingScrollView).bounds.width, 952, accuracy: 1,
                 "Deferred and unknown tools must leave all writing space available")
             XCTAssertEqual(h.fixture.session.activeProject, project)
             XCTAssertEqual(h.fixture.session.selectedDocumentID, selected)
@@ -432,6 +440,7 @@ final class FramedWorkspaceHarness {
 
     func editor() async throws -> BlockTextView {
         await layout()
+        if let key = fixture.session.runtimeIdentity?.key, let editor = requests.editor(for: key) { return editor }
         func find(_ view: NSView) -> BlockTextView? {
             (view as? BlockTextView) ?? view.subviews.compactMap { find($0) }.first
         }
@@ -454,7 +463,9 @@ final class FramedWorkspaceHarness {
             }
             return result
         }
-        return walk(root ?? host)
+        var result = walk(root ?? host)
+        if root == nil, let pouch = requests.pouch?.panel?.contentView { result += walk(pouch) }
+        return result
     }
 
     func element(_ identifier: String) -> (any NSAccessibilityProtocol)? {

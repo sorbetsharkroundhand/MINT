@@ -10,22 +10,25 @@ final class WriterCompatibilityTests: XCTestCase {
         let controls = h.elements()
         let search = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.source-search.show" })
         let compatibility = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.writer-tools.compatibility" })
-        XCTAssertEqual(search.accessibilityLabel(), "원문 검색")
-        XCTAssertEqual(compatibility.accessibilityLabel(), "저장된 설정과 기록")
+        XCTAssertEqual(search.accessibilityLabel(), "빠른 검색 및 명령 (⌘K)")
+        XCTAssertEqual(compatibility.accessibilityLabel(), "도구 더 보기 · 드래그하여 주머니 이동")
         XCTAssertFalse(controls.contains { $0.accessibilityLabel() == "리빙 마진" })
-        let menu = try XCTUnwrap((compatibility as? NSPopUpButton)?.menu)
-        XCTAssertEqual(menu.items.dropFirst().map(\.title), ["인물과 작품 정보", "작가 수정과 기록", "제안에 쓰인 내용"])
+        let menu = try XCTUnwrap((compatibility as? NSButton)?.menu)
+        for title in ["인물과 작품 정보", "작가 수정과 기록", "제안에 쓰인 내용", "원문 검색", "설정"] {
+            XCTAssertTrue(menu.items.contains { $0.title == title })
+        }
         XCTAssertNotNil(menu.items.first?.image)
         XCTAssertTrue(try XCTUnwrap(search as? NSButton).refusesFirstResponder)
-        XCTAssertTrue(h.window.makeFirstResponder(try XCTUnwrap(compatibility as? NSPopUpButton)),
+        XCTAssertTrue(h.window.makeFirstResponder(try XCTUnwrap(compatibility as? NSButton)),
             "The compatibility route must support native keyboard focus")
         let view = try await h.editor(), before = h.fixture.session.activeProject
         view.setSelectedRange(NSRange(location: 3, length: 4))
         let selection = view.selectedRange()
-        for (item, target) in zip(menu.items.dropFirst(), [SidebarSection.bible, .narrative, .context]) {
+        for (identifier, target) in [("mint.workspace.more.characters", WorkspaceTileID.characters), ("mint.workspace.more.narrative", .narrative), ("mint.workspace.context", .context)] {
+            let item = try XCTUnwrap(menu.items.first { $0.accessibilityIdentifier() == identifier })
             XCTAssertTrue(NSApp.sendAction(try XCTUnwrap(item.action), to: item.target, from: item))
             await h.layout()
-            XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), target.rawValue)
+            XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(target) == true)
             XCTAssertEqual(view.selectedRange(), selection)
             XCTAssertEqual(h.fixture.session.activeProject, before)
         }
@@ -33,8 +36,8 @@ final class WriterCompatibilityTests: XCTestCase {
         XCTAssertEqual((search as? NSButton)?.title, "")
         _ = search.accessibilityPerformPress()
         await h.layout()
-        let panel = try XCTUnwrap(NSApp.windows.first { $0.title == "원문 검색" && $0.isVisible })
-        panel.performClose(nil); await h.layout()
+        let panel = try XCTUnwrap(NSApp.windows.first { $0.title == "빠른 검색 및 명령" && $0.isVisible })
+        panel.close(); await h.layout()
         XCTAssertEqual(view.selectedRange(), selection)
         XCTAssertEqual(h.fixture.session.activeProject, before)
         XCTAssertTrue(h.window.firstResponder === view)

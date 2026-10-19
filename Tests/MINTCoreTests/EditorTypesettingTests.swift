@@ -15,7 +15,7 @@ final class EditorTypesettingTests: XCTestCase {
         editor.setSelectedRange(selection)
         let lines = try lineFragments(editor, width: 260)
         XCTAssertGreaterThan(lines.count, 1)
-        XCTAssertEqual(lines[0].rect.minX - lines[1].rect.minX, 20, accuracy: 0.1)
+        XCTAssertEqual(lines[0].rect.minX - lines[1].rect.minX, CGFloat(CompletionSettings.defaultFontSize), accuracy: 0.1)
         let style = try paragraphStyle(editor, at: 0)
         XCTAssertEqual(style.alignment, .left)
         XCTAssertEqual(style.paragraphSpacing, 0)
@@ -59,7 +59,7 @@ final class EditorTypesettingTests: XCTestCase {
         defer { harness.close() }
         let editor = try await harness.editor()
         let initial = try XCTUnwrap(editor.typingAttributes[.paragraphStyle] as? NSParagraphStyle)
-        XCTAssertEqual(initial.firstLineHeadIndent, 20)
+        XCTAssertEqual(initial.firstLineHeadIndent, CGFloat(CompletionSettings.defaultFontSize))
         harness.settings.editorFontSize = 24
         try await harness.waitUntil { editor.baseFontSize == 24 }
         let updated = try XCTUnwrap(editor.typingAttributes[.paragraphStyle] as? NSParagraphStyle)
@@ -144,7 +144,7 @@ final class EditorTypesettingTests: XCTestCase {
         undo.beginUndoGrouping()
         editor.insertNewline(nil)
         let emptyStyle = try XCTUnwrap(editor.typingAttributes[.paragraphStyle] as? NSParagraphStyle)
-        XCTAssertEqual(emptyStyle.firstLineHeadIndent, 20)
+        XCTAssertEqual(emptyStyle.firstLineHeadIndent, CGFloat(CompletionSettings.defaultFontSize))
         XCTAssertEqual(emptyStyle.paragraphSpacing, 0)
         harness.settings.editorFontSize = 24
         try await harness.waitUntil { editor.baseFontSize == 24 }

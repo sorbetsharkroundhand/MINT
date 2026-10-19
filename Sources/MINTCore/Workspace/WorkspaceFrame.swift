@@ -36,13 +36,15 @@ struct WorkspacePaperSurface: NSViewRepresentable {
 struct WorkspaceWindowChrome: View {
     let projectTitle: String
     let theme: MintTheme
+    var trailingInset: CGFloat = 16
+    var onTitlePress: (() -> Void)? = nil
     @State private var trafficLightMaxX: CGFloat?
 
     var body: some View {
-        WorkspaceProjectTitle(title: projectTitle, theme: theme)
+        WorkspaceProjectTitle(title: projectTitle, theme: theme, action: onTitlePress)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
-            .padding(.trailing, 16)
+            .padding(.trailing, trailingInset)
             .frame(height: WorkspaceLayoutPolicy.chromeHeight)
             .background(WorkspaceChromeSurface(theme: theme).allowsHitTesting(false))
             .background(WorkspaceWindowDragRegion())
@@ -53,6 +55,7 @@ struct WorkspaceWindowChrome: View {
 private struct WorkspaceProjectTitle: NSViewRepresentable {
     let title: String
     let theme: MintTheme
+    let action: (() -> Void)?
     func makeNSView(context: Context) -> NSTextField {
         let field = TitleField(labelWithString: title)
         field.font = MintFonts.serif(11.5, weight: .medium)
@@ -63,13 +66,26 @@ private struct WorkspaceProjectTitle: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         field.stringValue = title; field.textColor = theme.ink2
+        (field as? TitleField)?.onPress = action
+        field.setAccessibilityRole(action == nil ? .staticText : .button)
     }
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSTextField, context: Context) -> CGSize? {
         CGSize(width: proposal.width ?? nsView.intrinsicContentSize.width, height: 18)
     }
     final class TitleField: NSTextField {
+        var onPress: (() -> Void)?
+        private var press: NSEvent?
+        private var dragged = false
         override var alignmentRectInsets: NSEdgeInsets { NSEdgeInsetsZero }
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+        override func hitTest(_ point: NSPoint) -> NSView? { onPress == nil ? nil : super.hitTest(point) }
+        override func accessibilityPerformPress() -> Bool { guard let onPress else { return false }; onPress(); return true }
+        override func mouseDown(with event: NSEvent) { press = event; dragged = false }
+        override func mouseDragged(with event: NSEvent) {
+            guard let press, !dragged, hypot(event.locationInWindow.x - press.locationInWindow.x, event.locationInWindow.y - press.locationInWindow.y) > 3 else { return }
+            dragged = true; window?.performDrag(with: press)
+        }
+        override func mouseUp(with event: NSEvent) { if !dragged { onPress?() }; press = nil }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     }
 
 }

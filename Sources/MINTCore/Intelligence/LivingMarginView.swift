@@ -89,6 +89,7 @@ struct LivingMarginView: View {
     var onJumpToEvidence: (MarginInsight, EvidenceAnchor) -> Void
     var onAction: ((MarginInsight, MarginAction) -> Void)?
     var supportsAction: ((MarginInsight) -> Bool)? = nil
+    var spatial: SpatialWorkspaceController? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -104,7 +105,9 @@ struct LivingMarginView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(insights) { insight in
-                            insightRow(insight)
+                            if let spatial {
+                                WorkspaceCompactCard(model: spatial, id: "margin.\(insight.id)", title: insight.title, detail: insight.message, term: insight.evidence.first?.quote ?? "", theme: theme) { insightRow(insight) }.padding(8)
+                            } else { insightRow(insight) }
                             if insight.id != insights.last?.id {
                                 theme.sepC.frame(height: 1)
                                     .padding(.horizontal, MintSpacing.lg)

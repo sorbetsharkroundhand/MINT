@@ -7,6 +7,7 @@ struct ProjectWriterToolsView: View {
     @ObservedObject var editorRequests: ProjectEditorRequests
     let section: SidebarSection
     let theme: MintTheme
+    var spatial: SpatialWorkspaceController? = nil
     @State private var errorMessage: String?
 
     var body: some View {
@@ -48,13 +49,20 @@ struct ProjectWriterToolsView: View {
             Text("직접 적은 설정은 이 문서에 저장돼요.")
                 .foregroundStyle(theme.ink3C)
             ForEach(writer.characters) { card in
+                compactCard(card.id.uuidString, title: card.name.isEmpty ? "새 인물" : card.name, detail: card.note, term: card.name) {
                 CharacterCardRow(card: binding(card, snapshot: snapshot,
                     get: { $0.characters.first { $0.id == card.id } }, edit: { .character($0) }),
                     theme: theme, understanding: [], chronicle: [], knowledge: [], relations: [], conversations: [],
                     onDelete: { apply(.removeCharacter(card.id), identity: snapshot.identity) })
+                    if !card.name.isEmpty { evidence(EvidenceAnchor(documentID: writer.documentID, quote: card.name), snapshot) }
+                }
             }
             if snapshot.mode == .fiction {
-                Button("인물 추가") { apply(.character(CharacterCard()), identity: snapshot.identity) }
+                Button("인물 추가") {
+                    let card = CharacterCard()
+                    apply(.character(card), identity: snapshot.identity)
+                    spatial?.expandedItem = card.id.uuidString
+                }
                     .accessibilityIdentifier("mint.writer.add-character")
             }
             if !writer.rejectedCharacterNames.isEmpty {
@@ -75,6 +83,7 @@ struct ProjectWriterToolsView: View {
             Text("아직 저장된 수정이나 기록이 없어요.").foregroundStyle(theme.ink3C)
         }
         ForEach(Array(writer.narrativeOverrides.enumerated()), id: \.offset) { index, value in
+            compactCard("override.\(value.id)", title: overrideLabel(value.kind), detail: value.value, term: value.anchor ?? "") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("\(overrideLabel(value.kind)) · \(index + 1)")
@@ -91,8 +100,10 @@ struct ProjectWriterToolsView: View {
                 }
             }
             Divider()
+            }
         }
         ForEach(writer.decisions) { value in
+            compactCard("decision.\(value.id)", title: decisionLabel(value.kind), detail: value.statement, term: value.evidence.first?.quote ?? "") {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text(decisionLabel(value.kind)); Spacer()
@@ -105,8 +116,10 @@ struct ProjectWriterToolsView: View {
                 ForEach(Array(value.evidence.enumerated()), id: \.offset) { _, anchor in evidence(anchor, snapshot) }
             }
             Divider()
+            }
         }
         ForEach(writer.recordedConversations) { record in
+            compactCard("record.\(record.id)", title: "기록한 대화", detail: record.firstLine, term: record.firstLine) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
                     Text("기록한 대화"); Spacer()
@@ -116,7 +129,13 @@ struct ProjectWriterToolsView: View {
                 evidence(EvidenceAnchor(documentID: writer.documentID, quote: record.firstLine), snapshot)
             }
             Divider()
+            }
         }
+    }
+
+    @ViewBuilder private func compactCard<Content: View>(_ id: String, title: String, detail: String, term: String, @ViewBuilder content: @escaping () -> Content) -> some View {
+        if let spatial { WorkspaceCompactCard(model: spatial, id: id, title: title, detail: detail, term: term, theme: theme, content: content) }
+        else { content() }
     }
 
     @ViewBuilder private func context(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {
@@ -165,13 +184,11 @@ struct ProjectWriterToolsView: View {
 
     @ViewBuilder private func evidence(_ anchor: EvidenceAnchor, _ snapshot: ProjectDocumentSnapshot) -> some View {
         Text(anchor.quote).mintUIFont(10).foregroundStyle(theme.ink3C).textSelection(.enabled)
-        if let document = session.activeProject?.documents.first(where: { $0.id == anchor.documentID }),
-            anchor.resolvedQuery(in: document.body) != nil {
+        if let project = session.activeProject, let reference = OriginalSourceReference.exact(anchor, in: project) {
             Button("원문 보기") {
-                guard session.runtimeIdentity == snapshot.identity,
-                    let jump = LivingMarginWorkspaceBridge.jump(to: anchor, in: session,
-                        sequence: (editorRequests.searchJump?.sequence ?? 0) + 1) else { return }
-                editorRequests.issueJump(documentID: jump.documentID, query: jump.query)
+                guard session.runtimeIdentity == snapshot.identity else { return }
+                let inspection = ProjectSourceInspection(session: session)
+                if let token = inspection.capture() { editorRequests.jump(to: reference, inspection: inspection, token: token, in: session) }
             }
         } else { Text("원문을 찾을 수 없어요. 설정은 보관돼요.").foregroundStyle(theme.ink3C) }
     }

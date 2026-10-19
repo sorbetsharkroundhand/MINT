@@ -215,6 +215,25 @@ public final class CompletionController: ObservableObject {
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
+    func makeWorkspaceAssistance(session: ProjectSession, requests: ProjectEditorRequests, margin: LivingMarginModel) -> WorkspaceAssistance {
+        let model = WorkspaceAssistance(session: session, requests: requests, margin: margin) { [weak self] system, user in
+            let process = ProcessInfo.processInfo
+            guard let self, self.settings.authorization == .enabled, self.settings.autocompleteEnabled,
+                  self.engineState == .ready, !self.isMemoryPressurePaused, !self.isManagingModel,
+                  !self.foregroundIsBusy, !process.isLowPowerModeEnabled,
+                  process.thermalState != .serious, process.thermalState != .critical else {
+                throw CompletionEngine.ReadyInstructionError.modelUnavailable
+            }
+            let engine = self.engine, parameters = self.settings.parameters
+            return AskAnswerGeneration { emit in
+                try await engine.streamInstructionIfReady(system: system, user: user, parameters: parameters, onChunk: emit)
+            }
+        }
+        model.observe(self)
+        observeForegroundCompletion(owner: model) { [weak model] busy in if busy { model?.cancel() } }
+        return model
+    }
+
     private weak var currentJudgeSupport: ContinuityJudgeSupport?
     func makeContinuityJudgeSupport() -> ContinuityJudgeSupport {
         currentJudgeSupport?.shutdown()

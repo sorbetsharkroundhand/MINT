@@ -16,13 +16,32 @@ public final class ProjectEditorRequests: ObservableObject {
     var judgeSupport: ContinuityJudgeSupport?
     weak var spatialWorkspace: SpatialWorkspaceController?
     weak var pouch: WorkspacePouchController?
+    weak var registeredSession: ProjectSession?
+    var pendingSpatialJump: (jump: EditorSearchJump, identity: ProjectRuntimeIdentity)?
     private final class EditorReference { weak var editor: BlockTextView?; init(_ editor: BlockTextView) { self.editor = editor } }
     private var editors: [ProjectDocumentKey: EditorReference] = [:]
-    func register(_ editor: BlockTextView, for key: ProjectDocumentKey) {
+    var workspaceHover: ((BlockTextView, ProjectDocumentKey, Int) -> Void)?
+    var workspaceHoverEnd: (() -> Void)?
+    var workspacePolish: ((BlockTextView) -> Void)?
+    var workspaceExcerpt: ((BlockTextView) -> Void)?
+    func register(_ editor: BlockTextView, for key: ProjectDocumentKey, session: ProjectSession? = nil) {
         editors = editors.filter { $0.value.editor != nil }
         editors[key] = EditorReference(editor)
+        if let session {
+            registeredSession = session
+            installSpatialInteraction(editor, key: key, session: session)
+            scheduleSpatialNavigation()
+        }
     }
     func editor(for key: ProjectDocumentKey) -> BlockTextView? { editors[key]?.editor }
+    var registeredEditors: [ProjectDocumentKey: BlockTextView] { editors.compactMapValues(\.editor) }
+    func installSpatialInteraction(_ editor: BlockTextView, key: ProjectDocumentKey, session: ProjectSession) {
+        guard let spatialWorkspace, key.projectID == session.activeProject?.id else { return }
+        if let existing = editor.workspaceInteraction as? WorkspaceEditorInteraction, existing.key == key { return }
+        editor.workspaceInteraction = WorkspaceEditorInteraction(editor: editor, key: key,
+            session: session, requests: self, model: spatialWorkspace)
+        editor.updateTrackingAreas()
+    }
     private var consumedSearchFocusRequest = 0
 
     public init() {}
@@ -52,6 +71,12 @@ public final class ProjectEditorRequests: ObservableObject {
             documentID: documentID,
             query: query,
             sequence: (searchJump?.sequence ?? 0) + 1)
+        if let spatialWorkspace, let session = registeredSession {
+            spatialWorkspace.open(documentID)
+            if let identity = session.runtimeIdentity, identity.key.documentID == documentID, let searchJump {
+                pendingSpatialJump = (searchJump, identity); scheduleSpatialNavigation()
+            }
+        }
         focusEditor()
     }
 }

@@ -374,10 +374,12 @@ struct EditorPane: View {
                     positionStore: positionStore,
                     isEditable: projectSession.phase == .ready && !projectSession.isTransitioning,
                     focusRequest: editorRequests.editorFocusRequest,
-                    searchJump: editorRequests.searchJump,
+                    searchJump: editorRequests.spatialWorkspace != nil ? nil : editorRequests.searchJump,
                     assetCatalog: projectSession.assetCatalog,
-                    assetImporter: { [runtime = projectSession.runtimeIdentity] data, reference in
-                        guard let runtime else { throw ProjectSessionError.staleRuntime }
+                    assetImporter: { [key = editorIdentity, epoch = projectSession.activationEpoch] data, reference in
+                        guard case .project(let documentKey) = key,
+                              projectSession.activationEpoch == epoch,
+                              let runtime = projectSession.runtimeIdentity, runtime.key == documentKey else { throw ProjectSessionError.staleRuntime }
                         _ = try await projectSession.importAsset(data: data, reference: reference, for: runtime)
                         guard let catalog = projectSession.assetCatalog else { throw ProjectSessionError.staleRuntime }
                         return catalog
@@ -386,7 +388,7 @@ struct EditorPane: View {
                         guard let editor = view as? BlockTextView else { return }
                         if view.window != nil {
                             if case .project(let key) = editor.writingDocumentIdentity {
-                                editorRequests?.register(editor, for: key)
+                                if let projectSession { editorRequests?.register(editor, for: key, session: projectSession) }
                             }
                             guard editor.writingDocumentIdentity?.documentID == projectSession?.selectedDocumentID else { return }
                             editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in
@@ -412,6 +414,7 @@ struct EditorPane: View {
                         editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in projectSession?.selectedDocumentSnapshot })
                         editorRequests?.nativeEditor = editor; editorRequests?.nativeEditorKey = key
                         editor.isEditable = projectSession?.isEditorEditable == true
+                        editorRequests?.scheduleSpatialNavigation()
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")

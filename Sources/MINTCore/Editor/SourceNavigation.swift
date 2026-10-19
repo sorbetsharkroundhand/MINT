@@ -105,9 +105,43 @@ extension ProjectEditorRequests {
     }
 
     func issueSourceNavigation(_ source: SourceNavigationIntent) {
+        var resolved = source
+        if let spatialWorkspace, let session = registeredSession {
+            spatialWorkspace.open(source.key.documentID)
+            // Opening a middle file can persist a new column reading order. That
+            // synchronous mutation advances the runtime without changing its original.
+            if case .original(let target) = source, let identity = session.runtimeIdentity,
+               identity.key == target.reference.key, let body = session.document(identity.key.documentID)?.body,
+               target.reference.matchesSource(body) {
+                resolved = .original(.init(identity: identity, reference: target.reference))
+            }
+        }
         searchJump = EditorSearchJump(documentID: source.key.documentID, query: "",
-            sequence: (searchJump?.sequence ?? 0) + 1, source: source)
+            sequence: (searchJump?.sequence ?? 0) + 1, source: resolved)
+        if spatialWorkspace != nil, let identity = registeredSession?.runtimeIdentity, let searchJump {
+            pendingSpatialJump = (searchJump, identity); scheduleSpatialNavigation()
+        }
         focusEditor()
+    }
+
+    func scheduleSpatialNavigation() {
+        guard let pending = pendingSpatialJump else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.pendingSpatialJump?.jump == pending.jump,
+                  let session = self.registeredSession, session.runtimeIdentity == pending.identity,
+                  session.isEditorEditable, let editor = self.editor(for: pending.identity.key),
+                  editor.window != nil, !editor.hasMarkedText() else { return }
+            // New tiles initialize their native source projection during attachment. Leave
+            // the fresh request pending until that exact runtime has a proven mapping.
+            if case .original = pending.jump.source, !editor.ownsOriginalSource(pending.identity) { return }
+            self.pendingSpatialJump = nil
+            if let source = pending.jump.source {
+                self.didNavigateSource(editor.applySourceNavigation(source), jump: pending.jump)
+            } else {
+                editor.revealMatch(of: pending.jump.query)
+                editor.window?.makeFirstResponder(editor)
+            }
+        }
     }
 
     func didNavigateSource(_ succeeded: Bool, jump: EditorSearchJump) {
@@ -162,6 +196,7 @@ extension BlockTextView {
         }
         window?.makeFirstResponder(self)
         refreshActiveLineHighlight()
+        workspaceInteraction?.flash(selectedRange())
         return true
     }
 }
