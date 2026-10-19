@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class TypingUndoTests: XCTestCase {
+    func testResponderUndoAndRedoUseTheActiveDocumentHistory() async throws {
+        let h = try await SourceNavigationHarness(); defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("")
+        let view = try await h.editor(), manager = try XCTUnwrap(view.undoManager)
+        h.window.makeKeyAndOrderFront(nil); h.window.makeFirstResponder(view)
+        manager.removeAllActions(); manager.groupsByEvent = true
+        type("Earlier recent", into: view, manager: manager)
+        XCTAssertTrue(manager.canUndo)
+        XCTAssertTrue(view.tryToPerform(Selector(("undo:")), with: nil))
+        XCTAssertEqual(view.serialize(), "Earlier ")
+        XCTAssertTrue(view.tryToPerform(Selector(("redo:")), with: nil))
+        XCTAssertEqual(view.serialize(), "Earlier recent")
+    }
     func testContinuousTypingKeepsEarlierWordsWhenUndoingLastWord() async throws {
         let h = try await SourceNavigationHarness()
         defer { h.close() }

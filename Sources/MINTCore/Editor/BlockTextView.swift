@@ -865,6 +865,25 @@ final class BlockTextView: NSTextView {
     private var workspaceTrackingArea: NSTrackingArea?
     var documentUndoManager: UndoManager?
     override var undoManager: UndoManager? { documentUndoManager ?? super.undoManager }
+    @objc func undo(_ sender: Any?) {
+        guard isEditable, !hasMarkedText(), let manager = undoManager, manager.canUndo else { return }
+        breakUndoCoalescing(); manager.undo()
+    }
+    @objc func redo(_ sender: Any?) {
+        guard isEditable, !hasMarkedText(), let manager = undoManager, manager.canRedo else { return }
+        breakUndoCoalescing(); manager.redo()
+    }
+    private func historyCommandEnabled(_ action: Selector?) -> Bool? {
+        if action == #selector(undo(_:)) { return isEditable && !hasMarkedText() && undoManager?.canUndo == true }
+        if action == #selector(redo(_:)) { return isEditable && !hasMarkedText() && undoManager?.canRedo == true }
+        return nil
+    }
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        historyCommandEnabled(menuItem.action) ?? super.validateMenuItem(menuItem)
+    }
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        historyCommandEnabled(item.action) ?? super.validateUserInterfaceItem(item)
+    }
     var automaticallyFocusOnAttachment = true
     var editorDidActivate: (() -> Void)?
     let writingProjectionCapture = WritingEditorProjectionCapture()

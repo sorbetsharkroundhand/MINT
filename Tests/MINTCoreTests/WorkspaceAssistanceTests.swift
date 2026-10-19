@@ -3,6 +3,44 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspaceAssistanceTests: XCTestCase {
+    func testPolishAcrossAFormattingBoundaryPreservesUnselectedSourceAndUndo() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let original = "Before **한글🙂** after"
+        h.fixture.session.updateSelectedDocumentBody(original)
+        let editor = try await h.editor()
+        editor.undoManager?.groupsByEvent = false
+        editor.setSelectedRange((editor.string as NSString).range(of: "글🙂 after"))
+        var suppliedContext = ""
+        let model = WorkspaceAssistance(session: h.fixture.session, requests: h.requests, margin: LivingMarginModel()) { _, prompt in
+            suppliedContext = prompt
+            return AskAnswerGeneration { emit in try emit("다듬은 문장") }
+        }
+        try model.capture(.polish, editor: editor); await model.generate(prompt: "")
+        XCTAssertTrue(suppliedContext.contains("**글🙂** after"))
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, original)
+        XCTAssertTrue(model.insert())
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, "Before **한**다듬은 문장")
+        editor.undoManager?.undo(); await h.layout()
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, original)
+    }
+    func testExplicitMarginCreatesAnOriginalBackedSuggestionWithoutEditingTheManuscript() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        let original = "Original evidence.\n\nSecond paragraph."
+        h.fixture.session.updateSelectedDocumentBody(original)
+        let editor = try await h.editor(), margin = LivingMarginModel()
+        let model = WorkspaceAssistance(session: h.fixture.session, requests: h.requests, margin: margin) { _, _ in
+            AskAnswerGeneration { emit in try emit("Consider a clearer transition.") }
+        }
+        try model.capture(.margin, editor: editor); await model.generate(prompt: "")
+        XCTAssertTrue(margin.insights.isEmpty)
+        XCTAssertTrue(model.insert())
+        let insight = try XCTUnwrap(margin.insights.last)
+        XCTAssertEqual(insight.kind, .suggestion)
+        XCTAssertEqual(insight.evidence.first?.quote, original)
+        XCTAssertEqual(insight.evidence.first?.documentID, h.fixture.session.selectedDocumentID)
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, original)
+        XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(.margin) == true)
+    }
     func testEditingDuringAStreamCancelsTheProducerAndClearsTheBusyState() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let editor = try await h.editor()

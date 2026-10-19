@@ -14,7 +14,7 @@ Rows group related contracts; they do not imply that screenshots prove every cas
 | Source contract | Production path | Deterministic/native evidence |
 | --- | --- | --- |
 | T01, T03–T07, T11, T13 | `Workspace/SpatialWorkspaceLayout.swift`, `SpatialWorkspaceController.swift`, `SpatialWorkspaceGeometry.swift` | `SpatialWorkspaceTests`, `SpatialWorkspaceControllerTests`: six insertion positions, unique tiles, normalized weights, open/close/all, reading order, corrupt preferences and overflow |
-| T02, T08–T10 | `Workspace/SpatialWorkspaceCanvas.swift`, `SpatialTileHeader.swift`, keyed `ContentView.swift` editor bindings | `SpatialNativeWorkspaceTests`: native header events, insertion preview, cancellation, retained editor identity/selection/composition and independent Undo |
+| T02, T08–T10 | `Workspace/SpatialWorkspaceCanvas.swift`, `SpatialTileHeader.swift`, keyed `ContentView.swift` editor bindings | `SpatialNativeWorkspaceTests`: native header events, insertion preview, cancellation, retained editor identity/selection/composition, named native accessibility groups and independent Undo. `TypingUndoTests` also exercises the responder-chain Undo/Redo commands, rather than only invoking the manager directly |
 | T12 | `Workspace/SpatialNavigatorDragRegion.swift`, `ProjectNavigatorView.swift` | Native navigator events reorder actual documents while retaining both editors |
 | T14–T15 | `Workspace/SpatialResizeHandle.swift`, canvas geometry | Native column/row events, pair equalization, keyboard resizing, project replacement during resize |
 | P01–P04 | `Workspace/WorkspacePouchGeometry.swift`, `WorkspacePouchController.swift`, `WorkspacePouchView.swift` | `WorkspacePouchTests`, `FramedWorkspaceTests`: four edges, orientation, spring convergence, outside collapse, restore with the same editor, real native controls |
@@ -28,7 +28,7 @@ Rows group related contracts; they do not imply that screenshots prove every cas
 | N04 | `Workspace/WorkspaceCommandSearch.swift`, `WorkspaceQuickCommandPanel.swift`, `AppCommands.swift` | `WorkspaceCommandPaletteTests`: categories, first nine results, native title invocation and exact original selection. Source search/Ask remain on Cmd-Option-K |
 | N05 | `Workspace/WorkspaceCompactCard.swift`, `WorkspaceNarrativeCards.swift`, real writer and margin views | `SpatialNarrativePreparationTests`, entity/native tests: shared expansion, real records, original-backed narrative preparation in write mode; current source/runtime admission retained |
 | N07 | Existing palette integration plus pouch/palette theme action | `FramedWorkspaceTests`, `SpatialWorkspaceCaptureTests`: both standard themes; explicit custom palette/font settings remain authoritative |
-| A01–A03 | `Workspace/WorkspaceAssistance.swift`, `WorkspaceAssistancePanel.swift`, local-ready `CompletionController` adapter | `WorkspaceAssistanceTests`: explicit apply, whole-document coauthor context, selected-range polish, no-model error, live cancellation and stale/ABA rejection. Synthetic streams test transactions, not real-model quality |
+| A01–A03 | `Workspace/WorkspaceAssistance.swift`, `WorkspaceAssistancePanel.swift`, local-ready `CompletionController` adapter | `WorkspaceAssistanceTests`: explicit apply, whole-document coauthor context, selected-range polish across formatting boundaries with preserved outside source and Undo, original-backed margin suggestions, no-model error, live cancellation and stale/ABA rejection. Synthetic streams test transactions, not real-model quality |
 
 ## Verification scope
 
@@ -36,8 +36,9 @@ Native tests use synthetic projects under `CFFIXED_USER_HOME`. The optional
 `SpatialWorkspaceCaptureTests` records light/dark workspaces, a mixed tool stack,
 live header insertion preview, typewriter/focus, expanded pouch, collapsed orb and
 restoration; it also asserts the restored editor is the same native instance.
-No fixture comes from a real manuscript. The optional historical journal round-trip
-test now requires an explicitly supplied `MINT_TEST_JOURNAL_FIXTURE` path.
+No fixture comes from a real manuscript. Both historical journal preservation tests
+now require an explicitly supplied `MINT_TEST_JOURNAL_FIXTURE` path. The final pass
+supplies a generated synthetic journal so these checks run instead of being skipped.
 
 The implementation keeps the original six-way layout and motion constants while
 repairing lossy trimming, stale writes, duplicate-source ambiguity and sample AI
