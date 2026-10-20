@@ -16,7 +16,7 @@ struct WorkspaceEntityEvent: Equatable {
 @MainActor final class SpatialWorkspaceController: ObservableObject {
     @Published private(set) var layout = SpatialWorkspaceLayout(documents: [], selected: nil)
     @Published private(set) var previewTarget: SpatialDropTarget?
-    @Published private(set) var pointer = CGPoint.zero
+    private(set) var pointer = CGPoint.zero
     @Published private(set) var isDragging = false
     @Published var typewriter = false { didSet { persist() } }
     @Published var focusDimming = false { didSet { persist() } }
@@ -72,16 +72,7 @@ struct WorkspaceEntityEvent: Equatable {
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     var draggedTile: WorkspaceTileID? { isDragging ? drag?.tile : nil }
     var dragFromNavigator: Bool { drag?.fromNavigator == true }
-    var presentationLayout: SpatialWorkspaceLayout {
-        guard isDragging, let drag, let previewTarget else { return layout }
-        var preview = layout
-        preview.move(.insertionPreview, to: previewTarget)
-        if drag.tile.documentID == nil,
-           let index = preview.columns.firstIndex(where: { $0.slots.count == 1 && $0.slots[0].tile == .insertionPreview }) {
-            preview.columns[index].width = 204
-        }
-        return preview
-    }
+    var presentationLayout: SpatialWorkspaceLayout { layout }
 
     func configure(project: WritingProject, selected: WritingDocumentID?, defaults: UserDefaults? = nil) {
         if let defaults { self.defaults = defaults }
@@ -140,14 +131,12 @@ struct WorkspaceEntityEvent: Equatable {
         if !isDragging {
             guard hypot(point.x - drag.start.x, point.y - drag.start.y) > 5 else { return }
             isDragging = true
-            if !drag.fromNavigator { layout.remove(drag.tile) }
         }
-        if let previewTarget, let gap = geometry.tiles[.insertionPreview],
-           gap.insetBy(dx: -8, dy: 0).contains(point) {
-            self.drag = drag; self.previewTarget = previewTarget; return
+        let nextTarget = geometry.dropTarget(at: point, dragging: drag.tile, fromNavigator: drag.fromNavigator)
+        if previewTarget != nextTarget {
+            previewTarget = nextTarget
         }
-        previewTarget = geometry.dropTarget(at: point, dragging: drag.tile, fromNavigator: drag.fromNavigator)
-        if let previewTarget { drag.lastTarget = previewTarget }
+        if let nextTarget { drag.lastTarget = nextTarget }
         self.drag = drag
     }
     func endDrag() {
@@ -175,8 +164,8 @@ struct WorkspaceEntityEvent: Equatable {
         drag = nil; isDragging = false; previewTarget = nil; navigatorDrop = nil
     }
     func previewNavigator(_ drop: SpatialNavigatorDrop?) {
-        navigatorDrop = drop
-        if drop != nil { previewTarget = nil }
+        if navigatorDrop != drop { navigatorDrop = drop }
+        if drop != nil, previewTarget != nil { previewTarget = nil }
     }
     func commit() { persist(); onCommit?(layout) }
     private var preferenceKey: String { "mint.spatial-workspace.\(projectID?.rawValue.uuidString ?? "none")" }

@@ -1053,7 +1053,11 @@ final class BlockTextView: NSTextView {
 
     /// 디자인 기준(20pt) 대비 배율 — 제목·코드·수식 크기를 함께 확대/축소한다.
     private var fontScale: CGFloat { baseFontSize / 20 }
-    var editorialWorkspaceStyle = false
+    var editorialWorkspaceStyle = false {
+        didSet {
+            (layoutManager as? MintLayoutManager)?.editorialWorkspaceStyle = editorialWorkspaceStyle
+        }
+    }
 
     /// 본문 줄 간격(pt) — 설정에서 주입. `lineHeightMultiple` 대신 `lineSpacing`을
     /// 쓰는 이유: 배수는 여백을 라인 위쪽에 몰아 글자가 커서 아래쪽에 붙지만,
@@ -5765,6 +5769,8 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
 }
 
 final class MintLayoutManager: NSLayoutManager {
+    // TextKit drawing uses this snapshot rather than actor-isolated view state.
+    nonisolated(unsafe) var editorialWorkspaceStyle = false
 
     private var view: BlockTextView? {
         firstTextView as? BlockTextView
@@ -5877,8 +5883,8 @@ final class MintLayoutManager: NSLayoutManager {
 
             switch info.block {
             case .quote:
-                (view.editorialWorkspaceStyle ? theme.workspaceTerracotta : theme.ink2).setFill()
-                NSRect(x: rect.minX, y: rect.minY + 2, width: view.editorialWorkspaceStyle ? 2 : 3, height: rect.height - 4)
+                (editorialWorkspaceStyle ? theme.workspaceTerracotta : theme.ink2).setFill()
+                NSRect(x: rect.minX, y: rect.minY + 2, width: editorialWorkspaceStyle ? 2 : 3, height: rect.height - 4)
                     .fill()
             case .bullet:
                 draw(marker: "•", color: theme.ink2, size: 20,

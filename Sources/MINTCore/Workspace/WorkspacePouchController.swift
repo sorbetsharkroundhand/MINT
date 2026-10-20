@@ -15,6 +15,7 @@ struct WorkspacePouchAction {
     private(set) var panel: NSPanel?
     private(set) var isCollapsed = false
     private(set) var isDragging = false
+    private(set) var willCollapseOnDrop = false
     var reduceMotion = false
     var reduceTransparency = false
     var theme: MintTheme = .light { didSet { refresh() } }
@@ -28,6 +29,7 @@ struct WorkspacePouchAction {
     private var observers: [NSObjectProtocol] = []
     private var subscription: AnyCancellable?
     private var start: CGPoint?
+    private var dragOffset = CGPoint.zero
     private var edge: WorkspacePouchEdge = .left
     private var ratio = 0.45
     private var loadedKey: String?
@@ -90,10 +92,14 @@ struct WorkspacePouchAction {
         savedButtons.removeAll()
         transition?.orderOut(nil); transition?.close(); transition = nil
         panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
-        start = nil; isDragging = false; isCollapsed = false
+        start = nil; isDragging = false; isCollapsed = false; willCollapseOnDrop = false
     }
 
-    func beginDrag(at point: CGPoint) { start = point; isDragging = false }
+    func beginDrag(at point: CGPoint) {
+        start = point; isDragging = false; willCollapseOnDrop = false
+        let origin = panel?.frame.origin ?? CGPoint(x: point.x - 22, y: point.y - 22)
+        dragOffset = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
+    }
     func updateDrag(to point: CGPoint) {
         guard let start, let window else { return }
         if !isDragging {
@@ -101,19 +107,31 @@ struct WorkspacePouchAction {
             isDragging = true; refresh()
         }
         let screen = screenFrame(for: point)
-        target = WorkspacePouchGeometry.clampOrb(CGPoint(x: point.x - 22, y: point.y - 22), screen: screen, margin: 6)
+        // Keep the grabbed button under the pointer while the full rail stays visible.
+        let size = panel?.frame.size ?? CGSize(width: 44, height: 44)
+        target = CGPoint(
+            x: min(max(screen.minX + 6, point.x - dragOffset.x), max(screen.minX + 6, screen.maxX - size.width - 6)),
+            y: min(max(screen.minY + 6, point.y - dragOffset.y), max(screen.minY + 6, screen.maxY - size.height - 6)))
         moveTowardTarget()
-        let orb = CGRect(origin: target, size: CGSize(width: 44, height: 44))
-        if !isCollapsed, !window.frame.insetBy(dx: -4, dy: -4).contains(orb) { collapse() }
+        let orbOrigin = WorkspacePouchGeometry.clampOrb(CGPoint(x: point.x - 22, y: point.y - 22), screen: screen, margin: 6)
+        let orb = CGRect(origin: orbOrigin, size: CGSize(width: 44, height: 44))
+        willCollapseOnDrop = !isCollapsed && !window.frame.insetBy(dx: -4, dy: -4).contains(orb)
     }
     @discardableResult func endDrag(at point: CGPoint) -> Bool {
         guard start != nil else { return false }
+        if isDragging { updateDrag(to: point) }
         start = nil
         let moved = isDragging; isDragging = false
+        let shouldCollapse = willCollapseOnDrop
+        willCollapseOnDrop = false
         guard moved, let window else { refresh(); return false }
         if isCollapsed {
             target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: point))
             moveTowardTarget(); refresh(); return true
+        }
+        if shouldCollapse {
+            target = WorkspacePouchGeometry.clampOrb(CGPoint(x: point.x - 22, y: point.y - 22), screen: screenFrame(for: point))
+            collapse(); return true
         }
         edge = WorkspacePouchGeometry.nearestEdge(point: point, window: window.frame)
         if edge == .left || edge == .right {
@@ -142,7 +160,7 @@ struct WorkspacePouchAction {
     func restore() {
         guard isCollapsed, let window else { return }
         let origin = panel?.frame ?? CGRect(origin: target, size: CGSize(width: 44, height: 44))
-        isCollapsed = false; isDragging = false; start = nil
+        isCollapsed = false; isDragging = false; start = nil; willCollapseOnDrop = false
         window.makeKeyAndOrderFront(nil)
         if let previousResponder { window.makeFirstResponder(previousResponder) }
         refresh(); dock(immediate: false)
@@ -159,7 +177,7 @@ struct WorkspacePouchAction {
                 edge = saved.edge; ratio = min(0.95, max(0.05, saved.ratio))
             } else { edge = .left; ratio = 0.45 }
         }
-        content.configure(orb: isCollapsed || isDragging, horizontal: edge == .top || edge == .bottom,
+        content.configure(orb: isCollapsed, horizontal: edge == .top || edge == .bottom,
             actions: actions, theme: theme)
         panel.hidesOnDeactivate = !isCollapsed
         let opacity: CGFloat = model.whisperTyping && !isCollapsed ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84)
@@ -167,8 +185,8 @@ struct WorkspacePouchAction {
         else if abs(panel.alphaValue - opacity) > 0.001 {
             WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
         }
-        panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed
-        if isCollapsed || isDragging { panel.setContentSize(CGSize(width: 44, height: 44)) }
+        panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed && !isDragging
+        if isCollapsed { panel.setContentSize(CGSize(width: 44, height: 44)) }
         else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
         content.needsLayout = true; content.needsDisplay = true
     }

@@ -8,13 +8,16 @@ After running the application, the owner prioritized reliable manuscript tile gr
 
 The supplied review discusses an earlier independent desk/pinned-card design. Those descriptions do not replace the actual HTML's two-dimensional tiling state machine. Do not introduce an unrelated pinned-card system by treating quoted review text as new implementation requirements.
 
+The owner subsequently supplied replacement code for the editor drawing snapshot, pouch drag lifecycle, controller publishing and frozen canvas geometry, and requested applying it. This direction supersedes the earlier live tile-detachment animation: keep the original tile at 0.38 opacity, move a lightweight pill and drop guide, and commit the layout on release. No build, test or runtime verification was performed for this follow-up either.
+
 ## Implemented changes
 
 - Translate chrome, navigator, tile headers, labeled actions, compact character/event/margin cards, source-backed entity peeks, palette and coauthor presentation into SwiftUI/AppKit. Bundle the source typefaces and audited Lucide icons.
 - Preserve legacy author records, writer tools, modes, AI controls and diagnostics in secondary entry points. Keep project characters visible across documents, and return focus after closing record editors.
 - Keep captured-source assistance on existing local inference. Coauthor requires explicit insertion; explicit polish and margin actions run inline with stale-result guards. Preserve coauthor prompt text while reopening the panel.
-- Use retained native editor hosts for two-dimensional layout. Track a tile drag using an app-level event monitor so hiding its source header cannot end mouse movement/up delivery. Capture its source image before detaching; shrink it into the moving pill, then unfold into the final destination frame. Escape cancels and restores its origin.
-- Keep the independent four-edge pouch, orientation changes, native whole-window collapse/restore and floating collapsed orb. The live manuscript editor remains the same object.
+- Use retained native editor hosts for two-dimensional layout. Track tile dragging through an app-level event monitor, without synchronous tile snapshots. Finish earlier frame transitions before dragging, then keep editor sizes fixed while moving the pill and a noninteractive drop guide. Publish preview changes only when the target changes; pointer updates do not publish. Apply the new layout on release. Escape restores the original presentation.
+- Keep the independent four-edge pouch, orientation changes, native whole-window collapse/restore and floating collapsed orb. Defer collapse until release and keep the full rail and its buttons visible throughout dragging. Preserve the pointer's offset from the grabbed rail so button-originated drags do not jump. Recompute the pending collapse from the release point. The live manuscript editor remains the same object.
+- Mirror the editor's workspace style into the layout manager's drawing snapshot, so quote decoration does not read actor-isolated editor state from the drawing override.
 - Increase outer-window glass density: native Regular glass, with light tint alpha 0.82–0.88 and dark tint alpha 0.86–0.90. Keep manuscript surfaces opaque for writing legibility.
 - Restore native text line fragments rather than imposing the HTML's fixed CSS line box. Keep natural line spacing, explicit author formatting, Hangul IME, selection, undo, Ghost and manuscript serialization on the established editor path.
 - Give text insets one owner. The previous port alternated window-width and tile-width breakpoints in separate callbacks. The editor now computes its horizontal inset once, while workspace decoration no longer rewrites it.
@@ -25,7 +28,7 @@ The supplied review discusses an earlier independent desk/pinned-card design. Th
 | HTML source | Native implementation |
 | --- | --- |
 | `.mint-liquid-glass-window`, `.mint-object-card`, chrome and navigator templates | `WorkspaceLiquidGlass`, `WorkspaceSpatialChrome`, `SpatialTileHeader`, `ProjectNavigatorView` |
-| `spawnWindowMinimizeGhost`, `detachGrabbedWindowAndEatVoid`, document mousemove/mouseup handlers | `SpatialWorkspaceCanvasView`, `SpatialWorkspaceController`, `SpatialWorkspaceGeometry` |
+| Document mousemove/mouseup and tile drop targets; subsequent owner-supplied frozen-drag replacement | `SpatialWorkspaceCanvasView`, `SpatialWorkspaceController`, `SpatialWorkspaceGeometry` |
 | Pouch drag, four-edge docking, whole-window suck/unfold | `WorkspacePouchController`, `WorkspacePouchView`, `WorkspacePouchGeometry` |
 | Character/event/margin templates and entity peek | `WorkspaceCharacterCards`, `WorkspaceNarrativeCards`, `WorkspaceCompactCard`, `WorkspaceEntityController`, `LivingMarginView` |
 | Quick-command and coauthor markup | `WorkspaceQuickCommandPanel`, `WorkspaceAssistancePanel` |
