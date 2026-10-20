@@ -15,7 +15,6 @@ struct WorkspacePouchAction {
     private(set) var panel: NSPanel?
     private(set) var isCollapsed = false
     private(set) var isDragging = false
-    private(set) var willCollapseOnDrop = false
     var reduceMotion = false
     var reduceTransparency = false
     var theme: MintTheme = .light { didSet { refresh() } }
@@ -29,7 +28,8 @@ struct WorkspacePouchAction {
     private var observers: [NSObjectProtocol] = []
     private var subscription: AnyCancellable?
     private var start: CGPoint?
-    private var dragOffset = CGPoint.zero
+    private var dragMonitor: Any?
+    private var draggingCursor = false
     private var edge: WorkspacePouchEdge = .left
     private var ratio = 0.45
     private var loadedKey: String?
@@ -39,6 +39,8 @@ struct WorkspacePouchAction {
     private var lastStep = ProcessInfo.processInfo.systemUptime
     private var savedButtons: [(NSButton, AnyObject?, Selector?)] = []
     private(set) var transition: NSPanel?
+    private var transitionGeneration: UInt64 = 0
+    private var collapsedImage: NSImage?
     private struct Preference: Codable { let edge: WorkspacePouchEdge; let ratio: Double }
 
     init(model: SpatialWorkspaceController, defaults: UserDefaults = .standard) {
@@ -58,6 +60,7 @@ struct WorkspacePouchAction {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "MINT 주머니"; panel.isReleasedWhenClosed = false; panel.isOpaque = false
         panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating
+        panel.isMovable = false; panel.isMovableByWindowBackground = false
         panel.hidesOnDeactivate = true; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let content = WorkspacePouchView(); content.controller = self
         content.setAccessibilityIdentifier("mint.workspace.rail"); content.setAccessibilityLabel("주머니 도구창")
@@ -85,53 +88,64 @@ struct WorkspacePouchAction {
     }
 
     func detach() {
+        stopDragTracking()
         timer?.invalidate(); timer = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
         for (button, owner, action) in savedButtons { button.target = owner; button.action = action }
         savedButtons.removeAll()
-        transition?.orderOut(nil); transition?.close(); transition = nil
+        cancelTransition(); collapsedImage = nil
         panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
-        start = nil; isDragging = false; isCollapsed = false; willCollapseOnDrop = false
+        start = nil; isDragging = false; isCollapsed = false
     }
 
     func beginDrag(at point: CGPoint) {
-        start = point; isDragging = false; willCollapseOnDrop = false
-        let origin = panel?.frame.origin ?? CGPoint(x: point.x - 22, y: point.y - 22)
-        dragOffset = CGPoint(x: point.x - origin.x, y: point.y - origin.y)
+        stopDragTracking()
+        start = point; isDragging = false
+        // Own the gesture before the rail's buttons are hidden or its parent window
+        // is ordered out. Tracking must not depend on the original hit-test view.
+        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
+            guard let self, self.start != nil else { return event }
+            // The pouch moves between events. Sample desktop coordinates directly
+            // instead of converting through the panel's newly moved origin.
+            let point = NSEvent.mouseLocation
+            if event.type == .leftMouseDragged {
+                self.updateDrag(to: point)
+                return nil
+            }
+            let moved = self.endDrag(at: point)
+            // Preserve a stationary button click; consume a drag's mouse-up so the
+            // newly exposed orb cannot immediately reopen the collapsed window.
+            return moved ? nil : event
+        }
     }
     func updateDrag(to point: CGPoint) {
         guard let start, let window else { return }
         if !isDragging {
             guard hypot(point.x - start.x, point.y - start.y) > 4 else { return }
-            isDragging = true; refresh()
+            isDragging = true
+            NSCursor.closedHand.push(); draggingCursor = true
+            refresh()
         }
         let screen = screenFrame(for: point)
-        // Keep the grabbed button under the pointer while the full rail stays visible.
-        let size = panel?.frame.size ?? CGSize(width: 44, height: 44)
-        target = CGPoint(
-            x: min(max(screen.minX + 6, point.x - dragOffset.x), max(screen.minX + 6, screen.maxX - size.width - 6)),
-            y: min(max(screen.minY + 6, point.y - dragOffset.y), max(screen.minY + 6, screen.maxY - size.height - 6)))
+        target = WorkspacePouchGeometry.clampOrb(
+            CGPoint(x: point.x - 22, y: point.y - 22), screen: screen, margin: 6)
         moveTowardTarget()
-        let orbOrigin = WorkspacePouchGeometry.clampOrb(CGPoint(x: point.x - 22, y: point.y - 22), screen: screen, margin: 6)
-        let orb = CGRect(origin: orbOrigin, size: CGSize(width: 44, height: 44))
-        willCollapseOnDrop = !isCollapsed && !window.frame.insetBy(dx: -4, dy: -4).contains(orb)
+        let orb = CGRect(origin: target, size: CGSize(width: 44, height: 44))
+        if !isCollapsed, !window.frame.insetBy(dx: -4, dy: -4).contains(orb) {
+            collapse()
+        }
     }
     @discardableResult func endDrag(at point: CGPoint) -> Bool {
         guard start != nil else { return false }
         if isDragging { updateDrag(to: point) }
         start = nil
         let moved = isDragging; isDragging = false
-        let shouldCollapse = willCollapseOnDrop
-        willCollapseOnDrop = false
+        stopDragTracking()
         guard moved, let window else { refresh(); return false }
         if isCollapsed {
             target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: point))
             moveTowardTarget(); refresh(); return true
-        }
-        if shouldCollapse {
-            target = WorkspacePouchGeometry.clampOrb(CGPoint(x: point.x - 22, y: point.y - 22), screen: screenFrame(for: point))
-            collapse(); return true
         }
         edge = WorkspacePouchGeometry.nearestEdge(point: point, window: window.frame)
         if edge == .left || edge == .right {
@@ -143,6 +157,11 @@ struct WorkspacePouchAction {
         refresh(); dock(immediate: false); return true
     }
 
+    private func stopDragTracking() {
+        if let dragMonitor { NSEvent.removeMonitor(dragMonitor); self.dragMonitor = nil }
+        if draggingCursor { NSCursor.pop(); draggingCursor = false }
+    }
+
     @objc private func collapseFromButton() { collapse() }
     func collapse() {
         guard !isCollapsed, let window, let panel else { return }
@@ -151,22 +170,29 @@ struct WorkspacePouchAction {
             editor.unmarkText(); editor.didChangeText()
         }
         target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
+        cancelTransition()
+        isCollapsed = true
+        // Make the orb independent of application activation before hiding the window.
+        refresh()
+        panel.orderFrontRegardless()
         if !reduceMotion {
             animateSnapshot(of: window, toward: collapsedSnapshotFrame(window: window, orb: CGRect(origin: target, size: CGSize(width: 44, height: 44))))
         }
-        isCollapsed = true; window.orderOut(nil); refresh()
-        panel.setContentSize(CGSize(width: 44, height: 44)); panel.orderFrontRegardless(); moveTowardTarget()
+        window.orderOut(nil)
+        panel.orderFrontRegardless(); moveTowardTarget()
     }
     func restore() {
         guard isCollapsed, let window else { return }
         let origin = panel?.frame ?? CGRect(origin: target, size: CGSize(width: 44, height: 44))
-        isCollapsed = false; isDragging = false; start = nil; willCollapseOnDrop = false
+        stopDragTracking(); cancelTransition()
+        isCollapsed = false; isDragging = false; start = nil
+        if !reduceMotion { window.alphaValue = 0 }
         window.makeKeyAndOrderFront(nil)
         if let previousResponder { window.makeFirstResponder(previousResponder) }
         refresh(); dock(immediate: false)
         if !reduceMotion {
             animateSnapshot(of: window, toward: window.frame, expandingFrom: collapsedSnapshotFrame(window: window, orb: origin))
-        }
+        } else { collapsedImage = nil }
     }
 
     func refresh() {
@@ -177,16 +203,16 @@ struct WorkspacePouchAction {
                 edge = saved.edge; ratio = min(0.95, max(0.05, saved.ratio))
             } else { edge = .left; ratio = 0.45 }
         }
-        content.configure(orb: isCollapsed, horizontal: edge == .top || edge == .bottom,
+        content.configure(orb: isCollapsed || isDragging, horizontal: edge == .top || edge == .bottom,
             actions: actions, theme: theme)
-        panel.hidesOnDeactivate = !isCollapsed
-        let opacity: CGFloat = model.whisperTyping && !isCollapsed ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84)
+        panel.hidesOnDeactivate = !isCollapsed && !isDragging
+        let opacity: CGFloat = model.whisperTyping && !isCollapsed && !isDragging ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84)
         if reduceMotion { panel.alphaValue = opacity }
         else if abs(panel.alphaValue - opacity) > 0.001 {
             WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
         }
         panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed && !isDragging
-        if isCollapsed { panel.setContentSize(CGSize(width: 44, height: 44)) }
+        if isCollapsed || isDragging { panel.setContentSize(CGSize(width: 44, height: 44)) }
         else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
         content.needsLayout = true; content.needsDisplay = true
     }
@@ -241,15 +267,36 @@ struct WorkspacePouchAction {
     @objc private func invokeExtra(_ item: NSMenuItem) {
         guard extraActions.indices.contains(item.tag), extraActions[item.tag].enabled() else { return }; extraActions[item.tag].perform()
     }
+    private func cancelTransition() {
+        transitionGeneration &+= 1
+        transition?.orderOut(nil); transition?.close(); transition = nil
+        window?.alphaValue = 1
+    }
+
     private func animateSnapshot(of window: NSWindow, toward rect: CGRect, expandingFrom origin: CGRect? = nil) {
-        guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
-        view.cacheDisplay(in: view.bounds, to: bitmap)
-        let image = NSImage(size: view.bounds.size); image.addRepresentation(bitmap)
+        let image: NSImage
+        if origin != nil, let cached = collapsedImage {
+            image = cached
+        } else {
+            guard let view = window.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+                window.alphaValue = 1
+                return
+            }
+            // Capture once per collapse, never on pointer movement or animation ticks.
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            image = NSImage(size: view.bounds.size); image.addRepresentation(bitmap)
+            if origin == nil { collapsedImage = image }
+        }
+        let generation = transitionGeneration
         let ghost = NSPanel(contentRect: window.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         ghost.isReleasedWhenClosed = false; ghost.ignoresMouseEvents = true; ghost.level = .floating
-        ghost.isOpaque = false; ghost.backgroundColor = .clear
+        ghost.isOpaque = false; ghost.backgroundColor = .clear; ghost.hasShadow = false
+        ghost.hidesOnDeactivate = false; ghost.animationBehavior = .none
+        ghost.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let imageView = NSImageView(frame: CGRect(origin: .zero, size: window.frame.size))
         imageView.image = image; imageView.imageScaling = .scaleAxesIndependently
+        imageView.autoresizingMask = [.width, .height]
         imageView.wantsLayer = true
         let blur = CIFilter(name: "CIGaussianBlur")
         blur?.name = "collapseBlur"
@@ -260,7 +307,6 @@ struct WorkspacePouchAction {
         blurAnimation.duration = origin == nil ? 0.36 : 0.38
         blurAnimation.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
         imageView.layer?.add(blurAnimation, forKey: "pouch.blur")
-        transition?.orderOut(nil); transition?.close()
         ghost.contentView = imageView; transition = ghost
         if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
         ghost.orderFrontRegardless()
@@ -270,8 +316,13 @@ struct WorkspacePouchAction {
             ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = origin == nil ? 0 : 1
         } completionHandler: { [weak self, weak ghost, weak window] in
             MainActor.assumeIsolated {
+                guard let self, self.transitionGeneration == generation, self.transition === ghost else {
+                    ghost?.orderOut(nil); ghost?.close()
+                    return
+                }
                 window?.alphaValue = 1; ghost?.orderOut(nil); ghost?.close()
-                if self?.transition === ghost { self?.transition = nil }
+                self.transition = nil
+                if origin != nil { self.collapsedImage = nil }
             }
         }
     }

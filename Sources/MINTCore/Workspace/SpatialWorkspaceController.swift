@@ -60,6 +60,7 @@ struct WorkspaceEntityEvent: Equatable {
         let origin: SpatialWorkspaceLayout
         let start: CGPoint
         let fromNavigator: Bool
+        let previewColumnID = UUID()
         var lastTarget: SpatialDropTarget?
     }
     private struct Preference: Codable {
@@ -72,7 +73,19 @@ struct WorkspaceEntityEvent: Equatable {
     init(defaults: UserDefaults = .standard) { self.defaults = defaults }
     var draggedTile: WorkspaceTileID? { isDragging ? drag?.tile : nil }
     var dragFromNavigator: Bool { drag?.fromNavigator == true }
-    var presentationLayout: SpatialWorkspaceLayout { layout }
+    var presentationLayout: SpatialWorkspaceLayout {
+        guard isDragging, let drag, let previewTarget else { return layout }
+        var preview = layout
+        preview.move(.insertionPreview, to: previewTarget)
+        if let index = preview.columns.firstIndex(where: {
+            $0.slots.count == 1 && $0.slots[0].tile == .insertionPreview
+        }) {
+            // Stable identity keeps repeated reads from looking like layout changes.
+            preview.columns[index].id = drag.previewColumnID
+            if drag.tile.documentID == nil { preview.columns[index].width = 204 }
+        }
+        return preview
+    }
 
     func configure(project: WritingProject, selected: WritingDocumentID?, defaults: UserDefaults? = nil) {
         if let defaults { self.defaults = defaults }
@@ -131,6 +144,12 @@ struct WorkspaceEntityEvent: Equatable {
         if !isDragging {
             guard hypot(point.x - drag.start.x, point.y - drag.start.y) > 5 else { return }
             isDragging = true
+            if !drag.fromNavigator { layout.remove(drag.tile) }
+        }
+        // Keep the current destination while crossing the space it opened.
+        if previewTarget != nil, let gap = geometry.tiles[.insertionPreview],
+           gap.insetBy(dx: -8, dy: 0).contains(point) {
+            return
         }
         let nextTarget = geometry.dropTarget(at: point, dragging: drag.tile, fromNavigator: drag.fromNavigator)
         if previewTarget != nextTarget {

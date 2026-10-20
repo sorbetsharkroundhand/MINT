@@ -49,6 +49,8 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var lastTheme: MintTheme?
     private var animateLayout = false
     private var lastLayout: SpatialWorkspaceLayout?
+    private var geometryLayout: SpatialWorkspaceLayout?
+    private var geometryViewport = CGSize.zero
     private var newTiles: Set<WorkspaceTileID> = []
     private var targetFrames: [WorkspaceTileID: CGRect] = [:]
     private struct FrameTransition {
@@ -64,20 +66,13 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var dragMonitor: Any?
     private var dragTracking = false
     private var draggingCursor = false
+    private var dragSequence: UInt64 = 0
+    private var grabbedTile: WorkspaceTileID?
+    private var grabStart = CGPoint.zero
     private var wakeMonitor: Any?
     private var dragPill: NSPanel?
     private let pointerSpring = WorkspacePointerSpring()
-    private final class DropPreviewView: NSView {
-        override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    }
-    private let dropPreviewView: NSView = {
-        let view = DropPreviewView(frame: .zero)
-        view.wantsLayer = true
-        view.layer?.cornerRadius = 13
-        view.layer?.borderWidth = 2
-        view.isHidden = true
-        return view
-    }()
+    private var transitions: [(panel: NSPanel, host: NSView?)] = []
     private var handles: [String: SpatialResizeHandle] = [:]
     private struct Resize {
         let origin: SpatialWorkspaceLayout
@@ -101,12 +96,13 @@ final class SpatialWorkspaceCanvasView: NSView {
             resize = nil
             for host in hosts.values { host.removeFromSuperview() }
             hosts.removeAll(); projectID = model.projectID; lastLayout = nil; targetFrames.removeAll()
+            geometryLayout = nil
             stopDragPresentation()
         }
         let updateExisting = lastTheme != theme
         lastTheme = theme
-        let nextLayout = model.layout
-        animateLayout = lastLayout != nil && lastLayout != nextLayout && resize == nil && !model.isDragging
+        let nextLayout = model.presentationLayout
+        animateLayout = lastLayout != nil && lastLayout != nextLayout && resize == nil
         lastLayout = nextLayout
         var retained = Set(model.layout.tiles)
         if let dragged = model.draggedTile { retained.insert(dragged) }
@@ -125,7 +121,8 @@ final class SpatialWorkspaceCanvasView: NSView {
             if let existing = hosts[tile] {
                 host = existing
                 if updateExisting { host.rootView = content(tile) }
-            } else {
+            }
+            else {
                 host = NSHostingView(rootView: content(tile))
                 host.sizingOptions = []
                 host.wantsLayer = true; host.layer?.masksToBounds = true; host.layer?.cornerRadius = 13
@@ -133,28 +130,19 @@ final class SpatialWorkspaceCanvasView: NSView {
                 hosts[tile] = host; addSubview(host)
                 newTiles.insert(tile)
             }
-            host.isHidden = false
-            host.alphaValue = (model.isDragging && !model.dragFromNavigator && model.draggedTile == tile) ? 0.38 : 1.0
+            host.isHidden = model.isDragging && !model.dragFromNavigator && model.draggedTile == tile
         }
-        if dropPreviewView.superview == nil {
-            addSubview(dropPreviewView)
-        }
-        if !model.isDragging {
-            layoutTiles()
-        } else {
-            updateDragVisuals(previewTarget: model.previewTarget)
-        }
+        layoutTiles()
     }
 
     func layoutTiles() {
         guard let model, viewport.width > 0, viewport.height > 0 else { return }
-        // Keep native editor sizes stable until the drop commits the new layout.
-        guard !model.isDragging else {
-            updateDragVisuals(previewTarget: model.previewTarget)
-            return
+        let presentation = model.presentationLayout
+        if geometryLayout != presentation || geometryViewport != viewport {
+            geometry = SpatialWorkspaceGeometry(layout: presentation, viewport: viewport)
+            geometryLayout = presentation; geometryViewport = viewport
+            if frame.size != geometry.contentSize { setFrameSize(geometry.contentSize) }
         }
-        geometry = SpatialWorkspaceGeometry(layout: model.layout, viewport: viewport)
-        setFrameSize(geometry.contentSize)
         for (tile, host) in hosts {
             guard let rect = geometry.tiles[tile], !host.isHidden else { continue }
             guard targetFrames[tile] != rect || newTiles.contains(tile) else { continue }
@@ -162,11 +150,11 @@ final class SpatialWorkspaceCanvasView: NSView {
             if animateLayout && !reduceMotion {
                 if newTiles.contains(tile) {
                     var start = rect
-                    if model.layout.columns.contains(where: { $0.slots.count == 1 && $0.slots.first?.tile == tile }) { start.size.width = 0 }
+                    if presentation.columns.contains(where: { $0.slots.count == 1 && $0.slots.first?.tile == tile }) { start.size.width = 0 }
                     else { start.size.height = 0 }
                     host.frame = start
                 }
-                transition(host, to: rect, duration: 0.26)
+                transition(host, to: rect, duration: model.isDragging ? 0.28 : 0.30)
             } else {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host)); host.frame = rect
             }
@@ -212,25 +200,32 @@ final class SpatialWorkspaceCanvasView: NSView {
 
     private func updateResizeHandles() {
         guard let model else { return }
+        // Resize controls are not interactive during a tile drag.
+        if model.isDragging {
+            for handle in handles.values { handle.isHidden = true }
+            return
+        }
+        let presentation = model.presentationLayout
         var required: Set<String> = []
         func place(_ identifier: String, axis: SpatialResizeAxis, frame: CGRect) {
             required.insert(identifier)
             let handle = handles[identifier] ?? SpatialResizeHandle()
             if handle.superview == nil { handles[identifier] = handle; addSubview(handle) }
             handle.canvas = self; handle.axis = axis; handle.theme = theme
+            handle.isHidden = false
             handle.frame = frame; handle.toolTip = "드래그하여 크기 조절 · 행 경계 더블클릭: 50:50"
             handle.setAccessibilityIdentifier(identifier); handle.setAccessibilityRole(.splitter)
             handle.setAccessibilityLabel("창 크기 조절")
         }
         for (column, targetRect) in geometry.columns.enumerated() {
-            let slot = model.layout.columns.indices.contains(column) ? model.layout.columns[column].slots.first?.tile : nil
+            let slot = presentation.columns.indices.contains(column) ? presentation.columns[column].slots.first?.tile : nil
             let rect = slot.flatMap { hosts[$0]?.frame } ?? targetRect
             if column < geometry.columns.count - 1 {
                 place("mint.tile.column-resize.\(column)", axis: .column(column),
                     frame: CGRect(x: rect.maxX + 1, y: targetRect.minY, width: 6, height: targetRect.height))
             }
-            guard model.layout.columns.indices.contains(column) else { continue }
-            let slots = model.layout.columns[column].slots
+            guard presentation.columns.indices.contains(column) else { continue }
+            let slots = presentation.columns[column].slots
             for row in 0..<max(0, slots.count - 1) {
                 if let tile = hosts[slots[row].tile]?.frame ?? geometry.tiles[slots[row].tile] {
                     place("mint.tile.row-resize.\(column).\(row)", axis: .row(column, row),
@@ -278,13 +273,14 @@ final class SpatialWorkspaceCanvasView: NSView {
         guard let model, event.buttonNumber == 0 else { return }
         model.cancelDrag()
         stopDragPresentation()
-        // Finish any earlier open/close animation before freezing the drag geometry.
         stopFrameTransitions()
-        animateLayout = false
-        layoutTiles()
-        dragTracking = true
+        animateLayout = false; layoutTiles()
+        dragSequence &+= 1
+        grabbedTile = tile; grabStart = screenPoint(for: event); dragTracking = true
         if let id = tile.documentID { model.onActivate?(id) }
         model.beginDrag(tile, at: canvasPoint(for: event), fromNavigator: fromNavigator)
+        // The source header disappears during detachment. Continue tracking at the app
+        // boundary, like the HTML's document mousemove/mouseup handlers.
         dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp, .keyDown]) { [weak self] event in
             guard let self, self.dragTracking else { return event }
             switch event.type {
@@ -293,6 +289,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             case .leftMouseUp:
                 let moved = self.model?.isDragging == true
                 self.finishPanelDrag(event)
+                // Let a navigator row finish its ordinary click when no drag began.
                 return moved ? nil : event
             case .keyDown where event.keyCode == 53:
                 self.cancelInteraction(); return nil
@@ -300,67 +297,40 @@ final class SpatialWorkspaceCanvasView: NSView {
             }
         }
     }
-
     func continuePanelDrag(_ event: NSEvent) {
         guard dragTracking, let model else { return }
         if event.window === window { autoscroll(with: event) }
-        let wasDragging = model.isDragging
+        let wasDragging = model.isDragging, previous = model.previewTarget
         let pointer = screenPoint(for: event)
+        let beginning = !wasDragging && hypot(pointer.x - grabStart.x, pointer.y - grabStart.y) > 5
+        // Capture the retained native view before publishing a detached layout.
+        let sourceHost = grabbedTile.flatMap { hosts[$0] }
+        let sourceFrame = beginning ? sourceHost.map { screenFrame(of: $0) } : nil
+        let sourceImage = beginning && !model.dragFromNavigator && !reduceMotion ? sourceHost.flatMap { snapshot($0) } : nil
         var presented = geometry
         for (tile, host) in hosts where !host.isHidden { presented.tiles[tile] = host.frame }
         model.updateDrag(to: canvasPoint(for: event), geometry: presented)
         if !wasDragging, model.isDragging {
             NSCursor.closedHand.push(); draggingCursor = true
-            showDragPill(model.draggedTile, at: pointer)
-            if !model.dragFromNavigator, let dragged = model.draggedTile {
-                hosts[dragged]?.alphaValue = 0.38
+            showDragPill(model.draggedTile, at: pointer); positionDragPill(event)
+            if !model.dragFromNavigator, let host = sourceHost, let origin = sourceFrame {
+                frameTransitions.removeValue(forKey: ObjectIdentifier(host))
+                let width = origin.width * min(0.35, max(0.08, 96 / origin.width))
+                let height = origin.height * min(0.28, max(0.06, 36 / origin.height))
+                let destination = CGRect(x: pointer.x + 45 - width / 2, y: pointer.y - height / 2, width: width, height: height)
+                animateTile(host, from: origin, to: destination, duration: 0.24, hidingHost: false, image: sourceImage)
             }
         }
         if model.isDragging {
+            if !model.dragFromNavigator { hosts[model.draggedTile!]?.isHidden = true }
             updateNavigatorDrop(event)
+            if previous != model.previewTarget || !wasDragging {
+                animateLayout = true
+                layoutTiles()
+            }
             positionDragPill(event)
-            updateDragVisuals(previewTarget: model.previewTarget)
         }
     }
-
-    private func updateDragVisuals(previewTarget: SpatialDropTarget?) {
-        guard let target = previewTarget, let rect = previewFrame(for: target) else {
-            dropPreviewView.isHidden = true
-            return
-        }
-        if dropPreviewView.superview == nil { addSubview(dropPreviewView) }
-        else { addSubview(dropPreviewView, positioned: .above, relativeTo: nil) }
-        dropPreviewView.layer?.backgroundColor = theme.blue.withAlphaComponent(0.10).cgColor
-        dropPreviewView.layer?.borderColor = theme.blue.withAlphaComponent(0.55).cgColor
-        dropPreviewView.frame = rect
-        dropPreviewView.isHidden = false
-    }
-
-    private func previewFrame(for target: SpatialDropTarget) -> CGRect? {
-        let inset = SpatialWorkspaceGeometry.inset
-        let height = max(0, geometry.contentSize.height - inset * 2)
-        switch target {
-        case .start:
-            return CGRect(x: inset, y: inset, width: 6, height: height)
-        case .end:
-            return CGRect(x: max(inset, geometry.contentSize.width - inset - 6), y: inset, width: 6, height: height)
-        case .before(let tile):
-            guard let rect = hosts[tile]?.frame ?? geometry.tiles[tile] else { return nil }
-            return CGRect(x: rect.minX, y: rect.minY, width: max(48, rect.width * 0.25), height: rect.height)
-        case .after(let tile):
-            guard let rect = hosts[tile]?.frame ?? geometry.tiles[tile] else { return nil }
-            let width = max(48, rect.width * 0.25)
-            return CGRect(x: rect.maxX - width, y: rect.minY, width: width, height: rect.height)
-        case .above(let tile):
-            guard let rect = hosts[tile]?.frame ?? geometry.tiles[tile] else { return nil }
-            return CGRect(x: rect.minX, y: rect.minY, width: rect.width, height: max(36, rect.height * 0.28))
-        case .below(let tile):
-            guard let rect = hosts[tile]?.frame ?? geometry.tiles[tile] else { return nil }
-            let band = max(36, rect.height * 0.28)
-            return CGRect(x: rect.minX, y: rect.maxY - band, width: rect.width, height: band)
-        }
-    }
-
     private func updateNavigatorDrop(_ event: NSEvent) {
         guard let model, model.dragFromNavigator, let source = model.draggedTile?.documentID,
               let navigator = hosts[.navigator] else { model?.previewNavigator(nil); return }
@@ -375,32 +345,35 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
         model.previewNavigator(nil)
     }
-
     func finishPanelDrag(_ event: NSEvent) {
         guard dragTracking, let model else { return }
         if model.isDragging { continuePanelDrag(event) }
-        model.endDrag()
-        stopDragPresentation()
-        for host in hosts.values {
-            host.isHidden = false
-            host.alphaValue = 1.0
+        let tile = model.draggedTile
+        let origin = dragPill?.frame
+        let sequence = dragSequence
+        model.endDrag(); stopDragPresentation()
+        if let tile { hosts[tile]?.isHidden = false }
+        animateLayout = true; layoutTiles()
+        if let tile, let origin {
+            let project = projectID
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.window != nil, self.projectID == project, self.dragSequence == sequence,
+                      self.model?.isDragging != true, let host = self.hosts[tile],
+                      let destination = self.geometry.tiles[tile] else { return }
+                self.frameTransitions.removeValue(forKey: ObjectIdentifier(host))
+                self.targetFrames[tile] = destination; host.frame = destination; host.isHidden = false
+                host.layoutSubtreeIfNeeded()
+                self.animateTile(host, from: origin, to: self.screenFrame(of: host), duration: 0.32, hidingHost: true)
+            }
         }
-        animateLayout = true
-        layoutTiles()
     }
-
     func cancelInteraction() {
+        dragSequence &+= 1
         if let resize { model?.setLayout(resize.origin, persist: false); self.resize = nil }
-        model?.cancelDrag()
-        stopDragPresentation()
-        for host in hosts.values {
-            host.isHidden = false
-            host.alphaValue = 1.0
-        }
-        animateLayout = true
-        layoutTiles()
+        model?.cancelDrag(); stopDragPresentation()
+        for host in hosts.values { host.isHidden = false }
+        animateLayout = true; layoutTiles()
     }
-
     private func showDragPill(_ tile: WorkspaceTileID?, at pointer: CGPoint) {
         guard let tile else { return }
         let panel = NSPanel(contentRect: CGRect(x: 0, y: 0, width: 180, height: 36),
@@ -437,31 +410,69 @@ final class SpatialWorkspaceCanvasView: NSView {
             WorkspaceHTMLStyle.animate(0.18) { panel.animator().alphaValue = 0.96 }
         }
     }
-
     private func positionDragPill(_ event: NSEvent) {
         let screen = screenPoint(for: event)
         if let dragPill { pointerSpring.move(dragPill, to: CGPoint(x: screen.x + 12, y: screen.y - 18), reducedMotion: reduceMotion) }
     }
-
     private func stopDragPresentation() {
-        dragTracking = false
+        dragTracking = false; grabbedTile = nil
         if draggingCursor { NSCursor.pop(); draggingCursor = false }
         pointerSpring.stop()
-        for host in hosts.values { host.alphaValue = 1 }
-        dropPreviewView.isHidden = true
+        for transition in transitions { transition.host?.alphaValue = 1; transition.panel.orderOut(nil); transition.panel.close() }
+        transitions.removeAll()
         if let dragMonitor { NSEvent.removeMonitor(dragMonitor); self.dragMonitor = nil }
         dragPill?.orderOut(nil); dragPill?.close(); dragPill = nil
     }
-
+    private func screenFrame(of host: NSView) -> CGRect {
+        window?.convertToScreen(host.convert(host.bounds, to: nil)) ?? .zero
+    }
     private func screenPoint(for event: NSEvent) -> CGPoint {
         event.window?.convertPoint(toScreen: event.locationInWindow) ?? NSEvent.mouseLocation
     }
-
     private func canvasPoint(for event: NSEvent) -> CGPoint {
         guard let window else { return .zero }
         return convert(window.convertPoint(fromScreen: screenPoint(for: event)), from: nil)
     }
-
+    private func snapshot(_ host: NSView) -> NSImage? {
+        guard host.bounds.width > 0, host.bounds.height > 0,
+              let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { return nil }
+        host.cacheDisplay(in: host.bounds, to: bitmap)
+        let image = NSImage(size: host.bounds.size); image.addRepresentation(bitmap)
+        return image
+    }
+    private func animateTile(_ host: NSView, from origin: CGRect, to target: CGRect, duration: Double, hidingHost: Bool, image captured: NSImage? = nil) {
+        guard !reduceMotion, origin.width > 0, target.width > 0, let image = captured ?? snapshot(host) else { return }
+        var from = origin
+        if hidingHost {
+            let width = target.width * min(0.45, max(0.08, origin.width / target.width))
+            let height = target.height * min(0.35, max(0.06, origin.height / target.height))
+            from = .init(x: origin.midX - width / 2, y: origin.midY - height / 2, width: width, height: height)
+        }
+        let ghost = NSPanel(contentRect: from, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        ghost.isReleasedWhenClosed = false; ghost.ignoresMouseEvents = true; ghost.isOpaque = false
+        ghost.backgroundColor = .clear; ghost.level = .floating
+        let imageView = NSImageView(frame: CGRect(origin: .zero, size: origin.size))
+        imageView.image = image; imageView.imageScaling = .scaleAxesIndependently
+        imageView.wantsLayer = true; imageView.layer?.masksToBounds = true
+        imageView.layer?.cornerRadius = hidingHost ? 13 : 24
+        let rounding = CABasicAnimation(keyPath: "cornerRadius")
+        rounding.fromValue = hidingHost ? 22 : 13; rounding.toValue = hidingHost ? 13 : 24
+        rounding.duration = duration; rounding.timingFunction = WorkspaceHTMLStyle.calm
+        imageView.layer?.add(rounding, forKey: "tile.rounding")
+        ghost.contentView = imageView
+        transitions.append((ghost, hidingHost ? host : nil))
+        if hidingHost { host.alphaValue = 0; ghost.alphaValue = 0.45 } else { ghost.alphaValue = 0.92 }
+        ghost.orderFrontRegardless()
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = duration; context.timingFunction = CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1)
+            ghost.animator().setFrame(target, display: true); ghost.animator().alphaValue = hidingHost ? 1 : 0
+        } completionHandler: { [weak self, weak host, weak ghost] in
+            MainActor.assumeIsolated {
+                host?.alphaValue = 1; ghost?.orderOut(nil); ghost?.close()
+                self?.transitions.removeAll { $0.panel === ghost }
+            }
+        }
+    }
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window == nil {

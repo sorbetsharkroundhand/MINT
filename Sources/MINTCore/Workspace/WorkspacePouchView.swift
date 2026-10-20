@@ -10,6 +10,8 @@ final class WorkspacePouchView: NSVisualEffectView {
     private var theme: MintTheme = .light
     private(set) var hovered = false
     override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
         material = .popover; blendingMode = .behindWindow; state = .active; wantsLayer = true
@@ -104,6 +106,7 @@ final class WorkspacePouchView: NSVisualEffectView {
 
 final class WorkspacePouchButton: WorkspaceHTMLButton {
     weak var controller: WorkspacePouchController?
+    override var mouseDownCanMoveWindow: Bool { false }
     override func mouseDown(with event: NSEvent) { controller?.beginDrag(at: screenPoint(event)) }
     override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }
     override func mouseUp(with event: NSEvent) {
