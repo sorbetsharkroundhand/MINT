@@ -7,6 +7,12 @@ struct SpatialNavigatorDrop: Equatable {
     let after: Bool
 }
 
+struct WorkspaceEntityEvent: Equatable {
+    let name: String
+    let note: String
+    let reference: OriginalSourceReference
+}
+
 @MainActor final class SpatialWorkspaceController: ObservableObject {
     @Published private(set) var layout = SpatialWorkspaceLayout(documents: [], selected: nil)
     @Published private(set) var previewTarget: SpatialDropTarget?
@@ -16,9 +22,24 @@ struct SpatialNavigatorDrop: Equatable {
     @Published var focusDimming = false { didSet { persist() } }
     @Published var whisperTyping = false
     @Published var expandedItem: String?
+    @Published var writerDetailsVisible = false
+    @Published var narrativeDetailsVisible = false
     @Published var navigatorDrop: SpatialNavigatorDrop?
     @Published var resonatingTerm: String?
     @Published var activeParagraph = ""
+    var entityTerms: [String] = []
+    @Published var entityEvents: [WorkspaceEntityEvent] = []
+    @Published private(set) var toast: String?
+    private var toastTask: Task<Void, Never>?
+    func showToast(_ message: String) {
+        toastTask?.cancel(); toast = message
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(2200))
+            guard !Task.isCancelled else { return }
+            self?.toast = nil
+        }
+    }
+    private(set) var activeDocumentID: WritingDocumentID?
     private(set) var restoredPreference = false
     private var whisperOrigin = CGPoint.zero
     func noteTyping(at point: CGPoint) { whisperOrigin = point; whisperTyping = true }
@@ -64,6 +85,7 @@ struct SpatialNavigatorDrop: Equatable {
 
     func configure(project: WritingProject, selected: WritingDocumentID?, defaults: UserDefaults? = nil) {
         if let defaults { self.defaults = defaults }
+        activeDocumentID = selected
         validDocuments = project.documents.filter { !project.trashedDocumentIDs.contains($0.id) }.map(\.id)
         if projectID != project.id {
             cancelDrag(); loading = true; projectID = project.id
@@ -77,7 +99,8 @@ struct SpatialNavigatorDrop: Equatable {
                     navigatorVisible: self.defaults.object(forKey: "mint.sidebarVisible") as? Bool ?? true)
                 typewriter = false; focusDimming = false
             }
-            whisperTyping = false; expandedItem = nil; loading = false
+            whisperTyping = false; expandedItem = nil; toastTask?.cancel(); toast = nil
+            writerDetailsVisible = false; narrativeDetailsVisible = false; entityEvents = []; loading = false
         }
         guard !isDragging else { return }
         var normalized = layout
@@ -91,11 +114,12 @@ struct SpatialNavigatorDrop: Equatable {
         guard validDocuments.contains(id) else { return }
         layout.openDocument(id); commit(); onActivate?(id)
     }
-    func openAll() { layout.openAll(validDocuments); commit() }
+    func openAll() { layout.openAll(validDocuments); commit(); showToast("\(validDocuments.count)개 파일을 나란히 펼쳤습니다") }
     func toggle(_ tile: WorkspaceTileID) { cancelDrag(); layout.toggle(tile); commit() }
     @discardableResult func close(_ tile: WorkspaceTileID) -> Bool {
         cancelDrag()
-        guard layout.close(tile) else { return false }
+        guard layout.contains(tile) else { return false }
+        guard layout.close(tile) else { showToast("최소 1개의 원고 창은 열려 있어야 합니다"); return false }
         commit(); return true
     }
     func setLayout(_ value: SpatialWorkspaceLayout, persist: Bool = true) {

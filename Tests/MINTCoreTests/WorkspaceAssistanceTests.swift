@@ -3,6 +3,40 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspaceAssistanceTests: XCTestCase {
+    func testInlinePolishAppliesCapturedSelectionAndPreservesUndo() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("앞 문장. **고칠 문장.** 뒤 문장.")
+        let editor = try await h.editor()
+        editor.undoManager?.groupsByEvent = false
+        editor.setSelectedRange((editor.string as NSString).range(of: "고칠 문장."))
+        let original = h.fixture.session.selectedDocument?.body
+        let model = WorkspaceAssistance(session: h.fixture.session, requests: h.requests, margin: LivingMarginModel()) { _, _ in
+            AskAnswerGeneration { emit in try emit("다듬은 문장.") }
+        }
+        let applied = await model.runInline(.polish, editor: editor)
+        XCTAssertTrue(applied)
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, "앞 문장. 다듬은 문장. 뒤 문장.")
+        editor.undoManager?.undo(); await h.layout()
+        XCTAssertEqual(h.fixture.session.selectedDocument?.body, original)
+    }
+
+    func testInlineMarginAnchorsToActiveParagraphAndExpandsNewestCard() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("첫 문단.\n\n지금 쓰는 문단.")
+        let editor = try await h.editor(), margin = LivingMarginModel()
+        editor.setSelectedRange((editor.string as NSString).range(of: "지금"))
+        let model = WorkspaceAssistance(session: h.fixture.session, requests: h.requests, margin: margin) { _, prompt in
+            XCTAssertTrue(prompt.contains("지금 쓰는 문단."))
+            return AskAnswerGeneration { emit in try emit("장면 전환 | 전환의 감각을 한 가지 더해 보세요.") }
+        }
+        let inserted = await model.runInline(.margin, editor: editor)
+        XCTAssertTrue(inserted)
+        let insight = try XCTUnwrap(margin.insights.first)
+        XCTAssertEqual(insight.title, "장면 전환")
+        XCTAssertEqual(insight.message, "전환의 감각을 한 가지 더해 보세요.")
+        XCTAssertEqual(insight.evidence.first?.quote.trimmingCharacters(in: .whitespacesAndNewlines), "지금 쓰는 문단.")
+        XCTAssertEqual(h.requests.spatialWorkspace?.expandedItem, "margin.\(insight.id)")
+    }
     func testPolishAcrossAFormattingBoundaryPreservesUnselectedSourceAndUndo() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let original = "Before **한글🙂** after"
@@ -36,7 +70,7 @@ import XCTest
         XCTAssertTrue(model.insert())
         let insight = try XCTUnwrap(margin.insights.last)
         XCTAssertEqual(insight.kind, .suggestion)
-        XCTAssertEqual(insight.evidence.first?.quote, original)
+        XCTAssertEqual(insight.evidence.first?.quote.trimmingCharacters(in: .whitespacesAndNewlines), "Original evidence.")
         XCTAssertEqual(insight.evidence.first?.documentID, h.fixture.session.selectedDocumentID)
         XCTAssertEqual(h.fixture.session.selectedDocument?.body, original)
         XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(.margin) == true)

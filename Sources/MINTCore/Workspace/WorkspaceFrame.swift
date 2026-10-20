@@ -38,15 +38,18 @@ struct WorkspaceWindowChrome: View {
     let theme: MintTheme
     var trailingInset: CGFloat = 16
     var onTitlePress: (() -> Void)? = nil
+    var documentTitle: String? = nil
+    var openCount: Int? = nil
+    var glass = false
     @State private var trafficLightMaxX: CGFloat?
 
     var body: some View {
-        WorkspaceProjectTitle(title: projectTitle, theme: theme, action: onTitlePress)
+        WorkspaceProjectTitle(title: projectTitle, theme: theme, action: onTitlePress, documentTitle: documentTitle, openCount: openCount)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, WindowChromeGeometry.leadingContentInset(trafficLightMaxX: trafficLightMaxX))
             .padding(.trailing, trailingInset)
             .frame(height: WorkspaceLayoutPolicy.chromeHeight)
-            .background(WorkspaceChromeSurface(theme: theme).allowsHitTesting(false))
+            .background { if !glass { WorkspaceChromeSurface(theme: theme).allowsHitTesting(false) } }
             .background(WorkspaceWindowDragRegion())
             .background(WindowChromeProbe(trafficLightMaxX: $trafficLightMaxX))
     }
@@ -56,6 +59,8 @@ private struct WorkspaceProjectTitle: NSViewRepresentable {
     let title: String
     let theme: MintTheme
     let action: (() -> Void)?
+    var documentTitle: String?
+    var openCount: Int?
     func makeNSView(context: Context) -> NSTextField {
         let field = TitleField(labelWithString: title)
         field.font = MintFonts.serif(11.5, weight: .medium)
@@ -66,6 +71,13 @@ private struct WorkspaceProjectTitle: NSViewRepresentable {
     }
     func updateNSView(_ field: NSTextField, context: Context) {
         field.stringValue = title; field.textColor = theme.ink2
+        if let documentTitle {
+            let value = NSMutableAttributedString(string: title, attributes: [.font: MintFonts.serif(11.5, weight: .medium), .foregroundColor: theme.ink2])
+            value.append(NSAttributedString(string: "  /  ", attributes: [.font: MintFonts.ui(11.5), .foregroundColor: theme.workspaceMuted.withAlphaComponent(0.35)]))
+            value.append(NSAttributedString(string: documentTitle, attributes: [.font: MintFonts.ui(11.5), .foregroundColor: theme.workspaceMuted]))
+            if let openCount { value.append(NSAttributedString(string: "   \(openCount)개 열림", attributes: [.font: MintFonts.mono(10), .foregroundColor: theme.workspaceMuted])) }
+            field.attributedStringValue = value
+        }
         (field as? TitleField)?.onPress = action
         field.setAccessibilityRole(action == nil ? .staticText : .button)
     }

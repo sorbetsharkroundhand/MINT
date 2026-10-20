@@ -63,10 +63,10 @@ struct SelectionToolbarView: View {
                 onAction(.toggleItalic)
             }
             if let onPolish, let onExcerpt {
-                iconButton("text.quote", active: state.block == .quote, help: "인용") { onAction(.block(.quote)) }
+                labelButton("text.quote", "인용", active: state.block == .quote) { onAction(.block(state.block == .quote ? .p : .quote)) }
                 divider
-                iconButton("sparkles", active: false, help: "선택한 문장 다듬기") { onPolish() }
-                iconButton("arrow.up.forward.square", active: false, help: "참고 기록에 발췌") { onExcerpt() }
+                labelButton("wand.and.stars", "다듬기", active: false) { onPolish() }
+                labelButton("arrow.up.forward.square", "메모 발췌", active: false) { onExcerpt() }
                 Menu {
                     Button("인라인 코드") { onAction(.toggleCode) }
                     Button("글자 작게") { onAction(.fontSize(max(Self.minFontSize, state.fontSize - 2))) }
@@ -98,17 +98,17 @@ struct SelectionToolbarView: View {
             }
             }
         }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 4)
         .background(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .fill(theme.pillC)
                 .background(
                     .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    in: RoundedRectangle(cornerRadius: 13, style: .continuous))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 11, style: .continuous)
+            RoundedRectangle(cornerRadius: 13, style: .continuous)
                 .strokeBorder(theme.pillBorderC)
         )
         .shadow(color: .black.opacity(0.18), radius: 14, y: 5)
@@ -118,7 +118,7 @@ struct SelectionToolbarView: View {
     // MARK: 구성 요소
 
     private var divider: some View {
-        theme.sepStrongC.frame(width: 1, height: 15).padding(.horizontal, 3)
+        theme.sepStrongC.frame(width: 1, height: 14).padding(.horizontal, 2)
     }
 
     private func textButton(
@@ -127,7 +127,7 @@ struct SelectionToolbarView: View {
     ) -> some View {
         ToolbarButton(theme: theme, active: active, help: help, action: action) {
             Text(label)
-                .font(.system(size: 12, weight: weight, design: .serif))
+                .font(MintFonts.serifUI(11, weight))
                 .italic(italic)
         }
     }
@@ -139,6 +139,15 @@ struct SelectionToolbarView: View {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
         }
+    }
+
+    private func labelButton(_ symbol: String, _ title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        ToolbarButton(theme: theme, active: active, help: title, width: title == "메모 발췌" ? 78 : (title == "다듬기" ? 62 : 52), tint: title == "다듬기" ? theme.novelC : theme.ink2C, action: action) {
+            HStack(spacing: 4) {
+                WorkspaceIcon(name: symbol, size: 12)
+                Text(title).mintUIFont(11)
+            }
+        }.accessibilityIdentifier("mint.selection.\(symbol)")
     }
 
     private func colorDot(_ hex: String?) -> some View {
@@ -218,6 +227,8 @@ private struct ToolbarButton<Label: View>: View {
     let theme: MintTheme
     let active: Bool
     let help: String
+    var width: CGFloat = 24
+    var tint: Color?
     let action: () -> Void
     @ViewBuilder let label: () -> Label
     @State private var hovered = false
@@ -225,8 +236,8 @@ private struct ToolbarButton<Label: View>: View {
     var body: some View {
         Button(action: action) {
             label()
-                .foregroundStyle(active ? theme.blueC : theme.inkC)
-                .frame(width: 24, height: 24)
+                .foregroundStyle(active ? theme.blueC : (tint ?? theme.inkC))
+                .frame(width: width, height: 26)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .fill(active ? theme.activeBgC : (hovered ? theme.hoverC : .clear))

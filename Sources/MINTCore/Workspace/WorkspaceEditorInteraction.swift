@@ -19,8 +19,15 @@ import Combine
     private var pill: NSPanel?
     private var flashRange: NSRange?
     private var flashTask: Task<Void, Never>?
+    private var flashBegan = 0.0
+    private var pointerInEditor = CGPoint.zero
+    private var presentationTask: Task<Void, Never>?
+    private var previewTask: Task<Void, Never>?
+    private struct Fade { let from: CGFloat; let to: CGFloat; let began: Double }
+    private var fades: [Int: Fade] = [:]
+    private var renderedOpacity: [Int: CGFloat] = [:]
     func flash(_ range: NSRange) {
-        flashTask?.cancel(); flashRange = range; editor?.needsDisplay = true
+        flashTask?.cancel(); flashRange = range; flashBegan = ProcessInfo.processInfo.systemUptime; redrawForMotion()
         flashTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900)); guard !Task.isCancelled else { return }
             self?.flashRange = nil; self?.editor?.needsDisplay = true
@@ -29,6 +36,8 @@ import Combine
     private let pointerSpring = WorkspacePointerSpring()
     private var preview: (range: NSRange, style: NSParagraphStyle, text: String, after: Bool)?
     private var centering = false
+    private var previousTypewriter = false
+    private var previousEditorSize = CGSize.zero
 
     init(editor: BlockTextView, key: ProjectDocumentKey, session: ProjectSession,
          requests: ProjectEditorRequests, model: SpatialWorkspaceController) {
@@ -52,7 +61,7 @@ import Combine
         rect = rect.offsetBy(dx: editor.textContainerOrigin.x, dy: editor.textContainerOrigin.y)
         rect.origin.x = editor.textContainerOrigin.x
         rect.size.width = max(10, editor.bounds.width - editor.textContainerOrigin.x * 2)
-        if rect.height < 10 { rect.size.height = editor.baseFontSize * 1.72 + editor.lineSpacing }
+        if rect.height < 10 { rect.size.height = editor.bodyFont.ascender - editor.bodyFont.descender + editor.lineSpacing }
         return rect
     }
     func paragraphGrip(at offset: Int) -> CGRect? {
@@ -66,11 +75,35 @@ import Combine
            nativeParagraph(at: editor.selectedRange().location).location == range.location { return 1 }
         return hovered.map { nativeParagraph(at: $0).location == range.location } == true ? 0.68 : 0.24
     }
+    private func presentedOpacity(at offset: Int) -> CGFloat {
+        let desired = paragraphOpacity(at: offset), now = ProcessInfo.processInfo.systemUptime
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return desired }
+        if fades[offset]?.to != desired {
+            fades[offset] = .init(from: renderedOpacity[offset] ?? 1, to: desired, began: now)
+            if renderedOpacity[offset, default: 1] != desired { redrawForMotion() }
+        }
+        guard let fade = fades[offset] else { return desired }
+        let value = fade.from + (fade.to - fade.from) * WorkspaceHTMLStyle.progress((now - fade.began) / 0.28)
+        renderedOpacity[offset] = value
+        return value
+    }
+    private func redrawForMotion() {
+        editor?.needsDisplay = true
+        guard presentationTask == nil else { return }
+        presentationTask = Task { [weak self] in
+            for _ in 0..<60 {
+                guard !Task.isCancelled, let self else { return }
+                self.editor?.needsDisplay = true
+                try? await Task.sleep(for: .milliseconds(16))
+            }
+            self?.presentationTask = nil
+        }
+    }
     private func nativeParagraph(at offset: Int) -> NSRange {
         guard let editor else { return NSRange(location: 0, length: 0) }
         let ns = editor.string as NSString
         guard ns.length > 0 else { return NSRange(location: 0, length: 0) }
-        var range = ns.paragraphRange(for: NSRange(location: min(max(0, offset), ns.length - 1), length: 0))
+        var range = ns.paragraphRange(for: NSRange(location: min(max(0, offset), ns.length), length: 0))
         let block = editor.blockInfo(in: range).block
         if block == .code || block == .math {
             while range.location > 0 {
@@ -154,12 +187,17 @@ import Combine
             try WorkspaceParagraphTransfer.perform(source: drag.source, target: target, after: after,
                 copy: event.modifierFlags.contains(.option), session: session, requests: requests,
                 undoManager: requests.editor(for: target.key)?.undoManager)
+            let remaining = (drag.source.body as NSString).replacingCharacters(in: drag.source.range, with: "")
+            let copying = event.modifierFlags.contains(.option) || remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            model?.showToast(target.key == drag.source.key ? "문단 순서를 옮겼습니다" :
+                "‘\(session.document(target.key.documentID)?.title ?? "")’ 파일로 문단을 \(copying ? "복사" : "이동")했습니다")
         } catch { session.reportError(error) }
         editor?.needsDisplay = true
         return true
     }
     func mouseMoved(_ event: NSEvent) {
         guard let editor else { return }
+        pointerInEditor = editor.convert(event.locationInWindow, from: nil)
         model?.notePointer(at: editor.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow)
         hovered = offset(at: editor.convert(event.locationInWindow, from: nil)); editor.needsDisplay = true
         if model?.whisperTyping != true, drag == nil, model?.isDragging != true, let hovered {
@@ -182,24 +220,28 @@ import Combine
     }
     func layoutDidChange() {
         guard let editor else { return }
+        let typewriter = model?.typewriter == true
+        let changed = previousTypewriter != typewriter || previousEditorSize != editor.bounds.size
+        previousTypewriter = typewriter; previousEditorSize = editor.bounds.size
         if let scroll = editor.enclosingScrollView as? WritingScrollView {
-            scroll.workspacePresentationEnabled = true; scroll.workspaceTypewriter = model?.typewriter == true
+            scroll.workspacePresentationEnabled = true; scroll.workspaceTypewriter = typewriter
             scroll.updateWorkspaceInsets()
         }
-        if editor.textContainerInset.height != 32 {
-            editor.textContainerInset = CGSize(width: max(editor.bounds.width < 640 ? 28 : 48, (editor.bounds.width - 680) / 2), height: 32)
-        }
-        centerTypewriter()
+        if changed { centerTypewriter() }
     }
     private func centerTypewriter() {
         guard !centering, model?.typewriter == true, let editor, !editor.hasMarkedText(),
+              model?.isDragging != true, editor.window?.firstResponder === editor, editor.selectedRange().length == 0,
               session?.selectedDocumentID == key.documentID, let scroll = editor.enclosingScrollView,
-              let rect = paragraphRect(at: editor.selectedRange().location) else { return }
+              let rect = editor.caretRectInView() else { return }
         centering = true; defer { centering = false }
         let clip = scroll.contentView
         let minimum = -scroll.contentInsets.top
         let maximum = max(minimum, editor.bounds.height - clip.bounds.height + scroll.contentInsets.bottom)
         let y = min(maximum, max(minimum, rect.midY - clip.bounds.height / 2))
+        guard abs(clip.bounds.minY - y) > 0.5 else { return }
+        // Use the same native caret rect as selection, IME and Ghost. Queued scroll
+        // animations can otherwise pull a newer insertion point back to an old line.
         clip.scroll(to: CGPoint(x: clip.bounds.minX, y: y)); scroll.reflectScrolledClipView(clip)
     }
 
@@ -216,7 +258,9 @@ import Combine
     }
     func drawBackground(_ dirtyRect: CGRect) {
         if let editor, let flashRange, let rect = paragraphRect(at: flashRange.location), rect.intersects(dirtyRect) {
-            editor.palette.activeBg.setFill(); NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
+            let t = WorkspaceHTMLStyle.progress((ProcessInfo.processInfo.systemUptime - flashBegan) / 0.9)
+            (editor.palette.activeBg.blended(withFraction: t, of: editor.palette.activeLine) ?? editor.palette.activeBg).setFill()
+            NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
         }
         guard let editor, let term = model?.resonatingTerm, !term.isEmpty else { return }
         for range in visibleParagraphs() {
@@ -228,23 +272,44 @@ import Combine
         guard let editor else { return }
         for range in visibleParagraphs() {
             guard let rect = paragraphRect(at: range.location), rect.intersects(dirtyRect) else { continue }
-            let opacity = paragraphOpacity(at: range.location)
+            let opacity = presentedOpacity(at: range.location)
             if opacity < 1 {
                 editor.palette.editorSurface.withAlphaComponent(1 - opacity).setFill()
                 rect.insetBy(dx: -12, dy: -3).fill()
             }
             if model?.whisperTyping != true, hovered.map({ nativeParagraph(at: $0).location == range.location }) == true,
                let grip = paragraphGrip(at: range.location) {
-                editor.palette.ink3.withAlphaComponent(0.45).setFill()
+                let overGrip = grip.contains(pointerInEditor)
+                if overGrip { editor.palette.hover.setFill(); NSBezierPath(roundedRect: grip, xRadius: 5, yRadius: 5).fill() }
+                (overGrip ? editor.palette.ink : editor.palette.workspaceMuted.withAlphaComponent(0.45)).setFill()
                 for row in 0..<3 { for column in 0..<2 {
                     NSBezierPath(ovalIn: CGRect(x: grip.midX - 4 + CGFloat(column) * 5,
                         y: grip.midY - 5 + CGFloat(row) * 4, width: 1.7, height: 1.7)).fill()
                 } }
+                drawEntityUnderlines(in: range, editor: editor)
             }
         }
         if let preview, let rect = paragraphRect(at: preview.range.location) {
-            editor.palette.ink3.withAlphaComponent(0.32).setFill()
+            editor.palette.workspaceMuted.withAlphaComponent(0.32).setFill()
             CGRect(x: rect.minX, y: (preview.after ? rect.maxY + 12 : rect.minY - 12), width: rect.width, height: 1.5).fill()
+        }
+    }
+    private func drawEntityUnderlines(in paragraph: NSRange, editor: BlockTextView) {
+        guard let manager = editor.layoutManager, let container = editor.textContainer else { return }
+        let native = editor.string as NSString
+        for term in model?.entityTerms ?? [] where !term.isEmpty && term.count <= 80 {
+            var cursor = paragraph.location
+            while cursor < paragraph.upperBound {
+                let range = native.range(of: term, range: .init(location: cursor, length: paragraph.upperBound - cursor))
+                guard range.location != NSNotFound else { break }; cursor = range.upperBound
+                let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+                manager.enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: .init(location: NSNotFound, length: 0), in: container) { rect, _ in
+                    let rect = rect.offsetBy(dx: editor.textContainerOrigin.x, dy: editor.textContainerOrigin.y)
+                    let path = NSBezierPath(); path.lineWidth = 1; path.setLineDash([1, 2], count: 2, phase: 0)
+                    path.move(to: .init(x: rect.minX, y: rect.maxY - 3)); path.line(to: .init(x: rect.maxX, y: rect.maxY - 3))
+                    (self.model?.resonatingTerm == term ? editor.palette.novel : editor.palette.sepStrong).setStroke(); path.stroke()
+                }
+            }
         }
     }
     private func showDropPreview(at position: Int, after: Bool) {
@@ -253,12 +318,24 @@ import Combine
         let range = nativeParagraph(at: position)
         guard range.length > 0, range.location < storage.length else { return }
         let original = storage.attribute(.paragraphStyle, at: range.location, effectiveRange: nil) as? NSParagraphStyle ?? NSParagraphStyle.default
-        let changed = original.mutableCopy() as! NSMutableParagraphStyle
-        if after { changed.paragraphSpacing += 26 } else { changed.paragraphSpacingBefore += 26 }
         preview = (range, original, editor.string, after)
-        storage.addAttribute(.paragraphStyle, value: changed, range: range); editor.needsDisplay = true
+        let text = editor.string
+        previewTask = Task { [weak self, weak editor] in
+            let began = ProcessInfo.processInfo.systemUptime
+            repeat {
+                guard !Task.isCancelled, let self, let editor, editor.string == text, !editor.hasMarkedText(), self.preview?.range == range else { return }
+                let progress = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 1 : (ProcessInfo.processInfo.systemUptime - began) / 0.26
+                let changed = original.mutableCopy() as! NSMutableParagraphStyle
+                let gap = 26 * WorkspaceHTMLStyle.progress(progress)
+                if after { changed.paragraphSpacing += gap } else { changed.paragraphSpacingBefore += gap }
+                editor.textStorage?.addAttribute(.paragraphStyle, value: changed, range: range); editor.needsDisplay = true
+                if progress >= 1 { return }
+                try? await Task.sleep(for: .milliseconds(16))
+            } while !Task.isCancelled
+        }
     }
     private func clearDropPreview() {
+        previewTask?.cancel(); previewTask = nil
         guard let preview, let editor else { return }
         self.preview = nil
         if editor.string.utf16.elementsEqual(preview.text.utf16), preview.range.upperBound <= editor.string.utf16.count {
@@ -277,14 +354,22 @@ import Combine
             pill = panel
         }
         let text = (drag.source.body as NSString).substring(with: drag.source.range)
-        let label = NSTextField(wrappingLabelWithString: (copying ? "문단 복제" : "문단 이동 · ⌥ 복제") + "\n" + String(text.prefix(120)))
-        label.font = MintFonts.ui(11); label.textColor = editor.palette.ink; label.maximumNumberOfLines = 3
-        label.frame = CGRect(x: 12, y: 6, width: 296, height: 46)
-        let surface = NSView(frame: CGRect(x: 0, y: 0, width: 320, height: 58)); surface.wantsLayer = true
+        let meta = NSTextField(labelWithString: copying ? "문단 복제 (다른 파일로 복사)" : "문단 이동 (Alt 누르면 복제)")
+        meta.font = MintFonts.mono(10); meta.textColor = editor.palette.ink2
+        let label = NSTextField(wrappingLabelWithString: text.trimmingCharacters(in: .whitespacesAndNewlines))
+        label.font = MintFonts.serif(11.5); label.textColor = editor.palette.ink; label.maximumNumberOfLines = 2
+        label.lineBreakMode = .byTruncatingTail
+        let width = min(320, max(meta.fittingSize.width + 42, min(296, label.fittingSize.width) + 24))
+        let surface = NSView(frame: CGRect(x: 0, y: 0, width: width, height: 62)); surface.wantsLayer = true
         surface.layer?.cornerRadius = 10; surface.layer?.backgroundColor = editor.palette.pill.cgColor
-        surface.addSubview(label); pill?.contentView = surface
+        let icon = NSImageView(frame: .init(x: 12, y: 42, width: 12, height: 12))
+        icon.image = WorkspaceIcons.image("file-symlink", size: 12); icon.contentTintColor = editor.palette.ink2
+        meta.frame = .init(x: 30, y: 40, width: width - 42, height: 16)
+        label.frame = CGRect(x: 12, y: 8, width: width - 24, height: 30)
+        surface.addSubview(icon); surface.addSubview(meta); surface.addSubview(label)
+        pill?.setContentSize(surface.frame.size); pill?.contentView = surface; pill?.alphaValue = 0.95
         let point = editor.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow
-        if let pill { pointerSpring.move(pill, to: CGPoint(x: point.x + 14, y: point.y - 40), reducedMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) }
+        if let pill { pointerSpring.move(pill, to: CGPoint(x: point.x + 14, y: point.y + 18 - pill.frame.height), reducedMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) }
         pill?.orderFrontRegardless()
     }
     private func cancelDrag() {
@@ -293,5 +378,5 @@ import Combine
         drag = nil; target = nil; targetEditor = nil
         pointerSpring.stop(); pill?.orderOut(nil); pill?.close(); pill = nil
     }
-    func detach() { cancelDrag(); flashTask?.cancel(); flashTask = nil; subscription?.cancel(); subscription = nil }
+    func detach() { cancelDrag(); flashTask?.cancel(); flashTask = nil; presentationTask?.cancel(); presentationTask = nil; subscription?.cancel(); subscription = nil }
 }

@@ -9,16 +9,33 @@ import XCTest
         PaletteSettings.shared.enabled = false
         defer { PaletteSettings.shared.enabled = customPalette }
         try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let sourceURL = try XCTUnwrap(Bundle.module.url(forResource: "sample", withExtension: "json", subdirectory: "NativeWorkspaceHTML"))
+        let source = try JSONDecoder().decode(HTMLCaptureFixture.self, from: Data(contentsOf: sourceURL))
         for dark in [false, true] {
-            let h = try await FramedWorkspaceHarness(width: 1440, appearance: dark ? .dark : .light, reduceMotion: true, mode: .fiction)
+            let h = try await FramedWorkspaceHarness(width: 1440, appearance: dark ? .dark : .light, reduceMotion: true, projectTitle: source.project.title, mode: .fiction)
             defer { h.close() }
             let session = h.fixture.session
             let a = try XCTUnwrap(session.selectedDocumentID)
-            session.updateSelectedDocumentBody("# 바람이 머무는 곳\n\n서연은 창문을 열었다. 밤새 비가 지나간 골목에는 젖은 나무 향이 남아 있었다.\n\n탁자 위의 편지는 아직 봉투 안에 있었다. 오늘은 읽어야겠다고, 서연은 생각했다.\n\n바깥에서 자전거 종소리가 들렸다. 긴 하루가 이제 막 시작되고 있었다.")
-            try ProjectWriterEditing.perform(.character(CharacterCard(name: "서연", aliases: "편지를 기다리는 사람", note: "도시를 떠나기 전, 오래된 편지를 다시 읽는다.")), in: session, identity: XCTUnwrap(session.runtimeIdentity))
-            let b = try XCTUnwrap(session.createDocument(title: "두 번째 장"))
-            session.updateSelectedDocumentBody("# 두 번째 장\n\n기차가 역에 멈추자 사람들은 천천히 자리에서 일어났다.\n\n서연은 가방 안의 편지를 만졌다. 도착했다는 말을 누구에게 먼저 해야 할지 잠시 망설였다.")
+            var ids: [String: WritingDocumentID] = [:]
+            for (index, doc) in source.project.documents.enumerated() {
+                let id = index == 0 ? a : try XCTUnwrap(session.createDocument(title: doc.title, kind: doc.id.contains("note") ? .note : .manuscript))
+                ids[doc.id] = id
+                session.selectDocument(id)
+                session.renameDocument(try XCTUnwrap(session.runtimeIdentity).key, to: doc.title)
+                session.updateSelectedDocumentBody(doc.paragraphs.map { paragraph in
+                    (paragraph.block == "h1" ? "# " : paragraph.block == "h2" ? "## " : paragraph.block == "quote" ? "> " : "") + paragraph.text
+                }.joined(separator: "\n"))
+                for card in source.characters where card.docId == doc.id {
+                    try ProjectWriterEditing.perform(.character(CharacterCard(name: card.name, note: card.note, role: card.role, traits: card.traits)), in: session, identity: XCTUnwrap(session.runtimeIdentity))
+                }
+            }
+            let b = try XCTUnwrap(ids["doc-ch2"])
             await h.layout(); session.selectDocument(a); await h.layout()
+            h.requests.spatialWorkspace?.open(b); h.requests.spatialWorkspace?.open(a)
+            await h.layout()
+            for doc in source.project.documents.dropFirst(2) { if let id = ids[doc.id] { _ = h.requests.spatialWorkspace?.close(.document(id)) } }
+            await h.layout(); h.window.makeKeyAndOrderFront(nil); await h.layout()
+            try capture(h.host, path: directory + "/initial-\(dark ? "dark" : "light").png")
             let activeEditor = try await h.editor(); h.window.makeFirstResponder(activeEditor)
             let model = try XCTUnwrap(h.requests.spatialWorkspace)
             model.toggle(.characters); model.toggle(.narrative); model.toggle(.margin)
@@ -26,6 +43,37 @@ import XCTest
             try await Task.sleep(for: .milliseconds(400)); await h.layout()
             try capture(h.host, path: directory + "/workspace-\(dark ? "dark" : "light").png")
             if let pouch = h.requests.pouch?.panel?.contentView { try capture(pouch, path: directory + "/pouch-\(dark ? "dark" : "light").png") }
+            let theme: MintTheme = dark ? .dark : .light
+            let suffix = dark ? "dark" : "light"
+            let palette = try XCTUnwrap(WorkspaceQuickCommandPanel.present(session: session, requests: h.requests, theme: theme, toggleTheme: {}))
+            await h.layout()
+            try capture(try XCTUnwrap(palette.window?.contentView), path: directory + "/palette-\(suffix).png")
+            palette.close(); await h.layout()
+            h.window.makeFirstResponder(activeEditor)
+            let assistance = WorkspaceAssistance(session: session, requests: h.requests, margin: LivingMarginModel()) { _, _ in
+                AskAnswerGeneration { emit in try emit("도경은 천천히 면장갑을 벗었다. 창문 너머로 소리의 웃음이 파도처럼 밀려왔다.") }
+            }
+            WorkspaceAssistancePanel.present(.coauthor, model: assistance, requests: h.requests, theme: theme)
+            await h.layout()
+            let coauthor = try XCTUnwrap(NSApp.windows.first { $0.title == "공동 집필" && $0.isVisible })
+            try capture(try XCTUnwrap(coauthor.contentView), path: directory + "/coauthor-idle-\(suffix).png")
+            assistance.coauthorPrompt = "등대의 아침을 이어 써 주세요."
+            await assistance.generate(prompt: assistance.coauthorPrompt); await h.layout()
+            try capture(try XCTUnwrap(coauthor.contentView), path: directory + "/coauthor-result-\(suffix).png")
+            coauthor.close(); await h.layout()
+            h.window.makeFirstResponder(activeEditor)
+            activeEditor.setSelectedRange((activeEditor.string as NSString).range(of: "한도경은"))
+            activeEditor.updateSelectionToolbar(); try await Task.sleep(for: .milliseconds(350))
+            try capture(try XCTUnwrap(activeEditor.workspaceSelectionPanel?.contentView), path: directory + "/selection-\(suffix).png")
+            activeEditor.hideSelectionToolbar(); activeEditor.setSelectedRange(.init(location: 0, length: 0))
+            let entities = WorkspaceEntityController(session: session, requests: h.requests)
+            entities.hover(editor: activeEditor, key: try XCTUnwrap(session.runtimeIdentity).key,
+                nativeOffset: (activeEditor.string as NSString).range(of: "한도경").location)
+            try await Task.sleep(for: .milliseconds(250))
+            if let peek = h.window.childWindows?.first(where: { $0.title == "인물·고증·사건" })?.contentView {
+                try capture(peek, path: directory + "/entity-\(suffix).png")
+            }
+            entities.hide()
             let canvas = try XCTUnwrap(descendant(h.host, SpatialWorkspaceCanvasView.self))
             let header = try XCTUnwrap(h.element("mint.tile.header.document.\(a.rawValue.uuidString)") as? NSView)
             let source = try XCTUnwrap(canvas.geometry.tiles[.document(a)])
@@ -58,4 +106,13 @@ import XCTest
         view.cacheDisplay(in: view.bounds, to: bitmap)
         try XCTUnwrap(bitmap.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: path))
     }
+}
+
+private struct HTMLCaptureFixture: Decodable {
+    let project: Project
+    let characters: [Character]
+    struct Project: Decodable { let title: String; let documents: [Document] }
+    struct Document: Decodable { let id: String; let title: String; let paragraphs: [Paragraph] }
+    struct Paragraph: Decodable { let block: String; let text: String }
+    struct Character: Decodable { let name: String; let role: String; let traits: [String]; let note: String; let docId: String }
 }

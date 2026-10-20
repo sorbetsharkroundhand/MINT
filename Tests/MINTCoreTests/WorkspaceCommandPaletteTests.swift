@@ -3,6 +3,13 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspaceCommandPaletteTests: XCTestCase {
+    func testOriginalSearchExcludesCodeAndMathBlockContents() {
+        let document = WritingDocument(id: WritingDocumentID(), title: "Draft",
+            body: "```swift\nneedle in code\n```\n$$\nneedle in math\n$$\nVisible needle.", kind: .manuscript)
+        let project = WritingProject(id: WritingProjectID(), title: "Search", mode: .general, documents: [document])
+        let results = WorkspaceCommandSearch.items(in: project, query: "needle", typewriter: false, focus: false)
+        XCTAssertEqual(results.filter { $0.kind == .source }.map(\.title), ["Visible needle."])
+    }
     func testTitleClickOpensCommandsAndClosingReturnsToTheSameEditor() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let editor = try await h.editor(); h.window.makeFirstResponder(editor)

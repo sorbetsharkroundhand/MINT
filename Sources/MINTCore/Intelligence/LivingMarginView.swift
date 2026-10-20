@@ -100,15 +100,34 @@ struct LivingMarginView: View {
     var body: some View {
         Group {
             if insights.isEmpty {
-                emptyState
+                if spatial != nil {
+                    Text("아직 마진 노트가 없어요. ✨ 버튼으로 현재 문단의 제안을 받을 수 있어요.")
+                        .mintUIFont(11).foregroundStyle(theme.workspaceMutedC).padding(10)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else { emptyState }
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 0) {
                         ForEach(insights) { insight in
                             if let spatial {
-                                WorkspaceCompactCard(model: spatial, id: "margin.\(insight.id)", title: insight.title, detail: insight.message, term: insight.evidence.first?.quote ?? "", theme: theme) { insightRow(insight) }.padding(8)
+                                WorkspaceCompactCard(model: spatial, id: "margin.\(insight.id)", title: insight.title, detail: insight.message,
+                                    term: insight.evidence.first?.quote ?? "", theme: theme, serif: true,
+                                    sourceDocumentID: insight.evidence.first?.documentID) {
+                                    Text(insight.message).lineSpacing(5).fixedSize(horizontal: false, vertical: true)
+                                    HStack {
+                                        Spacer()
+                                        if let anchor = insight.evidence.first {
+                                            Button("본문 이동 →") { onJumpToEvidence(insight, anchor) }
+                                                .buttonStyle(.plain).mintUIFont(10, .medium).foregroundStyle(theme.novelC)
+                                        }
+                                    }
+                                    ForEach(customActions(insight)) { action in
+                                        Button(action.title) { onAction?(insight, action) }.buttonStyle(.plain).mintUIFont(10).foregroundStyle(theme.novelC)
+                                    }
+                                }.padding(.horizontal, 8).padding(.top, 6)
+                                    .contextMenu { Button("제안 닫기") { dismiss(insight.id) } }
                             } else { insightRow(insight) }
-                            if insight.id != insights.last?.id {
+                            if spatial == nil && insight.id != insights.last?.id {
                                 theme.sepC.frame(height: 1)
                                     .padding(.horizontal, MintSpacing.lg)
                                     .accessibilityHidden(true)
@@ -119,7 +138,7 @@ struct LivingMarginView: View {
             }
         }
         .animation(
-            reduceMotion ? nil : .spring(response: 0.26, dampingFraction: 0.9),
+            reduceMotion || spatial != nil ? nil : .spring(response: 0.26, dampingFraction: 0.9),
             value: insights.map(\.id)
         )
         .accessibilityIdentifier("mint.living-margin")

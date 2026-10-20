@@ -5,6 +5,7 @@ struct SpatialHeaderAction {
     let id: String
     let label: String
     let symbol: String
+    var title = ""
     var selected = false
     var enabled = true
     let perform: () -> Void
@@ -20,7 +21,7 @@ struct SpatialTileHeader: NSViewRepresentable {
     func makeNSView(context: Context) -> SpatialTileHeaderView { SpatialTileHeaderView() }
     func updateNSView(_ view: SpatialTileHeaderView, context: Context) {
         view.tile = tile; view.title.stringValue = title; view.theme = theme; view.active = active
-        view.title.textColor = active ? theme.ink : theme.ink3
+        view.title.textColor = tile.documentID == nil ? theme.ink2 : (active ? theme.ink : theme.workspaceMuted)
         view.title.font = MintFonts.ui(11, weight: active ? .semibold : .medium)
         view.setAccessibilityIdentifier("mint.tile.header.\(tile.id)")
         view.setAccessibilityLabel(title + " — 드래그하여 배치")
@@ -33,32 +34,39 @@ final class SpatialTileHeaderView: NSView {
     var theme: MintTheme = .light
     var active = false
     let title = PassthroughTitle(labelWithString: "")
-    private var buttons: [NSButton] = []
+    private var buttons: [WorkspaceHTMLButton] = []
+    private let icon = PassthroughIcon()
     private var actions: [SpatialHeaderAction] = []
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { false }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
         title.lineBreakMode = .byTruncatingTail; title.maximumNumberOfLines = 1
         title.setAccessibilityElement(false); addSubview(title)
+        icon.setAccessibilityElement(false); addSubview(icon)
     }
     required init?(coder: NSCoder) { nil }
     func configure(_ actions: [SpatialHeaderAction]) {
         self.actions = actions
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
-            let button = NSButton(title: "", target: self, action: #selector(invoke(_:)))
-            button.isBordered = false; button.refusesFirstResponder = true
+            let button = WorkspaceHTMLButton(frame: .zero)
+            button.target = self; button.action = #selector(invoke(_:))
             buttons.append(button); addSubview(button)
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]
-            button.tag = index; button.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.label)
+            button.tag = index; button.title = action.title
+            button.font = MintFonts.ui(10.5, weight: action.selected ? .semibold : .regular)
+            button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: action.title.isEmpty ? 12 : 10)
             button.toolTip = action.label; button.setAccessibilityLabel(action.label)
             button.setAccessibilityIdentifier(action.id)
-            button.contentTintColor = action.selected ? theme.blue : theme.ink3
+            button.contentTintColor = action.selected ? theme.blue : theme.workspaceMuted
             button.setAccessibilityValue(NSNumber(value: action.selected))
             button.isEnabled = action.enabled
+            button.theme = theme; button.selected = action.selected; button.refresh()
         }
     }
     @objc private func invoke(_ button: NSButton) {
@@ -67,16 +75,23 @@ final class SpatialTileHeaderView: NSView {
     }
     override func layout() {
         super.layout()
-        let leading: CGFloat = tile.documentID == nil ? 12 : 24
-        var x = bounds.width - 6
-        for button in buttons.reversed() { x -= 32; button.frame = CGRect(x: x, y: 0, width: 32, height: 32) }
+        let leading: CGFloat = tile.documentID == nil ? 30 : 26
+        var x = bounds.width - (tile.documentID == nil ? 12 : 14)
+        for button in buttons.reversed() {
+            let width: CGFloat = button.title.isEmpty ? 20 : ceil((button.title as NSString).size(withAttributes: [.font: button.font!]).width) + 12 + (button.image == nil ? 0 : 14)
+            x -= width; button.frame = CGRect(x: x, y: 6, width: width, height: 20); x -= tile.documentID == nil ? 2 : 4
+        }
         title.frame = CGRect(x: leading, y: 8, width: max(0, x - leading - 5), height: 18)
+        let symbol: String? = switch tile { case .navigator: "folder"; case .characters: "person.2"; case .narrative: "arrow.triangle.branch"; case .margin: "sparkles"; case .document: nil; default: "square.grid.2x2" }
+        icon.isHidden = symbol == nil
+        icon.image = symbol.flatMap { WorkspaceIcons.image($0, size: 12) }
+        icon.contentTintColor = theme.workspaceMuted; icon.frame = CGRect(x: 12, y: 10, width: 12, height: 12)
     }
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         if tile.documentID != nil {
-            (active ? theme.ink.withAlphaComponent(0.75) : theme.ink3.withAlphaComponent(0.25)).setFill()
-            NSBezierPath(ovalIn: CGRect(x: 12, y: 13, width: 6, height: 6)).fill()
+            (active ? theme.ink.withAlphaComponent(0.75) : theme.workspaceMuted.withAlphaComponent(0.25)).setFill()
+            NSBezierPath(ovalIn: CGRect(x: 14, y: 13, width: 6, height: 6)).fill()
         }
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
@@ -86,6 +101,9 @@ final class SpatialTileHeaderView: NSView {
     override func cancelOperation(_ sender: Any?) { canvas?.cancelInteraction() }
     private var canvas: SpatialWorkspaceCanvasView? { enclosingSpatialCanvas }
     final class PassthroughTitle: NSTextField {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+    final class PassthroughIcon: NSImageView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

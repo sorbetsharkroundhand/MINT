@@ -47,7 +47,7 @@ final class FramedWorkspaceTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(closeRect.minX, navigatorRect.minX + 12)
                 XCTAssertLessThanOrEqual(closeRect.maxX, navigatorRect.maxX,
                     "Long titles must not push the close button outside the clipped navigator")
-                XCTAssertEqual(close.bounds.width, 32, accuracy: 0.5)
+                XCTAssertEqual(close.bounds.width, 20, accuracy: 0.5, "HTML navigator controls are 20 points")
                 XCTAssertEqual(h.fixture.session.activeProject?.title, title)
             }
             try XCTUnwrap(h.element("mint.navigator.close") as? NSButton).performClick(nil)
@@ -65,8 +65,8 @@ final class FramedWorkspaceTests: XCTestCase {
         XCTAssertEqual(rail.bounds.height, 236, accuracy: 0.5)
         for identifier in ["mint.workspace.navigator-toggle", "mint.source-search.show"] {
             let button = try XCTUnwrap(h.element(identifier) as? NSButton)
-            XCTAssertGreaterThanOrEqual(button.bounds.width, 32)
-            XCTAssertGreaterThanOrEqual(button.bounds.height, 32)
+            XCTAssertEqual(button.bounds.width, 28, "HTML pouch controls are 28 points")
+            XCTAssertEqual(button.bounds.height, 28)
             if let menu = (button as? NSPopUpButton)?.menu {
                 for item in menu.items.dropFirst() { XCTAssertNotNil(item.target); XCTAssertNotNil(item.action) }
             } else { XCTAssertNotNil(button.target, identifier); XCTAssertNotNil(button.action, identifier) }
@@ -122,7 +122,7 @@ final class FramedWorkspaceTests: XCTestCase {
         try XCTUnwrap(h.element("mint.navigator.close") as? NSButton).performClick(nil); await h.layout()
         XCTAssertTrue(h.window.firstResponder === editor)
         h.fixture.defaults.set(true, forKey: "mint.sidebarVisible"); await h.layout()
-        XCTAssertNotNil(h.field("프로젝트 검색"))
+        XCTAssertNil(h.field("프로젝트 검색"), "Closing consumes the search request; reopening restores the compact source navigator")
         XCTAssertTrue(h.window.firstResponder === editor)
     }
 
@@ -179,7 +179,7 @@ final class FramedWorkspaceTests: XCTestCase {
 
     func testNavigatorColumnKeepsEditorAllocationAndIdentityAtNarrowWidths() async throws {
         let h = try await FramedWorkspaceHarness(presentationDefaults: [
-            "mint.sidebarVisible": true, "mint.sidebarWidth": 250.0, "mint.toolDockPosition": "left"])
+            "mint.sidebarVisible": true, "mint.sidebarWidth": 250.0, "mint.toolDockPosition": "left"], reduceMotion: true)
         defer { h.close() }
         let editor = try await h.editor()
         for width: CGFloat in [860, 1023, 1024, 1180, 1440] {
@@ -291,7 +291,7 @@ final class FramedWorkspaceTests: XCTestCase {
         XCTAssertEqual(frame.layer?.cornerRadius, 13)
         XCTAssertEqual(frame.layer?.masksToBounds, false, "Decoration must not clip editor transients")
         XCTAssertTrue(chrome.mouseDownCanMoveWindow)
-        XCTAssertEqual(title.stringValue, project.title + " · " + (h.fixture.session.selectedDocument?.title ?? ""))
+        XCTAssertEqual(title.stringValue, project.title + "  /  " + (h.fixture.session.selectedDocument?.title ?? "") + "   1개 열림")
         let buttonsMaxX = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
             .compactMap { h.window.standardWindowButton($0) }
             .map { $0.convert($0.bounds, to: nil).maxX }.max() ?? 0
@@ -348,8 +348,8 @@ final class FramedWorkspaceTests: XCTestCase {
         editor.setSelectedRange(NSRange(location: 3, length: 4))
         let before = h.fixture.session.activeProject
         let close = try XCTUnwrap(h.element("mint.navigator.close") as? NSButton)
-        XCTAssertGreaterThanOrEqual(close.bounds.width, 32)
-        XCTAssertGreaterThanOrEqual(close.bounds.height, 32)
+        XCTAssertEqual(close.bounds.width, 20)
+        XCTAssertEqual(close.bounds.height, 20)
         XCTAssertEqual(close.accessibilityLabel(), "파일 목록 숨기기")
         close.performClick(nil); await h.layout()
         XCTAssertFalse(h.fixture.defaults.bool(forKey: "mint.sidebarVisible"))

@@ -14,7 +14,7 @@ struct WorkspaceRail: View {
 
     var body: some View {
         VStack(spacing: 4) {
-            Capsule().fill(theme.ink3C.opacity(0.35))
+            Capsule().fill(theme.workspaceMutedC.opacity(0.35))
                 .frame(width: 14, height: 3)
                 .padding(.vertical, 5)
                 .accessibilityHidden(true)

@@ -35,6 +35,9 @@ public enum EditorMetrics {
     public static func sideInset(forWidth width: CGFloat) -> CGFloat {
         max(minSideInset, ((width - maxContentWidth) / 2).rounded())
     }
+    static func workspaceSideInset(forWidth width: CGFloat, windowWidth: CGFloat) -> CGFloat {
+        max(windowWidth < 640 ? 28 : 48, ((width - 680) / 2).rounded())
+    }
 }
 
 /// 고스트 텍스트(M3)는 기존 방식 그대로: storage 밖에서 `draw(_:)`로만 그린다.
@@ -145,7 +148,7 @@ public struct MintBlockEditor: NSViewRepresentable {
         layoutManager.addTextContainer(container)
 
         let textView = BlockTextView(frame: .zero, textContainer: container)
-        if case .project = documentIdentity { textView.documentUndoManager = UndoManager() }
+        if case .project = documentIdentity { textView.documentUndoManager = UndoManager(); textView.editorialWorkspaceStyle = true }
         textView.automaticallyFocusOnAttachment = isActiveEditor
         textView.writingDocumentIdentity = documentIdentity
         textView.setAccessibilityIdentifier(isActiveEditor ? "mint.editor" : "mint.editor.\(documentIdentity.documentID.rawValue.uuidString)")
@@ -166,7 +169,8 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.drawsBackground = false
         // 디자인: padding 46px 60px — inset은 좌우 동일 적용이라 56으로 근사.
-        textView.textContainerInset = NSSize(width: 56, height: 44)
+        textView.textContainerInset = textView.editorialWorkspaceStyle
+            ? NSSize(width: 48, height: 32) : NSSize(width: 56, height: 44)
         // 커서는 잉크색(라이트=검정/다크=하양) — 높이는 커서 위치의 글자 크기를 따른다.
         textView.insertionPointColor = theme.ink
         // 시스템 사각 선택 하이라이트는 끈다 — 선택 영역은 우리가 draw()에서
@@ -728,8 +732,9 @@ final class WritingScrollView: NSScrollView {
     var workspaceTypewriter = false
     func updateWorkspaceInsets() {
         guard workspacePresentationEnabled else { return }
+        // Ordinary writing keeps the established 25% bottom breathing room.
         let next = NSEdgeInsets(top: workspaceTypewriter ? bounds.height * 0.26 : 0, left: 0,
-            bottom: workspaceTypewriter ? bounds.height * 0.38 : 0, right: 0)
+            bottom: bounds.height * (workspaceTypewriter ? 0.38 : gutterFraction), right: 0)
         if abs(contentInsets.top - next.top) > 0.5 || abs(contentInsets.bottom - next.bottom) > 0.5 { contentInsets = next }
     }
     /// 활성 줄이 park할 지점을 남기기 위해 뷰 높이에 곱하는 하단 여백 비율.
@@ -1048,6 +1053,7 @@ final class BlockTextView: NSTextView {
 
     /// 디자인 기준(20pt) 대비 배율 — 제목·코드·수식 크기를 함께 확대/축소한다.
     private var fontScale: CGFloat { baseFontSize / 20 }
+    var editorialWorkspaceStyle = false
 
     /// 본문 줄 간격(pt) — 설정에서 주입. `lineHeightMultiple` 대신 `lineSpacing`을
     /// 쓰는 이유: 배수는 여백을 라인 위쪽에 몰아 글자가 커서 아래쪽에 붙지만,
@@ -1241,7 +1247,7 @@ final class BlockTextView: NSTextView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        if window == nil { workspaceInteraction?.detach() }
+        if window == nil { workspaceInteraction?.detach(); hideSelectionToolbar() }
         editorWindowDidChange?(self)
         guard automaticallyFocusOnAttachment, !didInitialFocus, window != nil else { return }
         didInitialFocus = true
@@ -2049,6 +2055,7 @@ final class BlockTextView: NSTextView {
                     ps.alignment = align == "right" ? .right : .center
                 }
                 if let spacing = emptyTailInline[.mintLineSpacing] as? Double {
+                    ps.minimumLineHeight = 0; ps.maximumLineHeight = 0
                     ps.lineSpacing = CGFloat(spacing)
                 }
             }
@@ -2169,6 +2176,8 @@ final class BlockTextView: NSTextView {
             storage.attribute(.paragraphStyle, at: paragraph.location, effectiveRange: nil)
             as? NSParagraphStyle ?? .default
         guard let ps = current.mutableCopy() as? NSMutableParagraphStyle else { return }
+        // Explicit author formatting keeps its native line-spacing semantics.
+        ps.minimumLineHeight = 0; ps.maximumLineHeight = 0
         ps.lineSpacing = CGFloat(spacing)
         storage.addAttribute(.paragraphStyle, value: ps, range: paragraph)
     }
@@ -2195,18 +2204,20 @@ final class BlockTextView: NSTextView {
                 ps.paragraphSpacing = 10
             }
         case .h1:
-            font = MintFonts.serif(31 * fontScale, weight: .bold)
-            ps.paragraphSpacingBefore = 16
-            ps.paragraphSpacing = 4
+            font = MintFonts.serif(editorialWorkspaceStyle ? baseFontSize * 1.52 : 31 * fontScale, weight: .bold)
+            ps.paragraphSpacingBefore = editorialWorkspaceStyle ? baseFontSize * 1.52 * 0.2 : 16
+            ps.paragraphSpacing = editorialWorkspaceStyle ? baseFontSize * 1.52 * 0.25 : 4
         case .h2:
-            font = MintFonts.serif(25 * fontScale, weight: .semibold)
-            ps.paragraphSpacingBefore = 12
-            ps.paragraphSpacing = 2
+            font = MintFonts.serif(editorialWorkspaceStyle ? baseFontSize * 1.12 : 25 * fontScale, weight: editorialWorkspaceStyle ? .medium : .semibold)
+            if editorialWorkspaceStyle { color = t.workspaceMuted }
+            ps.paragraphSpacingBefore = editorialWorkspaceStyle ? baseFontSize * 1.12 * 0.1 : 12
+            ps.paragraphSpacing = editorialWorkspaceStyle ? baseFontSize * 1.12 : 2
         case .h3:
             font = MintFonts.serif(21 * fontScale, weight: .semibold)
             ps.paragraphSpacingBefore = 8
         case .quote:
             color = t.ink2
+            if editorialWorkspaceStyle { font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask) }
             ps.firstLineHeadIndent = 19
             ps.headIndent = 19
             ps.paragraphSpacingBefore = 6
@@ -2251,6 +2262,12 @@ final class BlockTextView: NSTextView {
             .foregroundColor: color,
             .paragraphStyle: ps,
         ]
+        if editorialWorkspaceStyle, [.p, .h1, .h2, .quote].contains(block) {
+            attrs[.kern] = -font.pointSize * (block == .h1 ? 0.025 : 0.012)
+            // Keep TextKit's natural line fragments and native caret baseline.
+            // Editorial color, type and decoration must not impose a CSS line box.
+            if block == .quote { attrs[.obliqueness] = 0.18 }
+        }
         if block == .todo, checked {
             attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             attrs[.strikethroughColor] = t.ink3
@@ -4642,6 +4659,7 @@ final class BlockTextView: NSTextView {
                 ps.alignment = align == "right" ? .right : .center
             }
             if let spacing = storage.attribute(.mintLineSpacing, at: paragraph.location, effectiveRange: nil) as? Double {
+                ps.minimumLineHeight = 0; ps.maximumLineHeight = 0
                 ps.lineSpacing = CGFloat(spacing)
             }
         }
@@ -4759,14 +4777,16 @@ final class BlockTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         let widthChanged = abs(frame.width - newSize.width) > 0.5
         super.setFrameSize(newSize)
+        if widthChanged {
+            let inset = editorialWorkspaceStyle
+                ? EditorMetrics.workspaceSideInset(forWidth: newSize.width, windowWidth: window?.frame.width ?? 640)
+                : EditorMetrics.sideInset(forWidth: newSize.width)
+            if abs(textContainerInset.width - inset) > 0.5 {
+                textContainerInset = NSSize(width: inset, height: textContainerInset.height)
+            }
+        }
         workspaceInteraction?.layoutDidChange()
         guard widthChanged else { return }
-        // 가독 폭 유지 — 넓어진 만큼 좌우 여백(inset)을 키워 본문을 가운데로 모은다.
-        let inset = workspaceInteraction == nil ? EditorMetrics.sideInset(forWidth: newSize.width)
-            : max(newSize.width < 640 ? 28 : 48, (newSize.width - 680) / 2)
-        if abs(textContainerInset.width - inset) > 0.5 {
-            textContainerInset = NSSize(width: inset, height: textContainerInset.height)
-        }
         // 폭이 바뀌면 수식·이미지 축소 배율이 달라진다 — 줄 높이를 다시 맞춘다.
         if !mathRenders.isEmpty || !imageRenders.isEmpty {
             DispatchQueue.main.async { [weak self] in self?.refreshRenderedBlocks() }
@@ -4776,6 +4796,7 @@ final class BlockTextView: NSTextView {
     // MARK: 서식 툴바 (선택 위 플로팅)
 
     private var toolbarHost: NSHostingView<SelectionToolbarView>?
+    private(set) var workspaceSelectionPanel: NSPanel?
     private var toolbarShowTask: Task<Void, Never>?
     /// 이미지 객체 선택 시 뜨는 정렬·크기·줄바꿈 툴바 (요구 3).
     private var imageToolbarHost: NSHostingView<ImageObjectToolbarView>?
@@ -4805,6 +4826,10 @@ final class BlockTextView: NSTextView {
 
     func hideSelectionToolbar() {
         toolbarShowTask?.cancel()
+        if let panel = workspaceSelectionPanel {
+            workspaceSelectionPanel = nil
+            panel.parent?.removeChildWindow(panel); panel.orderOut(nil); panel.close()
+        }
         toolbarHost?.removeFromSuperview()
     }
 
@@ -4830,6 +4855,27 @@ final class BlockTextView: NSTextView {
             toolbarHost = host
         }
         let size = host.fittingSize
+        if editorialWorkspaceStyle, let window {
+            // A fixed source popover crosses tile boundaries instead of being clipped by a column.
+            let anchor = window.convertToScreen(convert(rect, to: nil))
+            let screen = window.screen?.visibleFrame ?? window.frame
+            let panel = workspaceSelectionPanel ?? NSPanel(contentRect: .zero,
+                styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            let appeared = workspaceSelectionPanel == nil
+            panel.title = "선택 서식"; panel.isReleasedWhenClosed = false
+            panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = true
+            panel.hidesOnDeactivate = true; panel.level = .floating
+            panel.contentView = host; panel.setContentSize(size)
+            if appeared {
+                let point = CGPoint(x: min(screen.maxX - size.width - 8, max(screen.minX + 8, anchor.midX - size.width / 2)),
+                    y: min(screen.maxY - size.height - 8, anchor.maxY + 8))
+                panel.setFrameOrigin(.init(x: point.x, y: point.y - 4))
+                window.addChildWindow(panel, ordered: .above); panel.alphaValue = 0; panel.orderFront(nil)
+                WorkspaceHTMLStyle.animate(0.22) { panel.animator().alphaValue = 1; panel.animator().setFrameOrigin(point) }
+            }
+            workspaceSelectionPanel = panel
+            return
+        }
         // 이미 떠 있으면 위치를 고정한다 — 글자 크기를 줄이면 선택 rect가 움직여
         // 툴바가 따라다니며 연타를 방해했다. 한번 뜬 툴바는 선택이 사라질 때까지
         // 그 자리(상단 중앙 기준)에 머문다 (요구 3).
@@ -4846,6 +4892,12 @@ final class BlockTextView: NSTextView {
         origin.x = max(8, min(origin.x, bounds.width - size.width - 8))
         host.frame = NSRect(origin: origin, size: size)
         addSubview(host)
+        if editorialWorkspaceStyle && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            host.alphaValue = 0; host.frame.origin.y += 4
+            WorkspaceHTMLStyle.animate(0.22) {
+                host.animator().alphaValue = 1; host.animator().setFrameOrigin(origin)
+            }
+        }
     }
 
     private func currentSelectionState() -> SelectionStyleState {
@@ -5570,7 +5622,7 @@ final class BlockTextView: NSTextView {
         ctx.restoreGState()
     }
 
-    private func caretRectInView() -> NSRect? {
+    func caretRectInView() -> NSRect? {
         guard let window else { return nil }
         let caret = selectedRange().location
         guard caret != NSNotFound else { return nil }
@@ -5825,8 +5877,8 @@ final class MintLayoutManager: NSLayoutManager {
 
             switch info.block {
             case .quote:
-                theme.ink2.setFill()
-                NSRect(x: rect.minX, y: rect.minY + 2, width: 3, height: rect.height - 4)
+                (view.editorialWorkspaceStyle ? theme.workspaceTerracotta : theme.ink2).setFill()
+                NSRect(x: rect.minX, y: rect.minY + 2, width: view.editorialWorkspaceStyle ? 2 : 3, height: rect.height - 4)
                     .fill()
             case .bullet:
                 draw(marker: "•", color: theme.ink2, size: 20,

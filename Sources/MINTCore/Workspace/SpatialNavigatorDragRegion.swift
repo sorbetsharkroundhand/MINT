@@ -29,6 +29,8 @@ final class SpatialNavigatorDragView: NSView {
     var documentID = WritingDocumentID()
     var onClick: (() -> Void)?
     override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override func mouseDown(with event: NSEvent) {
         enclosingSpatialCanvas?.beginPanelDrag(.document(documentID), event: event, fromNavigator: true)
     }

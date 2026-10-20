@@ -2,7 +2,7 @@ import Foundation
 import CryptoKit
 
 struct WorkspaceCommandItem: Identifiable {
-    enum Kind: String { case command = "명령", file = "문서", character = "인물", source = "원문" }
+    enum Kind: String { case command = "명령", file = "파일", character = "인물", source = "원문" }
     enum Action {
         case typewriter, focus, openAll, theme, document(WritingDocumentID)
         case character(WritingDocumentID, UUID), source(OriginalSourceReference)
@@ -17,20 +17,20 @@ struct WorkspaceCommandItem: Identifiable {
 enum WorkspaceCommandSearch {
     static func items(in project: WritingProject, query: String, typewriter: Bool, focus: Bool) -> [WorkspaceCommandItem] {
         var items: [WorkspaceCommandItem] = [
-            .init(id: "typewriter", title: "타자기 모드 \(typewriter ? "끄기" : "켜기")", detail: "현재 문단을 화면 가운데로", kind: .command, action: .typewriter),
-            .init(id: "focus", title: "집중 모드 \(focus ? "끄기" : "켜기")", detail: "현재 문단에 집중", kind: .command, action: .focus),
-            .init(id: "all", title: "모든 문서 나란히 열기", detail: "열린 원고 유지", kind: .command, action: .openAll),
-            .init(id: "theme", title: "테마 전환", detail: "밝게 / 어둡게", kind: .command, action: .theme)
+            .init(id: "typewriter", title: "타자기 중앙 스크롤 \(typewriter ? "끄기" : "켜기")", detail: "현재 문단을 화면 눈높이 중앙에 유지", kind: .command, action: .typewriter),
+            .init(id: "focus", title: "문단 집중 디밍 \(focus ? "끄기" : "켜기")", detail: "집필 중인 문단 외 주변 문단 흐리게", kind: .command, action: .focus),
+            .init(id: "all", title: "모든 파일 나란히 펼치기", detail: "프로젝트의 모든 문서를 나란히 비교", kind: .command, action: .openAll),
+            .init(id: "theme", title: "라이트 / 다크 테마 전환", detail: "에디토리얼 양피지 · 흑연 테마 전환", kind: .command, action: .theme)
         ]
         let documents = project.documents.filter { !project.trashedDocumentIDs.contains($0.id) }
         for document in documents {
-            items.append(.init(id: "file.\(document.id)", title: document.title, detail: "나란히 열기", kind: .file, action: .document(document.id)))
+            items.append(.init(id: "file.\(document.id)", title: document.title, detail: "\(WorkspaceWritingStatistics(text: document.body, goal: 500).paragraphs)개 문단 · 나란히 열기 또는 이동", kind: .file, action: .document(document.id)))
         }
         var seen: Set<UUID> = []
         for document in documents {
             if let data = try? WriterDocumentData.decode(project.userData[WriterDocumentData.key(for: document.id)], documentID: document.id) {
                 for card in data.characters where !card.name.isEmpty && card.autoRegistered != true && seen.insert(card.id).inserted {
-                    items.append(.init(id: "character.\(card.id)", title: card.name, detail: card.note, kind: .character, action: .character(document.id, card.id)))
+                    items.append(.init(id: "character.\(card.id)", title: card.name + ((card.role?.isEmpty == false) ? " (\(card.role!))" : ""), detail: card.note, kind: .character, action: .character(document.id, card.id)))
                 }
             }
         }
@@ -39,12 +39,23 @@ enum WorkspaceCommandSearch {
         for document in documents {
             let body = document.body as NSString
             var cursor = 0
+            var fence: Character?
+            var math = false
             let revision = SHA256.hash(data: Data(document.body.utf8)).map { String(format: "%02x", $0) }.joined()
             while cursor < body.length {
                 let paragraph = body.paragraphRange(for: NSRange(location: cursor, length: 0))
                 cursor = paragraph.upperBound
                 let raw = body.substring(with: paragraph)
-                guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                    if fence == nil { fence = trimmed.first }
+                    else if fence == trimmed.first { fence = nil }
+                    continue
+                }
+                if fence != nil { continue }
+                if trimmed == "$$" { math.toggle(); continue }
+                if math { continue }
+                guard !trimmed.isEmpty, !trimmed.hasPrefix("#"), !trimmed.hasPrefix("```"), !trimmed.hasPrefix("!["), !trimmed.hasPrefix("$$") else { continue }
                 if !needle.isEmpty && !raw.localizedCaseInsensitiveContains(needle) && !document.title.localizedCaseInsensitiveContains(needle) && !WorkspaceCommandItem.Kind.source.rawValue.localizedCaseInsensitiveContains(needle) { continue }
                 var start = paragraph.location
                 if !needle.isEmpty {
@@ -55,7 +66,8 @@ enum WorkspaceCommandSearch {
                 let quote = body.substring(with: chunk)
                 let reference = OriginalSourceReference(key: .init(projectID: project.id, documentID: document.id), revision: revision,
                     evidence: .init(documentID: document.id, quote: quote, utf16Hint: chunk.location), selection: .passage)
-                items.append(.init(id: "source.\(document.id).\(start)", title: String(quote.prefix(100)).replacingOccurrences(of: "\n", with: " "),
+                let display = quote.trimmingCharacters(in: .whitespacesAndNewlines)
+                items.append(.init(id: "source.\(document.id).\(start)", title: String(display.prefix(46)) + (display.count > 46 ? "…" : ""),
                     detail: document.title, kind: .source, action: .source(reference)))
                 if needle.isEmpty || items.filter({ $0.kind == .source }).count >= 9 { break }
             }

@@ -3,6 +3,37 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspaceEntityTests: XCTestCase {
+    func testEventPeekRejectsAChangedOriginal() async throws {
+        let h = try await FramedWorkspaceHarness(mode: .fiction); defer { h.close() }
+        let session = h.fixture.session
+        session.updateSelectedDocumentBody("1999년 12월 31일 — 파도가 높았다.")
+        let editor = try await h.editor(), document = try XCTUnwrap(session.selectedDocument)
+        let reference = try XCTUnwrap(OriginalSourceReference.exact(.init(documentID: document.id, quote: document.body, utf16Hint: 0), in: XCTUnwrap(session.activeProject)))
+        let entities = WorkspaceEntityController(session: session, requests: h.requests)
+        h.requests.spatialWorkspace?.entityEvents = [.init(name: "1999년 12월 31일", note: "당직 일지", reference: reference)]
+        entities.hover(editor: editor, key: reference.key, nativeOffset: 2)
+        XCTAssertEqual(entities.peek?.badge, "사건")
+        entities.hide()
+        session.updateSelectedDocumentBody("1999년 12월 31일 — 원문이 바뀌었다.")
+        await h.layout()
+        entities.hover(editor: editor, key: reference.key, nativeOffset: 2)
+        XCTAssertNil(entities.peek)
+    }
+    func testResearchNoteHeadingProducesAnOriginalBackedPeekInAnotherDocument() async throws {
+        let h = try await FramedWorkspaceHarness(mode: .fiction); defer { h.close() }
+        let session = h.fixture.session, manuscript = try XCTUnwrap(session.selectedDocumentID)
+        session.updateSelectedDocumentBody("도경은 프레넬 렌즈를 닦았다.")
+        let note = try XCTUnwrap(session.createDocument(title: "등대 고증", kind: .note))
+        session.updateSelectedDocumentBody("## 프레넬 렌즈\n동심원 계단식 유리 프리즘.")
+        session.selectDocument(manuscript); await h.layout()
+        let editor = try await h.editor()
+        let model = WorkspaceEntityController(session: session, requests: h.requests)
+        model.hover(editor: editor, key: try XCTUnwrap(session.runtimeIdentity).key,
+            nativeOffset: (editor.string as NSString).range(of: "프레넬 렌즈").location)
+        XCTAssertEqual(model.peek?.name, "프레넬 렌즈")
+        XCTAssertEqual(model.peek?.reference.key.documentID, note)
+        model.hide()
+    }
     func testPeekUsesNativeSourceMappingAcrossAnEarlierOpaqueMathOccurrence() async throws {
         let h = try await FramedWorkspaceHarness(mode: .fiction); defer { h.close() }
         let session = h.fixture.session

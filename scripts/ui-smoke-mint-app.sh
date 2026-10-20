@@ -348,12 +348,12 @@ on run argv
             if not (value of attribute "AXFocused" of searchField) then error "Project search focus missing"
         else if operation is "resize" then
             set size of rootElement to {expectedValue as integer, 700}
+        else if operation is "escape" then
+            tell targetProcess to key code 53
         else if operation is "autocomplete" then
-            set autocompleteControl to my findElement(rootElement, "AXDescription", "자동완성", 30)
-            -- Newer macOS versions expose SwiftUI labels as AXAttributedDescription.
-            if autocompleteControl is missing value then set autocompleteControl to my findElementContaining(rootElement, "AXHelp", "자동완성 ·", 30)
+            set autocompleteControl to my findElement(targetProcess, "AXIdentifier", "mint.workspace.autocomplete", 30)
             if autocompleteControl is missing value then error "자동완성 컨트롤 없음"
-            if (value of attribute "AXValue" of autocompleteControl as text) is not "자동완성 꺼짐" then error "자동완성 접근성 상태 유실"
+            if (value of attribute "AXTitle" of autocompleteControl as text) is not "자동완성 꺼짐" then error "자동완성 접근성 상태 유실"
         else if operation is "navigator" then
             if my findElement(rootElement, "AXIdentifier", "mint.navigator", 30) is missing value then error "탐색기 없음"
         else if operation is "focused" then
@@ -458,8 +458,20 @@ wait_ui() {
 }
 
 open_writer_information() {
-    ui press "mint.workspace.characters"
-    wait_ui present "mint.tile.close.characters"
+    ui press "mint.writer-tools.compatibility"
+    ui press "mint.workspace.more.characters"
+    wait_ui present "mint.writer.genre"
+}
+
+close_writer_information() {
+    ui press "mint.writer.details.close"
+    ui press "mint.tile.close.characters"
+}
+
+assert_autocomplete_disabled() {
+    ui press "mint.writer-tools.compatibility"
+    wait_ui autocomplete ""
+    ui escape ""
 }
 
 assert_isolated_project_mode() {
@@ -481,12 +493,15 @@ wait_ui equals "$PROJECT_BODY"
 ui redo ""
 wait_ui equals "$PERSISTED_BODY"
 # Implemented Write/Map modes remain available without model setup (#302).
-ui present "mint.workspace-mode"
+ui press "mint.writer-tools.compatibility"
+ui present "mint.workspace.mode.write"
+ui present "mint.workspace.mode.map"
+ui escape ""
 ui absent "리빙 마진"
 ui absent "문서로 돌아가기"
 ui absent "mint.ghost-shortcut-hint"
 ui resize 1250
-wait_ui autocomplete ""
+assert_autocomplete_disabled
 ui press "파일 목록 숨기기"
 ui press "파일 목록 보이기"
 ui navigator
@@ -526,13 +541,13 @@ ui field-set "mint.writer.genre" "$WRITER_GENRE"
 ui press "mint.writer.add-character"
 ui field-set "mint.writer.character.name." "$WRITER_NAME"
 ui field-set "mint.writer.character.note." "$WRITER_NOTE"
-ui press "mint.tile.close.characters"
+close_writer_information
 ui focused
 ui resize 860
-wait_ui autocomplete ""
+assert_autocomplete_disabled
 open_writer_information
 ui absent "리빙 마진"
-ui press "mint.tile.close.characters"
+close_writer_information
 ui focused
 ui navigator
 ui press "새 문서"
@@ -546,7 +561,7 @@ wait_ui equals "$NEW_BODY"
 open_writer_information
 ui field-equals "mint.writer.genre" ""
 ui field-absent "mint.writer.character.name."
-ui press "mint.tile.close.characters"
+close_writer_information
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 # Address the generated document by its persisted identity, not a localized AX label.
@@ -577,13 +592,12 @@ ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
 open_writer_information
 ui field-equals "mint.writer.genre" "$WRITER_GENRE"
-ui press-containing "mint.card."
 ui field-equals "mint.writer.character.name." "$WRITER_NAME"
 ui field-equals "mint.writer.character.note." "$WRITER_NOTE"
 ui press "인물 삭제"
 ui field-absent "mint.writer.character.name."
 ui field-set "mint.writer.genre" ""
-ui press "mint.tile.close.characters"
+close_writer_information
 ui focused
 terminate
 verify_project_state "$SMOKE_HOME/Documents/MINT" "$PERSISTED_BODY" >/dev/null

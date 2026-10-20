@@ -36,7 +36,7 @@ struct WorkspacePouchAction {
     private var timer: Timer?
     private var lastStep = ProcessInfo.processInfo.systemUptime
     private var savedButtons: [(NSButton, AnyObject?, Selector?)] = []
-    private var transition: NSPanel?
+    private(set) var transition: NSPanel?
     private struct Preference: Codable { let edge: WorkspacePouchEdge; let ratio: Double }
 
     init(model: SpatialWorkspaceController, defaults: UserDefaults = .standard) {
@@ -56,7 +56,7 @@ struct WorkspacePouchAction {
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "MINT 주머니"; panel.isReleasedWhenClosed = false; panel.isOpaque = false
         panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating
-        panel.hidesOnDeactivate = true; panel.collectionBehavior = [.fullScreenAuxiliary]
+        panel.hidesOnDeactivate = true; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         let content = WorkspacePouchView(); content.controller = self
         content.setAccessibilityIdentifier("mint.workspace.rail"); content.setAccessibilityLabel("주머니 도구창")
         panel.contentView = content; self.panel = panel; self.content = content
@@ -133,7 +133,9 @@ struct WorkspacePouchAction {
             editor.unmarkText(); editor.didChangeText()
         }
         target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
-        if !reduceMotion { animateSnapshot(of: window, toward: CGRect(origin: target, size: CGSize(width: 44, height: 44))) }
+        if !reduceMotion {
+            animateSnapshot(of: window, toward: collapsedSnapshotFrame(window: window, orb: CGRect(origin: target, size: CGSize(width: 44, height: 44))))
+        }
         isCollapsed = true; window.orderOut(nil); refresh()
         panel.setContentSize(CGSize(width: 44, height: 44)); panel.orderFrontRegardless(); moveTowardTarget()
     }
@@ -145,7 +147,7 @@ struct WorkspacePouchAction {
         if let previousResponder { window.makeFirstResponder(previousResponder) }
         refresh(); dock(immediate: false)
         if !reduceMotion {
-            animateSnapshot(of: window, toward: window.frame, expandingFrom: origin)
+            animateSnapshot(of: window, toward: window.frame, expandingFrom: collapsedSnapshotFrame(window: window, orb: origin))
         }
     }
 
@@ -159,7 +161,12 @@ struct WorkspacePouchAction {
         }
         content.configure(orb: isCollapsed || isDragging, horizontal: edge == .top || edge == .bottom,
             actions: actions, theme: theme)
-        panel.alphaValue = model.whisperTyping && !isCollapsed ? 0.06 : (reduceTransparency ? 1 : 0.84)
+        panel.hidesOnDeactivate = !isCollapsed
+        let opacity: CGFloat = model.whisperTyping && !isCollapsed ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84)
+        if reduceMotion { panel.alphaValue = opacity }
+        else if abs(panel.alphaValue - opacity) > 0.001 {
+            WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
+        }
         panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed
         if isCollapsed || isDragging { panel.setContentSize(CGSize(width: 44, height: 44)) }
         else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
@@ -184,9 +191,10 @@ struct WorkspacePouchAction {
         if reduceMotion { spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target); return }
         guard timer == nil else { return }
         lastStep = ProcessInfo.processInfo.systemUptime
-        timer = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.step() }
         }
+        self.timer = timer; RunLoop.main.add(timer, forMode: .common)
     }
     private func step() {
         let now = ProcessInfo.processInfo.systemUptime, elapsed = now - lastStep; lastStep = now
@@ -202,17 +210,18 @@ struct WorkspacePouchAction {
         moreMenu().popUp(positioning: nil, at: CGPoint(x: view.bounds.maxX, y: view.bounds.midY), in: view)
     }
     func moreMenu() -> NSMenu {
-        let menu = NSMenu()
+        let menu = NSMenu(); menu.autoenablesItems = false
         for (index, action) in extraActions.enumerated() {
             let item = NSMenuItem(title: action.label, action: #selector(invokeExtra(_:)), keyEquivalent: "")
             item.target = self; item.tag = index
             item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
+            item.state = action.selected() ? .on : .off; item.isEnabled = action.enabled()
             item.setAccessibilityIdentifier(action.id); menu.addItem(item)
         }
         return menu
     }
     @objc private func invokeExtra(_ item: NSMenuItem) {
-        guard extraActions.indices.contains(item.tag) else { return }; extraActions[item.tag].perform()
+        guard extraActions.indices.contains(item.tag), extraActions[item.tag].enabled() else { return }; extraActions[item.tag].perform()
     }
     private func animateSnapshot(of window: NSWindow, toward rect: CGRect, expandingFrom origin: CGRect? = nil) {
         guard let view = window.contentView, let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
@@ -223,13 +232,23 @@ struct WorkspacePouchAction {
         ghost.isOpaque = false; ghost.backgroundColor = .clear
         let imageView = NSImageView(frame: CGRect(origin: .zero, size: window.frame.size))
         imageView.image = image; imageView.imageScaling = .scaleAxesIndependently
+        imageView.wantsLayer = true
+        let blur = CIFilter(name: "CIGaussianBlur")
+        blur?.name = "collapseBlur"
+        blur?.setValue(origin == nil ? 12 : 0, forKey: kCIInputRadiusKey)
+        if let blur { imageView.layer?.filters = [blur] }
+        let blurAnimation = CABasicAnimation(keyPath: "filters.collapseBlur.inputRadius")
+        blurAnimation.fromValue = origin == nil ? 0 : 10; blurAnimation.toValue = origin == nil ? 12 : 0
+        blurAnimation.duration = origin == nil ? 0.36 : 0.38
+        blurAnimation.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
+        imageView.layer?.add(blurAnimation, forKey: "pouch.blur")
         transition?.orderOut(nil); transition?.close()
         ghost.contentView = imageView; transition = ghost
         if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
         ghost.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
             context.duration = origin == nil ? 0.36 : 0.38
-            context.timingFunction = CAMediaTimingFunction(controlPoints: origin == nil ? 0.4 : 0.25, 0, origin == nil ? 0.2 : 0.5, 1)
+            context.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
             ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = origin == nil ? 0 : 1
         } completionHandler: { [weak self, weak ghost, weak window] in
             MainActor.assumeIsolated {
@@ -237,5 +256,9 @@ struct WorkspacePouchAction {
                 if self?.transition === ghost { self?.transition = nil }
             }
         }
+    }
+    private func collapsedSnapshotFrame(window: NSWindow, orb: CGRect) -> CGRect {
+        let size = CGSize(width: window.frame.width * 0.03, height: window.frame.height * 0.03)
+        return CGRect(x: orb.midX - size.width / 2, y: orb.midY - size.height / 2, width: size.width, height: size.height)
     }
 }

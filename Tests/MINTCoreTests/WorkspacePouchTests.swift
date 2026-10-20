@@ -3,6 +3,35 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspacePouchTests: XCTestCase {
+    func testAnimatedCollapseAndRestoreTravelThroughIntermediateFrames() async throws {
+        let h = try await FramedWorkspaceHarness(width: 1000, reduceMotion: false)
+        defer { h.close() }
+        h.window.makeKeyAndOrderFront(nil)
+        let editor = try await h.editor()
+        h.window.makeFirstResponder(editor)
+        editor.setSelectedRange(NSRange(location: 1, length: 2))
+        let pouch = try XCTUnwrap(h.requests.pouch)
+        let original = h.window.frame
+        pouch.collapse()
+        let shrinking = try XCTUnwrap(pouch.transition)
+        XCTAssertFalse(h.window.isVisible)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertGreaterThan(shrinking.frame.width, original.width * 0.03)
+        XCTAssertLessThan(shrinking.frame.width, original.width)
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertNil(pouch.transition)
+        XCTAssertTrue(try XCTUnwrap(pouch.panel).isVisible)
+        pouch.restore()
+        let expanding = try XCTUnwrap(pouch.transition)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertGreaterThan(expanding.frame.width, original.width * 0.03)
+        XCTAssertLessThan(expanding.frame.width, original.width)
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNil(pouch.transition)
+        XCTAssertEqual(h.window.alphaValue, 1)
+        XCTAssertTrue(h.window.firstResponder === editor)
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 1, length: 2))
+    }
     func testFourEdgesUseNativeWindowGeometryAndChangeOrientation() {
         let window = CGRect(x: 100, y: 200, width: 1000, height: 700)
         let left = WorkspacePouchGeometry.dockedFrame(window: window, edge: .left, ratio: 0.5)
@@ -40,6 +69,9 @@ import XCTest
         XCTAssertTrue(pouch.isCollapsed); XCTAssertFalse(window.isVisible)
         _ = pouch.endDrag(at: CGPoint(x: 130, y: 500))
         XCTAssertEqual(panel.frame.size, CGSize(width: 44, height: 44))
+        XCTAssertFalse(panel.hidesOnDeactivate, "The collapsed pouch must remain floating when another app is active")
+        XCTAssertEqual(panel.alphaValue, 1, accuracy: 0.001)
+        XCTAssertTrue(panel.collectionBehavior.contains(.canJoinAllSpaces))
         pouch.restore()
         XCTAssertTrue(window.isVisible); XCTAssertFalse(pouch.isCollapsed)
         XCTAssertTrue(window.contentView === editor); XCTAssertTrue(window.firstResponder === editor)

@@ -1,4 +1,5 @@
 import AppKit
+import QuartzCore
 
 enum SpatialResizeAxis: Equatable {
     case column(Int)
@@ -11,6 +12,12 @@ final class SpatialResizeHandle: NSView {
     var theme: MintTheme = .light
     private var hovered = false
     private var area: NSTrackingArea?
+    private let indicator = CAShapeLayer()
+    override init(frame: NSRect) {
+        super.init(frame: frame); wantsLayer = true
+        layer?.addSublayer(indicator); indicator.opacity = 0
+    }
+    required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
     override var acceptsFirstResponder: Bool { true }
     override func accessibilityPerformIncrement() -> Bool { adjust(1) }
@@ -47,15 +54,27 @@ final class SpatialResizeHandle: NSView {
         let area = NSTrackingArea(rect: bounds, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect], owner: self)
         addTrackingArea(area); self.area = area
     }
-    override func mouseEntered(with event: NSEvent) { hovered = true; needsDisplay = true }
-    override func mouseExited(with event: NSEvent) { hovered = false; needsDisplay = true }
-    override func draw(_ dirtyRect: NSRect) {
-        guard hovered else { return }
-        theme.ink2.setFill()
+    override func mouseEntered(with event: NSEvent) { hovered = true; updateIndicator(animated: true) }
+    override func mouseExited(with event: NSEvent) { hovered = false; updateIndicator(animated: true) }
+    override func layout() { super.layout(); updateIndicator(animated: false) }
+    private func updateIndicator(animated: Bool) {
         let rect: CGRect
-        if case .column = axis { rect = CGRect(x: bounds.midX - 1, y: bounds.midY - 21, width: 2, height: 42) }
-        else { rect = CGRect(x: bounds.midX - 21, y: bounds.midY - 1, width: 42, height: 2) }
-        NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
+        let length: CGFloat = hovered ? 42 : 28
+        if case .column = axis { rect = CGRect(x: bounds.midX - 1, y: bounds.midY - length / 2, width: 2, height: length) }
+        else { rect = CGRect(x: bounds.midX - length / 2, y: bounds.midY - 1, width: length, height: 2) }
+        let path = CGPath(roundedRect: rect, cornerWidth: 1, cornerHeight: 1, transform: nil)
+        if animated && canvas?.reduceMotion != true && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let shape = CABasicAnimation(keyPath: "path")
+            shape.fromValue = indicator.presentation()?.path ?? indicator.path; shape.toValue = path
+            shape.duration = 0.26; shape.timingFunction = WorkspaceHTMLStyle.calm
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = indicator.presentation()?.opacity ?? indicator.opacity; fade.toValue = hovered ? 1 : 0
+            fade.duration = 0.22; fade.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            indicator.add(shape, forKey: "resize.length"); indicator.add(fade, forKey: "resize.opacity")
+        }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        indicator.path = path; indicator.fillColor = theme.ink2.cgColor; indicator.opacity = hovered ? 1 : 0
+        CATransaction.commit()
     }
     override func mouseDown(with event: NSEvent) {
         if event.clickCount == 2, case .row(let column, let row) = axis, let model = canvas?.model {

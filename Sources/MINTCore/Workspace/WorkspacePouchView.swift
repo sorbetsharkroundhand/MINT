@@ -1,16 +1,19 @@
 import AppKit
 import SwiftUI
 
-final class WorkspacePouchView: NSView {
+final class WorkspacePouchView: NSVisualEffectView {
     weak var controller: WorkspacePouchController?
     private let grip = WorkspacePouchButton(title: "", target: nil, action: nil)
     private var buttons: [WorkspacePouchButton] = []
     private var actions: [WorkspacePouchAction] = []
     private var orb = false, horizontal = false
     private var theme: MintTheme = .light
+    private(set) var hovered = false
     override var isFlipped: Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
+        material = .popover; blendingMode = .behindWindow; state = .active; wantsLayer = true
+        layer?.masksToBounds = true
         setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
         grip.isBordered = false; grip.refusesFirstResponder = false
@@ -20,9 +23,10 @@ final class WorkspacePouchView: NSView {
 
     func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme) {
         self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme
+        layer?.cornerRadius = orb ? 14 : 12
         grip.controller = controller
         grip.title = orb ? "M" : ""
-        grip.font = MintFonts.serif(14, weight: .bold); grip.contentTintColor = theme.blue
+        grip.font = MintFonts.serif(12, weight: .bold); grip.contentTintColor = theme.blue
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
         grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "도구 더 보기 · 드래그하여 주머니 이동")
         grip.menu = controller?.moreMenu()
@@ -34,11 +38,12 @@ final class WorkspacePouchView: NSView {
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]; button.controller = controller; button.tag = index; button.isHidden = orb
-            button.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: action.label)
+            button.image = WorkspaceIcons.image(action.symbol, size: 14)
             let selected = action.selected()
             button.setButtonType(.toggle); button.state = selected ? .on : .off
             button.isEnabled = action.enabled()
             button.contentTintColor = selected ? theme.blue : theme.ink2
+            button.theme = theme; button.selected = selected; button.refresh()
             button.layer?.backgroundColor = (selected ? theme.activeBg : NSColor.clear).cgColor
             button.layer?.cornerRadius = MintRadius.sm
             button.setAccessibilityIdentifier(action.id); button.setAccessibilityLabel(action.label)
@@ -53,22 +58,35 @@ final class WorkspacePouchView: NSView {
         var position: CGFloat = 18
         for (index, button) in buttons.enumerated() {
             if index == 4 { position += 12 }
-            button.frame = horizontal ? CGRect(x: position - 2, y: 3, width: 32, height: 32)
-                : CGRect(x: 3, y: position - 2, width: 32, height: 32)
+            button.frame = horizontal ? CGRect(x: position, y: 5, width: 28, height: 28)
+                : CGRect(x: 5, y: position, width: 28, height: 28)
             position += 32
         }
     }
     override func draw(_ dirtyRect: NSRect) {
         (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill).setFill()
         NSBezierPath(roundedRect: bounds, xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).fill()
-        guard !orb else { return }
-        theme.ink3.withAlphaComponent(0.35).setFill()
+        theme.pillBorder.setStroke()
+        NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).stroke()
+        if orb {
+            theme.novelBg.setFill()
+            NSBezierPath(roundedRect: bounds.insetBy(dx: hovered ? 6.6 : 8, dy: hovered ? 6.6 : 8), xRadius: 8, yRadius: 8).fill()
+            theme.novel.setFill(); NSBezierPath(ovalIn: CGRect(x: bounds.maxX - 10, y: 4, width: 6, height: 6)).fill()
+            return
+        }
+        theme.workspaceMuted.withAlphaComponent(0.35).setFill()
         let gripRect = horizontal ? CGRect(x: 8, y: 12, width: 3, height: 14) : CGRect(x: 12, y: 7, width: 14, height: 3)
         NSBezierPath(roundedRect: gripRect, xRadius: 1.5, yRadius: 1.5).fill()
         theme.sepStrong.setFill()
         if horizontal { CGRect(x: 151, y: 11, width: 1, height: 16).fill() }
         else { CGRect(x: 11, y: 151, width: 16, height: 1).fill() }
     }
+    override func updateTrackingAreas() {
+        trackingAreas.forEach(removeTrackingArea); super.updateTrackingAreas()
+        addTrackingArea(.init(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+    }
+    override func mouseEntered(with event: NSEvent) { hovered = true; controller?.refresh() }
+    override func mouseExited(with event: NSEvent) { hovered = false; controller?.refresh() }
     @objc private func activateGrip() {
         if orb { controller?.restore() } else { controller?.showMoreMenu(in: grip) }
     }
@@ -84,7 +102,7 @@ final class WorkspacePouchView: NSView {
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
 }
 
-final class WorkspacePouchButton: NSButton {
+final class WorkspacePouchButton: WorkspaceHTMLButton {
     weak var controller: WorkspacePouchController?
     override func mouseDown(with event: NSEvent) { controller?.beginDrag(at: screenPoint(event)) }
     override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }

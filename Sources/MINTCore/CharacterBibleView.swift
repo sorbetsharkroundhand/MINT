@@ -333,6 +333,8 @@ struct CharacterCardRow: View {
     @State private var knowledgeExpanded = false
     @State private var relationsExpanded = false
     @State private var conversationsExpanded = false
+    @State private var traitsDraft = ""
+    @FocusState private var traitsFocused: Bool
 
     var body: some View {
         VStack(spacing: 6) {
@@ -387,6 +389,19 @@ struct CharacterCardRow: View {
                 .textFieldStyle(.roundedBorder)
                 .mintUIFont(12)
                 .lineLimit(2...4)
+            HStack(spacing: 6) {
+                TextField("역할", text: Binding(get: { card.role ?? "" }, set: { card.role = $0 }))
+                    .accessibilityIdentifier("mint.writer.character.role.\(card.id)")
+                TextField("특성 (쉼표 구분)", text: $traitsDraft)
+                    .focused($traitsFocused)
+                    .onAppear { traitsDraft = (card.traits ?? []).joined(separator: ", ") }
+                    .onChange(of: traitsDraft) { _, value in
+                        card.traits = value.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                    }
+                    .onChange(of: card.traits) { _, value in
+                        if !traitsFocused { traitsDraft = (value ?? []).joined(separator: ", ") }
+                    }.accessibilityIdentifier("mint.writer.character.traits.\(card.id)")
+            }.textFieldStyle(.roundedBorder).mintUIFont(11)
             // 자동 이해 — 예측 카드 줄과 같은 질의 결과의 열람 (CLAUDE.md §1-5).
             // 편집은 원문·카드에서 한다 — 파생 지식을 직접 고치게 하면 원문과
             // 어긋난 채 다음 패스가 도로 덮는다 (원문이 유일한 진실, §2-1).

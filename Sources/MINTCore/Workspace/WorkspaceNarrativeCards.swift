@@ -16,10 +16,10 @@ struct WorkspaceNarrativeCards: View {
     }
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 8) {
+            LazyVStack(alignment: .leading, spacing: 6) {
                 if let prepared = controller.prepared {
                     ForEach(Array(prepared.projection.rows.enumerated()), id: \.element.id) { order, row in
-                        WorkspaceCompactCard(model: model, id: "narrative.\(row.id)", title: "\(order + 1)  \(row.title)", detail: row.evidence.quote, term: row.evidence.quote.trimmingCharacters(in: .whitespacesAndNewlines), theme: theme) {
+                        WorkspaceCompactCard(model: model, id: "narrative.\(row.id)", title: row.title, detail: row.evidence.quote, term: row.evidence.quote.trimmingCharacters(in: .whitespacesAndNewlines), theme: theme, order: String(format: "%02d", order + 1), sourceDocumentID: prepared.identity.key.documentID) {
                             Text(row.evidence.quote).mintUIFont(11).foregroundStyle(theme.ink2C).textSelection(.enabled)
                             Button("본문 이동 →") {
                                 let inspection = ProjectSourceInspection(session: session)
@@ -29,13 +29,28 @@ struct WorkspaceNarrativeCards: View {
                         }
                     }
                 }
-                DisclosureGroup("작가 수정과 기록") {
-                    ProjectWriterToolsView(session: session, completion: completion, editorRequests: requests, section: .narrative, theme: theme, spatial: model).frame(minHeight: 100, maxHeight: 280)
-                }.mintUIFont(10).foregroundStyle(theme.ink3C)
-            }.padding(12)
+            }.padding(8)
+        }
+        .contextMenu { Button("작가 수정과 기록…") { model.narrativeDetailsVisible = true } }
+        .sheet(isPresented: $model.narrativeDetailsVisible) {
+            VStack(spacing: 0) {
+                HStack { Text("작가 수정과 기록").mintUIFont(12, .semibold); Spacer(); Button("닫기") { model.narrativeDetailsVisible = false }.keyboardShortcut(.cancelAction) }.padding(14)
+                ProjectWriterToolsView(session: session, completion: completion, editorRequests: requests, section: .narrative, theme: theme).frame(minHeight: 100)
+            }.frame(width: 540, height: 460).background(theme.editorSurfaceC)
         }
         .task(id: RefreshID(identity: session.runtimeIdentity, generation: indexer.snapshotGeneration)) {
             controller.update(knowledge: indexer.snapshot, knowledgeOrigin: indexer.snapshotRuntimeIdentity, generation: indexer.snapshotGeneration)
+        }
+        .onChange(of: controller.prepared) { _, prepared in
+            model.entityEvents = prepared.map { prepared in
+                prepared.projection.rows.filter { $0.kind == .event }.map { row in
+                    WorkspaceEntityEvent(name: row.title, note: row.evidence.quote,
+                        reference: .init(key: prepared.identity.key, revision: prepared.projection.revision, evidence: row.evidence, selection: .passage))
+                }
+            } ?? []
+        }
+        .onChange(of: model.narrativeDetailsVisible) { _, visible in
+            if !visible { requests.focusEditor() }
         }
         .onAppear { completion.observeForegroundCompletion(owner: controller) { [weak controller] busy in controller?.setForegroundBusy(busy) } }
         .onReceive(completion.$isMemoryPressurePaused) { controller.setPolicyPaused($0) }

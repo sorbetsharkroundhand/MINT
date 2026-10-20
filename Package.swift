@@ -51,7 +51,7 @@ let package = Package(
                 .product(name: "SwiftMath", package: "SwiftMath"),
             ],
             path: "Sources/MINTCore",
-            resources: [.process("Resources/Fonts")]
+            resources: [.process("Resources/Fonts"), .process("Resources/Icons")]
         ),
         // @main 진입점만 담은 얇은 실행 셸. 실제 화면/로직은 MINTCore에 있다.
         .executableTarget(
@@ -72,7 +72,7 @@ let package = Package(
             name: "MINTCoreTests",
             dependencies: ["MINTCore", "MINTKoreanBackend"],
             path: "Tests/MINTCoreTests",
-            resources: [.copy("Fixtures/KoreanDiagnostics")]
+            resources: [.copy("Fixtures/KoreanDiagnostics"), .copy("Fixtures/NativeWorkspaceHTML")]
         ),
     ]
 )

@@ -93,6 +93,8 @@ struct ProjectNavigatorView: View {
     @State private var editingKey: ProjectDocumentKey?
     @State private var draftTitle = ""
     @State private var showingTrash = false
+    @State private var searchVisible = false
+    @State private var hoveredDocument: WritingDocumentID?
     @FocusState private var searchFocused: Bool
     @FocusState private var renameFocused: Bool
 
@@ -113,7 +115,7 @@ struct ProjectNavigatorView: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            searchField
+            if spatial == nil || searchVisible { searchField }
             if let error = session.lastErrorMessage {
                 Text(error)
                     .mintUIFont(11)
@@ -123,10 +125,10 @@ struct ProjectNavigatorView: View {
                 theme.sepC.frame(height: 1)
             }
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: spatial == nil ? 2 : 4) {
                     if isSearching { searchRows } else { documentRows }
                 }
-                .padding(8)
+                .padding(spatial == nil ? 8 : 6)
             }
         }
         .background(theme.cardSurfaceC)
@@ -155,6 +157,9 @@ struct ProjectNavigatorView: View {
         .onChange(of: renameFocused) { _, focused in
             if !focused { commitRename() }
         }
+        .onChange(of: searchFocused) { _, focused in
+            if !focused && !isSearching { searchVisible = false }
+        }
         .sheet(isPresented: $showingTrash) {
             ProjectTrashView(
                 documents: trashedDocuments,
@@ -165,6 +170,7 @@ struct ProjectNavigatorView: View {
 
     private func focusSearchIfRequested() async {
         guard editorRequests.consumeSearchFocusRequest() else { return }
+        searchVisible = true
         let projectID = session.activeProject?.id
         // Apply focus after native field insertion; an onAppear request can be lost.
         await withCheckedContinuation { continuation in
@@ -182,11 +188,13 @@ struct ProjectNavigatorView: View {
                 },
                 SpatialHeaderAction(id: "mint.navigator.close", label: "파일 목록 숨기기", symbol: "xmark", perform: onClose)
             ]).frame(height: 32).contextMenu {
+                Button("프로젝트 검색") { searchVisible = true; editorRequests.focusSearch() }
                 ForEach(session.recentProjects) { recent in
                     Button(recent.title) { Task { try? await session.activateProject(id: recent.id); editorRequests.focusEditor() } }
                 }
                 if !trashedDocuments.isEmpty { Button("휴지통") { showingTrash = true } }
-            })
+            }.opacity(spatial?.whisperTyping == true ? 0.08 : 1)
+                .animation(WorkspaceHTMLStyle.animation(0.32), value: spatial?.whisperTyping))
         }
         return AnyView(legacyHeader)
     }
@@ -258,7 +266,7 @@ struct ProjectNavigatorView: View {
 
     private var searchField: some View {
         HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").foregroundStyle(theme.ink3C)
+            Image(systemName: "magnifyingglass").foregroundStyle(theme.workspaceMutedC)
             TextField("프로젝트 검색", text: $searchText)
                 .textFieldStyle(.plain)
                 .focused($searchFocused)
@@ -266,7 +274,7 @@ struct ProjectNavigatorView: View {
             if !searchText.isEmpty {
                 Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
                     .buttonStyle(.plain)
-                    .foregroundStyle(theme.ink3C)
+                    .foregroundStyle(theme.workspaceMutedC)
             }
         }
         .mintUIFont(12)
@@ -291,7 +299,7 @@ struct ProjectNavigatorView: View {
         if searchResults.isEmpty {
             Text("일치하는 문서가 없어요")
                 .mintUIFont(12)
-                .foregroundStyle(theme.ink3C)
+                .foregroundStyle(theme.workspaceMutedC)
                 .padding(8)
         } else {
             ForEach(searchResults) { result in
@@ -304,7 +312,7 @@ struct ProjectNavigatorView: View {
                         if let snippet = result.snippet {
                             Text(snippet)
                                 .mintUIFont(11.5)
-                                .foregroundStyle(theme.ink3C)
+                                .foregroundStyle(theme.workspaceMutedC)
                                 .lineLimit(2)
                         }
                     }
@@ -321,9 +329,15 @@ struct ProjectNavigatorView: View {
         let selected = document.id == session.selectedDocumentID
         let editingName = editingKey == documentKey(for: document)
         return HStack(spacing: 8) {
-            Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
+            if let spatial {
+                Circle().fill(selected ? theme.inkC : theme.ink2C)
+                    .opacity(spatial.layout.contains(.document(document.id)) ? 0.75 : 0.20)
+                    .frame(width: 6, height: 6)
+            } else {
+                Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
                 .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(selected ? theme.blueC : theme.ink3C)
+                .foregroundStyle(selected ? theme.blueC : theme.workspaceMutedC)
+            }
             if editingName {
                 TextField("문서 이름", text: $draftTitle)
                     .textFieldStyle(.plain)
@@ -333,28 +347,35 @@ struct ProjectNavigatorView: View {
                     .onExitCommand { cancelRename() }
             } else {
                 Text(document.title)
-                    .mintUIFont(12, selected ? .medium : .regular)
+                    .mintUIFont(spatial == nil ? 12 : 11.5, selected ? .medium : .regular)
                     .foregroundStyle(selected ? theme.inkC : theme.ink2C)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
             if let spatial, !editingName {
                 let open = spatial.layout.contains(.document(document.id))
-                WorkspaceActionButton(identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)",
-                    label: open ? "이 문서 창 닫기" : "나란히 열기", symbol: open ? "xmark" : "plus", theme: theme) {
-                    if open { _ = spatial.close(.document(document.id)) }
-                    else { spatial.open(document.id) }
-                    editorRequests.focusEditor()
-                }.frame(width: 20, height: 20)
-                .opacity(open && spatial.layout.openDocuments.count == 1 ? 0 : 1)
-                .disabled(open && spatial.layout.openDocuments.count == 1)
+                if open && spatial.layout.openDocuments.count == 1 {
+                    Text("열림").font(MintFonts.monoUI(9.5)).foregroundStyle(theme.workspaceMutedC)
+                } else if open {
+                    WorkspaceActionButton(identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)",
+                        label: "이 문서 창 닫기", symbol: "xmark", theme: theme) {
+                        _ = spatial.close(.document(document.id)); editorRequests.focusEditor()
+                    }.frame(width: 16, height: 16).opacity(hoveredDocument == document.id ? 1 : 0)
+                } else {
+                    WorkspaceTextAction(title: "열기", identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)", theme: theme) {
+                        spatial.open(document.id); editorRequests.focusEditor()
+                    }.frame(width: 30, height: 16).opacity(hoveredDocument == document.id ? 1 : 0)
+                }
             }
         }
-        .padding(.vertical, 7)
-        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
         .background(
             RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
-                .fill(selected ? theme.activeBgC : .clear))
+                .fill(selected ? theme.activeBgC : (hoveredDocument == document.id ? theme.hoverC : .clear)))
+        .onHover { hoveredDocument = $0 ? document.id : nil }
+        .animation(WorkspaceHTMLStyle.animation(0.20), value: hoveredDocument)
+        .animation(WorkspaceHTMLStyle.animation(0.24), value: spatial?.navigatorDrop)
         .overlay {
             if spatial != nil && !editingName {
                 SpatialNavigatorDragRegion(documentID: document.id) {
@@ -438,7 +459,7 @@ private struct ProjectTrashView: View {
                 }
             }
             if documents.isEmpty {
-                Text("휴지통이 비어 있어요").foregroundStyle(theme.ink3C)
+                Text("휴지통이 비어 있어요").foregroundStyle(theme.workspaceMutedC)
             }
             Spacer(minLength: 0)
         }

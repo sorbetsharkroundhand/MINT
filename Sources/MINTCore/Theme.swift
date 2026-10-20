@@ -12,6 +12,9 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     public var workspaceSurfaceC: Color { Color(nsColor: workspaceSurface) }
     public var cardSurface: NSColor { sidebarTint.withAlphaComponent(1) }
     public var cardSurfaceC: Color { Color(nsColor: cardSurface) }
+    var workspaceTerracotta: NSColor {
+        NSColor(hex: (editorSurface.usingColorSpace(.sRGB)?.redComponent ?? 1) < 0.5 ? 0xE07A5F : 0xC86446)
+    }
 
     public let ink: NSColor
     public let ink2: NSColor
@@ -140,6 +143,13 @@ public struct MintTheme: Equatable, @unchecked Sendable {  // NSColor 불변 보
     // SwiftUI 크롬용 브리지.
     public var inkC: Color { Color(nsColor: ink) }
     public var ink2C: Color { Color(nsColor: ink2) }
+    /// Reference chrome ink; Increase Contrast retains the accessible application token.
+    var workspaceMuted: NSColor {
+        if NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast { return ink3 }
+        return NSColor(hex: (editorSurface.usingColorSpace(.sRGB)?.redComponent ?? 1) < 0.5 ? 0x6E6B64 : 0x8C877E)
+    }
+    var workspaceMutedC: Color { Color(nsColor: workspaceMuted) }
+
     public var ink3C: Color { Color(nsColor: ink3) }
     public var ghostC: Color { Color(nsColor: ghost) }
     public var ghostSuggestionC: Color { Color(nsColor: ghostSuggestion) }
@@ -611,6 +621,7 @@ public enum MintFonts {
     // also makes AppKit use our audited copy when another Noto version is installed.
     private static let bundledBodyFont = bundledFont(at: bodyFontURL(in: .main))
     private static let bundledUIFont = bundledFont(at: uiFontURL(in: .main))
+    private static let bundledMonoFont = bundledFont(at: fontURL("JetBrainsMono[wght]", in: .main))
 
     private static func bundledFont(at url: URL?) -> BundledFont? {
         guard let url,
@@ -717,7 +728,14 @@ public enum MintFonts {
 
     /// 모노 (상태·칩·kbd) — Dynamic Type 연동 (#31).
     public static func monoUI(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
-        .system(size: size, weight: weight, design: .monospaced)
+        Font(mono(size, weight: appKitWeight(weight)))
+    }
+
+    public static func mono(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+        guard let base = bundledMonoFont else { return .monospacedSystemFont(ofSize: size, weight: weight) }
+        let value: CGFloat = weight == .bold ? 700 : (weight == .semibold ? 600 : (weight == .medium ? 500 : 400))
+        let descriptor = CTFontDescriptorCreateCopyWithVariation(base.descriptor, NSNumber(value: 0x77676874), value)
+        return CTFontCreateWithFontDescriptor(descriptor, size, nil) as NSFont
     }
 
     /// pt → 가장 가까운 SwiftUI 텍스트 스타일 — relativeTo의 기준 (#31).
