@@ -369,7 +369,7 @@ struct EditorPane: View {
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
                     proseLayout: projectSession.activeProject?.mode == .fiction
-                        && displayedDocument?.kind == .manuscript ? .indented : .spaced,
+                        && displayedDocument?.kind == .manuscript ? .continuous : .spaced,
                     documentIdentity: identity,
                     positionStore: positionStore,
                     isEditable: projectSession.phase == .ready && !projectSession.isTransitioning,

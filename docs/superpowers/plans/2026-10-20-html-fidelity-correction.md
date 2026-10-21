@@ -58,6 +58,17 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### Disable automatic first-line indentation, 2026-10-21
+
+The owner requested flush prose paragraphs. Remove the font-sized first-line
+indent from fiction manuscripts and rename that presentation policy to
+`continuous`. Preserve its paragraph spacing and Hangul word wrapping, along
+with manual whitespace, explicit alignment and structural block insets.
+Update the existing typesetting assertions for empty paragraphs, font changes,
+Enter after headings and document switches to expect zero first-line indent.
+`swift build` succeeded (18.32 s). Tests and actual-app checks were not run,
+consistent with the owner's build-only instruction.
+
 ### Restore visible completion controls, 2026-10-21
 
 The owner requested the pre-redesign editor's autocomplete in the spatial

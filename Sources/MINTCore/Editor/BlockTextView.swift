@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 /// Presentation policy supplied by the workspace; storage stays independent of writing modes.
 public enum EditorProseLayout: Sendable {
     case spaced
-    case indented
+    case continuous
 }
 
 /// Notion식 블록 에디터 (에디터 v3 — 디자인 완전 이식).
@@ -2256,8 +2256,7 @@ final class BlockTextView: NSTextView {
 
         switch block {
         case .p:
-            if proseLayout == .indented {
-                ps.firstLineHeadIndent = baseFontSize
+            if proseLayout == .continuous {
                 ps.alignment = .left
                 ps.lineBreakMode = .byWordWrapping
                 ps.lineBreakStrategy = .hangulWordPriority
