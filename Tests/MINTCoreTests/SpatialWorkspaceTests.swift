@@ -95,7 +95,7 @@ final class SpatialWorkspaceTests: XCTestCase {
         let stacked = SpatialWorkspaceGeometry(layout: layout, viewport: CGSize(width: 500, height: 150))
         let first = try XCTUnwrap(stacked.tiles[.document(a)]), second = try XCTUnwrap(stacked.tiles[.document(b)])
         XCTAssertGreaterThanOrEqual(first.height, 95)
-        XCTAssertEqual(second.minY - first.maxY, 6, accuracy: 0.01)
+        XCTAssertEqual(second.minY - first.maxY, 34, accuracy: 0.01)
         XCTAssertGreaterThan(stacked.contentSize.height, 150)
         XCTAssertGreaterThanOrEqual(stacked.contentSize.width, 480)
         XCTAssertEqual(stacked.tiles.count, 3)

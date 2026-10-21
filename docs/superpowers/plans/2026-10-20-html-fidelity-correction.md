@@ -58,6 +58,52 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### Pouch manager and unified search objects, 2026-10-21
+
+The owner's new interaction replaces the HTML's title-click command palette:
+the outer glass window title is now a passive drag region. Remove its search
+button and the Command-K binding. The pouch search button, Command-F and project
+search entry points open the same persistent canvas object. It offers current
+document matches, project documents/characters/originals, and tool commands.
+Current-document search uses an immutable native-text snapshot, supports every
+literal occurrence including code, and validates its revision before selecting
+an exact native range. Project hits reuse original-source evidence navigation.
+Debounced, cancellable background searches suppress marked input and discard
+stale project results. Arrow keys, Enter, previous/next buttons and Command-G
+share result navigation; selecting a result leaves the search object open.
+Newly opened search/settings objects are scrolled into view without replacing
+the manuscript editor. The older standalone palette remains available only to
+its existing direct compatibility callers, not the spatial UI routes.
+The existing source-inspection/question interface remains accessible from the
+pouch's all-tools menu and Option-Command-K, preserving its evidence-based AI
+question workflow alongside the unified find object.
+
+Clicking a canvas object selects a pouch destination without intercepting its
+mouse event or stealing editor focus. One spring carries the pouch between
+objects and can be retargeted while moving. At the destination, the orb widens
+into a tinted shoulder shape; its actual AppKit view moves from the floating
+panel into the canvas. The panel is then hidden, leaving no separate window
+shadow, outline or connector at rest. The shape overlaps the object's lower
+edge, with reserved space below rows so it does not cover the next object.
+Canvas animation, scrolling and resizing update the attachment geometry.
+Reduced motion attaches immediately. Dragging the pouch detaches it; dragging
+outside the main window retains the existing suction/collapsed-widget lifecycle.
+
+The attached pouch exposes search and object settings directly. Its M grip
+opens all tools, including theme, coauthoring and document arrangement. A new
+settings object follows the selected object and reuses the existing writing,
+autocomplete, character, narrative and margin controls. Shared editor settings
+are labeled as applying to all manuscripts. Clicking the settings object itself
+preserves the object being inspected. Empty-space selection or the release
+action returns the pouch to its independent edge position.
+
+`swift build` completed successfully (13.37 s), linking MINT and MINTBench with
+no warnings or errors in the final invocation. Existing title-click and row-gap
+test expectations were updated for the requested behavior. Tests, live model
+inference and actual-app interaction checks were not run under the owner's
+build-only instruction; motion appearance, rapid retargeting, IME search, native
+focus and collapse/restore still need the owner's runtime review.
+
 ### Disable automatic first-line indentation, 2026-10-21
 
 The owner requested flush prose paragraphs. Remove the font-sized first-line

@@ -5247,7 +5247,9 @@ final class BlockTextView: NSTextView {
     @objc func mintAlignRight(_ sender: Any?) { applyAlignment("right") }
 
     /// NSTextFinder 액션 실행 — performTextFinderAction은 sender의 tag로 동작을 읽는다.
+    var workspaceFind: ((NSTextFinder.Action) -> Bool)?
     private func performFind(_ action: NSTextFinder.Action) {
+        if workspaceFind?(action) == true { return }
         let item = NSMenuItem()
         item.tag = action.rawValue
         performTextFinderAction(item)

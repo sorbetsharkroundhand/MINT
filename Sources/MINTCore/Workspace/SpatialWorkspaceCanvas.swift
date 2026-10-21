@@ -23,6 +23,7 @@ struct SpatialWorkspaceCanvas: NSViewRepresentable {
     }
     func updateNSView(_ view: SpatialCanvasScrollView, context: Context) {
         view.canvas.model = model
+        model.canvas = view.canvas
         view.canvas.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
         view.canvas.theme = theme
         view.canvas.updateHosts(content: content)
@@ -70,6 +71,8 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var grabbedTile: WorkspaceTileID?
     private var grabStart = CGPoint.zero
     private var wakeMonitor: Any?
+    private var scrollObserver: NSObjectProtocol?
+    private var revealedSequence = 0
     private var dragPill: NSPanel?
     private let pointerSpring = WorkspacePointerSpring()
     private var transitions: [(panel: NSPanel, host: NSView?)] = []
@@ -161,8 +164,13 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
         newTiles.removeAll()
         animateLayout = false
+        if revealedSequence != model.revealSequence, let tile = model.tileToReveal, let rect = geometry.tiles[tile] {
+            revealedSequence = model.revealSequence
+            _ = scrollToVisible(rect.insetBy(dx: -8, dy: -28))
+        }
         updateResizeHandles()
         needsDisplay = true
+        model.pouchGeometryDidChange?()
     }
 
     private func transition(_ view: NSView, to target: CGRect, duration: Double, remove: Bool = false) {
@@ -188,6 +196,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             }
         }
         updateResizeHandles()
+        model?.pouchGeometryDidChange?()
         if frameTransitions.isEmpty { frameTimer?.invalidate(); frameTimer = nil }
     }
     private func stopFrameTransitions() {
@@ -479,15 +488,41 @@ final class SpatialWorkspaceCanvasView: NSView {
             stopFrameTransitions()
             model?.cancelDrag(); stopDragPresentation()
             if let wakeMonitor { NSEvent.removeMonitor(wakeMonitor); self.wakeMonitor = nil }
+            if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver); self.scrollObserver = nil }
         } else if wakeMonitor == nil {
             window?.acceptsMouseMovedEvents = true
-            wakeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved]) { [weak self] event in
+            wakeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] event in
                 if let self, event.window === self.window {
                     self.model?.notePointer(at: self.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow)
+                    if event.type == .leftMouseDown {
+                        let point = self.convert(event.locationInWindow, from: nil)
+                        if self.visibleRect.contains(point) {
+                            var hit = self.hitTest(point)
+                            while let view = hit, !(view is WorkspacePouchView) { hit = view.superview }
+                            if hit == nil {
+                                let tile = self.hosts.first { !$0.value.isHidden && $0.value.frame.contains(point) }?.key
+                                self.model?.selectTile(tile)
+                            }
+                        }
+                    }
                 }
                 return event
             }
+            if let clip = enclosingScrollView?.contentView {
+                clip.postsBoundsChangedNotifications = true
+                scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
+                    object: clip, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.model?.pouchGeometryDidChange?() }
+                }
+            }
         }
+    }
+
+    func pouchFrame(for tile: WorkspaceTileID) -> CGRect? {
+        guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
+        let frame = CGRect(x: host.frame.midX - 56, y: host.frame.maxY - 8, width: 112, height: 36)
+        guard visibleRect.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return nil }
+        return frame
     }
 }
 

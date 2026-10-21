@@ -200,14 +200,9 @@ public struct MintCommands: Commands {
 
         // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
-            Button("빠른 검색 및 명령…") {
-                WorkspaceQuickCommandPanel.present(session: session, requests: editorRequests, theme: appearance == "dark" ? .dark : .light) {
-                    appearance = appearance == "dark" ? "light" : "dark"
-                }
-            }
-                .keyboardShortcut("k", modifiers: .command)
+            Button("검색 객체 열기") { editorRequests.spatialWorkspace?.openSearch() }
                 .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
-            Button("원문 검색…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
+            Button("원문 확인·질문…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
                 .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("이전 집필 위치로 돌아가기") { editorRequests.returnToWriting(in: session) }
@@ -218,11 +213,20 @@ public struct MintCommands: Commands {
             // 문서 내 검색 — 에디터의 performKeyEquivalent(⌘F)가 우선 처리하고,
             // 한글 IME 등으로 뷰에 닿지 못한 경우 이 메뉴가 안전망이 된다.
             Group {
-                Button("문서에서 찾기") { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                Button("문서에서 찾기") {
+                    if let spatial = editorRequests.spatialWorkspace, legacyWorkspace.mode != .legacy { spatial.openSearch(scope: .document) }
+                    else { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                }
                     .keyboardShortcut("f", modifiers: .command)
-                Button("다음 찾기") { send(#selector(BlockTextView.mintFindNext(_:))) }
+                Button("다음 찾기") {
+                    if legacyWorkspace.mode != .legacy, let advance = editorRequests.spatialWorkspace?.advanceSearch { advance(1) }
+                    else { send(#selector(BlockTextView.mintFindNext(_:))) }
+                }
                     .keyboardShortcut("g", modifiers: .command)
-                Button("이전 찾기") { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                Button("이전 찾기") {
+                    if legacyWorkspace.mode != .legacy, let advance = editorRequests.spatialWorkspace?.advanceSearch { advance(-1) }
+                    else { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
             }
             .disabled(hasMintEditor != true)
@@ -230,7 +234,7 @@ public struct MintCommands: Commands {
             Button(legacyWorkspace.mode == .legacy ? "라이브러리 검색" : "프로젝트 검색") {
                 sidebarVisible = true
                 if let store = legacyWorkspace.legacyStore { store.requestSearchFocus() }
-                else { editorRequests.focusSearch() }
+                else { editorRequests.spatialWorkspace?.openSearch() }
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 

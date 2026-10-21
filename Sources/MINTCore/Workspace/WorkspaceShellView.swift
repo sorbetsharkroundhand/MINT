@@ -185,7 +185,7 @@ struct WorkspaceSurface: View {
         let theme = palette.theme(for: colorScheme)
         VStack(spacing: 0) {
             WorkspaceSpatialChrome(session: projectSession, model: spatial, completion: completion, theme: theme,
-                search: { showCommands(theme: theme) }, coauthor: { showAssistance(.coauthor, theme: theme) })
+                coauthor: { showAssistance(.coauthor, theme: theme) })
             spatialWorkspace(theme: theme)
         }
         .background(WorkspaceLiquidGlass(theme: theme))
@@ -330,13 +330,21 @@ struct WorkspaceSurface: View {
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
                 pouchTool(.margin, id: "mint.workspace.margin", label: "마진 노트", symbol: "sparkles"),
-                WorkspacePouchAction(id: "mint.source-search.show", label: "빠른 검색 및 명령 (⌘K)", symbol: "magnifyingglass", enabled: { projectSession.isEditorEditable && projectSession.selectedDocumentID != nil }) {
-                    showCommands(theme: theme)
+                WorkspacePouchAction(id: "mint.source-search.show", label: "검색 · 문서, 원문, 도구 찾기", symbol: "magnifyingglass", selected: { spatial.layout.contains(.search) }, enabled: { projectSession.isEditorEditable }) {
+                    spatial.openSearch()
                 },
-                WorkspacePouchAction(id: "mint.workspace.theme", label: "테마 전환", symbol: "circle.lefthalf.filled") {
-                    appearance = colorScheme == .dark ? "light" : "dark"
+                WorkspacePouchAction(id: "mint.workspace.object-settings", label: "선택한 객체 설정", symbol: "gearshape", selected: { spatial.layout.contains(.inspector) }) {
+                    spatial.openInspector()
                 }
             ], extraActions: [
+                WorkspacePouchAction(id: "mint.workspace.pouch.release", label: "주머니 떼어 놓기", symbol: "arrow.up.left.and.arrow.down.right") { spatial.selectTile(nil) },
+                WorkspacePouchAction(id: "mint.workspace.pouch.coauthor", label: "공동 집필", symbol: "sparkles") {
+                    showAssistance(.coauthor, theme: theme)
+                },
+                WorkspacePouchAction(id: "mint.workspace.pouch.open-all", label: "문서 나란히 펼치기", symbol: "rectangle.split.3x1") { spatial.openAll() },
+                WorkspacePouchAction(id: "mint.workspace.theme", label: "테마 전환", symbol: "circle.lefthalf.filled") {
+                    appearance = colorScheme == .dark ? "light" : "dark"
+                },
                 WorkspacePouchAction(id: "mint.workspace.more.characters", label: "인물과 작품 정보", symbol: "person.2") {
                     if !spatial.layout.contains(.characters) { spatial.toggle(.characters) }
                     spatial.writerDetailsVisible = true
@@ -352,6 +360,9 @@ struct WorkspaceSurface: View {
                 WorkspacePouchAction(id: "mint.workspace.settings", label: "설정", symbol: "gearshape") { openSettings() },
                 pouchTool(.context, id: "mint.workspace.context", label: "제안에 쓰인 내용", symbol: "text.alignleft"),
                 WorkspacePouchAction(id: "mint.workspace.source-search", label: "원문 검색", symbol: "doc.text.magnifyingglass") {
+                    spatial.openSearch()
+                },
+                WorkspacePouchAction(id: "mint.workspace.source-inspection", label: "원문 확인·질문", symbol: "text.bubble") {
                     SourceSearchPanel.present(session: projectSession, requests: editorRequests)
                 }
             ] + WorkspaceModePresentation.options(for: activeWritingMode).map { option in
@@ -388,6 +399,14 @@ struct WorkspaceSurface: View {
                 .animation(WorkspaceHTMLStyle.animation(0.32), value: spatial.whisperTyping)
             Group {
                 switch tile {
+                case .search:
+                    WorkspaceSearchPane(session: projectSession, requests: editorRequests, spatial: spatial, theme: theme) {
+                        appearance = colorScheme == .dark ? "light" : "dark"
+                    }
+                case .inspector:
+                    WorkspaceObjectInspector(session: projectSession, requests: editorRequests,
+                        model: spatial, completion: completion, settings: completion.settings, theme: theme,
+                        generateMargin: { showAssistance(.margin, theme: theme) })
                 case .margin:
                     livingMarginPanel(theme: theme)
                 case .characters:
@@ -435,15 +454,12 @@ struct WorkspaceSurface: View {
         case .map: "이야기 지도"
         case .outline: "문서 개요"
         case .review: "검토"
+        case .search: "검색"
+        case .inspector: "객체 설정"
         default: "참고 기록"
         }
     }
 
-    private func showCommands(theme: MintTheme) {
-        WorkspaceQuickCommandPanel.present(session: projectSession, requests: editorRequests, theme: theme) {
-            appearance = colorScheme == .dark ? "light" : "dark"
-        }
-    }
     private func showAssistance(_ mode: WorkspaceAssistance.Mode, theme: MintTheme) {
         guard let assistance else { return }
         if mode == .coauthor {

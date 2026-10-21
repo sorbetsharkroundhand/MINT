@@ -4,7 +4,9 @@ import AppKit
 struct SpatialWorkspaceGeometry {
     static let inset: CGFloat = 8
     static let columnGap: CGFloat = 8
-    static let rowGap: CGFloat = 6
+    // Leave room for the selected object's fused pouch below its outer edge.
+    static let rowGap: CGFloat = 34
+    static let bottomInset: CGFloat = 36
     var columns: [CGRect] = []
     var tiles: [WorkspaceTileID: CGRect] = [:]
     var contentSize: CGSize
@@ -24,8 +26,8 @@ struct SpatialWorkspaceGeometry {
             guard let minimumWeight = column.slots.map(\.weight).min(), minimumWeight > 0 else { return 0 }
             return 95 / CGFloat(minimumWeight) + CGFloat(max(0, column.slots.count - 1)) * Self.rowGap
         }.max() ?? 0
-        contentSize = CGSize(width: max(availableWidth, requiredWidth), height: max(availableHeight, requiredHeight + Self.inset * 2))
-        let height = max(0, contentSize.height - Self.inset * 2)
+        contentSize = CGSize(width: max(availableWidth, requiredWidth), height: max(availableHeight, requiredHeight + Self.inset + Self.bottomInset))
+        let height = max(0, contentSize.height - Self.inset - Self.bottomInset)
         var x = Self.inset
         for (index, column) in layout.columns.enumerated() {
             var width = minimumWidths[index]

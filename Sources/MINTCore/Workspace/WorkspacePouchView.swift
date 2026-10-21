@@ -7,6 +7,9 @@ final class WorkspacePouchView: NSVisualEffectView {
     private var buttons: [WorkspacePouchButton] = []
     private var actions: [WorkspacePouchAction] = []
     private var orb = false, horizontal = false
+    private var fused = false
+    var fusionProgress: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
+    private let contourMask = CAShapeLayer()
     private var theme: MintTheme = .light
     private(set) var hovered = false
     override var isFlipped: Bool { true }
@@ -16,6 +19,7 @@ final class WorkspacePouchView: NSVisualEffectView {
         super.init(frame: frame)
         material = .popover; blendingMode = .behindWindow; state = .active; wantsLayer = true
         layer?.masksToBounds = true
+        layer?.mask = contourMask
         setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
         grip.isBordered = false; grip.refusesFirstResponder = false
@@ -23,16 +27,17 @@ final class WorkspacePouchView: NSVisualEffectView {
     }
     required init?(coder: NSCoder) { nil }
 
-    func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme) {
-        self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme
-        layer?.cornerRadius = orb ? 14 : 12
+    func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, fused: Bool = false) {
+        self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.fused = fused
+        if fused { fusionProgress = 1 } else if !orb { fusionProgress = 0 }
+        layer?.cornerRadius = 0
         grip.controller = controller
-        grip.title = orb ? "M" : ""
+        grip.title = orb || fused ? "M" : ""
         grip.theme = theme; grip.selected = orb
         grip.font = MintFonts.serif(12, weight: .bold)
         grip.refresh()
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
-        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "도구 더 보기 · 드래그하여 주머니 이동")
+        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "주머니의 모든 도구 · 드래그하여 떼어 놓기")
         grip.menu = controller?.moreMenu()
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
@@ -57,7 +62,22 @@ final class WorkspacePouchView: NSVisualEffectView {
     }
     override func layout() {
         super.layout()
-        if orb { grip.frame = bounds; return }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        contourMask.frame = bounds; contourMask.path = contour
+        CATransaction.commit()
+        if orb {
+            let p = fusionProgress
+            grip.frame = CGRect(x: 15 * p, y: 7 * p,
+                width: bounds.width * (1 - p) + 22 * p, height: bounds.height * (1 - p) + 25 * p)
+            return
+        }
+        if fused {
+            grip.frame = CGRect(x: 15, y: 7, width: 22, height: 25)
+            for (index, button) in buttons.enumerated() {
+                button.frame = CGRect(x: 39 + CGFloat(index) * 28, y: 7, width: 26, height: 25)
+            }
+            return
+        }
         grip.frame = horizontal ? CGRect(x: 4, y: 5, width: 12, height: 28) : CGRect(x: 5, y: 3, width: 28, height: 12)
         var position: CGFloat = 18
         for (index, button) in buttons.enumerated() {
@@ -68,14 +88,17 @@ final class WorkspacePouchView: NSVisualEffectView {
         }
     }
     override func draw(_ dirtyRect: NSRect) {
-        (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill).setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).fill()
+        let tint = theme.novelBg.blended(withFraction: 0.35, of: theme.pill) ?? theme.pill
+        (fused || fusionProgress > 0 ? tint.withAlphaComponent(1) : (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill)).setFill()
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        context.addPath(contour); context.fillPath()
+        if fused { return }
         theme.pillBorder.setStroke()
-        NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).stroke()
+        if fusionProgress == 0 { NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).stroke() }
         if orb {
-            theme.novelBg.setFill()
+            theme.novelBg.withAlphaComponent(1 - fusionProgress).setFill()
             NSBezierPath(roundedRect: bounds.insetBy(dx: hovered ? 6.6 : 8, dy: hovered ? 6.6 : 8), xRadius: 8, yRadius: 8).fill()
-            theme.novel.setFill(); NSBezierPath(ovalIn: CGRect(x: bounds.maxX - 10, y: 4, width: 6, height: 6)).fill()
+            theme.novel.withAlphaComponent(1 - fusionProgress).setFill(); NSBezierPath(ovalIn: CGRect(x: bounds.maxX - 10, y: 4, width: 6, height: 6)).fill()
             return
         }
         theme.workspaceMuted.withAlphaComponent(0.35).setFill()
@@ -84,6 +107,25 @@ final class WorkspacePouchView: NSVisualEffectView {
         theme.sepStrong.setFill()
         if horizontal { CGRect(x: 151, y: 11, width: 1, height: 16).fill() }
         else { CGRect(x: 11, y: 151, width: 16, height: 1).fill() }
+    }
+    private var contour: CGPath {
+        let p = fusionProgress
+        guard p > 0 else { return CGPath(roundedRect: bounds, cornerWidth: orb ? 14 : 12, cornerHeight: orb ? 14 : 12, transform: nil) }
+        let w = bounds.width, h = bounds.height, shoulder = 12 * p, radius = 14.0, corner = 14 * (1 - p)
+        let path = CGMutablePath()
+        path.move(to: CGPoint(x: corner, y: 0)); path.addLine(to: CGPoint(x: w - corner, y: 0))
+        path.addCurve(to: CGPoint(x: w - shoulder, y: corner + shoulder), control1: CGPoint(x: w - corner * 0.448 - shoulder * 0.8, y: 0), control2: CGPoint(x: w - shoulder, y: corner * 0.448 + shoulder * 0.3))
+        path.addLine(to: CGPoint(x: w - shoulder, y: h - radius))
+        path.addQuadCurve(to: CGPoint(x: w - shoulder - radius, y: h), control: CGPoint(x: w - shoulder, y: h))
+        path.addLine(to: CGPoint(x: shoulder + radius, y: h))
+        path.addQuadCurve(to: CGPoint(x: shoulder, y: h - radius), control: CGPoint(x: shoulder, y: h))
+        path.addLine(to: CGPoint(x: shoulder, y: corner + shoulder))
+        path.addCurve(to: CGPoint(x: corner, y: 0), control1: CGPoint(x: shoulder, y: corner * 0.448 + shoulder * 0.3), control2: CGPoint(x: corner * 0.448 + shoulder * 0.8, y: 0))
+        path.closeSubpath(); return path
+    }
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard contour.contains(convert(point, from: superview)) else { return nil }
+        return super.hitTest(point)
     }
     override func updateTrackingAreas() {
         trackingAreas.forEach(removeTrackingArea); super.updateTrackingAreas()

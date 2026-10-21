@@ -37,6 +37,21 @@ public final class ProjectEditorRequests: ObservableObject {
     var registeredEditors: [ProjectDocumentKey: BlockTextView] { editors.compactMapValues(\.editor) }
     func installSpatialInteraction(_ editor: BlockTextView, key: ProjectDocumentKey, session: ProjectSession) {
         guard let spatialWorkspace, key.projectID == session.activeProject?.id else { return }
+        editor.workspaceFind = { [weak self, weak editor] action in
+            guard let self, let spatial = self.spatialWorkspace else { return false }
+            if action == .showFindInterface {
+                var query: String?
+                if let editor, !editor.hasMarkedText(), editor.selectedRange().length > 0,
+                   editor.selectedRange().length <= 500 {
+                    query = (editor.string as NSString).substring(with: editor.selectedRange())
+                }
+                spatial.openSearch(scope: .document, query: query)
+            } else if action == .nextMatch || action == .previousMatch {
+                if let advance = spatial.advanceSearch { advance(action == .nextMatch ? 1 : -1) }
+                else { spatial.openSearch(scope: .document) }
+            } else { return false }
+            return true
+        }
         if let existing = editor.workspaceInteraction as? WorkspaceEditorInteraction, existing.key == key { return }
         editor.workspaceInteraction = WorkspaceEditorInteraction(editor: editor, key: key,
             session: session, requests: self, model: spatialWorkspace)
@@ -188,7 +203,7 @@ struct ProjectNavigatorView: View {
                 },
                 SpatialHeaderAction(id: "mint.navigator.close", label: "파일 목록 숨기기", symbol: "xmark", perform: onClose)
             ]).frame(height: 32).contextMenu {
-                Button("프로젝트 검색") { searchVisible = true; editorRequests.focusSearch() }
+                Button("프로젝트 검색") { spatial?.openSearch() }
                 ForEach(session.recentProjects) { recent in
                     Button(recent.title) { Task { try? await session.activateProject(id: recent.id); editorRequests.focusEditor() } }
                 }

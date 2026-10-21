@@ -5,16 +5,13 @@ struct WorkspaceSpatialChrome: View {
     @ObservedObject var model: SpatialWorkspaceController
     @ObservedObject var completion: CompletionController
     let theme: MintTheme
-    let search: () -> Void
     let coauthor: () -> Void
     var body: some View {
         WorkspaceWindowChrome(projectTitle: session.activeProject?.title ?? "프로젝트", theme: theme,
-            trailingInset: 270, onTitlePress: search, documentTitle: session.selectedDocument?.title,
+            trailingInset: 210, documentTitle: session.selectedDocument?.title,
             openCount: model.layout.openDocuments.count, glass: true)
             .overlay(alignment: .trailing) {
                 HStack(spacing: 6) {
-                    WorkspaceTextAction(title: "⌘K", symbol: "magnifyingglass", identifier: "mint.commands.show", theme: theme, action: search)
-                        .frame(width: 50, height: 22)
                     WorkspaceTextAction(title: "나란히 보기", symbol: "rectangle.split.3x1", identifier: "mint.workspace.open-all", theme: theme) { model.openAll() }
                         .frame(width: 89, height: 22)
                     WorkspaceTextAction(title: "공동 집필", symbol: "sparkles", identifier: "mint.coauthor.show", theme: theme, action: coauthor)

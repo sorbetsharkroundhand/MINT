@@ -24,6 +24,34 @@ struct WorkspaceEntityEvent: Equatable {
     @Published var expandedItem: String?
     @Published var writerDetailsVisible = false
     @Published var narrativeDetailsVisible = false
+    @Published private(set) var selectedTile: WorkspaceTileID?
+    @Published private(set) var inspectedTile: WorkspaceTileID?
+    @Published var searchRequest = WorkspaceSearchRequest()
+    @Published private(set) var revealSequence = 0
+    private(set) var tileToReveal: WorkspaceTileID?
+    weak var canvas: SpatialWorkspaceCanvasView?
+    var pouchGeometryDidChange: (() -> Void)?
+    var advanceSearch: ((Int) -> Void)?
+    private func reveal(_ tile: WorkspaceTileID) { tileToReveal = tile; revealSequence += 1 }
+
+    func selectTile(_ tile: WorkspaceTileID?) {
+        guard selectedTile != tile else { return }
+        selectedTile = tile
+        if let tile, tile != .inspector { inspectedTile = tile }
+    }
+    func openSearch(scope: WorkspaceSearchScope = .project, query: String? = nil) {
+        if !layout.contains(.search) { layout.toggle(.search); commit() }
+        selectTile(.search)
+        searchRequest = .init(sequence: searchRequest.sequence + 1, scope: scope,
+            query: query, documentID: activeDocumentID)
+        reveal(.search)
+    }
+    func openInspector() {
+        if !layout.contains(.inspector) { layout.toggle(.inspector); commit() }
+        // Keep the pouch and inspector targeted at the object being configured.
+        if inspectedTile == nil { inspectedTile = activeDocumentID.map(WorkspaceTileID.document) }
+        reveal(.inspector)
+    }
     @Published var navigatorDrop: SpatialNavigatorDrop?
     @Published var resonatingTerm: String?
     @Published var activeParagraph = ""
@@ -93,6 +121,7 @@ struct WorkspaceEntityEvent: Equatable {
         validDocuments = project.documents.filter { !project.trashedDocumentIDs.contains($0.id) }.map(\.id)
         if projectID != project.id {
             cancelDrag(); loading = true; projectID = project.id
+            selectedTile = nil; inspectedTile = nil; searchRequest = .init(); advanceSearch = nil
             if let data = self.defaults.data(forKey: preferenceKey),
                let saved = try? JSONDecoder().decode(Preference.self, from: data), saved.version == 1 {
                 layout = saved.layout; typewriter = saved.typewriter; focusDimming = saved.focusDimming
@@ -116,14 +145,21 @@ struct WorkspaceEntityEvent: Equatable {
 
     func open(_ id: WritingDocumentID) {
         guard validDocuments.contains(id) else { return }
-        layout.openDocument(id); commit(); onActivate?(id)
+        layout.openDocument(id); commit(); reveal(.document(id)); onActivate?(id)
     }
     func openAll() { layout.openAll(validDocuments); commit(); showToast("\(validDocuments.count)개 파일을 나란히 펼쳤습니다") }
-    func toggle(_ tile: WorkspaceTileID) { cancelDrag(); layout.toggle(tile); commit() }
+    func toggle(_ tile: WorkspaceTileID) {
+        cancelDrag(); layout.toggle(tile)
+        if layout.contains(tile) { selectTile(tile); reveal(tile) }
+        else if selectedTile == tile { selectTile(nil) }
+        commit()
+    }
     @discardableResult func close(_ tile: WorkspaceTileID) -> Bool {
         cancelDrag()
         guard layout.contains(tile) else { return false }
         guard layout.close(tile) else { showToast("최소 1개의 원고 창은 열려 있어야 합니다"); return false }
+        if selectedTile == tile { selectTile(nil) }
+        if inspectedTile == tile { inspectedTile = nil }
         commit(); return true
     }
     func setLayout(_ value: SpatialWorkspaceLayout, persist: Bool = true) {

@@ -129,6 +129,9 @@ import Combine
         case .focus: requests.spatialWorkspace?.focusDimming.toggle()
         case .openAll: requests.spatialWorkspace?.openAll()
         case .theme: toggleTheme()
+        case .tool(let tile):
+            if tile == .inspector { requests.spatialWorkspace?.openInspector() }
+            else if requests.spatialWorkspace?.layout.contains(tile) == false { requests.spatialWorkspace?.toggle(tile) }
         case .document(let id): session.selectDocument(id); requests.spatialWorkspace?.open(id)
         case .character(let id, let card):
             session.selectDocument(id)

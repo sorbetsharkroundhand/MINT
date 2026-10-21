@@ -10,15 +10,19 @@ import XCTest
         let results = WorkspaceCommandSearch.items(in: project, query: "needle", typewriter: false, focus: false)
         XCTAssertEqual(results.filter { $0.kind == .source }.map(\.title), ["Visible needle."])
     }
-    func testTitleClickOpensCommandsAndClosingReturnsToTheSameEditor() async throws {
+    func testTitleDoesNotSearchAndPouchOpensEmbeddedSearch() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let editor = try await h.editor(); h.window.makeFirstResponder(editor)
         let title = try XCTUnwrap(h.element("mint.workspace.chrome.title") as? NSTextField)
-        XCTAssertTrue(title.accessibilityPerformPress())
-        await h.layout()
-        let panel = try XCTUnwrap(NSApp.windows.first { $0.title == "빠른 검색 및 명령" && $0.isVisible })
-        panel.close(); await h.layout()
+        XCTAssertFalse(title.accessibilityPerformPress())
         XCTAssertTrue(h.window.firstResponder === editor)
+        let pouch = try XCTUnwrap(h.requests.pouch)
+        let search = try XCTUnwrap(pouch.actions.first { $0.id == "mint.source-search.show" })
+        search.perform()
+        await h.layout()
+        XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(.search) == true)
+        XCTAssertNotNil(h.element("mint.workspace.search"))
+        XCTAssertTrue(h.requests.nativeEditor === editor)
     }
     func testCommandsFilesCharactersAndOriginalsUseTheNineResultLimit() throws {
         let a = WritingDocument(id: WritingDocumentID(), title: "Chapter", body: "한도경은 바람을 들었다.\n", kind: .manuscript)
