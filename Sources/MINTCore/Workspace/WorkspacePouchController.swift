@@ -166,9 +166,9 @@ struct WorkspacePouchAction {
     func collapse() {
         guard !isCollapsed, let window, let panel else { return }
         previousResponder = window.firstResponder
-        if let editor = window.firstResponder as? BlockTextView, editor.hasMarkedText() {
-            editor.unmarkText(); editor.didChangeText()
-        }
+        // Hiding a retained window is a presentation change, not an editor commit.
+        // Keep marked text and the native selection with the same first responder;
+        // do not enqueue diagnostics/autosave by synthesizing didChangeText here.
         target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
         cancelTransition()
         isCollapsed = true

@@ -30,6 +30,8 @@ let package = Package(
         .binaryTarget(name: "Kiwi", path: "Packages/MINTKoreanBackend/Artifacts/KiwiStatic.xcframework"),
         .target(name: "CKiwiBridge", dependencies: ["Kiwi"],
             path: "Packages/MINTKoreanBackend/Sources/CKiwiBridge",
+            exclude: ["Upstream/LICENSE", "Upstream/MIMALLOC-LICENSE", "Upstream/provenance.json", "Upstream/README.md"],
+            cxxSettings: [.headerSearchPath("Upstream"), .define("KIWI_USE_MIMALLOC")],
             linkerSettings: [.linkedLibrary("c++"), .linkedLibrary("z")]),
         .target(name: "MINTKoreanBackend", dependencies: ["CKiwiBridge"],
             path: "Packages/MINTKoreanBackend/Sources/MINTKoreanBackend",
@@ -74,5 +76,6 @@ let package = Package(
             path: "Tests/MINTCoreTests",
             resources: [.copy("Fixtures/KoreanDiagnostics"), .copy("Fixtures/NativeWorkspaceHTML")]
         ),
-    ]
+    ],
+    cxxLanguageStandard: .cxx17
 )

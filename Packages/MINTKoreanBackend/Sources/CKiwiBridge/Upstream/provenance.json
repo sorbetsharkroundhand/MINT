@@ -1,0 +1,118 @@
+{
+  "repository": "https://github.com/bab2min/Kiwi",
+  "revision": "6e16bbcfc0940fabccbdde574abb4ea3a659588e",
+  "files": [
+    {
+      "path": "LICENSE",
+      "sha256": "4070ef92694190ae0d19410380654c37f0602e8a2aa3ddcc45e2dad3039b5b20"
+    },
+    {
+      "path": "kiwi/ArchUtils.h",
+      "sha256": "31a8256dee9c0a382c85835cb51c9c1608b28d0112e3f6b1f5f2d7ffadcc49f7"
+    },
+    {
+      "path": "kiwi/CoNgramModel.h",
+      "sha256": "9a84d4eac80a9c19f17871dd94cbde01bc91e2ed08475f6f4bd96d6c8f7b3837"
+    },
+    {
+      "path": "kiwi/FixedVector.hpp",
+      "sha256": "6ad0abbca5fce9ae61f117d4d13a6e11013d8cc353e7e2ecbebe819821737323"
+    },
+    {
+      "path": "kiwi/Form.h",
+      "sha256": "b544c3a7a487df277b8c4688795c8641549e41a89cc0949b89cadf2b21e9a941"
+    },
+    {
+      "path": "kiwi/FrozenTrie.h",
+      "sha256": "0fe96e4f926f466f6986ed32577c4245f6fd08cc56e5fadf9ca05e76493f2384"
+    },
+    {
+      "path": "kiwi/Joiner.h",
+      "sha256": "bce9567fb946dbc4f934b12300d6b9a9f75227bdb6b5871bb166df88ee2be15f"
+    },
+    {
+      "path": "kiwi/Kiwi.h",
+      "sha256": "559f26285c43e146656349211c9fe6a6bfe1dd9861acdc9c05488c94df287234"
+    },
+    {
+      "path": "kiwi/Knlm.h",
+      "sha256": "1ec4ac5c0bf53aac18ef4b66ff9e6a4925e9638f92dda7a55d1276580abda798"
+    },
+    {
+      "path": "kiwi/LangModel.h",
+      "sha256": "0d34aec3854e0dd7949bf4da33958ecbad49220b38944249114cd6cb815a0c6a"
+    },
+    {
+      "path": "kiwi/Macro.h",
+      "sha256": "19af14ebeaca651e94c9bab3b5e597da428b8243ec8f0d91567884e0b3a511e7"
+    },
+    {
+      "path": "kiwi/Mmap.h",
+      "sha256": "172ff8c427733b6ea699bb86a2cd1b8811849aee2961c4713487af44c51deb1f"
+    },
+    {
+      "path": "kiwi/PatternMatcher.h",
+      "sha256": "47d9a91df99f53119b2eda8a907871e76f430e8f646f243e0ca2de6f11677cf0"
+    },
+    {
+      "path": "kiwi/ScriptType.h",
+      "sha256": "e30bdbe0ad0cd94ce851bbec6dea02ffad75f7e2ff623d722032b8e50db0f874"
+    },
+    {
+      "path": "kiwi/SkipBigramModel.h",
+      "sha256": "1488d81f7e62f2abcaf778164ae64f986b693002627d81f553380259d9bda16c"
+    },
+    {
+      "path": "kiwi/TagUtils.h",
+      "sha256": "219da4013b12f95055efe3cb9fa523b0cdf1601c4cdd9bcf6aa7f64484acaa68"
+    },
+    {
+      "path": "kiwi/TemplateUtils.hpp",
+      "sha256": "c09ca5bc12cb6eaf2948f0f0ecc7a2a2b30ef8c10ea9becee7885e740450b0f4"
+    },
+    {
+      "path": "kiwi/ThreadPool.h",
+      "sha256": "19f5de870b3e9a6f2592e81a5b21d9d1911db2983ee8a840378d178757d4517f"
+    },
+    {
+      "path": "kiwi/Trainer.h",
+      "sha256": "3672469e37686a2cf736e66b9b8b65630ab8d98ebaa44701481d152d7c7a2a3b"
+    },
+    {
+      "path": "kiwi/Trie.hpp",
+      "sha256": "73369a3409948c4c732eab5f2e7753374f89ff205043a77b0686f751fe897669"
+    },
+    {
+      "path": "kiwi/Types.h",
+      "sha256": "c21b7ec6ffe552a1027223b9698583361e32bcebf50c4e97b0f5e5f9f5c1c2ec"
+    },
+    {
+      "path": "kiwi/TypoTransformer.h",
+      "sha256": "0d27aa4007fe97b74060a9c9a185211f4c649e9141c70d1b9e52fb9c0302eab8"
+    },
+    {
+      "path": "kiwi/Utils.h",
+      "sha256": "29dadabd465db5067cc0eb123600e97e83d71c5df00bd29e6e3158026e28e189"
+    },
+    {
+      "path": "kiwi/WordDetector.h",
+      "sha256": "79c1cc947d4bd54b10a0e122a451efe1d4a68c9145a12877f686e99f76542c51"
+    }
+  ],
+  "mimalloc": {
+    "repository": "https://github.com/microsoft/mimalloc",
+    "revision": "fbd8b99c2b828428947d70fdc046bb55609be93e",
+    "files": [
+      {
+        "path": "mimalloc.h",
+        "upstreamPath": "include/mimalloc.h",
+        "sha256": "a62aee63dfa22224c9d184ae09f270f9bb7dd4184ff9823b0be97433b04b63ce"
+      },
+      {
+        "path": "MIMALLOC-LICENSE",
+        "upstreamPath": "LICENSE",
+        "sha256": "82ade5d7d9b029044b5fbbc326207fc47c2d44ee4dd71e8a559c36d728217de9"
+      }
+    ]
+  }
+}

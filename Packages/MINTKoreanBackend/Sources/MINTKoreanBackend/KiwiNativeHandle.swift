@@ -12,7 +12,7 @@ final class KiwiNativeHandle: KoreanNativeHandle {
             throw KoreanNativeError.unavailable
         }
         guard admission() else { throw KoreanNativeError.cancelled }
-        guard let builder = kiwi_builder_init(model.path, 1, 15 | 0x0400, 0) else { throw KoreanNativeError.unavailable }
+        guard let builder = mint_kiwi_builder_init_fp32(model.path) else { throw KoreanNativeError.unavailable }
         defer { kiwi_builder_close(builder) }
         guard admission() else { throw KoreanNativeError.cancelled }
         guard let instance = kiwi_builder_build(builder, nil, 0) else { throw KoreanNativeError.unavailable }

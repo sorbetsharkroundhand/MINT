@@ -12,6 +12,26 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Implemented changes
 
+### Caret alignment and pouch follow-up, 2026-10-21
+
+- Derive the active-line band, custom caret and Ghost baseline from the same
+  TextKit line geometry. An insertion rectangle's top is not necessarily the
+  glyph ascender line. Honor upstream affinity at soft wraps and use the new
+  font's baseline for an empty extra fragment instead of scaling the previous
+  paragraph's metrics.
+- Pouch collapse retains the native first responder without manually unmarking
+  Hangul composition or synthesizing `didChangeText`. The HTML's suction and
+  floating orb remain presentation operations on the retained window.
+- Trace the reported two quantization messages to the bundled Kiwi archive and
+  its pinned `CoNgramModelBase::create` implementation. Its main and noun models
+  request unsupported quantization before falling back. A private constructor
+  adapter now selects the same FP32 implementation explicitly. Matching public
+  headers and allocator definitions are pinned; models and archive are unchanged.
+- These changes are source implementation only. No build, test, native execution
+  or visual verification was performed, as requested by the owner.
+
+### Existing port
+
 - Translate chrome, navigator, tile headers, labeled actions, compact character/event/margin cards, source-backed entity peeks, palette and coauthor presentation into SwiftUI/AppKit. Bundle the source typefaces and audited Lucide icons.
 - Preserve legacy author records, writer tools, modes, AI controls and diagnostics in secondary entry points. Keep project characters visible across documents, and return focus after closing record editors.
 - Keep captured-source assistance on existing local inference. Coauthor requires explicit insertion; explicit polish and margin actions run inline with stale-result guards. Preserve coauthor prompt text while reopening the panel.

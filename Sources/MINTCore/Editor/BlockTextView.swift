@@ -1212,30 +1212,22 @@ final class BlockTextView: NSTextView {
         return rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
     }
 
-    /// 커서 줄 하이라이트 rect (뷰 좌표). 포커스 밖이면 nil.
-    ///
-    /// 밴드는 **글자 em 박스(ascender~descender)에 아주 작은 상하 마진**만 더한
-    /// 높이로, em 박스 중심에 맞춰 그린다 — 글자가 정확히 중앙에 오고(요구 3),
-    /// 위·아래 여백이 같아진다. 또 밴드 높이를 라인 advance(=글자 높이+줄 간격)로
-    /// 상한 걸어, 줄 간격을 좁혀도 밴드가 옆 줄 글자를 침범하지 않는다.
+    /// Align the band with the typeset glyph baseline, not the insertion rectangle's
+    /// top edge, which can include leading and paragraph spacing.
     private func activeLineRect() -> NSRect? {
         guard let window, window.firstResponder === self,
             selectedRange().length == 0,
             selectedImageLocation == nil,  // 이미지 객체 선택 중엔 줄 하이라이트 없음
             !isEditingMath,
-            let textContainer, let cr = caretRectInView()
+            let textContainer, let line = caretLineGeometry()
         else { return nil }
-        // 캐럿과 **같은 기준**(시스템 캐럿 rect + 폰트 메트릭)에서 만든다.
-        // 시스템 캐럿 rect.top = ascender 라인 → baseline = top + ascender.
-        // 하이라이트는 글자(ascender~descender)를 감싸도록, 위아래 작은 여백만 준다.
         let font = caretLineFont()
-        let baseline = cr.minY + font.ascender
         let vpad: CGFloat = 2
-        let top = baseline - font.ascender - vpad
-        let bottom = baseline - font.descender + vpad  // descender 음수 → 아래로
+        let top = max(line.fragment.minY, line.baselineY - font.ascender - vpad)
+        let bottom = min(line.fragment.maxY, line.baselineY - font.descender + vpad)
         let x = textContainerOrigin.x + textContainer.lineFragmentPadding - 8
         let w = textContainer.size.width - textContainer.lineFragmentPadding * 2 + 16
-        return NSRect(x: x, y: top, width: w, height: bottom - top)
+        return NSRect(x: x, y: top, width: w, height: max(1, bottom - top))
     }
 
     private var isEditingMath: Bool {
@@ -5251,9 +5243,8 @@ final class BlockTextView: NSTextView {
             return
         }
         let font = caretLineFont()
-        let baseline = isEditingMath
-            ? (caretBaselineY() ?? rect.minY + font.ascender)
-            : rect.minY + font.ascender
+        let baseline = caretBaselineY()
+            ?? rect.minY + (layoutManager?.defaultBaselineOffset(for: font) ?? font.ascender)
         let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
         caret.origin.y = baseline - glyphTop
@@ -5637,58 +5628,56 @@ final class BlockTextView: NSTextView {
         return convert(windowRect, from: nil)
     }
 
-    /// Current caret line fragment converted from TextKit container coordinates
-    /// into this NSTextView's flipped view coordinates.
-    private func caretLineFragmentRectInView() -> NSRect? {
+    private struct CaretLineGeometry {
+        let fragment: NSRect
+        let baselineY: CGFloat
+    }
+
+    /// One TextKit coordinate source for the caret, active line and inline Ghost.
+    /// Keep AppKit's insertion-point x position and selection/IME handling intact.
+    private func caretLineGeometry() -> CaretLineGeometry? {
         guard let layoutManager, let textContainer else { return nil }
         let ns = string as NSString
-        guard ns.length > 0 else { return nil }
+        guard selectedRange().location != NSNotFound else { return nil }
         let caret = min(selectedRange().location, ns.length)
         layoutManager.ensureLayout(for: textContainer)
-
-        let charIndex = min(caret, ns.length - 1)
-        let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
+        let origin = textContainerOrigin
+        let extra = layoutManager.extraLineFragmentRect
+        // Empty documents and the empty paragraph after a final newline have no
+        // glyph. Use the new line's font metrics; scaling the previous line's
+        // baseline carries heading sizes and paragraph spacing into this line.
+        if caret == ns.length,
+           ns.paragraphRange(for: NSRange(location: caret, length: 0)).length == 0,
+           extra.height > 0,
+           layoutManager.extraLineFragmentTextContainer === textContainer {
+            return CaretLineGeometry(
+                fragment: extra.offsetBy(dx: origin.x, dy: origin.y),
+                baselineY: origin.y + extra.minY
+                    + layoutManager.defaultBaselineOffset(for: caretLineFont()))
+        }
+        guard ns.length > 0 else { return nil }
+        var glyphIndex = layoutManager.glyphIndexForCharacter(at: min(caret, ns.length - 1))
+        guard glyphIndex < layoutManager.numberOfGlyphs else { return nil }
+        var glyphRange = NSRange()
         var fragment = layoutManager.lineFragmentRect(
-            forGlyphAt: glyphIndex, effectiveRange: nil)
-
-        // At document-end newline the insertion point is in TextKit's extra fragment,
-        // not the previous glyph line.  Use that real visual fragment as the anchor.
-        if caret == ns.length, ns.hasSuffix("\n") {
-            let extra = layoutManager.extraLineFragmentRect
-            guard extra.height > 0 else { return nil }
-            fragment = extra
+            forGlyphAt: glyphIndex, effectiveRange: &glyphRange)
+        // A soft-wrap boundary has two insertion positions. Upstream affinity
+        // belongs to the preceding visual line, but never to a previous paragraph.
+        if selectionAffinity == .upstream, caret > 0, caret < ns.length,
+           glyphIndex == glyphRange.location,
+           ns.paragraphRange(for: NSRange(location: caret, length: 0)).location < caret {
+            glyphIndex = layoutManager.glyphIndexForCharacter(at: caret - 1)
+            fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
         }
         guard fragment.height > 0 else { return nil }
-        return fragment.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+        return CaretLineGeometry(
+            fragment: fragment.offsetBy(dx: origin.x, dy: origin.y),
+            baselineY: origin.y + fragment.minY + layoutManager.location(forGlyphAt: glyphIndex).y)
     }
 
-    /// 커서 라인의 텍스트 베이스라인 y (뷰 좌표).
-    private func caretBaselineY() -> CGFloat? {
-        guard let layoutManager, let textContainer else { return nil }
-        let ns = string as NSString
-        guard ns.length > 0 else { return nil }
-        let caret = min(selectedRange().location, ns.length)
-        layoutManager.ensureLayout(for: textContainer)
+    private func caretLineFragmentRectInView() -> NSRect? { caretLineGeometry()?.fragment }
 
-        // caret == length면 마지막 글리프의 라인을 기준으로 삼는다.
-        let charIndex = min(caret, ns.length - 1)
-        let glyphIndex = layoutManager.glyphIndexForCharacter(at: charIndex)
-        let fragment = layoutManager.lineFragmentRect(
-            forGlyphAt: glyphIndex, effectiveRange: nil)
-        guard fragment.height > 0 else { return nil }
-        var lineTop = fragment.minY
-        var baselineOffset = layoutManager.location(forGlyphAt: glyphIndex).y
-
-        // 문서 끝 개행 뒤(extra line fragment)에 커서가 있으면 그 라인 기준.
-        // 앞 라인과 스타일이 다를 수 있어 높이 비율로 베이스라인을 보정한다.
-        if caret == ns.length, ns.hasSuffix("\n") {
-            let extra = layoutManager.extraLineFragmentRect
-            guard extra.height > 0 else { return nil }
-            baselineOffset *= extra.height / fragment.height
-            lineTop = extra.minY
-        }
-        return textContainerOrigin.y + lineTop + baselineOffset
-    }
+    private func caretBaselineY() -> CGFloat? { caretLineGeometry()?.baselineY }
 
     // MARK: 타자기 존 스크롤
 
