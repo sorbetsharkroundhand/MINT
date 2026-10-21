@@ -48,7 +48,7 @@ struct WritingProjectionPatch: Sendable {
 /// Load/recovery projection. Ordinary edits supply already bounded, authoritative pieces.
 enum WritingProseProjection {
     struct Run { let source: NSRange; let eligible: Bool; var unsupported = false }
-    private static let alignment = rx(#"^<p align="(?:center|right)">(.*)</p>$"#)
+    private static let alignment = rx(#"^<p align="(?:center|right)">([^\n]*)</p>$"#)
     private static let prefix = rx(#"^(?:#{1,3} |[-*] |\d+\.\s|> |>$|- \[[ x]\] )"#)
     private static let divider = rx(#"^---+\s*$"#)
     private static func rx(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }

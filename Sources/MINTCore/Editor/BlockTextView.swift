@@ -565,7 +565,7 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.syncTypingAttributes()
             // 커서가 선택된 이미지 밖으로 나가면 객체 선택을 푼다 (렌더 유지 조건 갱신 전에).
             textView.syncImageSelection()
-            // 커서 줄 하이라이트를 새 커서 위치로 옮긴다 (이전 줄 무효화 포함).
+            // Move the single background to the active paragraph.
             textView.refreshActiveLineHighlight()
             // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
             textView.refreshRenderedBlocks()
@@ -1172,15 +1172,9 @@ final class BlockTextView: NSTextView {
     /// 다 덮지 못하고 잔상이 남는다. 선택이 바뀔 때 이 rect를 직접 지운다.
     private var lastSelectionRect: NSRect?
 
-    /// 커서 줄 하이라이트·선택 잔상·캐럿 뷰를 현재 커서 상태에 맞춘다.
-    /// 선택 변경·포커스 전환·재배치(layout)마다 불린다.
-    ///
-    /// 커서 줄 하이라이트는 **단일 서브뷰**(`activeLineView`)로 그린다 — 뷰 하나를
-    /// 옮기면 이전 자리가 원자적으로 지워지므로, 밴드가 여러 줄에 쌓이는 잔상이
-    /// 구조적으로 불가능하다(항상 최대 1개). 예전 draw() 픽셀 밴드 + 부분 무효화
-    /// 방식은 "refresh가 기록한 rect"와 "draw가 실제로 칠한 rect"가 재배치 타이밍에
-    /// 어긋나면(빈 문단 개행 등) 이전 밴드를 못 지워 잔상이 쌓였다 — 캐럿과 같은
-    /// 서브뷰 방식으로 그 레이스를 원천 제거한다.
+    /// Synchronize the paragraph background, selection cleanup and caret after
+    /// selection, focus or layout changes. Keep one background view so moving
+    /// between paragraphs cannot leave stale bands behind.
     func refreshActiveLineHighlight() {
         syncActiveLineView()
         // 직전 선택 하이라이트 영역 무효화 — 공백·개행 선택 잔상 방지.
@@ -1212,22 +1206,55 @@ final class BlockTextView: NSTextView {
         return rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
     }
 
-    /// Align the band with the typeset glyph baseline, not the insertion rectangle's
-    /// top edge, which can include leading and paragraph spacing.
-    private func activeLineRect() -> NSRect? {
+    /// Highlight the native paragraph, including wraps and U+2028 line breaks.
+    /// TextKit's used fragments include first-line indents and author alignment;
+    /// a container-wide band starts too far left in indented manuscripts.
+    private func activeParagraphRect() -> NSRect? {
         guard let window, window.firstResponder === self,
             selectedRange().length == 0,
-            selectedImageLocation == nil,  // 이미지 객체 선택 중엔 줄 하이라이트 없음
+            selectedRange().location != NSNotFound,
+            selectedImageLocation == nil,
             !isEditingMath,
-            let textContainer, let line = caretLineGeometry()
+            let layoutManager, let textContainer
         else { return nil }
-        let font = caretLineFont()
-        let vpad: CGFloat = 2
-        let top = max(line.fragment.minY, line.baselineY - font.ascender - vpad)
-        let bottom = min(line.fragment.maxY, line.baselineY - font.descender + vpad)
-        let x = textContainerOrigin.x + textContainer.lineFragmentPadding - 8
-        let w = textContainer.size.width - textContainer.lineFragmentPadding * 2 + 16
-        return NSRect(x: x, y: top, width: w, height: max(1, bottom - top))
+        let ns = string as NSString
+        let caret = min(selectedRange().location, ns.length)
+        let paragraph = ns.paragraphRange(for: NSRange(location: caret, length: 0))
+        layoutManager.ensureLayout(forCharacterRange: paragraph)
+        let origin = textContainerOrigin
+        let padding = textContainer.lineFragmentPadding
+        var bounds: NSRect?
+        func include(_ fragment: NSRect, used: NSRect) {
+            guard fragment.height > 0 else { return }
+            let top = max(fragment.minY, used.minY - 2)
+            let bottom = min(fragment.maxY, used.maxY + 2)
+            let rect = NSRect(x: used.minX, y: top,
+                width: max(1, fragment.maxX - padding - used.minX),
+                height: max(1, bottom - top))
+            bounds = bounds.map { $0.union(rect) } ?? rect
+        }
+        if paragraph.length > 0 {
+            let glyphs = layoutManager.glyphRange(forCharacterRange: paragraph, actualCharacterRange: nil)
+            layoutManager.enumerateLineFragments(forGlyphRange: glyphs) { fragment, used, _, _, _ in
+                include(fragment, used: used)
+            }
+        }
+        // A terminal soft break has an empty visual line in the SAME paragraph.
+        // A terminal Enter instead belongs to the next, empty paragraph.
+        let endsWithSoftBreak = paragraph.upperBound == ns.length && ns.length > 0
+            && ns.character(at: ns.length - 1) == 0x2028
+        if paragraph.length == 0 || endsWithSoftBreak {
+            layoutManager.ensureLayout(for: textContainer)
+            let extra = layoutManager.extraLineFragmentRect
+            if layoutManager.extraLineFragmentTextContainer === textContainer, extra.height > 0 {
+                var used = layoutManager.extraLineFragmentUsedRect
+                if caret == ns.length, let insertion = caretRectInView() {
+                    used.origin.x = insertion.minX - origin.x
+                }
+                include(extra, used: used)
+            }
+        }
+        return bounds?.offsetBy(dx: origin.x, dy: origin.y)
     }
 
     private var isEditingMath: Bool {
@@ -1554,7 +1581,7 @@ final class BlockTextView: NSTextView {
 
     /// `<p align="center|right">…</p>` — 정렬 저장 래퍼 (.p 문단 전용).
     private static let alignWrapper = try! NSRegularExpression(
-        pattern: #"^<p align="(center|right)">(.*)</p>$"#)
+        pattern: #"^<p align="(center|right)">([^\n]*)</p>$"#)
 
     /// storage를 순수 마크다운으로 되돌린다 (저장 경로).
     ///
@@ -2530,6 +2557,16 @@ final class BlockTextView: NSTextView {
 
     // MARK: 키 동작 (Enter/Backspace 블록 규칙)
 
+    override func insertLineBreak(_ sender: Any?) {
+        guard !hasMarkedText() else { return super.insertLineBreak(sender) }
+        guard selectedImageLocation == nil else { return insertNewline(sender) }
+        // U+2028 is a line separator, not a paragraph separator. Use the normal
+        // input path for undo, autosave and inline attributes without resetting
+        // the block or advancing a list number as Enter does.
+        insertText("\u{2028}", replacementRange: selectedRange())
+        refreshActiveLineHighlight()
+    }
+
     override func insertNewline(_ sender: Any?) {
         // 이미지 객체 선택 중 Enter — 이미지 아래에 새 문단을 만들고 커서를 옮긴다
         // (그림 블럭 완성도). insertText가 막혀 있어 기본 경로로는 아무 일도 없다.
@@ -2769,6 +2806,7 @@ final class BlockTextView: NSTextView {
     }
 
     private var lastTypingKeyTimestamp: TimeInterval?
+    private var isHandlingSoftReturn = false
 
     override func keyDown(with event: NSEvent) {
         workspaceInteraction?.keyDown(event)
@@ -2781,7 +2819,23 @@ final class BlockTextView: NSTextView {
             breakUndoCoalescing()
         }
         lastTypingKeyTimestamp = event.timestamp
+        let modifiers = event.modifierFlags.intersection([.shift, .control, .option, .command])
+        let previousSoftReturn = isHandlingSoftReturn
+        isHandlingSoftReturn = modifiers == .shift && (event.keyCode == 36 || event.keyCode == 76)
+        defer { isHandlingSoftReturn = previousSoftReturn }
+        // Let the input method handle/commit marked text before remapping the
+        // resulting newline command. A raw key interception skips Hangul IME.
         super.keyDown(with: event)
+    }
+
+    override func doCommand(by selector: Selector) {
+        if isHandlingSoftReturn, !hasMarkedText(),
+           selector == #selector(NSStandardKeyBindingResponding.insertNewline(_:))
+            || selector == #selector(NSStandardKeyBindingResponding.insertNewlineIgnoringFieldEditor(_:)) {
+            super.doCommand(by: #selector(NSStandardKeyBindingResponding.insertLineBreak(_:)))
+        } else {
+            super.doCommand(by: selector)
+        }
     }
 
     /// 수식 소스 모드에서의 객체 조작 키 — 이동(⌥↑↓)과 문단 삭제(⌘⌦)만 가로채고
@@ -5170,9 +5224,7 @@ final class BlockTextView: NSTextView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 
-    /// 커서 줄 하이라이트 뷰 — 단일 서브뷰라 위치를 옮기면 이전 밴드가 자동
-    /// 소거된다(잔상 구조적 불가, 최대 1개 보장, `syncActiveLineView`). 텍스트보다
-    /// 살짝 위에 얹히지만 activeLine 알파가 매우 낮아(≈0.06) 글자를 가리지 않는다.
+    /// One translucent background for the active paragraph, below other overlays.
     private lazy var activeLineView: PassthroughView = {
         let view = PassthroughView(frame: .zero)
         view.wantsLayer = true
@@ -5183,10 +5235,9 @@ final class BlockTextView: NSTextView {
         return view
     }()
 
-    /// 커서 줄 하이라이트 뷰를 현재 커서 줄에 맞춘다. 포커스 밖·선택 중·이미지
-    /// 객체 선택 중이면 `activeLineRect()`가 nil → 숨긴다.
+    /// Hide the paragraph background outside editing focus or during selection.
     private func syncActiveLineView() {
-        guard let rect = activeLineRect() else {
+        guard let rect = activeParagraphRect() else {
             activeLineView.isHidden = true
             return
         }
@@ -5372,10 +5423,8 @@ final class BlockTextView: NSTextView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        // 커서 줄 하이라이트는 draw()가 아니라 단일 서브뷰(activeLineView)가
-        // 그린다 — 픽셀 밴드 + 부분 무효화는 재배치 타이밍 레이스로 밴드가 여러
-        // 줄에 쌓였다(잔상). 서브뷰는 옮기면 이전 자리가 원자적으로 지워져
-        // 항상 최대 1개다 (refreshActiveLineHighlight → syncActiveLineView).
+        // The single activeLineView covers the active paragraph and clears its
+        // old frame atomically when selection or layout changes.
 
         // 드래그 선택 영역 — 시스템 사각 하이라이트 대신 줄별 라운드 사각형을
         // 본문 아래에 깔아 그린다 (우리식 드래그 표시, 테마 selection 토큰).
@@ -5633,7 +5682,7 @@ final class BlockTextView: NSTextView {
         let baselineY: CGFloat
     }
 
-    /// One TextKit coordinate source for the caret, active line and inline Ghost.
+    /// One TextKit coordinate source for the caret and inline Ghost.
     /// Keep AppKit's insertion-point x position and selection/IME handling intact.
     private func caretLineGeometry() -> CaretLineGeometry? {
         guard let layoutManager, let textContainer else { return nil }
@@ -5643,11 +5692,12 @@ final class BlockTextView: NSTextView {
         layoutManager.ensureLayout(for: textContainer)
         let origin = textContainerOrigin
         let extra = layoutManager.extraLineFragmentRect
-        // Empty documents and the empty paragraph after a final newline have no
-        // glyph. Use the new line's font metrics; scaling the previous line's
-        // baseline carries heading sizes and paragraph spacing into this line.
+        // Empty documents and final hard/soft breaks have no following glyph.
+        // Use the new line's font metrics, never the previous line's baseline.
+        let endsWithBreak = ns.length == 0
+            || [0x0A, 0x0D, 0x2028, 0x2029].contains(Int(ns.character(at: ns.length - 1)))
         if caret == ns.length,
-           ns.paragraphRange(for: NSRange(location: caret, length: 0)).length == 0,
+           endsWithBreak,
            extra.height > 0,
            layoutManager.extraLineFragmentTextContainer === textContainer {
             return CaretLineGeometry(
@@ -5662,10 +5712,10 @@ final class BlockTextView: NSTextView {
         var fragment = layoutManager.lineFragmentRect(
             forGlyphAt: glyphIndex, effectiveRange: &glyphRange)
         // A soft-wrap boundary has two insertion positions. Upstream affinity
-        // belongs to the preceding visual line, but never to a previous paragraph.
+        // belongs to the preceding visual line, never across an explicit break.
         if selectionAffinity == .upstream, caret > 0, caret < ns.length,
            glyphIndex == glyphRange.location,
-           ns.paragraphRange(for: NSRange(location: caret, length: 0)).location < caret {
+           ns.lineRange(for: NSRange(location: caret, length: 0)).location < caret {
             glyphIndex = layoutManager.glyphIndexForCharacter(at: caret - 1)
             fragment = layoutManager.lineFragmentRect(forGlyphAt: glyphIndex, effectiveRange: nil)
         }

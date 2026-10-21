@@ -58,6 +58,26 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### Paragraph highlight and soft returns, 2026-10-21
+
+The owner's screenshot showed a background starting before the actual indented
+text. Replace the container-wide single-line band with the union of TextKit's
+used line fragments in the active native paragraph. This follows first-line
+indentation, alignment, wrapping and mixed font metrics. The empty line after a
+terminal soft return belongs to that same background; Enter starts a new one.
+
+Keep Enter's existing block inheritance and list continuation. Route Shift+Enter
+through AppKit's input method and then `insertLineBreak`, inserting U+2028 through
+the normal text input/undo/autosave path. LF remains the paragraph separator.
+The source persists both characters verbatim, without migrating existing text.
+Alignment/font wrappers accept the internal line separator on reload and prose
+projection; EPUB emits `<br />` inside the original paragraph. Caret/Ghost geometry
+also recognizes the empty visual line after a terminal soft return.
+
+`swift build` compiled the final source and linked MINT and MINTBench successfully
+(15.55 s). Verification remains build-only at the owner's request; no tests or
+actual-app interaction checks were performed for this change.
+
 ### Persistent pouch widget follow-up, 2026-10-21
 
 The owner clarified that dragging the pouch outside the main window must leave

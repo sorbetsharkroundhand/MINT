@@ -291,7 +291,7 @@ public enum EpubExporter {
                 continue
             }
             if inCode {
-                html += escape(line) + "\n"
+                html += escape(line).replacingOccurrences(of: "\u{2028}", with: "\n") + "\n"
                 continue
             }
             // 정렬 래퍼는 스타일로 옮긴다.
@@ -564,7 +564,8 @@ public enum EpubExporter {
             in: s, range: fullRange(s), withTemplate: "<em>$1</em>")
         s = codeSpan.stringByReplacingMatches(
             in: s, range: fullRange(s), withTemplate: "<code>$1</code>")
-        return s
+        // Preserve native soft breaks without creating another XHTML paragraph.
+        return s.replacingOccurrences(of: "\u{2028}", with: "<br />")
     }
 
     /// 제목용 — 마커·태그를 벗겨 순수 글자만 남긴다 (nav·opf에 들어간다).
@@ -586,9 +587,9 @@ public enum EpubExporter {
     }
 
     private static let alignWrapper = try! NSRegularExpression(
-        pattern: #"^<p align="(center|right)">(.*)</p>$"#)
+        pattern: #"^<p align="(center|right)">([^\n]*)</p>$"#)
     private static let fontTag = try! NSRegularExpression(
-        pattern: #"&lt;font ([^&]*)&gt;(.*?)&lt;/font&gt;"#)
+        pattern: #"&lt;font ([^&]*)&gt;([^\n]*?)&lt;/font&gt;"#)
     private static let fontColorAttr = try! NSRegularExpression(
         pattern: ##"color="#([0-9A-Fa-f]{6})""##)
     private static let fontSizeAttr = try! NSRegularExpression(

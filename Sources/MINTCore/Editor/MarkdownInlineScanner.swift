@@ -12,7 +12,8 @@ enum MarkdownInlineScanner {
         let sourceRange: NSRange
         let style: Style
     }
-    static let fontTag = regex(##"<font ((?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+")(?: (?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+"))*)>(.*?)</font>"##)
+    // U+2028 stays inside a formatted paragraph; only Enter (LF) separates it.
+    static let fontTag = regex(##"<font ((?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+")(?: (?:color="#[0-9A-Fa-f]{6}"|size="[0-9.]+"))*)>([^\n]*?)</font>"##)
     private static let fontColor = regex(##"color="#([0-9A-Fa-f]{6})""##)
     private static let fontSize = regex(#"size="([0-9.]+)""#)
     static let code = regex(#"`([^`\n]+)`"#)
