@@ -92,7 +92,9 @@
     },
     {
       "path": "kiwi/Utils.h",
-      "sha256": "29dadabd465db5067cc0eb123600e97e83d71c5df00bd29e6e3158026e28e189"
+      "sha256": "29dadabd465db5067cc0eb123600e97e83d71c5df00bd29e6e3158026e28e189",
+      "localSHA256": "e4cbc01ada9f41287b9a9753db3098222a3e3a89e315636fcff881be17716096",
+      "localChange": "Explicit char16_t cast in the c < 0x10000 branch of decomposeSurrogate."
     },
     {
       "path": "kiwi/WordDetector.h",

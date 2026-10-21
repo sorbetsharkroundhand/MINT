@@ -58,6 +58,16 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
-Earlier targeted runs and native captures informed the implementation but do not establish the correctness of this revision. Changes made after the owner's implementation-only instruction have not been compiled or exercised. Existing regression coverage and the updated isolated UI script remain available for the owner's validation. The HTML sample is stored only as a test fixture; it is not shipped as author data.
+On 2026-10-21 the owner authorized building after supplying a log from
+`codex/mint-editorial-redesign`. That log already completed the MINT build and
+included the new `builder.cpp`; the reported output contained an AppKit font
+Sendable warning and a Kiwi character-conversion warning. Move native fonts to
+the main-actor-owned `NSMutableAttributedString` and make the guarded BMP cast
+explicit in the vendored header, recording its local patch in provenance.
+`swift build` then rebuilt both changed sources and linked MINT and MINTBench
+successfully (12.51 s), with no warnings or errors in that invocation. No tests,
+application launch, pouch interaction or visual alignment checks were run.
+
+Earlier targeted runs and native captures informed the implementation but do not establish the correctness of this revision. The changes initially delivered under the owner's implementation-only instruction are now compiled by the build-only follow-up above, but have not been exercised. Existing regression coverage and the updated isolated UI script remain available for the owner's validation. The HTML sample is stored only as a test fixture; it is not shipped as author data.
 
 Production adaptations are actual documents and writer records instead of fictional samples, existing local inference instead of Gemini, restrained readable glass, and the owner's requested preservation of native editing mechanics. Browser security rejected the local HTML URL; source was read directly without an alternate browser route or server workaround.

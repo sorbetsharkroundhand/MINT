@@ -276,7 +276,7 @@ namespace kiwi
 		std::array<char16_t, 2> ret;
 		if (c < 0x10000)
 		{
-			ret[0] = c;
+			ret[0] = static_cast<char16_t>(c);
 			ret[1] = 0;
 		}
 		else

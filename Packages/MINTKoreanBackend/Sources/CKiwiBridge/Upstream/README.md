@@ -1,9 +1,13 @@
 # Pinned Kiwi constructor headers
 
-These unmodified public headers come from Kiwi 0.24.0, revision
+These public headers come from Kiwi 0.24.0, revision
 `6e16bbcfc0940fabccbdde574abb4ea3a659588e`, matching the native archive and
 model index. `provenance.json` records each file's SHA-256. `LICENSE` is the
 upstream Apache-2.0 license; the existing distribution notices also cover Kiwi.
+One local change in `Utils.h` makes the UTF-32 to UTF-16 conversion explicit
+inside the existing `c < 0x10000` branch. This preserves its behavior and resolves
+Clang's character-conversion warning. Provenance retains the upstream hash and
+records the local hash separately.
 
 Only the transitive public includes of `kiwi/Kiwi.h` are retained. They are
 private build inputs to `builder.cpp`, not part of the exported Swift module.
