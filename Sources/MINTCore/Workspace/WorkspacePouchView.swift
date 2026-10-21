@@ -128,28 +128,42 @@ struct WorkspacePouchBridge: NSViewRepresentable {
 
     func makeCoordinator() -> Coordinator { Coordinator(model: model, defaults: defaults) }
     func makeNSView(context: Context) -> Probe {
-        let view = Probe(); view.controller = context.coordinator.controller; return view
+        let view = Probe()
+        view.coordinator = context.coordinator; view.controller = context.coordinator.controller
+        return view
     }
     func updateNSView(_ view: Probe, context: Context) {
+        if let window = view.window { context.coordinator.attach(to: window, from: view) }
         let controller = context.coordinator.controller
         controller.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
         controller.reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency || accessibilityOptions.reduceTransparency
         controller.theme = theme; controller.actions = actions; controller.extraActions = extraActions
         requests.pouch = controller
-        if let window = view.window { controller.attach(to: window) }
     }
-    static func dismantleNSView(_ view: Probe, coordinator: Coordinator) { coordinator.controller.detach() }
+    static func dismantleNSView(_ view: Probe, coordinator: Coordinator) {
+        coordinator.controller.detachFromWorkspaceView(view)
+        view.coordinator = nil; view.controller = nil
+    }
     @MainActor final class Coordinator {
-        let controller: WorkspacePouchController
+        private(set) var controller: WorkspacePouchController
         init(model: SpatialWorkspaceController, defaults: UserDefaults) { controller = WorkspacePouchController(model: model, defaults: defaults) }
+        func attach(to window: NSWindow, from view: Probe) {
+            if let retained = WorkspacePouchLifetime.controller(for: window), retained !== controller {
+                controller.detachFromWorkspaceView(view)
+                controller = retained
+            }
+            view.controller = controller
+            controller.attach(to: window, from: view)
+        }
     }
     final class Probe: NSView {
+        weak var coordinator: Coordinator?
         weak var controller: WorkspacePouchController?
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            if let window { controller?.attach(to: window) }
-            else { controller?.detach() }
+            if let window { coordinator?.attach(to: window, from: self) }
+            else { controller?.detachFromWorkspaceView(self) }
         }
     }
 }

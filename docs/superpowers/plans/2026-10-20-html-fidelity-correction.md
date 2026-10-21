@@ -58,6 +58,27 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### Persistent pouch widget follow-up, 2026-10-21
+
+The owner clarified that dragging the pouch outside the main window must leave
+a persistent desktop widget, with the original window stored inside it. Source
+inspection found that `AppDelegate` unconditionally allowed termination after
+the last window closed, while the suction path hides the main window and closes
+a temporary animation panel. The delegate now keeps the application alive while
+a workspace is collapsed. Explicit Quit still uses the existing save/drain path.
+
+An application-owned pouch lifetime retains the controller and hidden original
+window. SwiftUI bridge removal cannot dispose a collapsed widget, and a new bridge
+adopts the retained controller by window identity. The panel remains floating,
+visible across deactivation/application hiding and Spaces, and outside window
+cycling. Clicking it or reopening from the Dock restores and activates the same
+editor window. The HTML's 360 ms suction, 380 ms unfold and 44-point orb remain.
+
+The owner authorized build-only verification for this follow-up. `swift build`
+compiled the final changes and linked MINT and MINTBench successfully (13.14 s),
+with no warnings or errors in that invocation. Runtime/UI checks and tests
+remain unperformed.
+
 On 2026-10-21 the owner authorized building after supplying a log from
 `codex/mint-editorial-redesign`. That log already completed the MINT build and
 included the new `builder.cpp`; the reported output contained an AppKit font

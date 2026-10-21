@@ -11,6 +11,32 @@ struct WorkspacePouchAction {
     let perform: () -> Void
 }
 
+/// A collapsed workspace is still an open workspace, even without a visible
+/// document window. Its widget must outlive transient animation panels/views.
+@MainActor public enum WorkspacePouchLifetime {
+    private static var retained: [ObjectIdentifier: WorkspacePouchController] = [:]
+
+    public static var hasCollapsedWorkspace: Bool { retained.values.contains { $0.isCollapsed } }
+
+    static func controller(for window: NSWindow) -> WorkspacePouchController? {
+        retained.values.first { $0.window === window }
+    }
+
+    @discardableResult public static func restoreCollapsedWorkspaces() -> Bool {
+        let workspaces = retained.values.filter { $0.isCollapsed }
+        for workspace in workspaces { workspace.restore() }
+        return !workspaces.isEmpty
+    }
+
+    fileprivate static func retain(_ controller: WorkspacePouchController) {
+        retained[ObjectIdentifier(controller)] = controller
+    }
+
+    fileprivate static func release(_ controller: WorkspacePouchController) {
+        retained.removeValue(forKey: ObjectIdentifier(controller))
+    }
+}
+
 @MainActor final class WorkspacePouchController: NSObject {
     private(set) var panel: NSPanel?
     private(set) var isCollapsed = false
@@ -20,7 +46,9 @@ struct WorkspacePouchAction {
     var theme: MintTheme = .light { didSet { refresh() } }
     var actions: [WorkspacePouchAction] = [] { didSet { refresh() } }
     var extraActions: [WorkspacePouchAction] = []
-    private weak var window: NSWindow?
+    fileprivate weak var window: NSWindow?
+    private var collapsedWindow: NSWindow?
+    private weak var workspaceView: NSView?
     private weak var previousResponder: NSResponder?
     private let model: SpatialWorkspaceController
     private let defaults: UserDefaults
@@ -51,17 +79,21 @@ struct WorkspacePouchAction {
         }
     }
 
-    func attach(to window: NSWindow) {
+    func attach(to window: NSWindow, from workspaceView: NSView? = nil) {
         guard self.window !== window else {
+            if let workspaceView { self.workspaceView = workspaceView }
             let changed = loadedKey != preferenceKey
             refresh(); if changed { dock(immediate: true) }; return
         }
-        detach(); self.window = window
+        detach(); self.window = window; self.workspaceView = workspaceView
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.title = "MINT 주머니"; panel.isReleasedWhenClosed = false; panel.isOpaque = false
         panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating
+        panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = true
+        panel.isExcludedFromWindowsMenu = true
         panel.isMovable = false; panel.isMovableByWindowBackground = false
-        panel.hidesOnDeactivate = true; panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        panel.hidesOnDeactivate = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         let content = WorkspacePouchView(); content.controller = self
         content.setAccessibilityIdentifier("mint.workspace.rail"); content.setAccessibilityLabel("주머니 도구창")
         panel.contentView = content; self.panel = panel; self.content = content
@@ -97,6 +129,18 @@ struct WorkspacePouchAction {
         cancelTransition(); collapsedImage = nil
         panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
         start = nil; isDragging = false; isCollapsed = false
+        collapsedWindow = nil
+        workspaceView = nil
+        WorkspacePouchLifetime.release(self)
+    }
+
+    func detachFromWorkspaceView(_ view: NSView) {
+        guard workspaceView === view else { return }
+        workspaceView = nil
+        // SwiftUI may detach the bridge while the document window is hidden.
+        // Only an actual window close or an explicit detach disposes its widget.
+        guard !isCollapsed else { return }
+        detach()
     }
 
     func beginDrag(at point: CGPoint) {
@@ -170,8 +214,10 @@ struct WorkspacePouchAction {
         // Keep marked text and the native selection with the same first responder;
         // do not enqueue diagnostics/autosave by synthesizing didChangeText here.
         target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
-        cancelTransition()
+        collapsedWindow = window
         isCollapsed = true
+        WorkspacePouchLifetime.retain(self)
+        cancelTransition()
         // Make the orb independent of application activation before hiding the window.
         refresh()
         panel.orderFrontRegardless()
@@ -187,8 +233,13 @@ struct WorkspacePouchAction {
         stopDragTracking(); cancelTransition()
         isCollapsed = false; isDragging = false; start = nil
         if !reduceMotion { window.alphaValue = 0 }
+        NSApp.unhide(nil)
+        NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
         if let previousResponder { window.makeFirstResponder(previousResponder) }
+        collapsedWindow = nil
+        // Retain the controller until an actual detach/close. A recreated SwiftUI
+        // bridge adopts it, including when restoration happens before that bridge.
         refresh(); dock(immediate: false)
         if !reduceMotion {
             animateSnapshot(of: window, toward: window.frame, expandingFrom: collapsedSnapshotFrame(window: window, orb: origin))
@@ -206,8 +257,9 @@ struct WorkspacePouchAction {
         content.configure(orb: isCollapsed || isDragging, horizontal: edge == .top || edge == .bottom,
             actions: actions, theme: theme)
         panel.hidesOnDeactivate = !isCollapsed && !isDragging
+        panel.canHide = !isCollapsed && !isDragging
         let opacity: CGFloat = model.whisperTyping && !isCollapsed && !isDragging ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84)
-        if reduceMotion { panel.alphaValue = opacity }
+        if reduceMotion || isCollapsed || isDragging { panel.alphaValue = opacity }
         else if abs(panel.alphaValue - opacity) > 0.001 {
             WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
         }
@@ -215,6 +267,7 @@ struct WorkspacePouchAction {
         if isCollapsed || isDragging { panel.setContentSize(CGSize(width: 44, height: 44)) }
         else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
         content.needsLayout = true; content.needsDisplay = true
+        if isCollapsed { panel.orderFrontRegardless() }
     }
     private var preferenceKey: String { "mint.workspace-pouch.\(model.projectID?.rawValue.uuidString ?? "window")" }
     private func dock(immediate: Bool) {
