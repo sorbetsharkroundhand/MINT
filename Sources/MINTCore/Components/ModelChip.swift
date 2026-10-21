@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// 모델 상태 칩 + 디자인형 드롭다운 — ContentView에서 파일 분리 (이슈 #61 PR5).
-/// 모델 상태 칩 + 디자인형 드롭다운 (264px 카드, mint/basil/peppermint).
+/// Shared local completion controls for the editor toolbar and spatial document headers.
 struct ModelChip: View {
     @ObservedObject var completion: CompletionController
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     var compact = false
+    var onOpen: (() -> Void)? = nil
 
     @Environment(\.openSettings) private var openSettings
     @State private var menuOpen = false
@@ -17,6 +17,7 @@ struct ModelChip: View {
 
     var body: some View {
         Button {
+            if !menuOpen { onOpen?() }
             menuOpen.toggle()
         } label: {
             HStack(spacing: 8) {
@@ -37,6 +38,7 @@ struct ModelChip: View {
                     Text(statusLabel)
                         .font(MintFonts.monoUI(11, .semibold))
                         .foregroundStyle(theme.ink2C)
+                        .lineLimit(1)
                     Text("▼")
                         .font(.system(size: 8))
                         .foregroundStyle(theme.ink3C)

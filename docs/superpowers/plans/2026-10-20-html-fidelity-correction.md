@@ -58,6 +58,30 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### Restore visible completion controls, 2026-10-21
+
+The owner requested the pre-redesign editor's autocomplete in the spatial
+workspace. Source comparison confirms that `EditorPane` still embeds the same
+`MintBlockEditor`, with `CompletionController` edit/selection callbacks, local
+inference, inline Ghost rendering and Tab/right-arrow/Esc handling intact.
+The spatial tile's `showsChrome: false` removed the original toolbar, including
+its model status and autocomplete controls. The reference HTML's header has
+typewriter, focus and manual continuation actions, so restoring the older
+model controls is an explicit addition requested by the owner.
+
+Reuse `ModelChip` in each document header to expose enable/disable, model
+selection/download/retry, prediction length and generation/load status. Below
+520 points, use compact controls while retaining accessible labels and tooltips.
+Keep the native draggable header separate from the model button. Opening the
+model controls or invoking a header action focuses that tile's existing editor;
+manual continuation only proceeds after focus succeeds. No editor replacement,
+selection rewrite, new inference path or automatic authorization is introduced.
+
+`swift build` completed successfully (17.05 s), linking MINT and MINTBench.
+Per the owner's build-only instruction, no tests, model inference or actual-app
+interaction checks were run. Completion behavior and popover/focus interaction
+still require the owner's runtime review.
+
 ### First-character caret and pouch theme follow-up, 2026-10-21
 
 The owner's captures showed the active decoration above the first typed line

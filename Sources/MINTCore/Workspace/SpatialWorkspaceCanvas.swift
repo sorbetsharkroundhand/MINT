@@ -505,8 +505,8 @@ struct SpatialDocumentTile: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SpatialTileHeader(tile: .document(documentID), title: document?.title ?? "원고", theme: theme,
-                active: active, actions: headerActions).frame(height: 32).opacity(model.whisperTyping ? 0.08 : 1)
+            documentHeader
+                .opacity(model.whisperTyping ? 0.08 : 1)
             EditorPane(projectSession: session, editorRequests: requests, completion: completion,
                 settings: completion.settings, theme: theme, editorBridge: editorBridge,
                 positionStore: positionStore, documentID: documentID, showsChrome: false)
@@ -530,6 +530,34 @@ struct SpatialDocumentTile: View {
         .accessibilityIdentifier("mint.document-tile.\(documentID.rawValue.uuidString)")
         .task { await Task.yield(); statsRevision += 1 }
     }
+    private var documentHeader: some View {
+        GeometryReader { geometry in
+            let compact = geometry.size.width < 520
+            HStack(spacing: 0) {
+                SpatialTileHeader(tile: .document(documentID), title: document?.title ?? "원고", theme: theme,
+                    active: active, actions: headerActions(compact: compact))
+                    .frame(maxWidth: .infinity)
+                ModelChip(completion: completion, settings: completion.settings, theme: theme,
+                    compact: compact, onOpen: { _ = focusDocumentEditor() })
+                    .fixedSize()
+                    .padding(.trailing, 10)
+                    .accessibilityIdentifier("mint.tile.autocomplete.\(documentID.rawValue.uuidString)")
+            }
+            .frame(height: 32)
+        }
+        .frame(height: 32)
+    }
+
+    /// Activate this tile's existing editor without replacing its text or selection.
+    @discardableResult
+    private func focusDocumentEditor() -> BlockTextView? {
+        guard session.isEditorEditable, let project = session.activeProject,
+              let editor = requests.editor(for: .init(projectID: project.id, documentID: documentID)),
+              let window = editor.window, window.makeFirstResponder(editor),
+              window.firstResponder === editor else { return nil }
+        return editor
+    }
+
     private var document: WritingDocument? { session.document(documentID) }
     private var active: Bool { session.selectedDocumentID == documentID }
     private var statistics: WorkspaceWritingStatistics {
@@ -538,16 +566,22 @@ struct SpatialDocumentTile: View {
         let text = key.flatMap { requests.editor(for: $0)?.string } ?? document?.body ?? ""
         return WorkspaceWritingStatistics(text: text, goal: session.presentationPreferences.integer(forKey: "mint.writing-goal.\(documentID.rawValue.uuidString)"))
     }
-    private var headerActions: [SpatialHeaderAction] {
+    private func headerActions(compact: Bool) -> [SpatialHeaderAction] {
         var actions = [
             SpatialHeaderAction(id: "mint.tile.typewriter.\(documentID.rawValue.uuidString)", label: "타자기",
-                symbol: "", title: "타자기", selected: model.typewriter) { model.typewriter.toggle(); model.showToast(model.typewriter ? "타자기 스크롤 켜짐 — 현재 문단을 눈높이 중앙에 유지합니다" : "타자기 스크롤 꺼짐"); requests.focusEditor() },
+                symbol: compact ? "keyboard" : "", title: compact ? "" : "타자기", selected: model.typewriter) {
+                    model.typewriter.toggle()
+                    model.showToast(model.typewriter ? "타자기 스크롤 켜짐 — 현재 문단을 눈높이 중앙에 유지합니다" : "타자기 스크롤 꺼짐")
+                    focusDocumentEditor()
+                },
             SpatialHeaderAction(id: "mint.tile.focus.\(documentID.rawValue.uuidString)", label: "문단 집중",
-                symbol: "", title: "집중", selected: model.focusDimming) { model.focusDimming.toggle(); requests.focusEditor() },
+                symbol: compact ? "scope" : "", title: compact ? "" : "집중", selected: model.focusDimming) {
+                    model.focusDimming.toggle()
+                    focusDocumentEditor()
+                },
             SpatialHeaderAction(id: "mint.tile.continue.\(documentID.rawValue.uuidString)", label: "이어쓰기 — 로컬 AI",
-                symbol: "sparkles", title: "이어쓰기", enabled: completion.engineState == .ready && completion.settings.authorization == .enabled && completion.settings.autocompleteEnabled) {
-                    guard let project = session.activeProject, let editor = requests.editor(for: .init(projectID: project.id, documentID: documentID)) else { return }
-                    editor.window?.makeFirstResponder(editor)
+                symbol: "sparkles", title: compact ? "" : "이어쓰기", enabled: completion.engineState == .ready && completion.settings.authorization == .enabled && completion.settings.autocompleteEnabled) {
+                    guard let editor = focusDocumentEditor() else { return }
                     (editor.delegate as? MintBlockEditor.Coordinator)?.requestExplicitCompletion(editor)
                 }
         ]
