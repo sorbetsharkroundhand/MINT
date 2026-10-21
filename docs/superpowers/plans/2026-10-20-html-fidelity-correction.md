@@ -58,6 +58,34 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 ## Validation handoff
 
+### First-character caret and pouch theme follow-up, 2026-10-21
+
+The owner's captures showed the active decoration above the first typed line
+and an empty-document prompt at a different origin. Remove that prompt entirely.
+Selection updates previously measured overlays before rendered-block line-height
+updates, and native insertion/IME callbacks could measure an unfinished layout.
+Resolve overlays after block rendering and after native input calls unwind,
+coalesce a final post-edit refresh, and synchronize once TextKit draws the glyphs.
+Keep geometry updates nonanimated and restart the blink only for editing, focus
+or actual caret movement, not every redraw. Attribute edits/undo also schedule
+the same post-layout refresh. No manuscript characters are rewritten.
+
+Do not replace typing attributes during marked text. Caret height continues to
+use the input font's cap height, ascender and descender, including custom inline
+sizes; during composition, read the composing character's actual font. The
+stroke remains two points wide. Baseline measurement precedes the native
+insertion-rectangle query so both observe the completed layout.
+
+The separate pouch panel now receives an explicit light/dark AppKit appearance
+from its current theme surface. Its grip also receives the resolved palette,
+preventing hover refreshes from reverting to the default light palette. Existing
+theme-based surface, border and accent colors remain shared by rail and orb.
+
+`swift build` completed successfully (18.69 s), linking MINT and MINTBench without
+warnings or errors in that invocation. Per the owner's build-only instruction,
+actual-app typing, IME, visual checks and automated tests were not run; the
+reported first-character behavior still requires the owner's runtime review.
+
 ### Paragraph highlight and soft returns, 2026-10-21
 
 The owner's screenshot showed a background starting before the actual indented

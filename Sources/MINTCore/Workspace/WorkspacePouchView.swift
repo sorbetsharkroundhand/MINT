@@ -28,7 +28,9 @@ final class WorkspacePouchView: NSVisualEffectView {
         layer?.cornerRadius = orb ? 14 : 12
         grip.controller = controller
         grip.title = orb ? "M" : ""
-        grip.font = MintFonts.serif(12, weight: .bold); grip.contentTintColor = theme.blue
+        grip.theme = theme; grip.selected = orb
+        grip.font = MintFonts.serif(12, weight: .bold)
+        grip.refresh()
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
         grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "도구 더 보기 · 드래그하여 주머니 이동")
         grip.menu = controller?.moreMenu()

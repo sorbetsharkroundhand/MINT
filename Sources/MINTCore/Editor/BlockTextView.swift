@@ -565,10 +565,10 @@ public struct MintBlockEditor: NSViewRepresentable {
             textView.syncTypingAttributes()
             // 커서가 선택된 이미지 밖으로 나가면 객체 선택을 푼다 (렌더 유지 조건 갱신 전에).
             textView.syncImageSelection()
-            // Move the single background to the active paragraph.
-            textView.refreshActiveLineHighlight()
             // 커서가 수식 문단에 들어오면 소스, 나가면 렌더로 전환.
             textView.refreshRenderedBlocks()
+            // Resolve overlays after rendered blocks have finalized line heights.
+            textView.refreshActiveLineHighlight()
             // 드래그 선택 위 서식 툴바 표시/숨김.
             textView.updateSelectionToolbar()
             textView.workspaceInteraction?.selectionDidChange()
@@ -1171,18 +1171,53 @@ final class BlockTextView: NSTextView {
     /// 선택은 글리프 rect 바깥까지 그려져, 선택 해제 시 AppKit의 무효화가
     /// 다 덮지 못하고 잔상이 남는다. 선택이 바뀔 때 이 rect를 직접 지운다.
     private var lastSelectionRect: NSRect?
+    private var nativeTextUpdateDepth = 0
+    private var refreshingEditingOverlays = false
+    private var editingOverlayRefreshPending = false
+    private var pendingCaretBlinkRestart = false
+
+    /// NSTextView can notify selection/insertion changes before an insertion or
+    /// IME update has finished. Resolve the final layout once those edits unwind.
+    private func finishNativeTextUpdate() {
+        nativeTextUpdateDepth -= 1
+        guard nativeTextUpdateDepth == 0 else { return }
+        refreshActiveLineHighlight()
+        scheduleEditingOverlayRefresh()
+    }
+
+    private func scheduleEditingOverlayRefresh(restartBlink: Bool = false) {
+        pendingCaretBlinkRestart = pendingCaretBlinkRestart || restartBlink
+        guard !editingOverlayRefreshPending else { return }
+        editingOverlayRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.editingOverlayRefreshPending = false
+            let restart = self.pendingCaretBlinkRestart
+            self.pendingCaretBlinkRestart = false
+            guard self.window != nil else { return }
+            self.refreshActiveLineHighlight(restartBlink: restart)
+        }
+    }
 
     /// Synchronize the paragraph background, selection cleanup and caret after
     /// selection, focus or layout changes. Keep one background view so moving
     /// between paragraphs cannot leave stale bands behind.
-    func refreshActiveLineHighlight() {
+    func refreshActiveLineHighlight(restartBlink: Bool = true) {
+        guard nativeTextUpdateDepth == 0, !isTransforming else {
+            scheduleEditingOverlayRefresh(restartBlink: restartBlink)
+            return
+        }
+        guard !refreshingEditingOverlays else { return }
+        refreshingEditingOverlays = true
+        defer { refreshingEditingOverlays = false }
         syncActiveLineView()
         // 직전 선택 하이라이트 영역 무효화 — 공백·개행 선택 잔상 방지.
-        if let oldSelection = lastSelectionRect {
+        let selection = selectionHighlightRect()
+        if selection != lastSelectionRect, let oldSelection = lastSelectionRect {
             setNeedsDisplay(oldSelection.insetBy(dx: -4, dy: -4))
         }
-        lastSelectionRect = selectionHighlightRect()
-        syncCaretView()
+        lastSelectionRect = selection
+        syncCaretView(restartBlink: restartBlink)
     }
 
     /// 현재 선택 하이라이트가 그려질 수 있는 영역 (뷰 좌표). 선택이 없으면 nil.
@@ -2048,6 +2083,7 @@ final class BlockTextView: NSTextView {
         }
         isTransforming = wasTransforming
         needsDisplay = true
+        scheduleEditingOverlayRefresh()
     }
 
     /// 팔레트/테마 변경 시 문서 전체를 다시 입힌다.
@@ -2090,11 +2126,13 @@ final class BlockTextView: NSTextView {
         invalidateMediaIndex()
         refreshRenderedBlocks()
         needsDisplay = true
+        scheduleEditingOverlayRefresh()
     }
 
     /// 커서 문단의 속성을 typingAttributes로 동기화 — 빈 문단에서도 블록 유지.
     func syncTypingAttributes() {
-        guard let storage = textStorage else { return }
+        // The input method owns attributes while composing the first character.
+        guard !hasMarkedText(), let storage = textStorage else { return }
         let caret = selectedRange().location
         guard caret != NSNotFound else { return }
         let ns = string as NSString
@@ -2373,15 +2411,20 @@ final class BlockTextView: NSTextView {
         }
         // IME 조합 중에도 갱신 — 문단 위치가 밀리면 렌더 range를 다시 잡아야 한다.
         refreshRenderedBlocks()
+        scheduleEditingOverlayRefresh(restartBlink: true)
     }
 
     override func setMarkedText(_ string: Any, selectedRange: NSRange, replacementRange: NSRange) {
+        nativeTextUpdateDepth += 1
+        defer { finishNativeTextUpdate() }
         writingProjectionCapture.beginComposition()
         super.setMarkedText(string, selectedRange: selectedRange, replacementRange: replacementRange)
         writingProjectionCapture.endComposition(hasMarkedText() ? markedRange() : nil)
     }
 
     override func unmarkText() {
+        nativeTextUpdateDepth += 1
+        defer { finishNativeTextUpdate() }
         writingProjectionCapture.beginComposition()
         super.unmarkText()
         writingProjectionCapture.endComposition(nil)
@@ -2568,6 +2611,8 @@ final class BlockTextView: NSTextView {
     }
 
     override func insertNewline(_ sender: Any?) {
+        nativeTextUpdateDepth += 1
+        defer { finishNativeTextUpdate() }
         // 이미지 객체 선택 중 Enter — 이미지 아래에 새 문단을 만들고 커서를 옮긴다
         // (그림 블럭 완성도). insertText가 막혀 있어 기본 경로로는 아무 일도 없다.
         if let loc = selectedImageLocation {
@@ -3205,6 +3250,8 @@ final class BlockTextView: NSTextView {
     /// 이미지가 객체로 선택된 동안엔 텍스트 입력을 막는다 — 내부는 편집 불가 (요구 1).
     override func insertText(_ insertString: Any, replacementRange: NSRange) {
         guard selectedImageLocation == nil else { return }
+        nativeTextUpdateDepth += 1
+        defer { finishNativeTextUpdate() }
         super.insertText(insertString, replacementRange: replacementRange)
         let committed = (insertString as? String) ?? (insertString as? NSAttributedString)?.string
         // Keep each word and its trailing whitespace together. Only committed text
@@ -5241,11 +5288,19 @@ final class BlockTextView: NSTextView {
             activeLineView.isHidden = true
             return
         }
-        activeLineView.layer?.backgroundColor = palette.activeLine.cgColor
-        activeLineView.layer?.borderColor = palette.activeLineOutline?.cgColor
-        activeLineView.layer?.borderWidth = palette.activeLineOutline == nil ? 0 : 1
-        activeLineView.frame = rect
-        activeLineView.isHidden = false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            if activeLineView.layer?.backgroundColor != palette.activeLine.cgColor {
+                activeLineView.layer?.backgroundColor = palette.activeLine.cgColor
+            }
+            if activeLineView.layer?.borderColor != palette.activeLineOutline?.cgColor {
+                activeLineView.layer?.borderColor = palette.activeLineOutline?.cgColor
+                activeLineView.layer?.borderWidth = palette.activeLineOutline == nil ? 0 : 1
+            }
+            if activeLineView.frame != rect { activeLineView.frame = rect }
+            if activeLineView.isHidden { activeLineView.isHidden = false }
+        }
     }
 
     /// 우리가 소유한 캐럿 뷰. 표시 조건·위치는 `syncCaretView()`가 담당.
@@ -5266,13 +5321,13 @@ final class BlockTextView: NSTextView {
     /// 오지 않는 경로까지 덮는 안전망.
     override func updateInsertionPointStateAndRestartTimer(_ restartFlag: Bool) {
         super.updateInsertionPointStateAndRestartTimer(restartFlag)
-        refreshActiveLineHighlight()
+        scheduleEditingOverlayRefresh(restartBlink: restartFlag)
     }
 
     /// 줄바꿈 폭 변경 등 재배치 후에도 캐럿 뷰·하이라이트가 글자를 따라가게 한다.
     override func layout() {
         super.layout()
-        refreshActiveLineHighlight()
+        refreshActiveLineHighlight(restartBlink: false)
     }
 
     /// 캐럿 뷰를 현재 커서 위치·테마 색에 맞추고 블링크를 처음부터 다시 시작한다.
@@ -5282,29 +5337,36 @@ final class BlockTextView: NSTextView {
     /// 한글보다 짧아 보이므로 capHeight~ascender 사이로 올려 한글 상단까지 덮는다.
     /// 이미지가 객체로 선택된 동안엔 숨긴다 — 이미지 내부는 편집 대상이 아니라
     /// 조작 대상이므로 커서가 보이면 혼란스럽다.
-    private func syncCaretView() {
+    private func syncCaretView(restartBlink: Bool) {
         let visible =
             window?.firstResponder === self
             && selectedRange().length == 0
             && selectedImageLocation == nil
-        guard visible, let rect = caretRectInView() else {
+        guard visible, let line = caretLineGeometry(), let rect = caretRectInView() else {
             caretBlinkTimer?.invalidate()
             caretBlinkTimer = nil
             caretView.isHidden = true
             return
         }
         let font = caretLineFont()
-        let baseline = caretBaselineY()
-            ?? rect.minY + (layoutManager?.defaultBaselineOffset(for: font) ?? font.ascender)
+        let baseline = line.baselineY
         let glyphTop = font.capHeight + (font.ascender - font.capHeight) * 0.4
         var caret = rect
         caret.origin.y = baseline - glyphTop
         caret.size.height = max(1, glyphTop - font.descender)  // descender 음수
         caret.size.width = 2  // firstRect의 캐럿 폭은 0 — 얇은 표준 폭으로.
-        caretView.layer?.backgroundColor = insertionPointColor.cgColor
-        caretView.frame = caret
-        caretView.isHidden = false
-        restartCaretBlink()
+        let moved = caretView.isHidden || caretView.frame != caret
+        // A typing frame must never inherit a surrounding SwiftUI/AppKit animation.
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            context.allowsImplicitAnimation = false
+            if caretView.layer?.backgroundColor != insertionPointColor.cgColor {
+                caretView.layer?.backgroundColor = insertionPointColor.cgColor
+            }
+            if caretView.frame != caret { caretView.frame = caret }
+            if caretView.isHidden { caretView.isHidden = false }
+        }
+        if restartBlink || moved || caretBlinkTimer == nil { restartCaretBlink() }
     }
 
     /// 블링크를 "보임" 상태부터 다시 시작한다 — 타이핑·이동 중엔 캐럿이
@@ -5328,7 +5390,11 @@ final class BlockTextView: NSTextView {
 
     /// 커서가 놓인 줄의 폰트 — 캐럿·하이라이트가 공유하는 메트릭 소스.
     private func caretLineFont() -> NSFont {
-        (typingAttributes[.font] as? NSFont) ?? bodyFont
+        if hasMarkedText(), let storage = textStorage, storage.length > 0 {
+            let index = min(max(markedRange().location, selectedRange().location - 1), storage.length - 1)
+            if let font = storage.attribute(.font, at: index, effectiveRange: nil) as? NSFont { return font }
+        }
+        return (typingAttributes[.font] as? NSFont) ?? bodyFont
     }
 
     // MARK: 대화 기록 제안 렌더 (요구사항 §20)
@@ -5436,6 +5502,9 @@ final class BlockTextView: NSTextView {
         workspaceInteraction?.drawBackground(dirtyRect)
 
         super.draw(dirtyRect)
+        // TextKit has now drawn the final glyph layout, including first-character
+        // fallback fonts and the empty-to-nonempty paragraph transition.
+        refreshActiveLineHighlight(restartBlink: false)
         workspaceInteraction?.draw(dirtyRect)
 
         // 이미지 이동 드래그 중 드롭 위치 표시선 (요구 B).
@@ -5783,6 +5852,9 @@ extension BlockTextView: @preconcurrency NSTextStorageDelegate {
         range editedRange: NSRange,
         changeInLength delta: Int
     ) {
+        // Font/paragraph edits and undo can bypass text input overrides. Wait
+        // until TextKit has processed their layout invalidation before measuring.
+        scheduleEditingOverlayRefresh()
         writingProjectionCapture.storageChanged(mask: editedMask, range: editedRange, delta: delta, storage: textStorage)
         updateMediaRenderIndex(mask: editedMask, range: editedRange, delta: delta)
         // 직렬화 증분 캐시 판정 — 모든 편집에 대해 먼저(마커 조기 반환에 가리지 않게).

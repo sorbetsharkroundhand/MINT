@@ -423,20 +423,6 @@ struct EditorPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-            .overlay(alignment: .topLeading) {
-                if displayedDocument?.body.isEmpty == true {
-                    // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
-                    // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
-                    GeometryReader { geo in
-                        Text("여기서 글을 시작하세요…")
-                            .mintSerifFont(20)
-                            .foregroundStyle(theme.ghostSuggestionC)
-                            .padding(.top, 51)
-                            .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
             .overlay(alignment: .bottom) {
                 if settings.autocompleteEnabled && displayedDocument?.id == projectSession.selectedDocumentID {
                     ShortcutHintPill(active: completion.suggestion != nil, theme: theme)

@@ -248,6 +248,12 @@ struct WorkspacePouchAction {
 
     func refresh() {
         guard let panel, let content else { return }
+        // The pouch is an independent panel and does not inherit SwiftUI's
+        // preferredColorScheme from the manuscript window.
+        let appearanceName: NSAppearance.Name = theme.editorSurface.relativeLuminance < 0.5 ? .darkAqua : .aqua
+        if panel.appearance?.name != appearanceName {
+            panel.appearance = NSAppearance(named: appearanceName)
+        }
         if loadedKey != preferenceKey {
             loadedKey = preferenceKey
             if let data = defaults.data(forKey: preferenceKey), let saved = try? JSONDecoder().decode(Preference.self, from: data), saved.ratio.isFinite {
