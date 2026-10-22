@@ -3,7 +3,7 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class HTMLWorkspaceFidelityTests: XCTestCase {
-    func testSelectionToolbarFloatsAboveTileClippingAndKeepsEditorFocus() async throws {
+    func testSpatialSelectionKeepsFormattingInThePouchAndEditorFocus() async throws {
         let h = try await FramedWorkspaceHarness(width: 860, reduceMotion: true)
         defer { h.close() }
         h.window.makeKeyAndOrderFront(nil)
@@ -11,13 +11,11 @@ import XCTest
         let editor = try await h.editor(); h.window.makeFirstResponder(editor)
         editor.setSelectedRange(NSRange(location: 0, length: 3)); editor.updateSelectionToolbar()
         try await Task.sleep(for: .milliseconds(300))
-        let panel = try XCTUnwrap(editor.workspaceSelectionPanel)
-        XCTAssertTrue(panel.parent === h.window)
-        XCTAssertTrue(panel.isVisible)
-        XCTAssertFalse(panel.canBecomeKey)
+        XCTAssertNil(editor.workspaceSelectionPanel)
         XCTAssertTrue(h.window.firstResponder === editor)
-        editor.hideSelectionToolbar()
-        XCTAssertFalse(panel.isVisible)
+        editor.perform(.color("FF453A"))
+        XCTAssertEqual(editor.currentSelectionState().colorHex, "FF453A")
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))
         XCTAssertNil(editor.workspaceSelectionPanel)
     }
     func testSecondaryMenuKeepsModesAndAIStateAccessible() async throws {
@@ -32,18 +30,25 @@ import XCTest
         XCTAssertEqual(ai.state, .off)
         let details = try XCTUnwrap(menu.items.firstIndex { $0.accessibilityIdentifier() == "mint.workspace.more.characters" })
         menu.performActionForItem(at: details); await h.layout()
-        XCTAssertTrue(h.requests.spatialWorkspace?.writerDetailsVisible == true)
+        XCTAssertEqual(h.requests.spatialWorkspace?.selectedTile, .characters)
+        XCTAssertEqual(h.requests.spatialWorkspace?.pouchSection, .object)
     }
-    func testDocumentHeaderExposesTheSourceTextControls() async throws {
+    func testDocumentControlsBelongToTheAttachedPouch() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
         defer { h.close() }
         let id = try XCTUnwrap(h.fixture.session.selectedDocumentID).rawValue.uuidString
-        let typewriter = try XCTUnwrap(h.element("mint.tile.typewriter.\(id)") as? NSButton)
-        let focus = try XCTUnwrap(h.element("mint.tile.focus.\(id)") as? NSButton)
-        let continuation = try XCTUnwrap(h.element("mint.tile.continue.\(id)") as? NSButton)
-        XCTAssertEqual(typewriter.title, "타자기")
-        XCTAssertEqual(focus.title, "집중")
-        XCTAssertEqual(continuation.title, "이어쓰기")
+        XCTAssertNil(h.element("mint.tile.typewriter.\(id)"))
+        XCTAssertNil(h.element("mint.tile.focus.\(id)"))
+        XCTAssertNil(h.element("mint.tile.continue.\(id)"))
+        let spatial = try XCTUnwrap(h.requests.spatialWorkspace)
+        let before = spatial.layout
+        spatial.openPouchTools(); await h.layout()
+        XCTAssertEqual(spatial.layout, before)
+        XCTAssertEqual(spatial.pouchSection, .format)
+        XCTAssertFalse(spatial.layout.contains(.inspector))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.index.format"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.index.ai"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.index.view"))
     }
 
     func testPaletteShowsCategoryTitleAndDetailWithoutNativeWindowChrome() async throws {

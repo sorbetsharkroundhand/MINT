@@ -26,7 +26,7 @@ enum WorkspaceCommandSearch {
         if !includeSources {
             for (tile, title) in [(WorkspaceTileID.navigator, "문서 목록"), (.characters, "인물·작품 정보"),
                                   (.narrative, "서사 흐름"), (.margin, "마진 노트"),
-                                  (.context, "제안에 쓰인 내용"), (.inspector, "객체 설정")] {
+                                  (.context, "제안에 쓰인 내용"), (.inspector, "주머니 서식·기능 펼치기")] {
                 items.append(.init(id: "tool.\(tile.id)", title: title, detail: "주머니에서 도구 열기",
                     kind: .command, action: .tool(tile)))
             }

@@ -4,9 +4,10 @@ import AppKit
 struct SpatialWorkspaceGeometry {
     static let inset: CGFloat = 8
     static let columnGap: CGFloat = 8
-    // Leave room for the selected object's fused pouch below its outer edge.
+    // Reserve a folder-tab lip above each row, outside the manuscript text area.
     static let rowGap: CGFloat = 34
-    static let bottomInset: CGFloat = 36
+    static let topInset: CGFloat = 36
+    static let bottomInset: CGFloat = 8
     var columns: [CGRect] = []
     var tiles: [WorkspaceTileID: CGRect] = [:]
     var contentSize: CGSize
@@ -26,16 +27,16 @@ struct SpatialWorkspaceGeometry {
             guard let minimumWeight = column.slots.map(\.weight).min(), minimumWeight > 0 else { return 0 }
             return 95 / CGFloat(minimumWeight) + CGFloat(max(0, column.slots.count - 1)) * Self.rowGap
         }.max() ?? 0
-        contentSize = CGSize(width: max(availableWidth, requiredWidth), height: max(availableHeight, requiredHeight + Self.inset + Self.bottomInset))
-        let height = max(0, contentSize.height - Self.inset - Self.bottomInset)
+        contentSize = CGSize(width: max(availableWidth, requiredWidth), height: max(availableHeight, requiredHeight + Self.topInset + Self.bottomInset))
+        let height = max(0, contentSize.height - Self.topInset - Self.bottomInset)
         var x = Self.inset
         for (index, column) in layout.columns.enumerated() {
             var width = minimumWidths[index]
             if column.width == nil, flexible > 0 { width += excess / CGFloat(flexible) }
             if flexible == 0, index == 0 { width += excess }
-            columns.append(CGRect(x: x, y: Self.inset, width: width, height: height))
+            columns.append(CGRect(x: x, y: Self.topInset, width: width, height: height))
             let rowSpace = max(0, height - CGFloat(max(0, column.slots.count - 1)) * Self.rowGap)
-            var y = Self.inset
+            var y = Self.topInset
             for slot in column.slots {
                 let slotHeight = rowSpace * CGFloat(slot.weight)
                 tiles[slot.tile] = CGRect(x: x, y: y, width: width, height: slotHeight)

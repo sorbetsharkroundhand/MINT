@@ -199,7 +199,8 @@ struct SpatialWorkspaceLayout: Equatable, Codable, Sendable {
         for index in columns.indices {
             if !columnIDs.insert(columns[index].id).inserted { columns[index].id = UUID() }
             columns[index].slots.removeAll {
-                if $0.tile == .insertionPreview { return true }
+                // Keep the legacy enum case decodable without restoring a settings tile.
+                if $0.tile == .insertionPreview || $0.tile == .inspector { return true }
                 if let id = $0.tile.documentID, !validDocuments.contains(id) { return true }
                 return !seen.insert($0.tile).inserted
             }

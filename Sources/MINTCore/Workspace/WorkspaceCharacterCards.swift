@@ -38,32 +38,19 @@ struct WorkspaceCharacterCards: View {
                         }
                     }
                     .contextMenu {
-                        Button("인물 편집…") { session.selectDocument(record.documentID); model.writerDetailsVisible = true }
-                        Button("작품 정보 편집…") { model.writerDetailsVisible = true }
+                        Button("인물 편집…") { session.selectDocument(record.documentID); model.selectTile(.characters); model.pouchSection = .object }
+                        Button("작품 정보 편집…") { model.selectTile(.characters); model.pouchSection = .object }
                     }
-                    .accessibilityAction(named: Text("인물 편집")) { session.selectDocument(record.documentID); model.writerDetailsVisible = true }
+                    .accessibilityAction(named: Text("인물 편집")) { session.selectDocument(record.documentID); model.selectTile(.characters); model.pouchSection = .object }
                 }
                 if records.isEmpty {
-                    Text("아직 등록한 인물이 없어요. + 버튼으로 추가할 수 있어요.")
+                    Text("아직 등록한 인물이 없어요. 주머니의 인물·작품 라벨에서 추가할 수 있어요.")
                         .mintUIFont(11).foregroundStyle(theme.workspaceMutedC).padding(2)
                 }
             }.padding(8).frame(maxWidth: .infinity, alignment: .leading)
         }
-        .contextMenu { Button("작품 정보 편집…") { model.writerDetailsVisible = true } }
-        .sheet(isPresented: $model.writerDetailsVisible) {
-            VStack(spacing: 0) {
-                HStack {
-                    Text("인물과 작품 정보").mintUIFont(12, .semibold)
-                    Spacer()
-                    Button("닫기") { model.writerDetailsVisible = false }.keyboardShortcut(.cancelAction)
-                        .accessibilityIdentifier("mint.writer.details.close")
-                }.padding(14)
-                ProjectWriterToolsView(session: session, completion: completion, editorRequests: requests, section: .bible, theme: theme)
-            }.frame(width: 540, height: 460).background(theme.editorSurfaceC)
-        }
-        .onChange(of: model.writerDetailsVisible) { _, visible in
-            if !visible { requests.focusEditor() }
-        }
+        .contextMenu { Button("작품 정보 편집…") { model.selectTile(.characters); model.pouchSection = .object } }
+
     }
     private func reference(for record: Record) -> OriginalSourceReference? {
         guard let project = session.activeProject, let document = project.documents.first(where: { $0.id == record.documentID }), !record.card.name.isEmpty else { return nil }

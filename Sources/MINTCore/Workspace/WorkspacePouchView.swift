@@ -8,6 +8,9 @@ final class WorkspacePouchView: NSVisualEffectView {
     private var actions: [WorkspacePouchAction] = []
     private var orb = false, horizontal = false
     private var fused = false
+    private var toolsHost: NSHostingView<AnyView>?
+    var baseSurface: NSColor = MintTheme.light.editorSurface
+    var toolsExpanded = false { didSet { needsLayout = true; needsDisplay = true } }
     var fusionProgress: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
     private let contourMask = CAShapeLayer()
     private var theme: MintTheme = .light
@@ -22,10 +25,27 @@ final class WorkspacePouchView: NSVisualEffectView {
         layer?.mask = contourMask
         setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
-        grip.isBordered = false; grip.refusesFirstResponder = false
+        grip.isBordered = false; grip.refusesFirstResponder = true
         addSubview(grip)
     }
     required init?(coder: NSCoder) { nil }
+
+    func setTools(_ root: AnyView) {
+        if let toolsHost { toolsHost.rootView = root }
+        else {
+            let host = NSHostingView(rootView: root)
+            host.sizingOptions = []
+            addSubview(host); toolsHost = host
+        }
+        needsLayout = true
+    }
+
+    var toolsOwnFirstResponder: Bool {
+        guard let toolsHost, let responder = window?.firstResponder as? NSView else { return false }
+        if responder.isDescendant(of: toolsHost) { return true }
+        // AppKit's shared field editor lives outside its TextField's view hierarchy.
+        return ((responder as? NSTextView)?.delegate as? NSView)?.isDescendant(of: toolsHost) == true
+    }
 
     func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, fused: Bool = false) {
         self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.fused = fused
@@ -47,7 +67,9 @@ final class WorkspacePouchView: NSVisualEffectView {
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]; button.controller = controller; button.tag = index; button.isHidden = orb
-            button.image = WorkspaceIcons.image(action.symbol, size: 14)
+            button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: 14)
+            button.title = fused && action.symbol.isEmpty ? action.label : ""
+            button.font = MintFonts.ui(10, weight: .medium)
             let selected = action.selected()
             button.setButtonType(.toggle); button.state = selected ? .on : .off
             button.isEnabled = action.enabled()
@@ -65,16 +87,21 @@ final class WorkspacePouchView: NSVisualEffectView {
         CATransaction.begin(); CATransaction.setDisableActions(true)
         contourMask.frame = bounds; contourMask.path = contour
         CATransaction.commit()
+        toolsHost?.isHidden = !fused || !toolsExpanded
+        if fused && toolsExpanded {
+            toolsHost?.frame = CGRect(x: 0, y: 36, width: bounds.width, height: max(0, bounds.height - 36))
+        }
         if orb {
             let p = fusionProgress
-            grip.frame = CGRect(x: 15 * p, y: 7 * p,
-                width: bounds.width * (1 - p) + 22 * p, height: bounds.height * (1 - p) + 25 * p)
+            grip.frame = CGRect(x: 10 * p, y: 3 * p,
+                width: bounds.width * (1 - p) + 24 * p, height: bounds.height * (1 - p) + 25 * p)
             return
         }
         if fused {
-            grip.frame = CGRect(x: 15, y: 7, width: 22, height: 25)
+            grip.frame = CGRect(x: 10, y: 3, width: 24, height: 25)
+            let width = max(0, bounds.width - 44) / CGFloat(max(1, buttons.count))
             for (index, button) in buttons.enumerated() {
-                button.frame = CGRect(x: 39 + CGFloat(index) * 28, y: 7, width: 26, height: 25)
+                button.frame = CGRect(x: 36 + CGFloat(index) * width, y: 3, width: width - 2, height: 25)
             }
             return
         }
@@ -88,11 +115,20 @@ final class WorkspacePouchView: NSVisualEffectView {
         }
     }
     override func draw(_ dirtyRect: NSRect) {
-        let tint = theme.novelBg.blended(withFraction: 0.35, of: theme.pill) ?? theme.pill
-        (fused || fusionProgress > 0 ? tint.withAlphaComponent(1) : (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill)).setFill()
+        let tint = theme.novelBg.blended(withFraction: 0.35, of: theme.pill)?.withAlphaComponent(1) ?? theme.pill.withAlphaComponent(1)
+        (fused || fusionProgress > 0 ? baseSurface.withAlphaComponent(1) : (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill)).setFill()
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.addPath(contour); context.fillPath()
-        if fused { return }
+        if fused || fusionProgress > 0 {
+            context.saveGState(); context.addPath(contour); context.clip()
+            tint.setFill(); CGRect(x: 0, y: 0, width: bounds.width, height: 24).fill()
+            // The last eight points share the object's surface; there is no double border,
+            // separate shadow or material seam where the folder tab joins the object.
+            NSGradient(starting: tint, ending: baseSurface.withAlphaComponent(1))?
+                .draw(from: CGPoint(x: 0, y: 24), to: CGPoint(x: 0, y: 36), options: [.drawsAfterEndingLocation])
+            context.restoreGState()
+            if fused { return }
+        }
         theme.pillBorder.setStroke()
         if fusionProgress == 0 { NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).stroke() }
         if orb {
@@ -111,16 +147,22 @@ final class WorkspacePouchView: NSVisualEffectView {
     private var contour: CGPath {
         let p = fusionProgress
         guard p > 0 else { return CGPath(roundedRect: bounds, cornerWidth: orb ? 14 : 12, cornerHeight: orb ? 14 : 12, transform: nil) }
-        let w = bounds.width, h = bounds.height, shoulder = 12 * p, radius = 14.0, corner = 14 * (1 - p)
+        let w = bounds.width, h = bounds.height, shoulder = 8 * p
+        let radius = 14 - 6 * p, bottomRadius = 14 * (1 - p)
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: corner, y: 0)); path.addLine(to: CGPoint(x: w - corner, y: 0))
-        path.addCurve(to: CGPoint(x: w - shoulder, y: corner + shoulder), control1: CGPoint(x: w - corner * 0.448 - shoulder * 0.8, y: 0), control2: CGPoint(x: w - shoulder, y: corner * 0.448 + shoulder * 0.3))
-        path.addLine(to: CGPoint(x: w - shoulder, y: h - radius))
-        path.addQuadCurve(to: CGPoint(x: w - shoulder - radius, y: h), control: CGPoint(x: w - shoulder, y: h))
-        path.addLine(to: CGPoint(x: shoulder + radius, y: h))
-        path.addQuadCurve(to: CGPoint(x: shoulder, y: h - radius), control: CGPoint(x: shoulder, y: h))
-        path.addLine(to: CGPoint(x: shoulder, y: corner + shoulder))
-        path.addCurve(to: CGPoint(x: corner, y: 0), control1: CGPoint(x: shoulder, y: corner * 0.448 + shoulder * 0.3), control2: CGPoint(x: corner * 0.448 + shoulder * 0.8, y: 0))
+        path.move(to: CGPoint(x: shoulder + radius, y: 0))
+        path.addLine(to: CGPoint(x: w - shoulder - radius, y: 0))
+        path.addQuadCurve(to: CGPoint(x: w - shoulder, y: radius), control: CGPoint(x: w - shoulder, y: 0))
+        path.addLine(to: CGPoint(x: w - shoulder, y: 22))
+        path.addQuadCurve(to: CGPoint(x: w, y: 30), control: CGPoint(x: w - shoulder, y: 30))
+        path.addLine(to: CGPoint(x: w, y: h - bottomRadius))
+        path.addQuadCurve(to: CGPoint(x: w - bottomRadius, y: h), control: CGPoint(x: w, y: h))
+        path.addLine(to: CGPoint(x: bottomRadius, y: h))
+        path.addQuadCurve(to: CGPoint(x: 0, y: h - bottomRadius), control: CGPoint(x: 0, y: h))
+        path.addLine(to: CGPoint(x: 0, y: 30))
+        path.addQuadCurve(to: CGPoint(x: shoulder, y: 22), control: CGPoint(x: shoulder, y: 30))
+        path.addLine(to: CGPoint(x: shoulder, y: radius))
+        path.addQuadCurve(to: CGPoint(x: shoulder + radius, y: 0), control: CGPoint(x: shoulder, y: 0))
         path.closeSubpath(); return path
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -140,11 +182,17 @@ final class WorkspacePouchView: NSVisualEffectView {
         guard actions.indices.contains(button.tag) else { return }
         actions[button.tag].perform(); controller?.refresh()
     }
-    override func mouseDown(with event: NSEvent) { controller?.beginDrag(at: screenPoint(event)) }
+    override func mouseDown(with event: NSEvent) {
+        if !fused || convert(event.locationInWindow, from: nil).y < 32 {
+            controller?.beginDrag(at: screenPoint(event))
+        }
+    }
     override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }
     override func mouseUp(with event: NSEvent) { _ = controller?.endDrag(at: screenPoint(event)) }
     override func rightMouseDown(with event: NSEvent) { controller?.showMoreMenu(in: self) }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }
+    override func resetCursorRects() {
+        addCursorRect(fused ? CGRect(x: 0, y: 0, width: bounds.width, height: 32) : bounds, cursor: .openHand)
+    }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
 }
 
@@ -165,6 +213,7 @@ struct WorkspacePouchBridge: NSViewRepresentable {
     let requests: ProjectEditorRequests
     let defaults: UserDefaults
     let theme: MintTheme
+    let tools: AnyView
     let actions: [WorkspacePouchAction]
     let extraActions: [WorkspacePouchAction]
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -182,6 +231,8 @@ struct WorkspacePouchBridge: NSViewRepresentable {
         controller.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
         controller.reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency || accessibilityOptions.reduceTransparency
         controller.theme = theme; controller.actions = actions; controller.extraActions = extraActions
+        controller.requests = requests
+        controller.setTools(tools)
         requests.pouch = controller
     }
     static func dismantleNSView(_ view: Probe, coordinator: Coordinator) {

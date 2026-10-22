@@ -4902,6 +4902,8 @@ final class BlockTextView: NSTextView {
     /// 선택이 생기면 잠깐 안정된 뒤 툴바를 띄우고, 사라지면 감춘다.
     func updateSelectionToolbar() {
         toolbarShowTask?.cancel()
+        // Spatial editing keeps formatting in the attached index tab.
+        if editorialWorkspaceStyle && workspaceInteraction != nil { hideSelectionToolbar(); return }
         let sel = selectedRange()
         // 공백만 있는(단어 삭제용 같은) 사소한 선택이나 IME 조합 중이면 띄우지 않는다.
         let selected = sel.length > 0 ? (string as NSString).substring(with: sel) : ""
@@ -4930,6 +4932,7 @@ final class BlockTextView: NSTextView {
     }
 
     private func presentSelectionToolbar() {
+        if editorialWorkspaceStyle && workspaceInteraction != nil { hideSelectionToolbar(); return }
         guard let layoutManager, let textContainer else { return }
         let sel = selectedRange()
         guard sel.length > 0 else { return }
@@ -4996,7 +4999,7 @@ final class BlockTextView: NSTextView {
         }
     }
 
-    private func currentSelectionState() -> SelectionStyleState {
+    func currentSelectionState() -> SelectionStyleState {
         var state = SelectionStyleState()
         guard let storage = textStorage else { return state }
         let sel = selectedRange()
@@ -5008,8 +5011,8 @@ final class BlockTextView: NSTextView {
             (para.location < storage.length
                 ? storage.attribute(.mintLineSpacing, at: para.location, effectiveRange: nil)
                     as? Double : nil) ?? Double(lineSpacing)
-        guard sel.location < storage.length else { return state }
-        let attrs = storage.attributes(at: sel.location, effectiveRange: nil)
+        let attrs = sel.location < storage.length
+            ? storage.attributes(at: sel.location, effectiveRange: nil) : typingAttributes
         state.bold = attrs[.mintBold] as? Bool == true
         state.italic = attrs[.mintItalic] as? Bool == true
         state.code = attrs[.mintCode] as? Bool == true

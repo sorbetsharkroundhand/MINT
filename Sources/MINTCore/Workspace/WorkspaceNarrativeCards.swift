@@ -31,13 +31,7 @@ struct WorkspaceNarrativeCards: View {
                 }
             }.padding(8)
         }
-        .contextMenu { Button("작가 수정과 기록…") { model.narrativeDetailsVisible = true } }
-        .sheet(isPresented: $model.narrativeDetailsVisible) {
-            VStack(spacing: 0) {
-                HStack { Text("작가 수정과 기록").mintUIFont(12, .semibold); Spacer(); Button("닫기") { model.narrativeDetailsVisible = false }.keyboardShortcut(.cancelAction) }.padding(14)
-                ProjectWriterToolsView(session: session, completion: completion, editorRequests: requests, section: .narrative, theme: theme).frame(minHeight: 100)
-            }.frame(width: 540, height: 460).background(theme.editorSurfaceC)
-        }
+        .contextMenu { Button("작가 수정과 기록…") { model.selectTile(.narrative); model.pouchSection = .object } }
         .task(id: RefreshID(identity: session.runtimeIdentity, generation: indexer.snapshotGeneration)) {
             controller.update(knowledge: indexer.snapshot, knowledgeOrigin: indexer.snapshotRuntimeIdentity, generation: indexer.snapshotGeneration)
         }
@@ -49,9 +43,7 @@ struct WorkspaceNarrativeCards: View {
                 }
             } ?? []
         }
-        .onChange(of: model.narrativeDetailsVisible) { _, visible in
-            if !visible { requests.focusEditor() }
-        }
+
         .onAppear { completion.observeForegroundCompletion(owner: controller) { [weak controller] busy in controller?.setForegroundBusy(busy) } }
         .onReceive(completion.$isMemoryPressurePaused) { controller.setPolicyPaused($0) }
         .onDisappear { controller.stop() }

@@ -221,3 +221,36 @@ application launch, pouch interaction or visual alignment checks were run.
 Earlier targeted runs and native captures informed the implementation but do not establish the correctness of this revision. The changes initially delivered under the owner's implementation-only instruction are now compiled by the build-only follow-up above, but have not been exercised. Existing regression coverage and the updated isolated UI script remain available for the owner's validation. The HTML sample is stored only as a test fixture; it is not shipped as author data.
 
 Production adaptations are actual documents and writer records instead of fictional samples, existing local inference instead of Gemini, restrained readable glass, and the owner's requested preservation of native editing mechanics. Browser security rejected the local HTML URL; source was read directly without an alternate browser route or server workaround.
+
+### Folder-index pouch correction, 2026-10-22
+
+The owner superseded the separate settings-object design: the pouch must become
+an index label on the selected object's edge and own that object's controls.
+The settled pouch now sits above the object's top edge, with a flared folder-tab
+contour. Its base overlaps eight points of the object's surface and blends into
+that exact surface color, without an independent border, shadow or stacked glass.
+The reserved vertical space moved from below each row to above it; opening tools
+does not add a tile, resize the manuscript or replace its native editor.
+
+The pouch itself hosts an expandable native control area. Manuscripts expose
+Format, AI, View and Object index labels: selected-text colors, size, bold,
+italic and code; paragraph styles, lists, alignment and spacing; local model and
+autocomplete settings, continuation, polish and embedded coauthoring; typewriter,
+paragraph focus and default typesetting. All formatting reuses BlockTextView's
+existing transactions and marked-text guards. The spatial selection popover and
+document-header controls are retired; legacy editor formatting remains intact.
+
+Character and narrative edit sheets are replaced by their existing durable writer
+editors inside the pouch. Context, margin, navigation and search expose relevant
+controls there. The legacy inspector enum remains decodable, but saved layouts
+remove that presentation-only object and old command routes open the pouch.
+Existing tests/capture helpers and smoke selectors were adapted to these routes;
+they were not executed, per the owner's build-only instruction.
+
+The same spring, native canvas attachment, four-edge detached docking and retained
+collapsed-window lifetime remain in use. Expansion obeys Reduce Motion. Detaching
+an expanded pouch starts from its index lip, and hiding focused tool controls
+returns focus to the original native editor. `swift build` compiled the final
+source and linked MINT and MINTBench successfully (12.99 s), with no warnings or
+errors in that invocation. No runtime, IME, visual or UI interaction checks were
+run for this revision.

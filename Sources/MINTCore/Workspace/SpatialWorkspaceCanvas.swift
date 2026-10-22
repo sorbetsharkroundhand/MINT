@@ -518,10 +518,14 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
     }
 
-    func pouchFrame(for tile: WorkspaceTileID) -> CGRect? {
+    func pouchFrame(for tile: WorkspaceTileID, expanded: Bool = false) -> CGRect? {
         guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        let frame = CGRect(x: host.frame.midX - 56, y: host.frame.maxY - 8, width: 112, height: 36)
-        guard visibleRect.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return nil }
+        let width = min(360, host.frame.width - 32)
+        let origin = CGPoint(x: host.frame.minX + 16, y: host.frame.minY - 28)
+        guard visibleRect.contains(CGPoint(x: origin.x + width / 2, y: origin.y + 14)) else { return nil }
+        let available = min(host.frame.height + 28, visibleRect.maxY - origin.y)
+        let height = expanded ? min(360, max(36, available)) : 36
+        let frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
         return frame
     }
 }
@@ -547,7 +551,7 @@ struct SpatialDocumentTile: View {
                 positionStore: positionStore, documentID: documentID, showsChrome: false)
             HStack(spacing: 6) {
                 if hoveringStats {
-                    Text("Enter 새 문단 · 드래그하여 텍스트 다듬기/발췌 · ⋮⋮ 문단 이동").mintUIFont(9).lineLimit(1)
+                    Text("Enter 새 문단 · 주머니에서 서식·AI · ⋮⋮ 문단 이동").mintUIFont(9).lineLimit(1)
                 }
                 Spacer(minLength: 8)
                 if hoveringStats { Text(statistics.detail).font(MintFonts.monoUI(9)).fixedSize() }
@@ -566,31 +570,8 @@ struct SpatialDocumentTile: View {
         .task { await Task.yield(); statsRevision += 1 }
     }
     private var documentHeader: some View {
-        GeometryReader { geometry in
-            let compact = geometry.size.width < 520
-            HStack(spacing: 0) {
-                SpatialTileHeader(tile: .document(documentID), title: document?.title ?? "원고", theme: theme,
-                    active: active, actions: headerActions(compact: compact))
-                    .frame(maxWidth: .infinity)
-                ModelChip(completion: completion, settings: completion.settings, theme: theme,
-                    compact: compact, onOpen: { _ = focusDocumentEditor() })
-                    .fixedSize()
-                    .padding(.trailing, 10)
-                    .accessibilityIdentifier("mint.tile.autocomplete.\(documentID.rawValue.uuidString)")
-            }
-            .frame(height: 32)
-        }
-        .frame(height: 32)
-    }
-
-    /// Activate this tile's existing editor without replacing its text or selection.
-    @discardableResult
-    private func focusDocumentEditor() -> BlockTextView? {
-        guard session.isEditorEditable, let project = session.activeProject,
-              let editor = requests.editor(for: .init(projectID: project.id, documentID: documentID)),
-              let window = editor.window, window.makeFirstResponder(editor),
-              window.firstResponder === editor else { return nil }
-        return editor
+        SpatialTileHeader(tile: .document(documentID), title: document?.title ?? "원고", theme: theme,
+            active: active, actions: []).frame(height: 32)
     }
 
     private var document: WritingDocument? { session.document(documentID) }
@@ -600,30 +581,5 @@ struct SpatialDocumentTile: View {
         let key = session.activeProject.map { ProjectDocumentKey(projectID: $0.id, documentID: documentID) }
         let text = key.flatMap { requests.editor(for: $0)?.string } ?? document?.body ?? ""
         return WorkspaceWritingStatistics(text: text, goal: session.presentationPreferences.integer(forKey: "mint.writing-goal.\(documentID.rawValue.uuidString)"))
-    }
-    private func headerActions(compact: Bool) -> [SpatialHeaderAction] {
-        var actions = [
-            SpatialHeaderAction(id: "mint.tile.typewriter.\(documentID.rawValue.uuidString)", label: "타자기",
-                symbol: compact ? "keyboard" : "", title: compact ? "" : "타자기", selected: model.typewriter) {
-                    model.typewriter.toggle()
-                    model.showToast(model.typewriter ? "타자기 스크롤 켜짐 — 현재 문단을 눈높이 중앙에 유지합니다" : "타자기 스크롤 꺼짐")
-                    focusDocumentEditor()
-                },
-            SpatialHeaderAction(id: "mint.tile.focus.\(documentID.rawValue.uuidString)", label: "문단 집중",
-                symbol: compact ? "scope" : "", title: compact ? "" : "집중", selected: model.focusDimming) {
-                    model.focusDimming.toggle()
-                    focusDocumentEditor()
-                },
-            SpatialHeaderAction(id: "mint.tile.continue.\(documentID.rawValue.uuidString)", label: "이어쓰기 — 로컬 AI",
-                symbol: "sparkles", title: compact ? "" : "이어쓰기", enabled: completion.engineState == .ready && completion.settings.authorization == .enabled && completion.settings.autocompleteEnabled) {
-                    guard let editor = focusDocumentEditor() else { return }
-                    (editor.delegate as? MintBlockEditor.Coordinator)?.requestExplicitCompletion(editor)
-                }
-        ]
-        if !model.layout.openDocuments.isEmpty {
-            actions.append(SpatialHeaderAction(id: "mint.tile.close.\(documentID.rawValue.uuidString)",
-                label: "이 문서 창 닫기", symbol: "xmark") { _ = model.close(.document(documentID)); requests.focusEditor() })
-        }
-        return actions
     }
 }

@@ -325,7 +325,10 @@ struct WorkspaceSurface: View {
 
     private func pouchBridge(theme: MintTheme) -> some View {
         WorkspacePouchBridge(model: spatial, requests: editorRequests, defaults: projectSession.presentationPreferences,
-            theme: theme, actions: [
+            theme: theme, tools: AnyView(WorkspacePouchTools(session: projectSession, requests: editorRequests,
+                model: spatial, completion: completion, settings: completion.settings, theme: theme,
+                assistance: assistance, generateMargin: { showAssistance(.margin, theme: theme) },
+                openSettings: { openSettings() })), actions: [
                 pouchTool(.navigator, id: "mint.workspace.navigator-toggle", label: "문서 목록", symbol: "folder"),
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
@@ -333,8 +336,8 @@ struct WorkspaceSurface: View {
                 WorkspacePouchAction(id: "mint.source-search.show", label: "검색 · 문서, 원문, 도구 찾기", symbol: "magnifyingglass", selected: { spatial.layout.contains(.search) }, enabled: { projectSession.isEditorEditable }) {
                     spatial.openSearch()
                 },
-                WorkspacePouchAction(id: "mint.workspace.object-settings", label: "선택한 객체 설정", symbol: "gearshape", selected: { spatial.layout.contains(.inspector) }) {
-                    spatial.openInspector()
+                WorkspacePouchAction(id: "mint.workspace.object-settings", label: "객체의 주머니 펼치기", symbol: "rectangle.topthird.inset.filled", selected: { spatial.pouchSection != nil }) {
+                    spatial.openPouchTools()
                 }
             ], extraActions: [
                 WorkspacePouchAction(id: "mint.workspace.pouch.release", label: "주머니 떼어 놓기", symbol: "arrow.up.left.and.arrow.down.right") { spatial.selectTile(nil) },
@@ -347,11 +350,11 @@ struct WorkspaceSurface: View {
                 },
                 WorkspacePouchAction(id: "mint.workspace.more.characters", label: "인물과 작품 정보", symbol: "person.2") {
                     if !spatial.layout.contains(.characters) { spatial.toggle(.characters) }
-                    spatial.writerDetailsVisible = true
+                    spatial.selectTile(.characters); spatial.pouchSection = .object
                 },
                 WorkspacePouchAction(id: "mint.workspace.more.narrative", label: "작가 수정과 기록", symbol: "text.book.closed") {
                     if !spatial.layout.contains(.narrative) { spatial.toggle(.narrative) }
-                    spatial.narrativeDetailsVisible = true
+                    spatial.selectTile(.narrative); spatial.pouchSection = .object
                 },
                 WorkspacePouchAction(id: "mint.workspace.autocomplete", label: completion.settings.autocompleteEnabled ? "자동완성 켜짐" : "자동완성 꺼짐", symbol: "sparkles", selected: { completion.settings.autocompleteEnabled }, enabled: { !completion.isManagingModel }) {
                     completion.setAutocompleteEnabled(!completion.settings.autocompleteEnabled)
@@ -389,13 +392,8 @@ struct WorkspaceSurface: View {
 
     private func spatialTool(_ tile: WorkspaceTileID, theme: MintTheme) -> some View {
         VStack(spacing: 0) {
-            SpatialTileHeader(tile: tile, title: spatialToolTitle(tile), theme: theme, actions: spatialToolActions(tile, theme: theme) + [
-                SpatialHeaderAction(id: tile == .map ? "mint.story-map.close" : "mint.tile.close.\(tile.id)", label: "주머니에 넣기", symbol: "xmark") {
-                    _ = spatial.close(tile)
-                    if tile == .map || tile == .outline { projectSession.selectWorkspaceMode(.write) }
-                    editorRequests.focusEditor()
-                }
-            ]).frame(height: 32).opacity(spatial.whisperTyping ? 0.08 : 1)
+            SpatialTileHeader(tile: tile, title: spatialToolTitle(tile), theme: theme, actions: [])
+                .frame(height: 32).opacity(spatial.whisperTyping ? 0.08 : 1)
                 .animation(WorkspaceHTMLStyle.animation(0.32), value: spatial.whisperTyping)
             Group {
                 switch tile {
@@ -403,10 +401,6 @@ struct WorkspaceSurface: View {
                     WorkspaceSearchPane(session: projectSession, requests: editorRequests, spatial: spatial, theme: theme) {
                         appearance = colorScheme == .dark ? "light" : "dark"
                     }
-                case .inspector:
-                    WorkspaceObjectInspector(session: projectSession, requests: editorRequests,
-                        model: spatial, completion: completion, settings: completion.settings, theme: theme,
-                        generateMargin: { showAssistance(.margin, theme: theme) })
                 case .margin:
                     livingMarginPanel(theme: theme)
                 case .characters:
@@ -427,25 +421,6 @@ struct WorkspaceSurface: View {
             .clipShape(RoundedRectangle(cornerRadius: MintRadius.lg))
     }
 
-    private func spatialToolActions(_ tile: WorkspaceTileID, theme: MintTheme) -> [SpatialHeaderAction] {
-        if tile == .characters {
-            return [SpatialHeaderAction(id: "mint.writer.add-character", label: "새 인물 추가", symbol: "plus") {
-                guard let identity = projectSession.runtimeIdentity else { return }
-                let card = CharacterCard()
-                do {
-                    try ProjectWriterEditing.perform(.character(card), in: projectSession, identity: identity)
-                    spatial.expandedItem = card.id.uuidString; spatial.writerDetailsVisible = true
-                } catch { projectSession.reportError(error) }
-            }]
-        }
-        if tile == .margin {
-            return [SpatialHeaderAction(id: "mint.margin.generate", label: "AI 노트 생성", symbol: "wand.and.stars") {
-                showAssistance(.margin, theme: theme)
-            }]
-        }
-        return []
-    }
-
     private func spatialToolTitle(_ tile: WorkspaceTileID) -> String {
         switch tile {
         case .characters: "인물"
@@ -455,7 +430,6 @@ struct WorkspaceSurface: View {
         case .outline: "문서 개요"
         case .review: "검토"
         case .search: "검색"
-        case .inspector: "객체 설정"
         default: "참고 기록"
         }
     }
@@ -463,7 +437,9 @@ struct WorkspaceSurface: View {
     private func showAssistance(_ mode: WorkspaceAssistance.Mode, theme: MintTheme) {
         guard let assistance else { return }
         if mode == .coauthor {
-            WorkspaceAssistancePanel.present(mode, model: assistance, requests: editorRequests, theme: theme)
+            guard let id = projectSession.selectedDocumentID else { return }
+            spatial.selectTile(.document(id))
+            spatial.openPouchTools(); spatial.pouchSection = .ai
         } else if let editor = editorRequests.nativeEditor {
             Task { await assistance.runInline(mode, editor: editor) }
         }

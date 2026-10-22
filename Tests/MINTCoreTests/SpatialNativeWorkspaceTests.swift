@@ -52,7 +52,8 @@ import XCTest
         let second = try await h.editor()
         XCTAssertEqual(second.accessibilityIdentifier(), "mint.editor")
         XCTAssertNotEqual(first.accessibilityIdentifier(), "mint.editor")
-        XCTAssertNotNil(h.element("mint.tile.continue.\(b.rawValue.uuidString)"))
+        h.requests.spatialWorkspace?.openPouchTools(); await h.layout()
+        XCTAssertEqual(h.requests.spatialWorkspace?.selectedTile, .document(b))
     }
     func testParagraphGripMovesRichSourceAcrossLiveEditorsAndUndoesBoth() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)

@@ -464,7 +464,7 @@ open_writer_information() {
 }
 
 close_writer_information() {
-    ui press "mint.writer.details.close"
+    # Object controls now live inside the attached pouch, without a separate sheet.
     ui press "mint.tile.close.characters"
 }
 

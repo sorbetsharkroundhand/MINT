@@ -64,7 +64,9 @@ import XCTest
             h.window.makeFirstResponder(activeEditor)
             activeEditor.setSelectedRange((activeEditor.string as NSString).range(of: "한도경은"))
             activeEditor.updateSelectionToolbar(); try await Task.sleep(for: .milliseconds(350))
-            try capture(try XCTUnwrap(activeEditor.workspaceSelectionPanel?.contentView), path: directory + "/selection-\(suffix).png")
+            h.requests.spatialWorkspace?.openPouchTools(); await h.layout()
+            try capture(try XCTUnwrap(h.element("mint.workspace.pouch.tools")), path: directory + "/selection-\(suffix).png")
+            h.requests.spatialWorkspace?.pouchSection = nil
             activeEditor.hideSelectionToolbar(); activeEditor.setSelectedRange(.init(location: 0, length: 0))
             let entities = WorkspaceEntityController(session: session, requests: h.requests)
             entities.hover(editor: activeEditor, key: try XCTUnwrap(session.runtimeIdentity).key,

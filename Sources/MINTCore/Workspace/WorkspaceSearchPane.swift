@@ -133,14 +133,14 @@ struct WorkspaceSearchResult: Identifiable, Sendable {
             case .openAll: spatial.openAll()
             case .theme: toggleTheme()
             case .tool(let tile):
-                if tile == .inspector { spatial.openInspector() }
+                if tile == .inspector { spatial.openPouchTools() }
                 else if !spatial.layout.contains(tile) { spatial.toggle(tile) }
                 else { spatial.selectTile(tile) }
             case .document(let id): spatial.open(id)
             case .character(let id, let card):
                 spatial.open(id)
                 if !spatial.layout.contains(.characters) { spatial.toggle(.characters) }
-                spatial.expandedItem = card.uuidString; spatial.writerDetailsVisible = true
+                spatial.expandedItem = card.uuidString; spatial.selectTile(.characters); spatial.pouchSection = .object
             case .source(let reference):
                 let inspection = ProjectSourceInspection(session: session)
                 guard let token = inspection.capture(),

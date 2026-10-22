@@ -336,17 +336,27 @@ struct CharacterCardRow: View {
     @State private var traitsDraft = ""
     @FocusState private var traitsFocused: Bool
 
+    private var nameField: some View {
+        TextField("이름", text: $card.name)
+            .accessibilityIdentifier("mint.writer.character.name.\(card.id)")
+            .textFieldStyle(.roundedBorder).mintUIFont(12)
+    }
+    private var aliasesField: some View {
+        TextField("별칭·호칭 (쉼표 구분)", text: $card.aliases)
+            .textFieldStyle(.roundedBorder).mintUIFont(12)
+    }
+
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
-                TextField("이름", text: $card.name)
-                    .accessibilityIdentifier("mint.writer.character.name.\(card.id)")
-                    .textFieldStyle(.roundedBorder)
-                    .mintUIFont(12)
-                    .frame(width: 110)
-                TextField("별칭·호칭 (쉼표 구분)", text: $card.aliases)
-                    .textFieldStyle(.roundedBorder)
-                    .mintUIFont(12)
+                // Attached index tabs can be narrower than the legacy writer sheet.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 6) {
+                        nameField.frame(width: 110)
+                        aliasesField.frame(minWidth: 100)
+                    }
+                    VStack(spacing: 6) { nameField; aliasesField }
+                }.frame(maxWidth: .infinity)
                 // 자동 등록 표식 (요구사항 §16) — HIGH 신뢰 감지로 만들어진 카드.
                 // 편집하면 사라진다. 삭제는 오른쪽 휴지통 한 번이다.
                 if card.autoRegistered == true {
