@@ -91,7 +91,8 @@ import XCTest
         XCTAssertTrue(model.generating)
         h.fixture.session.updateSelectedDocumentBody("Changed original")
         XCTAssertFalse(model.generating)
-        XCTAssertTrue(model.result.isEmpty)
+        XCTAssertEqual(model.result, "Partial result", "Keep the draft readable without authorizing a stale insertion")
+        XCTAssertFalse(model.canInsertResult)
         XCTAssertFalse(model.insert())
         model.cancel(); await work.value
     }
@@ -150,7 +151,8 @@ import XCTest
         h.fixture.session.updateSelectedDocumentBody(before)
         XCTAssertFalse(model.insert())
         XCTAssertEqual(h.fixture.session.selectedDocument?.body, before)
-        XCTAssertTrue(model.result.isEmpty)
+        XCTAssertEqual(model.result, "Proposed continuation")
+        XCTAssertFalse(model.canInsertResult)
         XCTAssertNotNil(model.errorMessage)
     }
     func testExplicitCoauthorReadsTheDocumentAndAppendsAfterItsEnd() async throws {

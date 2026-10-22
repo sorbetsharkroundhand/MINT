@@ -52,6 +52,10 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var lastLayout: SpatialWorkspaceLayout?
     private var geometryLayout: SpatialWorkspaceLayout?
     private var geometryViewport = CGSize.zero
+    private var pouchSpaceTile: WorkspaceTileID?
+    private var closingPouchTile: WorkspaceTileID?
+    private var pouchSpaceHeight: CGFloat = 0
+    private var baseTileFrames: [WorkspaceTileID: CGRect] = [:]
     private var newTiles: Set<WorkspaceTileID> = []
     private var targetFrames: [WorkspaceTileID: CGRect] = [:]
     private struct FrameTransition {
@@ -100,6 +104,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             for host in hosts.values { host.removeFromSuperview() }
             hosts.removeAll(); projectID = model.projectID; lastLayout = nil; targetFrames.removeAll()
             geometryLayout = nil
+            pouchSpaceTile = nil; closingPouchTile = nil; pouchSpaceHeight = 0
             stopDragPresentation()
         }
         let updateExisting = lastTheme != theme
@@ -141,10 +146,18 @@ final class SpatialWorkspaceCanvasView: NSView {
     func layoutTiles() {
         guard let model, viewport.width > 0, viewport.height > 0 else { return }
         let presentation = model.presentationLayout
-        if geometryLayout != presentation || geometryViewport != viewport {
+        let spaceTile = model.pouchSection == nil || model.isDragging ? nil : model.selectedTile
+        let spaceHeight = spaceTile == nil ? 0 : min(model.pouchSection?.preferredHeight(for: spaceTile) ?? 0, max(160, viewport.height * 0.46))
+        let changesPouch = pouchSpaceTile != spaceTile || pouchSpaceHeight != spaceHeight
+        if changesPouch, pouchSpaceTile != spaceTile { closingPouchTile = pouchSpaceTile }
+        if changesPouch && geometryLayout != nil && resize == nil { animateLayout = true }
+        if geometryLayout != presentation || geometryViewport != viewport || changesPouch {
             geometry = SpatialWorkspaceGeometry(layout: presentation, viewport: viewport)
+            baseTileFrames = geometry.tiles
+            if let spaceTile { geometry.reservePouchSpace(above: spaceTile, height: spaceHeight, layout: presentation) }
+            pouchSpaceTile = spaceTile; pouchSpaceHeight = spaceHeight
             geometryLayout = presentation; geometryViewport = viewport
-            if frame.size != geometry.contentSize { setFrameSize(geometry.contentSize) }
+            updateContentSize()
         }
         for (tile, host) in hosts {
             guard let rect = geometry.tiles[tile], !host.isHidden else { continue }
@@ -157,7 +170,7 @@ final class SpatialWorkspaceCanvasView: NSView {
                     else { start.size.height = 0 }
                     host.frame = start
                 }
-                transition(host, to: rect, duration: model.isDragging ? 0.28 : 0.30)
+                transition(host, to: rect, duration: changesPouch ? 0.24 : (model.isDragging ? 0.28 : 0.30))
             } else {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host)); host.frame = rect
             }
@@ -166,7 +179,16 @@ final class SpatialWorkspaceCanvasView: NSView {
         animateLayout = false
         if revealedSequence != model.revealSequence, let tile = model.tileToReveal, let rect = geometry.tiles[tile] {
             revealedSequence = model.revealSequence
-            _ = scrollToVisible(rect.insetBy(dx: -8, dy: -28))
+            let reserved = tile == pouchSpaceTile ? pouchSpaceHeight : 0
+            let destination = reserved > 0
+                ? CGRect(x: rect.minX, y: rect.minY - reserved - 28, width: min(rect.width, 300), height: reserved + 120)
+                : rect.insetBy(dx: -8, dy: -28)
+            _ = scrollToVisible(destination)
+        }
+        updateContentSize()
+        if changesPouch, let tile = spaceTile, let base = baseTileFrames[tile] {
+            _ = scrollToVisible(CGRect(x: base.minX, y: base.minY - 28,
+                width: min(base.width, 300), height: spaceHeight + 92))
         }
         updateResizeHandles()
         needsDisplay = true
@@ -196,8 +218,16 @@ final class SpatialWorkspaceCanvasView: NSView {
             }
         }
         updateResizeHandles()
+        updateContentSize()
         model?.pouchGeometryDidChange?()
-        if frameTransitions.isEmpty { frameTimer?.invalidate(); frameTimer = nil }
+        if frameTransitions.isEmpty { frameTimer?.invalidate(); frameTimer = nil; closingPouchTile = nil }
+    }
+    private func updateContentSize() {
+        // Keep the scroll extent until closing motion finishes, avoiding a jump
+        // when a lower row's accessory bay retracts.
+        let bottom = hosts.values.filter { !$0.isHidden }.map { $0.frame.maxY + SpatialWorkspaceGeometry.bottomInset }.max() ?? 0
+        let size = CGSize(width: geometry.contentSize.width, height: max(geometry.contentSize.height, bottom))
+        if frame.size != size { setFrameSize(size) }
     }
     private func stopFrameTransitions() {
         frameTimer?.invalidate(); frameTimer = nil
@@ -260,8 +290,9 @@ final class SpatialWorkspaceCanvasView: NSView {
                 direction: rightFixed ? -1 : 1, height: 0)
         case .row(let column, _):
             guard geometry.columns.indices.contains(column) else { return }
+            let accessory = origin.columns[column].slots.contains { $0.tile == pouchSpaceTile } ? pouchSpaceHeight : 0
             resize = Resize(origin: origin, start: convert(event.locationInWindow, from: nil), axis: axis,
-                column: column, startWidth: 0, direction: 1, height: geometry.columns[column].height)
+                column: column, startWidth: 0, direction: 1, height: geometry.columns[column].height - accessory)
         }
     }
     func continueResize(_ event: NSEvent) {
@@ -520,13 +551,17 @@ final class SpatialWorkspaceCanvasView: NSView {
 
     func pouchFrame(for tile: WorkspaceTileID, expanded: Bool = false) -> CGRect? {
         guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        let width = min(360, host.frame.width - 32)
-        let origin = CGPoint(x: host.frame.minX + 16, y: host.frame.minY - 28)
+        let width = WorkspacePouchMetrics.indexWidth(for: tile, available: host.frame.width)
+        let ownsSpace = tile == pouchSpaceTile || tile == closingPouchTile
+        let gap = ownsSpace ? max(0, host.frame.minY - (baseTileFrames[tile]?.minY ?? host.frame.minY)) : 0
+        let origin = CGPoint(x: host.frame.minX + 16, y: host.frame.minY - gap - 28)
         guard visibleRect.contains(CGPoint(x: origin.x + width / 2, y: origin.y + 14)) else { return nil }
-        let available = min(host.frame.height + 28, visibleRect.maxY - origin.y)
-        let height = expanded ? min(360, max(36, available)) : 36
-        let frame = CGRect(origin: origin, size: CGSize(width: width, height: height))
-        return frame
+        if expanded && gap > 0.5 {
+            // The body sits behind the host and continues through its rounded
+            // top corners, forming one perimeter without covering header text.
+            return CGRect(x: host.frame.minX, y: origin.y, width: host.frame.width, height: 44 + gap)
+        }
+        return CGRect(origin: origin, size: CGSize(width: width, height: 36))
     }
 }
 

@@ -254,3 +254,43 @@ returns focus to the original native editor. `swift build` compiled the final
 source and linked MINT and MINTBench successfully (12.99 s), with no warnings or
 errors in that invocation. No runtime, IME, visual or UI interaction checks were
 run for this revision.
+
+### Index pouch refinement, 2026-10-22
+
+The owner's screenshot and follow-up authorize a focused refinement of the
+folder-index interaction. The frontend-design, apple-design and emil-design-eng
+skills informed proportions, material continuity, motion and control ownership.
+The original HTML's critically damped movement and retained 360/380 ms workspace
+collapse/restore transitions remain the motion reference.
+
+- The manuscript index is at most 276 points wide; reference-object labels are
+  at most 188 points. Readable ink, a discrete all-tools grip and short scope-aware
+  labels replace the wide, low-contrast gray toolbar. The accent is composited
+  into the actual theme surface, rather than making translucent palette tokens
+  opaque. The joined surface has one contour and no additional glass layer.
+- An expanded pouch reserves space above its object. The native host translates
+  downward without changing its width, height, editor instance or text layout;
+  subsequent rows move with it. The body continues behind the host's top corners.
+  A single 240 ms layout transition supplies both surfaces' frames, including
+  interrupted openings/closings. Tool content keeps a stable layout while the
+  contour reveals it; narrow objects use a vertical, scrollable arrangement.
+- Standard buttons retain native tracking and keyboard focus. Only the grip and
+  blank label area initiate pouch movement. A 7-point threshold distinguishes a
+  grab, and the desktop orb preserves its grab offset. An approaching pouch can
+  be grabbed; Reduce Motion still settles immediately.
+- Format applies to the selection/paragraph; Environment explicitly applies to
+  all manuscripts. The enclosing window's duplicate coauthor/layout controls are
+  removed, with those routes retained in the pouch's all-tools menu. Coauthor
+  opens the prompt directly, including when invoked from that menu.
+- Pouch visibility no longer owns or cancels coauthoring. Session-local drafts
+  are retained per project/document across tab and object changes. Runtime and
+  source invalidation still cancel generation; interrupted or stale drafts stay
+  readable but cannot be inserted. Stored runtime identity and activation epoch
+  prevent an ABA source change from reauthorizing an old result. This is not a
+  new disk-persisted draft format. Existing stale-source test expectations now
+  require retained text and rejected insertion; they have not been executed.
+
+Validation remains build-only at the owner's request. No application launch,
+screenshots, native interaction, IME checks or test execution were performed.
+The final `swift build` completed successfully in 12.09 seconds and linked MINT
+and MINTBench without warnings or errors in that invocation.

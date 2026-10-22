@@ -1,7 +1,13 @@
 import AppKit
 import SwiftUI
 
-final class WorkspacePouchView: NSVisualEffectView {
+enum WorkspacePouchMetrics {
+    static func indexWidth(for tile: WorkspaceTileID, available: CGFloat) -> CGFloat {
+        min(tile.documentID == nil ? 188 : 276, max(80, available - 32))
+    }
+}
+
+final class WorkspacePouchView: NSView {
     weak var controller: WorkspacePouchController?
     private let grip = WorkspacePouchButton(title: "", target: nil, action: nil)
     private var buttons: [WorkspacePouchButton] = []
@@ -10,6 +16,8 @@ final class WorkspacePouchView: NSVisualEffectView {
     private var fused = false
     private var toolsHost: NSHostingView<AnyView>?
     var baseSurface: NSColor = MintTheme.light.editorSurface
+    var indexWidth: CGFloat = 276
+    var toolsHeight: CGFloat = 300
     var toolsExpanded = false { didSet { needsLayout = true; needsDisplay = true } }
     var fusionProgress: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
     private let contourMask = CAShapeLayer()
@@ -20,12 +28,12 @@ final class WorkspacePouchView: NSVisualEffectView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     override init(frame: NSRect) {
         super.init(frame: frame)
-        material = .popover; blendingMode = .behindWindow; state = .active; wantsLayer = true
+        wantsLayer = true
         layer?.masksToBounds = true
         layer?.mask = contourMask
         setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
-        grip.isBordered = false; grip.refusesFirstResponder = true
+        grip.isBordered = false; grip.refusesFirstResponder = false; grip.draggable = true
         addSubview(grip)
     }
     required init?(coder: NSCoder) { nil }
@@ -39,6 +47,7 @@ final class WorkspacePouchView: NSVisualEffectView {
         }
         needsLayout = true
     }
+    func clearPressedState() { grip.highlight(false) }
 
     var toolsOwnFirstResponder: Bool {
         guard let toolsHost, let responder = window?.firstResponder as? NSView else { return false }
@@ -52,31 +61,31 @@ final class WorkspacePouchView: NSVisualEffectView {
         if fused { fusionProgress = 1 } else if !orb { fusionProgress = 0 }
         layer?.cornerRadius = 0
         grip.controller = controller
-        grip.title = orb || fused ? "M" : ""
+        grip.title = orb ? "M" : ""
+        grip.image = fused ? WorkspaceIcons.image("square.grid.2x2", size: 12) : nil
         grip.theme = theme; grip.selected = orb
         grip.font = MintFonts.serif(12, weight: .bold)
         grip.refresh()
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
-        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "주머니의 모든 도구 · 드래그하여 떼어 놓기")
+        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "모든 도구 · 드래그하여 주머니 이동")
+        grip.toolTip = orb ? "클릭하여 원고 펼치기 · 드래그하여 이동" : "모든 도구 · 이 손잡이로 주머니 이동"
         grip.menu = controller?.moreMenu()
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
             let button = WorkspacePouchButton(title: "", target: self, action: #selector(invoke(_:)))
-            button.isBordered = false; button.refusesFirstResponder = true; button.wantsLayer = true
+            button.isBordered = false; button.refusesFirstResponder = false; button.wantsLayer = true
             buttons.append(button); addSubview(button)
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]; button.controller = controller; button.tag = index; button.isHidden = orb
             button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: 14)
             button.title = fused && action.symbol.isEmpty ? action.label : ""
-            button.font = MintFonts.ui(10, weight: .medium)
+            button.font = MintFonts.ui(11, weight: .medium)
             let selected = action.selected()
             button.setButtonType(.toggle); button.state = selected ? .on : .off
             button.isEnabled = action.enabled()
             button.contentTintColor = selected ? theme.blue : theme.ink2
             button.theme = theme; button.selected = selected; button.refresh()
-            button.layer?.backgroundColor = (selected ? theme.activeBg : NSColor.clear).cgColor
-            button.layer?.cornerRadius = MintRadius.sm
             button.setAccessibilityIdentifier(action.id); button.setAccessibilityLabel(action.label)
             button.setAccessibilityValue(NSNumber(value: selected)); button.toolTip = action.label
         }
@@ -89,19 +98,26 @@ final class WorkspacePouchView: NSVisualEffectView {
         CATransaction.commit()
         toolsHost?.isHidden = !fused || !toolsExpanded
         if fused && toolsExpanded {
-            toolsHost?.frame = CGRect(x: 0, y: 36, width: bounds.width, height: max(0, bounds.height - 36))
+            // Reveal a stable layout through the contour mask. Resizing text on
+            // every animation frame makes controls swim under the pointer.
+            toolsHost?.frame = CGRect(x: 0, y: 36, width: bounds.width, height: max(0, toolsHeight - 8))
         }
         if orb {
             let p = fusionProgress
-            grip.frame = CGRect(x: 10 * p, y: 3 * p,
-                width: bounds.width * (1 - p) + 24 * p, height: bounds.height * (1 - p) + 25 * p)
+            grip.frame = CGRect(x: 10 * p, y: p,
+                width: bounds.width * (1 - p) + 28 * p, height: bounds.height * (1 - p) + 26 * p)
             return
         }
         if fused {
-            grip.frame = CGRect(x: 10, y: 3, width: 24, height: 25)
-            let width = max(0, bounds.width - 44) / CGFloat(max(1, buttons.count))
+            let inset = labelInset, width = labelWidth
+            grip.frame = CGRect(x: inset + 10, y: 1, width: 28, height: 26)
+            let actionWidth = max(0, width - 80) / CGFloat(max(1, buttons.count - 1))
             for (index, button) in buttons.enumerated() {
-                button.frame = CGRect(x: 36 + CGFloat(index) * width, y: 3, width: width - 2, height: 25)
+                if index == buttons.count - 1 {
+                    button.frame = CGRect(x: inset + width - 38, y: 1, width: 28, height: 26)
+                } else {
+                    button.frame = CGRect(x: inset + 40 + CGFloat(index) * actionWidth, y: 1, width: actionWidth - 2, height: 26)
+                }
             }
             return
         }
@@ -115,17 +131,19 @@ final class WorkspacePouchView: NSVisualEffectView {
         }
     }
     override func draw(_ dirtyRect: NSRect) {
-        let tint = theme.novelBg.blended(withFraction: 0.35, of: theme.pill)?.withAlphaComponent(1) ?? theme.pill.withAlphaComponent(1)
-        (fused || fusionProgress > 0 ? baseSurface.withAlphaComponent(1) : (controller?.reduceTransparency == true ? theme.pill.withAlphaComponent(1) : theme.pill)).setFill()
+        // Composite the accent into the actual paper. Forcing a translucent theme
+        // token opaque used to turn custom dark palettes into a bright gray slab.
+        let base = baseSurface.withAlphaComponent(1)
+        let tint = base.blended(withFraction: 0.14, of: theme.novel.withAlphaComponent(1)) ?? base
+        (fused || fusionProgress > 0 ? base : tint).setFill()
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.addPath(contour); context.fillPath()
         if fused || fusionProgress > 0 {
             context.saveGState(); context.addPath(contour); context.clip()
-            tint.setFill(); CGRect(x: 0, y: 0, width: bounds.width, height: 24).fill()
-            // The last eight points share the object's surface; there is no double border,
-            // separate shadow or material seam where the folder tab joins the object.
+            // One opaque surface meets the object with exactly the same color.
+            // Only the protruding label carries the pouch tint; there is no skirt.
             NSGradient(starting: tint, ending: baseSurface.withAlphaComponent(1))?
-                .draw(from: CGPoint(x: 0, y: 24), to: CGPoint(x: 0, y: 36), options: [.drawsAfterEndingLocation])
+                .draw(from: CGPoint(x: 0, y: 4), to: CGPoint(x: 0, y: 28), options: [.drawsBeforeStartingLocation])
             context.restoreGState()
             if fused { return }
         }
@@ -144,25 +162,36 @@ final class WorkspacePouchView: NSVisualEffectView {
         if horizontal { CGRect(x: 151, y: 11, width: 1, height: 16).fill() }
         else { CGRect(x: 11, y: 151, width: 16, height: 1).fill() }
     }
+    private var labelInset: CGFloat { fused && bounds.height > 36.5 ? 16 : 0 }
+    private var labelWidth: CGFloat { min(indexWidth, bounds.width - labelInset * 2) }
     private var contour: CGPath {
         let p = fusionProgress
         guard p > 0 else { return CGPath(roundedRect: bounds, cornerWidth: orb ? 14 : 12, cornerHeight: orb ? 14 : 12, transform: nil) }
         let w = bounds.width, h = bounds.height, shoulder = 8 * p
+        let left = labelInset, right = fused ? left + labelWidth : w
         let radius = 14 - 6 * p, bottomRadius = 14 * (1 - p)
         let path = CGMutablePath()
-        path.move(to: CGPoint(x: shoulder + radius, y: 0))
-        path.addLine(to: CGPoint(x: w - shoulder - radius, y: 0))
-        path.addQuadCurve(to: CGPoint(x: w - shoulder, y: radius), control: CGPoint(x: w - shoulder, y: 0))
-        path.addLine(to: CGPoint(x: w - shoulder, y: 22))
-        path.addQuadCurve(to: CGPoint(x: w, y: 30), control: CGPoint(x: w - shoulder, y: 30))
+        path.move(to: CGPoint(x: left + shoulder + radius, y: 0))
+        path.addLine(to: CGPoint(x: right - shoulder - radius, y: 0))
+        path.addQuadCurve(to: CGPoint(x: right - shoulder, y: radius), control: CGPoint(x: right - shoulder, y: 0))
+        path.addLine(to: CGPoint(x: right - shoulder, y: 20))
+        path.addQuadCurve(to: CGPoint(x: right, y: 28), control: CGPoint(x: right - shoulder, y: 28))
+        if labelInset > 0 {
+            path.addLine(to: CGPoint(x: w - 13, y: 28))
+            path.addQuadCurve(to: CGPoint(x: w, y: 41), control: CGPoint(x: w, y: 28))
+        }
         path.addLine(to: CGPoint(x: w, y: h - bottomRadius))
         path.addQuadCurve(to: CGPoint(x: w - bottomRadius, y: h), control: CGPoint(x: w, y: h))
         path.addLine(to: CGPoint(x: bottomRadius, y: h))
         path.addQuadCurve(to: CGPoint(x: 0, y: h - bottomRadius), control: CGPoint(x: 0, y: h))
-        path.addLine(to: CGPoint(x: 0, y: 30))
-        path.addQuadCurve(to: CGPoint(x: shoulder, y: 22), control: CGPoint(x: shoulder, y: 30))
-        path.addLine(to: CGPoint(x: shoulder, y: radius))
-        path.addQuadCurve(to: CGPoint(x: shoulder + radius, y: 0), control: CGPoint(x: shoulder, y: 0))
+        if labelInset > 0 {
+            path.addLine(to: CGPoint(x: 0, y: 41))
+            path.addQuadCurve(to: CGPoint(x: 13, y: 28), control: CGPoint(x: 0, y: 28))
+        }
+        path.addLine(to: CGPoint(x: left, y: 28))
+        path.addQuadCurve(to: CGPoint(x: left + shoulder, y: 20), control: CGPoint(x: left + shoulder, y: 28))
+        path.addLine(to: CGPoint(x: left + shoulder, y: radius))
+        path.addQuadCurve(to: CGPoint(x: left + shoulder + radius, y: 0), control: CGPoint(x: left + shoulder, y: 0))
         path.closeSubpath(); return path
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -191,18 +220,39 @@ final class WorkspacePouchView: NSVisualEffectView {
     override func mouseUp(with event: NSEvent) { _ = controller?.endDrag(at: screenPoint(event)) }
     override func rightMouseDown(with event: NSEvent) { controller?.showMoreMenu(in: self) }
     override func resetCursorRects() {
-        addCursorRect(fused ? CGRect(x: 0, y: 0, width: bounds.width, height: 32) : bounds, cursor: .openHand)
+        addCursorRect(grip.frame, cursor: .openHand)
     }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
 }
 
 final class WorkspacePouchButton: WorkspaceHTMLButton {
     weak var controller: WorkspacePouchController?
+    var draggable = false
     override var mouseDownCanMoveWindow: Bool { false }
-    override func mouseDown(with event: NSEvent) { controller?.beginDrag(at: screenPoint(event)) }
-    override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }
+    override func mouseDown(with event: NSEvent) {
+        guard draggable else { super.mouseDown(with: event); return }
+        highlight(true); controller?.beginDrag(at: screenPoint(event))
+    }
+    override func mouseDragged(with event: NSEvent) {
+        if draggable { controller?.updateDrag(to: screenPoint(event)) }
+    }
     override func mouseUp(with event: NSEvent) {
+        guard draggable else { super.mouseUp(with: event); return }
+        highlight(false)
         if controller?.endDrag(at: screenPoint(event)) != true { performClick(nil) }
+    }
+    override func highlight(_ flag: Bool) { super.highlight(flag); refresh() }
+    override func refresh() {
+        super.refresh()
+        let active = selected || isHighlighted
+        layer?.backgroundColor = (active ? theme.novel.withAlphaComponent(0.13) : (hovered ? theme.hover : .clear)).cgColor
+        contentTintColor = isEnabled ? theme.ink : theme.ink2
+        if !title.isEmpty {
+            attributedTitle = NSAttributedString(string: title, attributes: [
+                .font: font ?? MintFonts.ui(11, weight: .medium),
+                .foregroundColor: isEnabled ? theme.ink : theme.ink2
+            ])
+        }
     }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }

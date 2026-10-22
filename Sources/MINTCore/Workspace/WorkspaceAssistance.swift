@@ -11,6 +11,7 @@ import CryptoKit
     @Published private(set) var errorMessage: String?
     @Published private(set) var generating = false
     @Published var coauthorPrompt = ""
+    @Published private(set) var coauthorKey: ProjectDocumentKey?
     @Published private(set) var contextVersion: UInt64 = 0
     private let session: ProjectSession
     private let requests: ProjectEditorRequests
@@ -20,6 +21,15 @@ import CryptoKit
     private var generation: AskAnswerGeneration?
     private var serial: UInt64 = 0
     private var subscriptions: Set<AnyCancellable> = []
+    private struct CoauthorDraft {
+        let prompt: String
+        let result: String
+        let body: String?
+        let identity: ProjectRuntimeIdentity?
+        let epoch: UInt64?
+        let complete: Bool
+    }
+    private var coauthorDrafts: [ProjectDocumentKey: CoauthorDraft] = [:]
     private struct Capture { let key: ProjectDocumentKey; let identity: ProjectRuntimeIdentity; let epoch: UInt64; let body: String; let selection: Selection?; let paragraph: NSRange }
     private struct Selection {
         let text: NSAttributedString
@@ -59,6 +69,7 @@ import CryptoKit
         session.$isTransitioning.dropFirst().sink { [weak self] value in if value { self?.invalidateCapture() } }.store(in: &subscriptions)
     }
     func capture(_ mode: Mode, editor: BlockTextView) throws {
+        rememberCoauthor()
         cancel()
         guard session.isEditorEditable, let identity = session.runtimeIdentity, !editor.hasMarkedText(), case .project(let key) = editor.writingDocumentIdentity,
             identity.key == key,
@@ -76,11 +87,46 @@ import CryptoKit
                 markdown: InlineMarkdown.serialize(storage, in: selection))
         } else { capturedSelection = nil }
         self.mode = mode; result = ""; errorMessage = nil
+        coauthorKey = mode == .coauthor ? key : nil
         capture = .init(key: key, identity: identity, epoch: session.activationEpoch, body: body,
             selection: capturedSelection, paragraph: editor.originalParagraphRange(forNative:
                 (editor.string as NSString).paragraphRange(for: NSRange(location: min(selection.location, max(0, editor.string.utf16.count - 1)), length: 0)))
                 ?? NSRange(location: 0, length: min(body.utf16.count, 1024)))
     }
+
+    /// Visibility does not own the writing task. Keep drafts per document when
+    /// the pouch changes tabs, detaches, or follows another object.
+    func openCoauthor(editor: BlockTextView) throws {
+        guard case .project(let key) = editor.writingDocumentIdentity else { throw ProjectSessionError.staleRuntime }
+        if mode == .coauthor, coauthorKey == key, current { return }
+        rememberCoauthor()
+        let draft = coauthorDrafts[key]
+        try capture(.coauthor, editor: editor)
+        coauthorPrompt = draft?.prompt ?? ""
+        result = draft?.result ?? ""
+        if !result.isEmpty, draft?.body != capture?.body || draft?.identity != capture?.identity || draft?.epoch != capture?.epoch {
+            capture = nil
+            errorMessage = "원고의 작업 상태가 바뀌어 초안을 보관했어요. 현재 원고로 다시 생성한 뒤 넣어 주세요."
+        } else if !result.isEmpty, draft?.complete != true {
+            capture = nil
+            errorMessage = "중단된 초안을 보관하고 있어요. 요청을 확인하고 다시 생성해 주세요."
+        }
+    }
+
+    func hasCoauthorDraft(for key: ProjectDocumentKey) -> Bool {
+        coauthorKey == key || coauthorDrafts[key] != nil
+    }
+
+    private func rememberCoauthor() {
+        guard mode == .coauthor, let key = coauthorKey else { return }
+        let complete = capture == nil ? (coauthorDrafts[key]?.complete ?? false) : (!generating && errorMessage == nil)
+        coauthorDrafts[key] = .init(prompt: coauthorPrompt, result: result,
+            body: capture?.body ?? coauthorDrafts[key]?.body,
+            identity: capture?.identity ?? coauthorDrafts[key]?.identity,
+            epoch: capture?.epoch ?? coauthorDrafts[key]?.epoch, complete: complete)
+    }
+
+    var canInsertResult: Bool { current && !generating && !result.isEmpty && errorMessage == nil }
     /// The author's click authorizes this single captured edit, never later source revisions.
     @discardableResult func runInline(_ mode: Mode, editor: BlockTextView) async -> Bool {
         guard mode != .coauthor else { return false }
@@ -142,7 +188,8 @@ import CryptoKit
             guard ticket == serial else { return }
             if let generation { await generation.cancelAndDrain() }
             guard ticket == serial else { return }
-            generation = nil; generating = false; result = ""
+            generation = nil; generating = false
+            if mode != .coauthor { result = "" }
             errorMessage = "로컬 모델을 사용할 수 없거나 생성이 중단됐어요. 설정에서 AI와 모델 상태를 확인해 주세요."
         }
     }
@@ -174,17 +221,23 @@ import CryptoKit
                     in: session, requests: requests, actionName: mode.rawValue)
                 requests.spatialWorkspace?.open(capture.key.documentID)
             }
+            if mode == .coauthor { coauthorDrafts.removeValue(forKey: capture.key); coauthorKey = nil; result = "" }
             self.capture = nil; return true
         } catch { errorMessage = error.localizedDescription; return false }
     }
     func cancel() {
-        if generating { result = ""; errorMessage = "생성이 중단됐어요." }
+        if generating {
+            if mode != .coauthor { result = "" }
+            errorMessage = mode == .coauthor ? "생성을 멈췄어요. 요청과 초안은 보관됩니다." : "생성이 중단됐어요."
+        }
         serial &+= 1; generating = false
         if let generation { Task { await generation.cancelAndDrain() } }
         generation = nil
     }
     private func invalidateCapture() {
-        cancel(); capture = nil; result = ""
+        rememberCoauthor()
+        cancel(); capture = nil
+        if mode != .coauthor { result = "" }
         errorMessage = "원문이나 문서가 바뀌었어요. 현재 원문에서 다시 실행해 주세요."
         contextVersion &+= 1
     }

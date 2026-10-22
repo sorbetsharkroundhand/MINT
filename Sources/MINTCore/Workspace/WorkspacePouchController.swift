@@ -58,6 +58,7 @@ struct WorkspacePouchAction {
     private var observers: [NSObjectProtocol] = []
     private var subscription: AnyCancellable?
     private var start: CGPoint?
+    private var grabOffset = CGPoint(x: 22, y: 22)
     private var dragMonitor: Any?
     private var draggingCursor = false
     private var edge: WorkspacePouchEdge = .left
@@ -80,7 +81,10 @@ struct WorkspacePouchAction {
         self.model = model; self.defaults = defaults
         super.init()
         subscription = model.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in self?.refresh(); self?.syncAttachment() }
+            DispatchQueue.main.async { [weak self] in
+                self?.model.canvas?.layoutTiles()
+                self?.refresh(); self?.syncAttachment()
+            }
         }
         model.pouchGeometryDidChange = { [weak self] in self?.syncAttachment() }
     }
@@ -155,6 +159,9 @@ struct WorkspacePouchAction {
     func beginDrag(at point: CGPoint) {
         stopDragTracking()
         start = point; isDragging = false
+        if isCollapsed, let panel {
+            grabOffset = CGPoint(x: point.x - panel.frame.minX, y: point.y - panel.frame.minY)
+        } else { grabOffset = CGPoint(x: 22, y: 22) }
         // Own the gesture before the rail's buttons are hidden or its parent window
         // is ordered out. Tracking must not depend on the original hit-test view.
         dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
@@ -175,17 +182,17 @@ struct WorkspacePouchAction {
     func updateDrag(to point: CGPoint) {
         guard let start, let window else { return }
         if !isDragging {
-            guard hypot(point.x - start.x, point.y - start.y) > 4 else { return }
+            guard hypot(point.x - start.x, point.y - start.y) > 7 else { return }
             releaseContentToPanel()
             attachmentTile = nil; model.selectTile(nil)
-            if let panel { spring.position = CGPoint(x: panel.frame.midX - 22, y: panel.frame.midY - 22) }
+            spring = WorkspaceSpringPoint(position: CGPoint(x: start.x - grabOffset.x, y: start.y - grabOffset.y))
             isDragging = true
             NSCursor.closedHand.push(); draggingCursor = true
             refresh()
         }
         let screen = screenFrame(for: point)
         target = WorkspacePouchGeometry.clampOrb(
-            CGPoint(x: point.x - 22, y: point.y - 22), screen: screen, margin: 6)
+            CGPoint(x: point.x - grabOffset.x, y: point.y - grabOffset.y), screen: screen, margin: 6)
         moveTowardTarget()
         let orb = CGRect(origin: target, size: CGSize(width: 44, height: 44))
         if !isCollapsed, !window.frame.insetBy(dx: -4, dy: -4).contains(orb) {
@@ -197,6 +204,7 @@ struct WorkspacePouchAction {
         if isDragging { updateDrag(to: point) }
         start = nil
         let moved = isDragging; isDragging = false
+        content?.clearPressedState()
         stopDragTracking()
         guard moved, let window else { refresh(); return false }
         if isCollapsed {
@@ -282,6 +290,10 @@ struct WorkspacePouchAction {
         let visibleActions = attached ? indexActions : actions
         let documentActive = model.selectedTile?.documentID != nil && model.selectedTile?.documentID == model.activeDocumentID
         content.baseSurface = documentActive ? theme.editorSurface : theme.cardSurface
+        content.indexWidth = attachmentFrame()?.local.width ?? 276
+        if let section = model.pouchSection {
+            content.toolsHeight = min(section.preferredHeight(for: model.selectedTile), max(160, (model.canvas?.viewport.height ?? 700) * 0.46))
+        }
         content.toolsExpanded = attached && model.pouchSection != nil
         content.configure(orb: isCollapsed || isDragging || flying,
             horizontal: attached || edge == .top || edge == .bottom,
@@ -293,7 +305,7 @@ struct WorkspacePouchAction {
         else if abs(panel.alphaValue - opacity) > 0.001 {
             WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
         }
-        panel.ignoresMouseEvents = flying || (model.whisperTyping && !isCollapsed && !isDragging && !attached)
+        panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed && !isDragging && !attached && !flying
         if attached { panel.orderOut(nil) }
         else if isCollapsed || isDragging || flying {
             let p = flying ? content.fusionProgress : 0
@@ -381,6 +393,7 @@ struct WorkspacePouchAction {
         guard let tile = model.selectedTile, let destination = attachmentFrame() else {
             if attachmentTile != nil {
                 releaseContentToPanel(); attachmentTile = nil
+                model.pouchSection = nil
                 refresh(); dock(immediate: false)
             }
             return
@@ -430,20 +443,21 @@ struct WorkspacePouchAction {
         attachmentTile = model.selectedTile
         panel.contentView = nil
         content.removeFromSuperview()
-        destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
+        destination.canvas.addSubview(content, positioned: .below,
+            relativeTo: model.selectedTile.flatMap { destination.canvas.hosts[$0] })
         content.autoresizingMask = []
         content.frame = destination.local; content.fusionProgress = 1
         attachmentDestination = destination.local
         panel.orderOut(nil); refresh(); updateAttachedFrame()
     }
     private func updateAttachedFrame() {
-        guard let content, let frame = attachmentFrame(expanded: model.pouchSection != nil)?.local,
+        guard let content, let frame = attachmentFrame(expanded: true)?.local,
               frame != attachmentDestination else { return }
-        let changesHeight = attachmentDestination?.height != frame.height
         attachmentDestination = frame
-        if changesHeight && !reduceMotion {
-            WorkspaceHTMLStyle.animate(0.22) { content.animator().frame = frame }
-        } else { content.frame = frame }
+        // The canvas supplies the current presentation frame on every motion
+        // tick. A second animator here would lag behind and expose a seam.
+        content.frame = frame
+        content.needsLayout = true; content.needsDisplay = true
     }
     private func screenFrame(for point: CGPoint) -> CGRect {
         (NSScreen.screens.first { $0.visibleFrame.contains(point) } ?? window?.screen ?? NSScreen.main)?.visibleFrame

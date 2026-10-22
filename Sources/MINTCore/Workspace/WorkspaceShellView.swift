@@ -184,8 +184,7 @@ struct WorkspaceSurface: View {
     var body: some View {
         let theme = palette.theme(for: colorScheme)
         VStack(spacing: 0) {
-            WorkspaceSpatialChrome(session: projectSession, model: spatial, completion: completion, theme: theme,
-                coauthor: { showAssistance(.coauthor, theme: theme) })
+            WorkspaceSpatialChrome(session: projectSession, model: spatial, theme: theme)
             spatialWorkspace(theme: theme)
         }
         .background(WorkspaceLiquidGlass(theme: theme))
@@ -437,7 +436,9 @@ struct WorkspaceSurface: View {
     private func showAssistance(_ mode: WorkspaceAssistance.Mode, theme: MintTheme) {
         guard let assistance else { return }
         if mode == .coauthor {
-            guard let id = projectSession.selectedDocumentID else { return }
+            guard let id = projectSession.selectedDocumentID, let editor = editorRequests.nativeEditor else { return }
+            do { try assistance.openCoauthor(editor: editor) }
+            catch { spatial.showToast("현재 원고에서 다시 실행해 주세요."); return }
             spatial.selectTile(.document(id))
             spatial.openPouchTools(); spatial.pouchSection = .ai
         } else if let editor = editorRequests.nativeEditor {

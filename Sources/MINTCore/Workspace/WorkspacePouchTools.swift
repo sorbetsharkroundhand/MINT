@@ -4,6 +4,15 @@ import SwiftUI
 enum WorkspacePouchSection: String, CaseIterable {
     case format, ai, view, object
 
+    func preferredHeight(for tile: WorkspaceTileID?) -> CGFloat {
+        switch self {
+        case .format: 268
+        case .ai: 320
+        case .view: 240
+        case .object: tile?.documentID != nil ? 160 : ([.characters, .narrative, .context].contains(tile) ? 300 : 220)
+        }
+    }
+
     static func sections(for tile: WorkspaceTileID?) -> [Self] {
         tile?.documentID == nil ? [.object] : [.format, .ai, .view, .object]
     }
@@ -12,7 +21,7 @@ enum WorkspacePouchSection: String, CaseIterable {
         switch self {
         case .format: return "서식"
         case .ai: return "AI"
-        case .view: return "보기"
+        case .view: return "환경"
         case .object:
             switch tile {
             case .characters: return "인물·작품"
@@ -23,7 +32,7 @@ enum WorkspacePouchSection: String, CaseIterable {
             case .context: return "AI 문맥"
             case .map: return "지도"
             case .outline: return "개요"
-            default: return "객체"
+            default: return "원고"
             }
         }
     }
@@ -43,7 +52,6 @@ struct WorkspacePouchTools: View {
     @State private var style = SelectionStyleState()
     @State private var hasSelection = false
     @State private var markedText = false
-    @State private var coauthorVisible = false
 
     private var target: WorkspaceTileID? { model.selectedTile }
     private var editor: BlockTextView? {
@@ -74,7 +82,8 @@ struct WorkspacePouchTools: View {
                         case .object: contextualTools; objectActions
                         case nil: EmptyView()
                         }
-                    }.padding(14).frame(maxWidth: .infinity, alignment: .leading)
+                    }.padding(16).frame(maxWidth: 780, alignment: .leading)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
         }
@@ -82,21 +91,30 @@ struct WorkspacePouchTools: View {
         .controlSize(.small)
         .accessibilityIdentifier("mint.workspace.pouch.tools")
         .onAppear(perform: updateSelection)
-        .onChange(of: target) { _, _ in endCoauthor(); updateSelection() }
-        .onChange(of: model.pouchSection) { _, _ in endCoauthor(); updateSelection() }
+        .onChange(of: target) { _, _ in updateSelection() }
+        .onChange(of: model.pouchSection) { _, _ in updateSelection() }
         .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { note in
             if note.object as? BlockTextView === editor { updateSelection() }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSText.didChangeNotification)) { note in
             if note.object as? BlockTextView === editor { updateSelection() }
         }
-        .onDisappear(perform: endCoauthor)
     }
 
     private var formatting: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 24) {
+                characterFormatting.frame(width: 268)
+                paragraphFormatting.frame(width: 280)
+            }
+            VStack(alignment: .leading, spacing: 20) { characterFormatting; paragraphFormatting }
+        }.disabled(markedText || !session.isEditorEditable)
+    }
+
+    private var characterFormatting: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text(hasSelection ? "선택한 글자" : "글자를 선택하면 서식을 바꿀 수 있어요.")
-                .foregroundStyle(theme.ink2C)
+            Text("선택한 글자").mintUIFont(11, .semibold)
+            if !hasSelection { Text("원고에서 글자를 선택해 주세요.").foregroundStyle(theme.ink2C) }
             HStack(spacing: 8) {
                 formatButton("굵게", active: style.bold, action: .toggleBold)
                 formatButton("기울임", active: style.italic, action: .toggleItalic)
@@ -110,8 +128,16 @@ struct WorkspacePouchTools: View {
                 get: { style.fontSize }, set: { apply(.fontSize($0)) }),
                 in: SelectionToolbarView.minFontSize...SelectionToolbarView.maxFontSize)
                 .disabled(!hasSelection || markedText || !session.isEditorEditable)
-            Divider()
-            Text("현재 문단").foregroundStyle(theme.ink2C)
+            Button("선택한 글을 메모로 발췌") {
+                guard let editor = focusEditor() else { return }
+                editor.workspaceInteraction?.excerptSelection()
+            }.disabled(!hasSelection)
+        }
+    }
+
+    private var paragraphFormatting: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("현재 문단").mintUIFont(11, .semibold)
             Menu("본문 · 제목 · 목록") {
                 Button("본문") { apply(.block(.p)) }
                 Button("제목 1") { apply(.block(.h1)) }
@@ -130,15 +156,14 @@ struct WorkspacePouchTools: View {
             }
             Stepper("문단 줄 간격 · \(Int(style.lineSpacing)) pt", value: Binding(
                 get: { style.lineSpacing }, set: { apply(.lineSpacing($0)) }), in: 0...20)
-            Button("선택한 글을 메모로 발췌") {
-                guard let editor = focusEditor() else { return }
-                editor.workspaceInteraction?.excerptSelection()
-            }.disabled(!hasSelection)
-        }.disabled(markedText || !session.isEditorEditable)
+            Text("Enter 새 문단 · Shift + Enter 줄바꿈")
+                .foregroundStyle(theme.ink2C).fixedSize(horizontal: false, vertical: true)
+        }
     }
 
     private var viewing: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("집필 환경 · 모든 원고에 적용").mintUIFont(11, .semibold)
             Toggle("타자기 중앙 스크롤", isOn: $model.typewriter)
             Toggle("현재 문단에 집중", isOn: $model.focusDimming)
             Text("기본 본문 크기 · \(Int(settings.editorFontSize)) pt")
@@ -146,43 +171,47 @@ struct WorkspacePouchTools: View {
                 in: CompletionSettings.minFontSize...CompletionSettings.maxFontSize, step: 1)
             Text("기본 줄 간격 · \(Int(settings.lineSpacing)) pt")
             Slider(value: $settings.lineSpacing, in: 0...20, step: 1)
-            Text("기본 크기와 간격은 모든 원고에 적용됩니다.")
+            Text("선택한 글자의 서식은 ‘서식’에서 바꿀 수 있어요.")
                 .foregroundStyle(theme.ink2C)
-        }
+        }.frame(maxWidth: 360, alignment: .leading)
     }
 
     private var aiTools: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 24) {
+                aiActions.frame(width: 212)
+                coauthor.frame(minWidth: 280, maxWidth: .infinity)
+            }
+            VStack(alignment: .leading, spacing: 20) { aiActions; coauthor }
+        }
+    }
+
+    private var aiActions: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Text("이 원고의 집필 도구").mintUIFont(11, .semibold)
             ModelChip(completion: completion, settings: settings, theme: theme)
+                .help("모델과 자동완성 설정은 모든 원고에 적용됩니다.")
             Button("커서에서 이어쓰기") {
-                endCoauthor()
                 guard let editor = focusEditor() else { return }
                 (editor.delegate as? MintBlockEditor.Coordinator)?.requestExplicitCompletion(editor)
             }.disabled(!canGenerate)
             Button("선택한 문장 다듬기") {
-                endCoauthor()
                 guard let editor = focusEditor() else { return }
                 editor.workspaceInteraction?.polishSelection()
             }.disabled(!canGenerate || !hasSelection)
-            if let assistance {
-                if coauthorVisible {
-                    WorkspaceAssistanceView(model: assistance, theme: theme, close: {
-                        endCoauthor(); _ = focusEditor()
-                    })
-                } else {
-                    Button("공동 집필") {
-                        guard let editor = focusEditor() else { return }
-                        do { try assistance.capture(.coauthor, editor: editor); coauthorVisible = true }
-                        catch { model.showToast("현재 원고에서 다시 실행해 주세요.") }
-                    }.disabled(!canGenerate)
-                }
-            }
             Button("제안에 쓰인 내용 보기") {
                 if !model.layout.contains(.context) { model.toggle(.context) }
                 else { model.selectTile(.context) }
             }
             Text("자동완성: Tab 수락 · → 일부 수락 · Esc 거절")
                 .foregroundStyle(theme.ink2C).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder private var coauthor: some View {
+        if let assistance {
+            WorkspacePouchCoauthor(assistance: assistance, workspace: model, theme: theme,
+                editor: editor, canGenerate: canGenerate)
         }
     }
 
@@ -206,7 +235,7 @@ struct WorkspacePouchTools: View {
     private var objectActions: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let target {
-                Button("이 객체를 주머니에 넣기") {
+                Button(target.documentID == nil ? "이 도구를 주머니에 넣기" : "이 원고를 주머니에 넣기") {
                     if model.close(target) {
                         if target == .map || target == .outline { session.selectWorkspaceMode(.write) }
                         requests.focusEditor()
@@ -246,7 +275,44 @@ struct WorkspacePouchTools: View {
               editor.window?.makeFirstResponder(editor) == true else { return nil }
         return editor
     }
-    private func endCoauthor() {
-        if coauthorVisible { assistance?.cancel(); coauthorVisible = false }
+}
+
+private struct WorkspacePouchCoauthor: View {
+    @ObservedObject var assistance: WorkspaceAssistance
+    @ObservedObject var workspace: SpatialWorkspaceController
+    let theme: MintTheme
+    let editor: BlockTextView?
+    let canGenerate: Bool
+    private var key: ProjectDocumentKey? {
+        guard case .project(let key) = editor?.writingDocumentIdentity else { return nil }
+        return key
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("공동 집필").mintUIFont(11, .semibold)
+                Spacer()
+                if assistance.generating && assistance.coauthorKey == key {
+                    ProgressView().controlSize(.mini).accessibilityLabel("초안 생성 중")
+                }
+            }
+            if let key, assistance.mode == .coauthor, assistance.coauthorKey == key {
+                WorkspaceAssistanceView(model: assistance, theme: theme,
+                    close: { workspace.pouchSection = nil; editor?.window?.makeFirstResponder(editor) },
+                    embedded: true, canGenerate: canGenerate, prepareGeneration: {
+                        guard let editor else { return false }
+                        do { try assistance.capture(.coauthor, editor: editor); return true }
+                        catch { workspace.showToast("현재 원고에서 다시 실행해 주세요."); return false }
+                    })
+            } else {
+                Text("장면의 방향을 적고 초안을 함께 다듬으세요.\n도구를 접어도 요청과 초안은 유지됩니다.")
+                    .foregroundStyle(theme.ink2C).fixedSize(horizontal: false, vertical: true)
+                Button(key.map { assistance.hasCoauthorDraft(for: $0) } == true ? "보관한 집필 이어가기" : "공동 집필 시작") {
+                    guard let editor else { return }
+                    do { try assistance.openCoauthor(editor: editor) }
+                    catch { workspace.showToast("현재 원고에서 다시 실행해 주세요.") }
+                }.disabled(editor == nil || editor?.hasMarkedText() == true)
+            }
+        }
     }
 }

@@ -71,51 +71,56 @@ struct WorkspaceAssistanceView: View {
     @ObservedObject var model: WorkspaceAssistance
     let theme: MintTheme
     let close: () -> Void
+    var embedded = false
+    var canGenerate = true
+    var prepareGeneration: (() -> Bool)?
     @FocusState private var promptFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
+            if !embedded { HStack(spacing: 8) {
                 WorkspaceIcon(name: "sparkles", size: 14).foregroundStyle(theme.novelC)
                 Text(model.mode.rawValue).mintUIFont(12, .semibold)
                 Spacer()
                 Button(action: close) { WorkspaceIcon(name: "xmark", size: 14).frame(width: 24, height: 24) }
                     .buttonStyle(.plain).foregroundStyle(theme.ink2C).accessibilityLabel("닫기")
-            }.padding(.horizontal, 16).padding(.vertical, 10).background(theme.toolbarC)
+            }.padding(.horizontal, 16).padding(.vertical, 10).background(theme.toolbarC) }
             VStack(alignment: .leading, spacing: 12) {
                 if model.mode == .coauthor {
                     ZStack(alignment: .topLeading) {
                         if model.coauthorPrompt.isEmpty { Text("어떤 장면을 이어 쓸까요?").mintUIFont(12).foregroundStyle(theme.workspaceMutedC).padding(.horizontal, 5).padding(.top, 8).allowsHitTesting(false) }
                         TextEditor(text: $model.coauthorPrompt).font(MintFonts.uiFont(12)).scrollContentBackground(.hidden)
                             .focused($promptFocused).accessibilityIdentifier("mint.coauthor.prompt")
-                    }.padding(7).frame(height: 76).background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
+                    }.padding(7).frame(height: embedded ? 64 : 76).background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
                 }
                 if model.generating || !model.result.isEmpty {
                     ScrollView {
                         Text(model.result.isEmpty ? "문장을 짓는 중…" : model.result)
                             .font(MintFonts.serifUI(12)).lineSpacing(6).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(maxHeight: 176).fixedSize(horizontal: false, vertical: true)
-                        .padding(12).background(theme.novelBgC, in: RoundedRectangle(cornerRadius: 12))
+                    }.frame(maxHeight: embedded ? 72 : 176).fixedSize(horizontal: false, vertical: true)
+                        .padding(embedded ? 8 : 12).background(theme.novelBgC, in: RoundedRectangle(cornerRadius: 8))
                 }
                 if let error = model.errorMessage { Text(error).mintUIFont(11).foregroundStyle(theme.dangerC).fixedSize(horizontal: false, vertical: true) }
-            }.padding(16)
+            }.padding(embedded ? 0 : 16)
             HStack(spacing: 8) {
                 Spacer()
-                if !model.generating && !model.result.isEmpty && model.errorMessage == nil {
+                if !model.generating && !model.result.isEmpty {
                     Button(model.mode == .margin ? "노트 추가" : (model.mode == .polish ? "다듬은 문장 적용" : "본문에 넣기")) { if model.insert() { close() } }
                         .buttonStyle(.plain).mintUIFont(12, .semibold).foregroundStyle(theme.novelC)
                         .padding(.horizontal, 12).padding(.vertical, 4).background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
                         .accessibilityIdentifier("mint.coauthor.insert")
+                        .disabled(!model.canInsertResult)
                 }
                 Button(model.generating ? "중단" : "생성") {
-                    if model.generating { model.cancel() } else { Task { await model.generate(prompt: model.coauthorPrompt) } }
+                    if model.generating { model.cancel() }
+                    else if prepareGeneration?() ?? true { Task { await model.generate(prompt: model.coauthorPrompt) } }
                 }.buttonStyle(.plain).mintUIFont(12, .semibold).foregroundStyle(.white)
                     .padding(.horizontal, 12).padding(.vertical, 4).background(theme.novelC, in: RoundedRectangle(cornerRadius: 8))
-                    .disabled(model.mode == .coauthor && model.coauthorPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!model.generating && (!canGenerate || (model.mode == .coauthor && model.coauthorPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)))
                     .accessibilityIdentifier("mint.coauthor.generate")
-            }.padding(.horizontal, 16).padding(.vertical, 10).background(theme.statusbarC)
-        }.foregroundStyle(theme.inkC).background(theme.editorSurfaceC)
-            .clipShape(RoundedRectangle(cornerRadius: 16))
-            .onAppear { promptFocused = model.mode == .coauthor }
+            }.padding(.horizontal, embedded ? 0 : 16).padding(.vertical, 10).background(embedded ? Color.clear : theme.statusbarC)
+        }.foregroundStyle(theme.inkC).background(embedded ? Color.clear : theme.editorSurfaceC)
+            .clipShape(RoundedRectangle(cornerRadius: embedded ? 0 : 16))
+            .onAppear { promptFocused = !embedded && model.mode == .coauthor }
     }
 }
