@@ -6,6 +6,7 @@ struct ModelChip: View {
     @ObservedObject var settings: CompletionSettings
     let theme: MintTheme
     var compact = false
+    var embedded = false
     var onOpen: (() -> Void)? = nil
 
     @Environment(\.openSettings) private var openSettings
@@ -16,6 +17,10 @@ struct ModelChip: View {
     @StateObject private var downloads = ModelDownloadManager.shared
 
     var body: some View {
+        if embedded { dropdown } else { chip }
+    }
+
+    private var chip: some View {
         Button {
             if !menuOpen { onOpen?() }
             menuOpen.toggle()
@@ -121,7 +126,7 @@ struct ModelChip: View {
             theme.sepC.frame(height: 1)
             advancedModelSettingsButton
         }
-        .frame(width: 292)
+        .frame(width: embedded ? nil : 292)
         // 열 때마다 로컬 캐시를 다시 확인한다 — 엔진 로드로 받아진 모델도 반영.
         .onAppear { downloads.refresh(ModelChoice.all.map(\.id)) }
     }

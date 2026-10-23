@@ -1,9 +1,14 @@
 import AppKit
 import SwiftUI
 
-enum WorkspacePouchMetrics {
-    static func indexWidth(for tile: WorkspaceTileID, available: CGFloat) -> CGFloat {
-        min(tile.documentID == nil ? 148 : 260, max(68, available - 100))
+enum WorkspacePouchStyle {
+    static let width: CGFloat = 304
+    static let height: CGFloat = 556
+    static let radius: CGFloat = 15
+    static let theme = MintTheme.dark
+    static let surface = NSColor(hex: 0x252523)
+    static var border: NSColor {
+        NSColor(white: 1, alpha: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.3 : 0.10)
     }
 }
 
@@ -12,17 +17,14 @@ final class WorkspacePouchView: NSView {
     private let grip = WorkspacePouchButton(title: "", target: nil, action: nil)
     private var buttons: [WorkspacePouchButton] = []
     private var actions: [WorkspacePouchAction] = []
-    private var orb = false, horizontal = false
-    private var fused = false
+    private var orb = false, horizontal = false, attached = false
     private var toolsHost: NSHostingView<AnyView>?
     private let dismissButton = WorkspacePouchButton(title: "", target: nil, action: nil)
+    private let moreButton = WorkspacePouchButton(title: "", target: nil, action: nil)
+    private let titleField = NSTextField(labelWithString: "MINT")
+    var targetTitle = "MINT" { didSet { titleField.stringValue = targetTitle; titleField.toolTip = targetTitle } }
     var placement: WorkspacePouchPlacement? { didSet { if placement != oldValue { needsLayout = true; needsDisplay = true } } }
-    var baseSurface: NSColor = MintTheme.light.editorSurface
-    var indexWidth: CGFloat = 276
-    var toolsHeight: CGFloat = 300
     var toolsExpanded = false { didSet { needsLayout = true; needsDisplay = true } }
-    var fusionProgress: CGFloat = 0 { didSet { needsLayout = true; needsDisplay = true } }
-    private let contourMask = CAShapeLayer()
     private var theme: MintTheme = .light
     private(set) var hovered = false
     override var isFlipped: Bool { true }
@@ -31,19 +33,26 @@ final class WorkspacePouchView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        layer?.masksToBounds = true
-        layer?.mask = contourMask
         setAccessibilityElement(true); setAccessibilityRole(.group)
         grip.target = self; grip.action = #selector(activateGrip)
         grip.isBordered = false; grip.refusesFirstResponder = false; grip.draggable = true
         addSubview(grip)
-        dismissButton.target = self; dismissButton.action = #selector(dismissTools)
-        dismissButton.image = WorkspaceIcons.image("xmark", size: 11)
-        dismissButton.refusesFirstResponder = false
-        dismissButton.setAccessibilityIdentifier("mint.workspace.pouch.dismiss")
-        dismissButton.setAccessibilityLabel("도구 닫기")
-        dismissButton.toolTip = "도구 닫기 · Esc"
-        addSubview(dismissButton)
+        titleField.font = MintFonts.ui(12, weight: .semibold)
+        titleField.textColor = WorkspacePouchStyle.theme.ink
+        titleField.lineBreakMode = .byTruncatingTail; titleField.maximumNumberOfLines = 1
+        titleField.setAccessibilityIdentifier("mint.workspace.pouch.title")
+        addSubview(titleField)
+        for (button, symbol, label, identifier, selector) in [
+            (moreButton, "ellipsis", "모든 도구", "mint.workspace.pouch.more", #selector(showMore)),
+            (dismissButton, "xmark", "주머니 닫기 · Esc", "mint.workspace.pouch.dismiss", #selector(dismissTools))
+        ] {
+            button.target = self; button.action = selector
+            button.image = WorkspaceIcons.image(symbol, size: 12)
+            button.refusesFirstResponder = false
+            button.theme = WorkspacePouchStyle.theme; button.refresh()
+            button.setAccessibilityIdentifier(identifier); button.setAccessibilityLabel(label)
+            button.toolTip = label; addSubview(button)
+        }
     }
     required init?(coder: NSCoder) { nil }
 
@@ -52,110 +61,79 @@ final class WorkspacePouchView: NSView {
         else {
             let host = NSHostingView(rootView: root)
             host.sizingOptions = []; host.wantsLayer = true
+            host.appearance = NSAppearance(named: .darkAqua)
             addSubview(host, positioned: .below, relativeTo: dismissButton); toolsHost = host
         }
         needsLayout = true
     }
     func clearPressedState() { grip.highlight(false) }
-    func revealControls(reduceMotion: Bool) {
-        guard !reduceMotion else { return }
-        for view in [grip] + buttons { reveal(view, from: 0.6) }
-    }
     func revealTools(reduceMotion: Bool) {
-        guard !reduceMotion, let toolsHost else { return }
-        reveal(toolsHost, from: 0)
-    }
-    private func reveal(_ view: NSView, from opacity: Float) {
+        guard !reduceMotion, let layer = toolsHost?.layer else { return }
         let fade = CABasicAnimation(keyPath: "opacity")
-        fade.fromValue = view.layer?.animation(forKey: "pouch.reveal") == nil ? opacity : (view.layer?.presentation()?.opacity ?? opacity)
-        fade.toValue = 1; fade.duration = 0.12; fade.timingFunction = WorkspaceHTMLStyle.calm
-        view.layer?.add(fade, forKey: "pouch.reveal")
+        fade.fromValue = 0.7; fade.toValue = 1; fade.duration = 0.08
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(fade, forKey: "pouch.reveal")
     }
-
+    func hideToolsImmediately() {
+        toolsHost?.layer?.removeAllAnimations()
+        toolsHost?.isHidden = true; dismissButton.isHidden = true
+        moreButton.isHidden = true; titleField.isHidden = true
+        toolsExpanded = false
+        needsDisplay = true
+    }
     var toolsOwnFirstResponder: Bool {
-        guard let toolsHost, let responder = window?.firstResponder as? NSView else { return false }
-        if responder.isDescendant(of: toolsHost) { return true }
-        // AppKit's shared field editor lives outside its TextField's view hierarchy.
-        return ((responder as? NSTextView)?.delegate as? NSView)?.isDescendant(of: toolsHost) == true
+        guard let responder = window?.firstResponder as? NSView else { return false }
+        if responder.isDescendant(of: self), responder !== grip { return true }
+        return ((responder as? NSTextView)?.delegate as? NSView)?.isDescendant(of: self) == true
     }
 
-    func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, fused: Bool = false) {
-        self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.fused = fused
-        dismissButton.theme = theme; dismissButton.refresh()
-        if fused { fusionProgress = 1 } else if !orb { fusionProgress = 0 }
-        layer?.cornerRadius = 0
+    func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, attached: Bool = false) {
+        self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.attached = attached
         grip.controller = controller
         grip.title = orb ? "M" : ""
-        grip.image = fused ? WorkspaceIcons.image("square.grid.2x2", size: 12) : nil
-        grip.theme = theme; grip.selected = orb
-        grip.font = MintFonts.serif(12, weight: .bold)
-        grip.refresh()
+        grip.image = attached ? WorkspaceIcons.image("slider.horizontal.3", size: 13) : nil
+        grip.theme = theme; grip.selected = orb || toolsExpanded
+        grip.font = MintFonts.serif(12, weight: .bold); grip.refresh()
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
-        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "모든 도구 · 드래그하여 주머니 이동")
-        grip.toolTip = orb ? "클릭하여 원고 펼치기 · 드래그하여 이동" : "모든 도구 · 이 손잡이로 주머니 이동"
+        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "주머니 펼치기 · 드래그하여 이동")
+        grip.toolTip = orb ? "클릭하여 원고 펼치기 · 드래그하여 이동" : "주머니 펼치기 · 드래그하여 이동"
         grip.menu = controller?.moreMenu()
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
             let button = WorkspacePouchButton(title: "", target: self, action: #selector(invoke(_:)))
-            button.isBordered = false; button.refusesFirstResponder = false; button.wantsLayer = true
+            button.refusesFirstResponder = false
             buttons.append(button); addSubview(button)
         }
         for (index, action) in actions.enumerated() {
-            let button = buttons[index]; button.controller = controller; button.tag = index; button.isHidden = orb
-            let compact = fused && (placement?.index.width ?? 260) < 240
-            button.image = (!fused || compact || action.id == "mint.source-search.show") && !action.symbol.isEmpty
-                ? WorkspaceIcons.image(action.symbol, size: compact ? 12 : 14) : nil
-            button.title = fused && !compact && action.id != "mint.source-search.show" ? action.label : ""
-            button.font = MintFonts.ui(11, weight: .medium)
-            let selected = action.selected()
-            button.setButtonType(.toggle); button.state = selected ? .on : .off
-            button.isEnabled = action.enabled()
-            button.contentTintColor = selected ? theme.blue : theme.ink2
-            button.theme = theme; button.selected = selected; button.refresh()
+            let button = buttons[index]; button.controller = controller; button.tag = index
+            button.isHidden = orb || attached
+            button.image = WorkspaceIcons.image(action.symbol, size: 14)
+            button.title = ""; button.isEnabled = action.enabled()
+            button.theme = theme; button.selected = action.selected(); button.refresh()
             button.setAccessibilityIdentifier(action.id); button.setAccessibilityLabel(action.label)
-            button.setAccessibilityValue(NSNumber(value: selected)); button.toolTip = action.label
+            button.setAccessibilityValue(NSNumber(value: action.selected())); button.toolTip = action.label
         }
         needsLayout = true; needsDisplay = true
     }
     override func layout() {
         super.layout()
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        contourMask.frame = bounds; contourMask.path = contour
-        CATransaction.commit()
-        toolsHost?.isHidden = !fused || !toolsExpanded
-        dismissButton.isHidden = !fused || !toolsExpanded
-        if fused, let placement {
-            let index = placement.index
-            grip.frame = CGRect(x: index.minX, y: index.minY + 1, width: 24, height: 26)
-            let width = max(1, (index.width - 26) / CGFloat(max(1, buttons.count)))
-            for (i, button) in buttons.enumerated() {
-                button.frame = CGRect(x: index.minX + 26 + CGFloat(i) * width, y: index.minY + 1, width: width - 1, height: 26)
-            }
-            dismissButton.frame = CGRect(x: bounds.width - 32, y: placement.tools.minY + 2, width: 24, height: 24)
-            // Reveal a stable layout through the contour mask. Resizing text on
-            // every animation frame makes controls swim under the pointer.
-            toolsHost?.frame = CGRect(x: 0, y: placement.tools.minY + 26, width: bounds.width, height: max(0, placement.tools.height - 26))
-            return
-        }
-        if orb {
-            let p = fusionProgress
-            grip.frame = CGRect(x: 10 * p, y: p,
-                width: bounds.width * (1 - p) + 28 * p, height: bounds.height * (1 - p) + 26 * p)
-            return
-        }
-        if fused {
-            let inset = labelInset, width = labelWidth
-            grip.frame = CGRect(x: inset + 10, y: 1, width: 28, height: 26)
-            let actionWidth = max(0, width - 80) / CGFloat(max(1, buttons.count - 1))
-            for (index, button) in buttons.enumerated() {
-                if index == buttons.count - 1 {
-                    button.frame = CGRect(x: inset + width - 38, y: 1, width: 28, height: 26)
-                } else {
-                    button.frame = CGRect(x: inset + 40 + CGFloat(index) * actionWidth, y: 1, width: actionWidth - 2, height: 26)
-                }
+        let expanded = attached && toolsExpanded && placement?.card.isEmpty == false
+        toolsHost?.isHidden = !expanded; dismissButton.isHidden = !expanded
+        moreButton.isHidden = !expanded; titleField.isHidden = !expanded
+        if attached, let placement {
+            grip.isHidden = expanded && placement.card.intersects(placement.trigger)
+            grip.frame = placement.trigger
+            if expanded {
+                let card = placement.card
+                titleField.frame = CGRect(x: card.minX + 16, y: card.minY + 15, width: max(0, card.width - 94), height: 18)
+                moreButton.frame = CGRect(x: card.maxX - 66, y: card.minY + 10, width: 28, height: 28)
+                dismissButton.frame = CGRect(x: card.maxX - 36, y: card.minY + 10, width: 28, height: 28)
+                toolsHost?.frame = CGRect(x: card.minX + 6, y: card.minY + 46, width: max(0, card.width - 12), height: max(0, card.height - 54))
             }
             return
         }
+        grip.isHidden = false
+        if orb { grip.frame = bounds; return }
         grip.frame = horizontal ? CGRect(x: 4, y: 5, width: 12, height: 28) : CGRect(x: 5, y: 3, width: 28, height: 12)
         var position: CGFloat = 18
         for (index, button) in buttons.enumerated() {
@@ -166,114 +144,62 @@ final class WorkspacePouchView: NSView {
         }
     }
     override func draw(_ dirtyRect: NSRect) {
-        // Composite the accent into the actual paper. Forcing a translucent theme
-        // token opaque used to turn custom dark palettes into a bright gray slab.
-        let base = baseSurface.withAlphaComponent(1)
-        let tint = base.blended(withFraction: 0.14, of: theme.novel.withAlphaComponent(1)) ?? base
-        if fused, let placement, let context = NSGraphicsContext.current?.cgContext {
-            context.saveGState(); context.addPath(placement.contour); context.clip()
-            if toolsExpanded { base.setFill(); placement.tools.fill() }
-            let accent = CGRect(x: placement.index.minX - 10, y: 0, width: placement.index.width + 20, height: placement.bodyTop + 32)
-            NSGradient(starting: tint, ending: base)?.draw(in: accent, relativeCenterPosition: CGPoint(x: 0, y: -0.5))
-            context.restoreGState()
+        if attached, let placement {
+            theme.pill.withAlphaComponent(1).setFill()
+            NSBezierPath(roundedRect: placement.trigger, xRadius: 8, yRadius: 8).fill()
+            if toolsExpanded, !placement.card.isEmpty {
+                let card = NSBezierPath(roundedRect: placement.card.insetBy(dx: 0.5, dy: 0.5),
+                    xRadius: WorkspacePouchStyle.radius, yRadius: WorkspacePouchStyle.radius)
+                WorkspacePouchStyle.surface.setFill(); card.fill()
+                WorkspacePouchStyle.border.setStroke(); card.lineWidth = 1; card.stroke()
+            }
             return
         }
-        (fused || fusionProgress > 0 ? base : tint).setFill()
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        context.addPath(contour); context.fillPath()
-        if fused || fusionProgress > 0 {
-            context.saveGState(); context.addPath(contour); context.clip()
-            // One opaque surface meets the object with exactly the same color.
-            // Only the protruding label carries the pouch tint; there is no skirt.
-            NSGradient(starting: tint, ending: baseSurface.withAlphaComponent(1))?
-                .draw(from: CGPoint(x: 0, y: 4), to: CGPoint(x: 0, y: 28), options: [.drawsBeforeStartingLocation])
-            context.restoreGState()
-            if fused { return }
-        }
-        theme.pillBorder.setStroke()
-        if fusionProgress == 0 { NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12).stroke() }
-        if orb {
-            theme.novelBg.withAlphaComponent(1 - fusionProgress).setFill()
-            NSBezierPath(roundedRect: bounds.insetBy(dx: hovered ? 6.6 : 8, dy: hovered ? 6.6 : 8), xRadius: 8, yRadius: 8).fill()
-            theme.novel.withAlphaComponent(1 - fusionProgress).setFill(); NSBezierPath(ovalIn: CGRect(x: bounds.maxX - 10, y: 4, width: 6, height: 6)).fill()
-            return
-        }
-        theme.workspaceMuted.withAlphaComponent(0.35).setFill()
-        let gripRect = horizontal ? CGRect(x: 8, y: 12, width: 3, height: 14) : CGRect(x: 12, y: 7, width: 14, height: 3)
-        NSBezierPath(roundedRect: gripRect, xRadius: 1.5, yRadius: 1.5).fill()
-        theme.sepStrong.setFill()
-        if horizontal { CGRect(x: 151, y: 11, width: 1, height: 16).fill() }
-        else { CGRect(x: 11, y: 151, width: 16, height: 1).fill() }
+        theme.pill.withAlphaComponent(1).setFill()
+        let shape = NSBezierPath(roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5), xRadius: orb ? 14 : 12, yRadius: orb ? 14 : 12)
+        shape.fill(); theme.pillBorder.setStroke(); shape.stroke()
+        if orb { return }
+        theme.workspaceMuted.withAlphaComponent(0.6).setFill()
+        let handle = horizontal ? CGRect(x: 8, y: 12, width: 3, height: 14) : CGRect(x: 12, y: 7, width: 14, height: 3)
+        NSBezierPath(roundedRect: handle, xRadius: 1.5, yRadius: 1.5).fill()
     }
-    private var labelInset: CGFloat { fused && bounds.height > 36.5 ? 16 : 0 }
-    private var labelWidth: CGFloat { min(indexWidth, bounds.width - labelInset * 2) }
-    private var contour: CGPath {
-        if fused, let placement { return placement.contour }
-        let p = fusionProgress
-        guard p > 0 else { return CGPath(roundedRect: bounds, cornerWidth: orb ? 14 : 12, cornerHeight: orb ? 14 : 12, transform: nil) }
-        let w = bounds.width, h = bounds.height, shoulder = 8 * p
-        let left = labelInset, right = fused ? left + labelWidth : w
-        let radius = 14 - 6 * p, bottomRadius = 14 * (1 - p)
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: left + shoulder + radius, y: 0))
-        path.addLine(to: CGPoint(x: right - shoulder - radius, y: 0))
-        path.addQuadCurve(to: CGPoint(x: right - shoulder, y: radius), control: CGPoint(x: right - shoulder, y: 0))
-        path.addLine(to: CGPoint(x: right - shoulder, y: 20))
-        path.addQuadCurve(to: CGPoint(x: right, y: 28), control: CGPoint(x: right - shoulder, y: 28))
-        if labelInset > 0 {
-            path.addLine(to: CGPoint(x: w - 13, y: 28))
-            path.addQuadCurve(to: CGPoint(x: w, y: 41), control: CGPoint(x: w, y: 28))
-        }
-        path.addLine(to: CGPoint(x: w, y: h - bottomRadius))
-        path.addQuadCurve(to: CGPoint(x: w - bottomRadius, y: h), control: CGPoint(x: w, y: h))
-        path.addLine(to: CGPoint(x: bottomRadius, y: h))
-        path.addQuadCurve(to: CGPoint(x: 0, y: h - bottomRadius), control: CGPoint(x: 0, y: h))
-        if labelInset > 0 {
-            path.addLine(to: CGPoint(x: 0, y: 41))
-            path.addQuadCurve(to: CGPoint(x: 13, y: 28), control: CGPoint(x: 0, y: 28))
-        }
-        path.addLine(to: CGPoint(x: left, y: 28))
-        path.addQuadCurve(to: CGPoint(x: left + shoulder, y: 20), control: CGPoint(x: left + shoulder, y: 28))
-        path.addLine(to: CGPoint(x: left + shoulder, y: radius))
-        path.addQuadCurve(to: CGPoint(x: left + shoulder + radius, y: 0), control: CGPoint(x: left + shoulder, y: 0))
-        path.closeSubpath(); return path
+    func containsControl(at point: CGPoint) -> Bool {
+        guard attached, let placement else { return bounds.contains(point) }
+        if toolsExpanded, placement.card.contains(point) { return true }
+        return placement.trigger.contains(point)
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
-        let local = convert(point, from: superview)
-        guard contour.contains(local) else { return nil }
-        if fused, let placement, !placement.index.contains(local), !(toolsExpanded && placement.tools.contains(local)) { return nil }
+        guard containsControl(at: convert(point, from: superview)) else { return nil }
         return super.hitTest(point)
     }
     override func accessibilityFrame() -> NSRect {
-        guard fused, let placement, let window else { return super.accessibilityFrame() }
-        let area = toolsExpanded ? placement.index.union(placement.tools) : placement.index
+        guard attached, let placement, let window else { return super.accessibilityFrame() }
+        let area = toolsExpanded ? placement.trigger.union(placement.card) : placement.trigger
         return window.convertToScreen(convert(area, to: nil))
     }
     override func updateTrackingAreas() {
         trackingAreas.forEach(removeTrackingArea); super.updateTrackingAreas()
-        addTrackingArea(.init(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self))
+        let area = attached ? (placement?.trigger ?? bounds) : bounds
+        addTrackingArea(.init(rect: area, options: [.mouseEnteredAndExited, .activeAlways], owner: self))
     }
     override func mouseEntered(with event: NSEvent) { hovered = true; controller?.refresh() }
     override func mouseExited(with event: NSEvent) { hovered = false; controller?.refresh() }
     @objc private func activateGrip() {
-        if orb { controller?.restore() } else { controller?.showMoreMenu(in: grip) }
+        if orb { controller?.restore() } else { controller?.toggleTools() }
     }
     @objc private func invoke(_ button: NSButton) {
         guard actions.indices.contains(button.tag) else { return }
         actions[button.tag].perform(); controller?.refresh()
     }
     @objc private func dismissTools() { controller?.dismissTools() }
+    @objc private func showMore() { controller?.showMoreMenu(in: moreButton) }
     override func mouseDown(with event: NSEvent) {
-        if !fused || convert(event.locationInWindow, from: nil).y < 32 {
-            controller?.beginDrag(at: screenPoint(event))
-        }
+        if !attached { controller?.beginDrag(at: screenPoint(event)) }
     }
     override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }
     override func mouseUp(with event: NSEvent) { _ = controller?.endDrag(at: screenPoint(event)) }
     override func rightMouseDown(with event: NSEvent) { controller?.showMoreMenu(in: self) }
-    override func resetCursorRects() {
-        addCursorRect(grip.frame, cursor: .openHand)
-    }
+    override func resetCursorRects() { addCursorRect(grip.frame, cursor: .openHand) }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
 }
 
@@ -297,7 +223,7 @@ final class WorkspacePouchButton: WorkspaceHTMLButton {
     override func refresh() {
         super.refresh()
         let active = selected || isHighlighted
-        layer?.backgroundColor = (active ? theme.novel.withAlphaComponent(0.13) : (hovered ? theme.hover : .clear)).cgColor
+        layer?.backgroundColor = (active ? theme.ink.withAlphaComponent(0.08) : (hovered ? theme.hover : .clear)).cgColor
         contentTintColor = isEnabled ? theme.ink : theme.ink2
         if !title.isEmpty {
             attributedTitle = NSAttributedString(string: title, attributes: [
@@ -316,6 +242,7 @@ struct WorkspacePouchBridge: NSViewRepresentable {
     let defaults: UserDefaults
     let theme: MintTheme
     let tools: AnyView
+    var targetTitle = "MINT"
     let actions: [WorkspacePouchAction]
     let extraActions: [WorkspacePouchAction]
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
@@ -333,6 +260,7 @@ struct WorkspacePouchBridge: NSViewRepresentable {
         controller.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
         controller.reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency || accessibilityOptions.reduceTransparency
         controller.theme = theme; controller.actions = actions; controller.extraActions = extraActions
+        controller.targetTitle = targetTitle
         controller.requests = requests
         controller.setTools(tools)
         requests.pouch = controller

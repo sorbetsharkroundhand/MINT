@@ -457,21 +457,29 @@ wait_ui() {
     ui "$operation" "$expected"
 }
 
+open_pouch_menu() {
+    if ! osascript "$SMOKE_ROOT/ui.applescript" "$PID" present "mint.workspace.pouch.more" >/dev/null 2>&1; then
+        ui press "mint.writer-tools.compatibility"
+    fi
+    ui press "mint.workspace.pouch.more"
+}
+
 open_writer_information() {
-    ui press "mint.writer-tools.compatibility"
+    open_pouch_menu
     ui press "mint.workspace.more.characters"
     wait_ui present "mint.writer.genre"
 }
 
 close_writer_information() {
-    # Object controls now live inside the attached pouch, without a separate sheet.
+    # Writer controls expand inside the pouch card, without a separate sheet.
     ui press "mint.tile.close.characters"
 }
 
 assert_autocomplete_disabled() {
-    ui press "mint.writer-tools.compatibility"
+    open_pouch_menu
     wait_ui autocomplete ""
     ui escape ""
+    ui press "mint.workspace.pouch.dismiss"
 }
 
 assert_isolated_project_mode() {
@@ -493,10 +501,11 @@ wait_ui equals "$PROJECT_BODY"
 ui redo ""
 wait_ui equals "$PERSISTED_BODY"
 # Implemented Write/Map modes remain available without model setup (#302).
-ui press "mint.writer-tools.compatibility"
+open_pouch_menu
 ui present "mint.workspace.mode.write"
 ui present "mint.workspace.mode.map"
 ui escape ""
+ui press "mint.workspace.pouch.dismiss"
 ui absent "리빙 마진"
 ui absent "문서로 돌아가기"
 ui absent "mint.ghost-shortcut-hint"

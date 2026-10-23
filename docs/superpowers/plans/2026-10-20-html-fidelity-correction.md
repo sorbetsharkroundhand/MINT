@@ -328,3 +328,43 @@ and MINTBench, with no warnings or errors in that invocation. Existing geometry
 expectations now cover unchanged frames and scroll extent when tools open, but
 tests were not executed. No application launch, screenshot, native interaction or
 IME check was performed, in accordance with the owner's build-only instruction.
+
+### Vertical pouch popover, 2026-10-24
+
+The owner's new specification replaces the index label and seamless contour
+entirely. Selection now exposes one compact pouch trigger. Clicking it opens a
+304-point popover with a uniform dark surface, a subtle one-point border and
+15-point corners. There is no gradient, contour mask, section tab bar or shared
+object silhouette. The detached pouch still follows the application theme and
+retains four-edge docking and the independent collapsed-window widget.
+
+The fixed header shows the current object/document name, an all-tools menu and
+a separate close button. Titles truncate within their own space; neither button
+can be pushed outside the card. The body shows AI Writing, Formatting/Paragraphs
+and Manuscript/Tools together as compact icon/title/status rows. Section headings
+provide immediate coauthor, bold and new-manuscript actions. Formatting values use
+native menus. Model management, coauthor drafts and author-data editors expand
+within the same scrollable card, retaining their existing operations and state.
+An ordinary opening starts with the overview; explicit writer-edit and coauthor
+commands still reveal their requested controls. Search objects retain their own
+context instead of redirecting the pouch to the active manuscript.
+
+The card remains out of layout flow and may extend across a narrow object's edge.
+Its position and height are clamped to the visible canvas; it moves above its
+trigger when there is sufficient room there. The trigger hides if a constrained
+viewport requires the card to cover it. New objects and resize handles cannot
+cover the popover. Manuscript hosts, text layout and scroll extent are unchanged.
+
+The close button, Escape and outside clicks dismiss the card without a closing
+animation. A second Escape no longer closes the manuscript/window. Native marked
+text, Ghost and media/math Escape handling retain priority. Opening uses only an
+80 ms content fade, bypassed with Reduce Motion. Tool focus returns to the native
+editor, and closing the card does not discard or cancel a coauthor draft.
+
+Updated regression sources cover viewport fitting for narrow and lower objects,
+tab removal, simultaneous action availability, unchanged tile geometry and
+synchronous dismissal. Existing smoke selectors now reach the all-tools menu
+through the popover header. Neither tests nor the smoke script were executed.
+The final `swift build` linked MINT and MINTBench successfully in 13.38 seconds,
+with no warnings or errors in that invocation. No application launch, screenshot,
+IME or interaction verification was performed under the owner's build-only scope.

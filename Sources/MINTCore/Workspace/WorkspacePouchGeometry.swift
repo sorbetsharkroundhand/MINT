@@ -2,59 +2,32 @@ import AppKit
 
 enum WorkspacePouchEdge: String, Codable { case left, right, top, bottom }
 
-/// Presentation geometry only. Neither the label nor its tools participate in
-/// tile sizing, row spacing, scrolling extent, or the native editor's layout.
+/// The trigger and popover are presentation-only, independent of object sizing
+/// and scroll extent. A narrow object may open a full-width card over its neighbor.
 struct WorkspacePouchPlacement: Equatable {
     let frame: CGRect
-    let index: CGRect
-    let tools: CGRect
-    let bodyTop: CGFloat
+    let trigger: CGRect
+    let card: CGRect
 
-    init?(object: CGRect, visible: CGRect, tile: WorkspaceTileID, toolHeight: CGFloat) {
-        guard visible.intersects(CGRect(x: object.minX, y: object.minY, width: object.width, height: 32)) else { return nil }
-        bodyTop = min(6, max(0, object.minY - visible.minY))
-        let width = WorkspacePouchMetrics.indexWidth(for: tile, available: object.width)
-        index = CGRect(x: object.width - width - 36, y: bodyTop + 2, width: width, height: 28)
-        let available = max(0, visible.maxY - object.minY - 32)
-        tools = CGRect(x: 0, y: bodyTop + 32, width: object.width, height: min(toolHeight, available))
-        frame = CGRect(x: object.minX, y: object.minY - bodyTop, width: object.width,
-            height: max(object.height + bodyTop, tools.maxY))
-    }
-
-    /// One perimeter for the entire object, with a small organic rise in its
-    /// own top edge. There is no separate tab outline or attachment skirt.
-    var contour: CGPath {
-        let w = frame.width, h = frame.height, r: CGFloat = 13
-        let left = max(r + 6, index.minX - 4), right = min(w - r - 6, index.maxX + 4)
-        let path = CGMutablePath()
-        path.move(to: CGPoint(x: r, y: bodyTop))
-        path.addLine(to: CGPoint(x: left - 6, y: bodyTop))
-        path.addCurve(to: CGPoint(x: left + 6, y: 0), control1: CGPoint(x: left, y: bodyTop), control2: CGPoint(x: left, y: 0))
-        path.addLine(to: CGPoint(x: right - 6, y: 0))
-        path.addCurve(to: CGPoint(x: right + 6, y: bodyTop), control1: CGPoint(x: right, y: 0), control2: CGPoint(x: right, y: bodyTop))
-        path.addLine(to: CGPoint(x: w - r, y: bodyTop))
-        path.addQuadCurve(to: CGPoint(x: w, y: bodyTop + r), control: CGPoint(x: w, y: bodyTop))
-        path.addLine(to: CGPoint(x: w, y: h - r))
-        path.addQuadCurve(to: CGPoint(x: w - r, y: h), control: CGPoint(x: w, y: h))
-        path.addLine(to: CGPoint(x: r, y: h))
-        path.addQuadCurve(to: CGPoint(x: 0, y: h - r), control: CGPoint(x: 0, y: h))
-        path.addLine(to: CGPoint(x: 0, y: bodyTop + r))
-        path.addQuadCurve(to: CGPoint(x: r, y: bodyTop), control: CGPoint(x: 0, y: bodyTop))
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// The object's shared silhouette is below its persistent native host. Controls
-/// are above it; pointer events outside those controls still reach the editor.
-final class WorkspacePouchSurfaceView: NSView {
-    var placement: WorkspacePouchPlacement? { didSet { if placement != oldValue { needsDisplay = true } } }
-    var color = NSColor.clear { didSet { if color != oldValue { needsDisplay = true } } }
-    override var isFlipped: Bool { true }
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-    override func draw(_ dirtyRect: NSRect) {
-        guard let placement, let context = NSGraphicsContext.current?.cgContext else { return }
-        color.setFill(); context.addPath(placement.contour); context.fillPath()
+    init?(object: CGRect, visible: CGRect, toolHeight: CGFloat) {
+        let anchor = CGRect(x: object.maxX - 66, y: object.minY + 2, width: 28, height: 28)
+        guard visible.intersects(anchor) else { return nil }
+        guard toolHeight > 0 else {
+            frame = anchor; trigger = CGRect(origin: .zero, size: anchor.size); card = .zero
+            return
+        }
+        let available = visible.insetBy(dx: 8, dy: 8)
+        let width = min(WorkspacePouchStyle.width, max(0, available.width))
+        let height = min(toolHeight, max(0, available.height))
+        let x = min(max(available.minX, anchor.maxX - width), available.maxX - width)
+        let below = anchor.maxY + 6
+        let above = anchor.minY - 6 - height
+        let y = below + height <= available.maxY ? below
+            : (above >= available.minY ? above : max(available.minY, available.maxY - height))
+        let popover = CGRect(x: x, y: y, width: width, height: height)
+        frame = anchor.union(popover)
+        trigger = anchor.offsetBy(dx: -frame.minX, dy: -frame.minY)
+        card = popover.offsetBy(dx: -frame.minX, dy: -frame.minY)
     }
 }
 

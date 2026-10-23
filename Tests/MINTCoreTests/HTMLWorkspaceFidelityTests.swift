@@ -49,11 +49,18 @@ import XCTest
         XCTAssertEqual(spatial.layout, before)
         XCTAssertEqual(canvas.geometry.tiles, frames, "The pouch must overlay existing objects without moving or resizing them")
         XCTAssertEqual(canvas.geometry.contentSize, extent, "An overlay must not reserve scroll space")
-        XCTAssertEqual(spatial.pouchSection, .format)
+        XCTAssertEqual(spatial.pouchSection, .overview)
         XCTAssertFalse(spatial.layout.contains(.inspector))
-        XCTAssertNotNil(h.element("mint.workspace.pouch.index.format"))
-        XCTAssertNotNil(h.element("mint.workspace.pouch.index.ai"))
-        XCTAssertNotNil(h.element("mint.workspace.pouch.index.view"))
+        XCTAssertNil(h.element("mint.workspace.pouch.index.format"))
+        XCTAssertNil(h.element("mint.workspace.pouch.index.ai"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.dismiss"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.more"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.autocomplete"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.character-format"))
+        let pouch = try XCTUnwrap(h.requests.pouch)
+        pouch.dismissTools()
+        XCTAssertNil(spatial.pouchSection, "Dismissal must be synchronous, without an animation delay")
+        XCTAssertEqual(canvas.geometry.tiles, frames)
     }
 
     func testPaletteShowsCategoryTitleAndDetailWithoutNativeWindowChrome() async throws {

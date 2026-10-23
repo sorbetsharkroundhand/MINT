@@ -523,8 +523,8 @@ final class SpatialWorkspaceCanvasView: NSView {
 
     func pouchPlacement(for tile: WorkspaceTileID) -> WorkspacePouchPlacement? {
         guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        let height = model?.pouchSection?.preferredHeight(for: tile) ?? 0
-        return WorkspacePouchPlacement(object: host.frame, visible: visibleRect, tile: tile, toolHeight: height)
+        let height: CGFloat = model?.pouchSection == nil ? 0 : WorkspacePouchStyle.height
+        return WorkspacePouchPlacement(object: host.frame, visible: visibleRect, toolHeight: height)
     }
     func header(for tile: WorkspaceTileID) -> SpatialTileHeaderView? {
         func find(_ view: NSView) -> SpatialTileHeaderView? {

@@ -52,7 +52,7 @@ final class SpatialTileHeaderView: NSView {
     func configure(_ supplied: [SpatialHeaderAction]) {
         var actions = supplied
         if !actions.contains(where: { $0.symbol == "xmark" }) {
-            actions.append(SpatialHeaderAction(id: "mint.tile.close.\(tile.id)", label: "객체 닫기 · Esc", symbol: "xmark") { [weak self] in
+            actions.append(SpatialHeaderAction(id: "mint.tile.close.\(tile.id)", label: "객체 닫기", symbol: "xmark") { [weak self] in
                 guard let self else { return }; self.canvas?.model?.dismissObject?(self.tile)
             })
         }
@@ -88,7 +88,7 @@ final class SpatialTileHeaderView: NSView {
         for button in buttons.reversed() {
             button.isHidden = overlayLeading != nil && actions[button.tag].symbol != "xmark"
             if actions[button.tag].symbol == "xmark", tile.documentID != nil {
-                let label = canvas?.model?.layout.openDocuments.count == 1 ? "주머니로 접기 · Esc" : "원고 객체 닫기 · Esc"
+                let label = canvas?.model?.layout.openDocuments.count == 1 ? "주머니로 접기" : "원고 객체 닫기"
                 button.toolTip = label; button.setAccessibilityLabel(label)
             }
             let width: CGFloat = button.title.isEmpty ? 20 : ceil((button.title as NSString).size(withAttributes: [.font: button.font!]).width) + 12 + (button.image == nil ? 0 : 14)

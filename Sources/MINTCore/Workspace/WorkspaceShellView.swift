@@ -328,9 +328,10 @@ struct WorkspaceSurface: View {
     private func pouchBridge(theme: MintTheme) -> some View {
         WorkspacePouchBridge(model: spatial, requests: editorRequests, defaults: projectSession.presentationPreferences,
             theme: theme, tools: AnyView(WorkspacePouchTools(session: projectSession, requests: editorRequests,
-                model: spatial, completion: completion, settings: completion.settings, theme: theme,
+                model: spatial, completion: completion, settings: completion.settings, theme: WorkspacePouchStyle.theme,
                 assistance: assistance, generateMargin: { showAssistance(.margin, theme: theme) },
-                openSettings: { openSettings() })), actions: [
+                openSettings: { openSettings() })), targetTitle: spatial.selectedTile?.documentID
+                    .flatMap { projectSession.document($0)?.title } ?? (spatial.selectedTile == nil ? "MINT" : WorkspacePouchSection.object.title(for: spatial.selectedTile)), actions: [
                 pouchTool(.navigator, id: "mint.workspace.navigator-toggle", label: "문서 목록", symbol: "folder"),
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),

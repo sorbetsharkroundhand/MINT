@@ -3,6 +3,27 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspacePouchTests: XCTestCase {
+    func testPopoverKeepsItsWidthOnNarrowObjectsAndFitsTheViewport() throws {
+        let visible = CGRect(x: 0, y: 0, width: 900, height: 700)
+        let object = CGRect(x: 8, y: 8, width: 165, height: 640)
+        let placement = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 520))
+        let card = placement.card.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
+        XCTAssertEqual(card.width, 304)
+        XCTAssertTrue(visible.contains(card))
+        XCTAssertGreaterThan(card.maxX, object.maxX, "Narrow objects must not clip or compress the overlay")
+        XCTAssertFalse(card.intersects(placement.trigger.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)))
+    }
+
+    func testPopoverNearBottomRemainsInsideVisibleCanvas() throws {
+        let visible = CGRect(x: 200, y: 400, width: 780, height: 560)
+        let object = CGRect(x: 610, y: 880, width: 360, height: 200)
+        let placement = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 520))
+        XCTAssertTrue(visible.contains(placement.card.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)))
+        let folded = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 0))
+        XCTAssertEqual(folded.frame.size, CGSize(width: 28, height: 28))
+        XCTAssertTrue(folded.card.isEmpty)
+    }
+
     func testAnimatedCollapseAndRestoreTravelThroughIntermediateFrames() async throws {
         let h = try await FramedWorkspaceHarness(width: 1000, reduceMotion: false)
         defer { h.close() }

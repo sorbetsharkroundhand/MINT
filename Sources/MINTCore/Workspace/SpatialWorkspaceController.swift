@@ -47,11 +47,11 @@ struct WorkspaceEntityEvent: Equatable {
         reveal(.search)
     }
     func openPouchTools() {
-        if selectedTile == nil || selectedTile == .search {
+        if selectedTile == nil {
             selectTile(activeDocumentID.map(WorkspaceTileID.document))
         }
         guard let selectedTile else { return }
-        pouchSection = selectedTile.documentID == nil ? .object : .format
+        pouchSection = .overview
         reveal(selectedTile)
     }
     @Published var navigatorDrop: SpatialNavigatorDrop?
