@@ -3,6 +3,9 @@ import SwiftUI
 
 enum WorkspacePouchSection: String, CaseIterable {
     case format, ai, view, object
+    var symbol: String {
+        switch self { case .format: "textformat"; case .ai: "sparkles"; case .view: "slider.horizontal.3"; case .object: "doc" }
+    }
 
     func preferredHeight(for tile: WorkspaceTileID?) -> CGFloat {
         switch self {

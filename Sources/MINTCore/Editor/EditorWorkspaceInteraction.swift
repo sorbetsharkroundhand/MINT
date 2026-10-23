@@ -2,6 +2,7 @@ import AppKit
 
 /// Native presentation hooks. Knowledge and manuscript transactions remain in workspace owners.
 @MainActor protocol EditorWorkspaceInteraction: AnyObject {
+    var ownsEscapeKey: Bool { get }
     func mouseDown(_ event: NSEvent) -> Bool
     func mouseDragged(_ event: NSEvent) -> Bool
     func mouseUp(_ event: NSEvent) -> Bool
@@ -16,4 +17,8 @@ import AppKit
     func polishSelection()
     func excerptSelection()
     func flash(_ range: NSRange)
+}
+
+extension EditorWorkspaceInteraction {
+    var ownsEscapeKey: Bool { false }
 }

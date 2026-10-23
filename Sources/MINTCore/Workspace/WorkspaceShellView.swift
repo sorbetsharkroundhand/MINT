@@ -279,6 +279,9 @@ struct WorkspaceSurface: View {
         spatial.onActivate = { [weak projectSession, weak editorRequests] id in
             projectSession?.selectDocument(id); editorRequests?.focusEditor()
         }
+        spatial.onClose = { [weak projectSession] tile in
+            if tile == .map || tile == .outline { projectSession?.selectWorkspaceMode(.write) }
+        }
         spatial.onCommit = { [weak projectSession] layout in
             guard let project = projectSession?.activeProject else { return }
             projectSession?.reorderDocuments(layout.reorderedDocuments(project.documents.map(\.id)), projectID: project.id)
@@ -339,6 +342,9 @@ struct WorkspaceSurface: View {
                     spatial.openPouchTools()
                 }
             ], extraActions: [
+                WorkspacePouchAction(id: "mint.workspace.new-document", label: "새 원고", symbol: "plus") {
+                    ProjectCommandActions(session: projectSession).newDocument(.manuscript); editorRequests.focusEditor()
+                },
                 WorkspacePouchAction(id: "mint.workspace.pouch.release", label: "주머니 떼어 놓기", symbol: "arrow.up.left.and.arrow.down.right") { spatial.selectTile(nil) },
                 WorkspacePouchAction(id: "mint.workspace.pouch.coauthor", label: "공동 집필", symbol: "sparkles") {
                     showAssistance(.coauthor, theme: theme)
@@ -392,8 +398,7 @@ struct WorkspaceSurface: View {
     private func spatialTool(_ tile: WorkspaceTileID, theme: MintTheme) -> some View {
         VStack(spacing: 0) {
             SpatialTileHeader(tile: tile, title: spatialToolTitle(tile), theme: theme, actions: [])
-                .frame(height: 32).opacity(spatial.whisperTyping ? 0.08 : 1)
-                .animation(WorkspaceHTMLStyle.animation(0.32), value: spatial.whisperTyping)
+                .frame(height: 32)
             Group {
                 switch tile {
                 case .search:

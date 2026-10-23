@@ -208,8 +208,7 @@ struct ProjectNavigatorView: View {
                     Button(recent.title) { Task { try? await session.activateProject(id: recent.id); editorRequests.focusEditor() } }
                 }
                 if !trashedDocuments.isEmpty { Button("휴지통") { showingTrash = true } }
-            }.opacity(spatial?.whisperTyping == true ? 0.08 : 1)
-                .animation(WorkspaceHTMLStyle.animation(0.32), value: spatial?.whisperTyping))
+            })
         }
         return AnyView(legacyHeader)
     }

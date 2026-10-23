@@ -1299,6 +1299,12 @@ final class BlockTextView: NSTextView {
         return blockInfo(in: ns.paragraphRange(for: NSRange(location: location, length: 0))).block == .math
     }
 
+    /// Native editing gestures take precedence over workspace dismissal.
+    var ownsEscapeKey: Bool {
+        hasMarkedText() || !(ghostText ?? "").isEmpty || selectedImageLocation != nil
+            || isEditingMath || workspaceInteraction?.ownsEscapeKey == true
+    }
+
     /// 창에 처음 붙을 때 한 번만 자동 포커스 — 앱을 켜면 곧바로 쓸 수 있게.
     private var didInitialFocus = false
     var editorWindowDidChange: ((NSTextView) -> Void)?

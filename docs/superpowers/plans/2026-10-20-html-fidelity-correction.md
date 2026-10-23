@@ -294,3 +294,37 @@ Validation remains build-only at the owner's request. No application launch,
 screenshots, native interaction, IME checks or test execution were performed.
 The final `swift build` completed successfully in 12.09 seconds and linked MINT
 and MINTBench without warnings or errors in that invocation.
+
+### Seamless overlay correction, 2026-10-23
+
+The owner's latest direction supersedes the reserved accessory space and the
+slower transitions described above. The selected object's perimeter now has a
+small continuous rise around its index controls. A shared surface below the
+persistent native host and controls above it use the object's exact theme color;
+the accent fades into that surface without a separate tab border or shadow.
+
+The pouch is entirely out of layout flow. Opening its tools changes neither tile
+frames nor the canvas scroll extent. Ordinary eight-point object spacing replaces
+the pouch-specific top and row gaps. Tools overlay the object's content, while
+pointer events outside the visible controls pass through to the native editor.
+Compact objects use accessible icon controls, and titles truncate before the
+index instead of colliding with it. The all-tools menu retains new-manuscript
+creation when the navigator's inline action is covered by its index.
+
+Object headers retain a minimal close button; expanded tools have their own close
+button. Unmodified Escape dismisses tools first, then the selected object. The
+last manuscript folds the retained window into the floating desktop pouch instead
+of discarding content or destroying the window. Marked text, Ghost rejection,
+media/math editing and paragraph dragging retain their existing Escape handling.
+Closing tools preserves coauthor drafts and returns tool focus to the editor.
+
+Object creation and tool/control reveals use 120 ms transitions. Selection no
+longer sends the pouch flying across the writing area. Object closure is immediate,
+neighbor layout settles in 120 ms, and window folding/restoration uses 120/140 ms.
+Reduce Motion continues to bypass these transitions.
+
+The final `swift build` completed successfully in 14.91 seconds and linked MINT
+and MINTBench, with no warnings or errors in that invocation. Existing geometry
+expectations now cover unchanged frames and scroll extent when tools open, but
+tests were not executed. No application launch, screenshot, native interaction or
+IME check was performed, in accordance with the owner's build-only instruction.

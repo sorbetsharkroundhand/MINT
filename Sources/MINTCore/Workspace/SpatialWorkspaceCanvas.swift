@@ -52,10 +52,6 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var lastLayout: SpatialWorkspaceLayout?
     private var geometryLayout: SpatialWorkspaceLayout?
     private var geometryViewport = CGSize.zero
-    private var pouchSpaceTile: WorkspaceTileID?
-    private var closingPouchTile: WorkspaceTileID?
-    private var pouchSpaceHeight: CGFloat = 0
-    private var baseTileFrames: [WorkspaceTileID: CGRect] = [:]
     private var newTiles: Set<WorkspaceTileID> = []
     private var targetFrames: [WorkspaceTileID: CGRect] = [:]
     private struct FrameTransition {
@@ -104,7 +100,6 @@ final class SpatialWorkspaceCanvasView: NSView {
             for host in hosts.values { host.removeFromSuperview() }
             hosts.removeAll(); projectID = model.projectID; lastLayout = nil; targetFrames.removeAll()
             geometryLayout = nil
-            pouchSpaceTile = nil; closingPouchTile = nil; pouchSpaceHeight = 0
             stopDragPresentation()
         }
         let updateExisting = lastTheme != theme
@@ -117,12 +112,8 @@ final class SpatialWorkspaceCanvasView: NSView {
         for key in Array(hosts.keys) where !retained.contains(key) {
             guard let host = hosts.removeValue(forKey: key) else { continue }
             targetFrames.removeValue(forKey: key)
-            if animateLayout && !reduceMotion {
-                var target = host.frame
-                let sharesColumn = hosts.values.contains { abs($0.frame.minX - host.frame.minX) < 1 }
-                if sharesColumn { target.size.height = 0 } else { target.size.width = 0 }
-                transition(host, to: target, duration: 0.27, remove: true)
-            } else { host.removeFromSuperview() }
+            frameTransitions.removeValue(forKey: ObjectIdentifier(host))
+            host.removeFromSuperview()
         }
         for tile in retained {
             let host: NSHostingView<AnyView>
@@ -146,16 +137,8 @@ final class SpatialWorkspaceCanvasView: NSView {
     func layoutTiles() {
         guard let model, viewport.width > 0, viewport.height > 0 else { return }
         let presentation = model.presentationLayout
-        let spaceTile = model.pouchSection == nil || model.isDragging ? nil : model.selectedTile
-        let spaceHeight = spaceTile == nil ? 0 : min(model.pouchSection?.preferredHeight(for: spaceTile) ?? 0, max(160, viewport.height * 0.46))
-        let changesPouch = pouchSpaceTile != spaceTile || pouchSpaceHeight != spaceHeight
-        if changesPouch, pouchSpaceTile != spaceTile { closingPouchTile = pouchSpaceTile }
-        if changesPouch && geometryLayout != nil && resize == nil { animateLayout = true }
-        if geometryLayout != presentation || geometryViewport != viewport || changesPouch {
+        if geometryLayout != presentation || geometryViewport != viewport {
             geometry = SpatialWorkspaceGeometry(layout: presentation, viewport: viewport)
-            baseTileFrames = geometry.tiles
-            if let spaceTile { geometry.reservePouchSpace(above: spaceTile, height: spaceHeight, layout: presentation) }
-            pouchSpaceTile = spaceTile; pouchSpaceHeight = spaceHeight
             geometryLayout = presentation; geometryViewport = viewport
             updateContentSize()
         }
@@ -165,12 +148,11 @@ final class SpatialWorkspaceCanvasView: NSView {
             targetFrames[tile] = rect
             if animateLayout && !reduceMotion {
                 if newTiles.contains(tile) {
-                    var start = rect
-                    if presentation.columns.contains(where: { $0.slots.count == 1 && $0.slots.first?.tile == tile }) { start.size.width = 0 }
-                    else { start.size.height = 0 }
-                    host.frame = start
+                    host.frame = rect
+                    host.alphaValue = 0
+                    WorkspaceHTMLStyle.animate(0.12) { host.animator().alphaValue = 1 }
                 }
-                transition(host, to: rect, duration: changesPouch ? 0.24 : (model.isDragging ? 0.28 : 0.30))
+                transition(host, to: rect, duration: 0.12)
             } else {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host)); host.frame = rect
             }
@@ -179,17 +161,9 @@ final class SpatialWorkspaceCanvasView: NSView {
         animateLayout = false
         if revealedSequence != model.revealSequence, let tile = model.tileToReveal, let rect = geometry.tiles[tile] {
             revealedSequence = model.revealSequence
-            let reserved = tile == pouchSpaceTile ? pouchSpaceHeight : 0
-            let destination = reserved > 0
-                ? CGRect(x: rect.minX, y: rect.minY - reserved - 28, width: min(rect.width, 300), height: reserved + 120)
-                : rect.insetBy(dx: -8, dy: -28)
-            _ = scrollToVisible(destination)
+            _ = scrollToVisible(rect.insetBy(dx: -8, dy: -8))
         }
         updateContentSize()
-        if changesPouch, let tile = spaceTile, let base = baseTileFrames[tile] {
-            _ = scrollToVisible(CGRect(x: base.minX, y: base.minY - 28,
-                width: min(base.width, 300), height: spaceHeight + 92))
-        }
         updateResizeHandles()
         needsDisplay = true
         model.pouchGeometryDidChange?()
@@ -220,11 +194,10 @@ final class SpatialWorkspaceCanvasView: NSView {
         updateResizeHandles()
         updateContentSize()
         model?.pouchGeometryDidChange?()
-        if frameTransitions.isEmpty { frameTimer?.invalidate(); frameTimer = nil; closingPouchTile = nil }
+        if frameTransitions.isEmpty { frameTimer?.invalidate(); frameTimer = nil }
     }
     private func updateContentSize() {
-        // Keep the scroll extent until closing motion finishes, avoiding a jump
-        // when a lower row's accessory bay retracts.
+        // Only actual objects participate in the scroll extent, never overlays.
         let bottom = hosts.values.filter { !$0.isHidden }.map { $0.frame.maxY + SpatialWorkspaceGeometry.bottomInset }.max() ?? 0
         let size = CGSize(width: geometry.contentSize.width, height: max(geometry.contentSize.height, bottom))
         if frame.size != size { setFrameSize(size) }
@@ -290,9 +263,8 @@ final class SpatialWorkspaceCanvasView: NSView {
                 direction: rightFixed ? -1 : 1, height: 0)
         case .row(let column, _):
             guard geometry.columns.indices.contains(column) else { return }
-            let accessory = origin.columns[column].slots.contains { $0.tile == pouchSpaceTile } ? pouchSpaceHeight : 0
             resize = Resize(origin: origin, start: convert(event.locationInWindow, from: nil), axis: axis,
-                column: column, startWidth: 0, direction: 1, height: geometry.columns[column].height - accessory)
+                column: column, startWidth: 0, direction: 1, height: geometry.columns[column].height)
         }
     }
     func continueResize(_ event: NSEvent) {
@@ -358,7 +330,7 @@ final class SpatialWorkspaceCanvasView: NSView {
                 let width = origin.width * min(0.35, max(0.08, 96 / origin.width))
                 let height = origin.height * min(0.28, max(0.06, 36 / origin.height))
                 let destination = CGRect(x: pointer.x + 45 - width / 2, y: pointer.y - height / 2, width: width, height: height)
-                animateTile(host, from: origin, to: destination, duration: 0.24, hidingHost: false, image: sourceImage)
+                animateTile(host, from: origin, to: destination, duration: 0.12, hidingHost: false, image: sourceImage)
             }
         }
         if model.isDragging {
@@ -403,7 +375,7 @@ final class SpatialWorkspaceCanvasView: NSView {
                 self.frameTransitions.removeValue(forKey: ObjectIdentifier(host))
                 self.targetFrames[tile] = destination; host.frame = destination; host.isHidden = false
                 host.layoutSubtreeIfNeeded()
-                self.animateTile(host, from: origin, to: self.screenFrame(of: host), duration: 0.32, hidingHost: true)
+                self.animateTile(host, from: origin, to: self.screenFrame(of: host), duration: 0.12, hidingHost: true)
             }
         }
     }
@@ -549,19 +521,18 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
     }
 
-    func pouchFrame(for tile: WorkspaceTileID, expanded: Bool = false) -> CGRect? {
+    func pouchPlacement(for tile: WorkspaceTileID) -> WorkspacePouchPlacement? {
         guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        let width = WorkspacePouchMetrics.indexWidth(for: tile, available: host.frame.width)
-        let ownsSpace = tile == pouchSpaceTile || tile == closingPouchTile
-        let gap = ownsSpace ? max(0, host.frame.minY - (baseTileFrames[tile]?.minY ?? host.frame.minY)) : 0
-        let origin = CGPoint(x: host.frame.minX + 16, y: host.frame.minY - gap - 28)
-        guard visibleRect.contains(CGPoint(x: origin.x + width / 2, y: origin.y + 14)) else { return nil }
-        if expanded && gap > 0.5 {
-            // The body sits behind the host and continues through its rounded
-            // top corners, forming one perimeter without covering header text.
-            return CGRect(x: host.frame.minX, y: origin.y, width: host.frame.width, height: 44 + gap)
+        let height = model?.pouchSection?.preferredHeight(for: tile) ?? 0
+        return WorkspacePouchPlacement(object: host.frame, visible: visibleRect, tile: tile, toolHeight: height)
+    }
+    func header(for tile: WorkspaceTileID) -> SpatialTileHeaderView? {
+        func find(_ view: NSView) -> SpatialTileHeaderView? {
+            if let header = view as? SpatialTileHeaderView { return header }
+            for child in view.subviews { if let header = find(child) { return header } }
+            return nil
         }
-        return CGRect(origin: origin, size: CGSize(width: width, height: 36))
+        return hosts[tile].flatMap(find)
     }
 }
 
@@ -580,7 +551,6 @@ struct SpatialDocumentTile: View {
     var body: some View {
         VStack(spacing: 0) {
             documentHeader
-                .opacity(model.whisperTyping ? 0.08 : 1)
             EditorPane(projectSession: session, editorRequests: requests, completion: completion,
                 settings: completion.settings, theme: theme, editorBridge: editorBridge,
                 positionStore: positionStore, documentID: documentID, showsChrome: false)

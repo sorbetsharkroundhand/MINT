@@ -4,9 +4,8 @@ import AppKit
 struct SpatialWorkspaceGeometry {
     static let inset: CGFloat = 8
     static let columnGap: CGFloat = 8
-    // Reserve a folder-tab lip above each row, outside the manuscript text area.
-    static let rowGap: CGFloat = 34
-    static let topInset: CGFloat = 36
+    static let rowGap: CGFloat = 8
+    static let topInset: CGFloat = 8
     static let bottomInset: CGFloat = 8
     var columns: [CGRect] = []
     var tiles: [WorkspaceTileID: CGRect] = [:]
@@ -61,15 +60,4 @@ struct SpatialWorkspaceGeometry {
         return nil
     }
 
-    /// A pouch unfolds above its object. Preserve manuscript dimensions and move
-    /// only that object and the rows below it; the canvas absorbs the extra height.
-    mutating func reservePouchSpace(above tile: WorkspaceTileID, height: CGFloat, layout: SpatialWorkspaceLayout) {
-        guard height > 0, let column = layout.columns.firstIndex(where: { $0.slots.contains { $0.tile == tile } }),
-              let row = layout.columns[column].slots.firstIndex(where: { $0.tile == tile }) else { return }
-        for slot in layout.columns[column].slots.dropFirst(row) {
-            tiles[slot.tile]?.origin.y += height
-        }
-        columns[column].size.height += height
-        contentSize.height += height
-    }
 }

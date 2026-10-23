@@ -3,7 +3,7 @@ import SwiftUI
 
 enum WorkspacePouchMetrics {
     static func indexWidth(for tile: WorkspaceTileID, available: CGFloat) -> CGFloat {
-        min(tile.documentID == nil ? 188 : 276, max(80, available - 32))
+        min(tile.documentID == nil ? 148 : 260, max(68, available - 100))
     }
 }
 
@@ -15,6 +15,8 @@ final class WorkspacePouchView: NSView {
     private var orb = false, horizontal = false
     private var fused = false
     private var toolsHost: NSHostingView<AnyView>?
+    private let dismissButton = WorkspacePouchButton(title: "", target: nil, action: nil)
+    var placement: WorkspacePouchPlacement? { didSet { if placement != oldValue { needsLayout = true; needsDisplay = true } } }
     var baseSurface: NSColor = MintTheme.light.editorSurface
     var indexWidth: CGFloat = 276
     var toolsHeight: CGFloat = 300
@@ -35,6 +37,13 @@ final class WorkspacePouchView: NSView {
         grip.target = self; grip.action = #selector(activateGrip)
         grip.isBordered = false; grip.refusesFirstResponder = false; grip.draggable = true
         addSubview(grip)
+        dismissButton.target = self; dismissButton.action = #selector(dismissTools)
+        dismissButton.image = WorkspaceIcons.image("xmark", size: 11)
+        dismissButton.refusesFirstResponder = false
+        dismissButton.setAccessibilityIdentifier("mint.workspace.pouch.dismiss")
+        dismissButton.setAccessibilityLabel("도구 닫기")
+        dismissButton.toolTip = "도구 닫기 · Esc"
+        addSubview(dismissButton)
     }
     required init?(coder: NSCoder) { nil }
 
@@ -42,12 +51,26 @@ final class WorkspacePouchView: NSView {
         if let toolsHost { toolsHost.rootView = root }
         else {
             let host = NSHostingView(rootView: root)
-            host.sizingOptions = []
-            addSubview(host); toolsHost = host
+            host.sizingOptions = []; host.wantsLayer = true
+            addSubview(host, positioned: .below, relativeTo: dismissButton); toolsHost = host
         }
         needsLayout = true
     }
     func clearPressedState() { grip.highlight(false) }
+    func revealControls(reduceMotion: Bool) {
+        guard !reduceMotion else { return }
+        for view in [grip] + buttons { reveal(view, from: 0.6) }
+    }
+    func revealTools(reduceMotion: Bool) {
+        guard !reduceMotion, let toolsHost else { return }
+        reveal(toolsHost, from: 0)
+    }
+    private func reveal(_ view: NSView, from opacity: Float) {
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = view.layer?.animation(forKey: "pouch.reveal") == nil ? opacity : (view.layer?.presentation()?.opacity ?? opacity)
+        fade.toValue = 1; fade.duration = 0.12; fade.timingFunction = WorkspaceHTMLStyle.calm
+        view.layer?.add(fade, forKey: "pouch.reveal")
+    }
 
     var toolsOwnFirstResponder: Bool {
         guard let toolsHost, let responder = window?.firstResponder as? NSView else { return false }
@@ -58,6 +81,7 @@ final class WorkspacePouchView: NSView {
 
     func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, fused: Bool = false) {
         self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.fused = fused
+        dismissButton.theme = theme; dismissButton.refresh()
         if fused { fusionProgress = 1 } else if !orb { fusionProgress = 0 }
         layer?.cornerRadius = 0
         grip.controller = controller
@@ -78,8 +102,10 @@ final class WorkspacePouchView: NSView {
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]; button.controller = controller; button.tag = index; button.isHidden = orb
-            button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: 14)
-            button.title = fused && action.symbol.isEmpty ? action.label : ""
+            let compact = fused && (placement?.index.width ?? 260) < 240
+            button.image = (!fused || compact || action.id == "mint.source-search.show") && !action.symbol.isEmpty
+                ? WorkspaceIcons.image(action.symbol, size: compact ? 12 : 14) : nil
+            button.title = fused && !compact && action.id != "mint.source-search.show" ? action.label : ""
             button.font = MintFonts.ui(11, weight: .medium)
             let selected = action.selected()
             button.setButtonType(.toggle); button.state = selected ? .on : .off
@@ -97,10 +123,19 @@ final class WorkspacePouchView: NSView {
         contourMask.frame = bounds; contourMask.path = contour
         CATransaction.commit()
         toolsHost?.isHidden = !fused || !toolsExpanded
-        if fused && toolsExpanded {
+        dismissButton.isHidden = !fused || !toolsExpanded
+        if fused, let placement {
+            let index = placement.index
+            grip.frame = CGRect(x: index.minX, y: index.minY + 1, width: 24, height: 26)
+            let width = max(1, (index.width - 26) / CGFloat(max(1, buttons.count)))
+            for (i, button) in buttons.enumerated() {
+                button.frame = CGRect(x: index.minX + 26 + CGFloat(i) * width, y: index.minY + 1, width: width - 1, height: 26)
+            }
+            dismissButton.frame = CGRect(x: bounds.width - 32, y: placement.tools.minY + 2, width: 24, height: 24)
             // Reveal a stable layout through the contour mask. Resizing text on
             // every animation frame makes controls swim under the pointer.
-            toolsHost?.frame = CGRect(x: 0, y: 36, width: bounds.width, height: max(0, toolsHeight - 8))
+            toolsHost?.frame = CGRect(x: 0, y: placement.tools.minY + 26, width: bounds.width, height: max(0, placement.tools.height - 26))
+            return
         }
         if orb {
             let p = fusionProgress
@@ -135,6 +170,14 @@ final class WorkspacePouchView: NSView {
         // token opaque used to turn custom dark palettes into a bright gray slab.
         let base = baseSurface.withAlphaComponent(1)
         let tint = base.blended(withFraction: 0.14, of: theme.novel.withAlphaComponent(1)) ?? base
+        if fused, let placement, let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState(); context.addPath(placement.contour); context.clip()
+            if toolsExpanded { base.setFill(); placement.tools.fill() }
+            let accent = CGRect(x: placement.index.minX - 10, y: 0, width: placement.index.width + 20, height: placement.bodyTop + 32)
+            NSGradient(starting: tint, ending: base)?.draw(in: accent, relativeCenterPosition: CGPoint(x: 0, y: -0.5))
+            context.restoreGState()
+            return
+        }
         (fused || fusionProgress > 0 ? base : tint).setFill()
         guard let context = NSGraphicsContext.current?.cgContext else { return }
         context.addPath(contour); context.fillPath()
@@ -165,6 +208,7 @@ final class WorkspacePouchView: NSView {
     private var labelInset: CGFloat { fused && bounds.height > 36.5 ? 16 : 0 }
     private var labelWidth: CGFloat { min(indexWidth, bounds.width - labelInset * 2) }
     private var contour: CGPath {
+        if fused, let placement { return placement.contour }
         let p = fusionProgress
         guard p > 0 else { return CGPath(roundedRect: bounds, cornerWidth: orb ? 14 : 12, cornerHeight: orb ? 14 : 12, transform: nil) }
         let w = bounds.width, h = bounds.height, shoulder = 8 * p
@@ -195,8 +239,15 @@ final class WorkspacePouchView: NSView {
         path.closeSubpath(); return path
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
-        guard contour.contains(convert(point, from: superview)) else { return nil }
+        let local = convert(point, from: superview)
+        guard contour.contains(local) else { return nil }
+        if fused, let placement, !placement.index.contains(local), !(toolsExpanded && placement.tools.contains(local)) { return nil }
         return super.hitTest(point)
+    }
+    override func accessibilityFrame() -> NSRect {
+        guard fused, let placement, let window else { return super.accessibilityFrame() }
+        let area = toolsExpanded ? placement.index.union(placement.tools) : placement.index
+        return window.convertToScreen(convert(area, to: nil))
     }
     override func updateTrackingAreas() {
         trackingAreas.forEach(removeTrackingArea); super.updateTrackingAreas()
@@ -211,6 +262,7 @@ final class WorkspacePouchView: NSView {
         guard actions.indices.contains(button.tag) else { return }
         actions[button.tag].perform(); controller?.refresh()
     }
+    @objc private func dismissTools() { controller?.dismissTools() }
     override func mouseDown(with event: NSEvent) {
         if !fused || convert(event.locationInWindow, from: nil).y < 32 {
             controller?.beginDrag(at: screenPoint(event))

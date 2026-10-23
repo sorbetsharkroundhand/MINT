@@ -33,6 +33,7 @@ final class SpatialTileHeaderView: NSView {
     var tile: WorkspaceTileID = .navigator
     var theme: MintTheme = .light
     var active = false
+    var overlayLeading: CGFloat? { didSet { if overlayLeading != oldValue { needsLayout = true } } }
     let title = PassthroughTitle(labelWithString: "")
     private var buttons: [WorkspaceHTMLButton] = []
     private let icon = PassthroughIcon()
@@ -48,7 +49,13 @@ final class SpatialTileHeaderView: NSView {
         icon.setAccessibilityElement(false); addSubview(icon)
     }
     required init?(coder: NSCoder) { nil }
-    func configure(_ actions: [SpatialHeaderAction]) {
+    func configure(_ supplied: [SpatialHeaderAction]) {
+        var actions = supplied
+        if !actions.contains(where: { $0.symbol == "xmark" }) {
+            actions.append(SpatialHeaderAction(id: "mint.tile.close.\(tile.id)", label: "객체 닫기 · Esc", symbol: "xmark") { [weak self] in
+                guard let self else { return }; self.canvas?.model?.dismissObject?(self.tile)
+            })
+        }
         self.actions = actions
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
@@ -58,6 +65,7 @@ final class SpatialTileHeaderView: NSView {
         }
         for (index, action) in actions.enumerated() {
             let button = buttons[index]
+            button.refusesFirstResponder = false
             button.tag = index; button.title = action.title
             button.font = MintFonts.ui(10.5, weight: action.selected ? .semibold : .regular)
             button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: action.title.isEmpty ? 12 : 10)
@@ -78,9 +86,15 @@ final class SpatialTileHeaderView: NSView {
         let leading: CGFloat = tile.documentID == nil ? 30 : 26
         var x = bounds.width - (tile.documentID == nil ? 12 : 14)
         for button in buttons.reversed() {
+            button.isHidden = overlayLeading != nil && actions[button.tag].symbol != "xmark"
+            if actions[button.tag].symbol == "xmark", tile.documentID != nil {
+                let label = canvas?.model?.layout.openDocuments.count == 1 ? "주머니로 접기 · Esc" : "원고 객체 닫기 · Esc"
+                button.toolTip = label; button.setAccessibilityLabel(label)
+            }
             let width: CGFloat = button.title.isEmpty ? 20 : ceil((button.title as NSString).size(withAttributes: [.font: button.font!]).width) + 12 + (button.image == nil ? 0 : 14)
             x -= width; button.frame = CGRect(x: x, y: 6, width: width, height: 20); x -= tile.documentID == nil ? 2 : 4
         }
+        if let overlayLeading { x = min(x, overlayLeading - 4) }
         title.frame = CGRect(x: leading, y: 8, width: max(0, x - leading - 5), height: 18)
         let symbol: String? = switch tile { case .navigator: "folder"; case .characters: "person.2"; case .narrative: "arrow.triangle.branch"; case .margin: "sparkles"; case .document: nil; default: "square.grid.2x2" }
         icon.isHidden = symbol == nil

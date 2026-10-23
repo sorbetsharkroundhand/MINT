@@ -29,6 +29,8 @@ struct WorkspaceEntityEvent: Equatable {
     private(set) var tileToReveal: WorkspaceTileID?
     weak var canvas: SpatialWorkspaceCanvasView?
     var pouchGeometryDidChange: (() -> Void)?
+    var dismissObject: ((WorkspaceTileID) -> Void)?
+    var onClose: ((WorkspaceTileID) -> Void)?
     var advanceSearch: ((Int) -> Void)?
     private func reveal(_ tile: WorkspaceTileID) { tileToReveal = tile; revealSequence += 1 }
 
@@ -161,7 +163,7 @@ struct WorkspaceEntityEvent: Equatable {
         guard layout.contains(tile) else { return false }
         guard layout.close(tile) else { showToast("최소 1개의 원고 창은 열려 있어야 합니다"); return false }
         if selectedTile == tile { selectTile(nil) }
-        commit(); return true
+        commit(); onClose?(tile); return true
     }
     func setLayout(_ value: SpatialWorkspaceLayout, persist: Bool = true) {
         layout = value

@@ -55,6 +55,10 @@ struct WorkspacePouchAction {
     private let model: SpatialWorkspaceController
     private let defaults: UserDefaults
     private var content: WorkspacePouchView?
+    private let surface = WorkspacePouchSurfaceView()
+    private weak var attachedHeader: SpatialTileHeaderView?
+    private var escapeMonitor: Any?
+    private var toolsWereExpanded = false
     private var observers: [NSObjectProtocol] = []
     private var subscription: AnyCancellable?
     private var start: CGPoint?
@@ -87,6 +91,7 @@ struct WorkspacePouchAction {
             }
         }
         model.pouchGeometryDidChange = { [weak self] in self?.syncAttachment() }
+        model.dismissObject = { [weak self] tile in self?.dismissObject(tile) }
     }
 
     func attach(to window: NSWindow, from workspaceView: NSView? = nil) {
@@ -107,6 +112,19 @@ struct WorkspacePouchAction {
         let content = WorkspacePouchView(); content.controller = self
         content.setAccessibilityIdentifier("mint.workspace.rail"); content.setAccessibilityLabel("주머니 도구창")
         panel.contentView = content; self.panel = panel; self.content = content
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self, event.keyCode == 53, event.window === self.window,
+                  self.window?.attachedSheet == nil, NSApp.modalWindow == nil,
+                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  !self.isCollapsed, !self.isDragging, !self.model.isDragging else { return event }
+            if let text = self.window?.firstResponder as? NSTextView, text.hasMarkedText() { return event }
+            if let editor = self.window?.firstResponder as? BlockTextView, editor.ownsEscapeKey { return event }
+            guard self.model.pouchSection != nil || self.model.selectedTile != nil else { return event }
+            if event.isARepeat { return nil }
+            if self.model.pouchSection != nil { self.dismissTools() }
+            else if let tile = self.model.selectedTile { self.dismissObject(tile) }
+            return nil
+        }
         for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton] {
             if let button = window.standardWindowButton(kind) {
                 savedButtons.append((button, button.target as AnyObject?, button.action))
@@ -131,6 +149,8 @@ struct WorkspacePouchAction {
 
     func detach() {
         stopDragTracking()
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
+        attachedHeader?.overlayLeading = nil; attachedHeader = nil; surface.removeFromSuperview()
         timer?.invalidate(); timer = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
@@ -290,6 +310,7 @@ struct WorkspacePouchAction {
         let visibleActions = attached ? indexActions : actions
         let documentActive = model.selectedTile?.documentID != nil && model.selectedTile?.documentID == model.activeDocumentID
         content.baseSurface = documentActive ? theme.editorSurface : theme.cardSurface
+        surface.color = content.baseSurface
         content.indexWidth = attachmentFrame()?.local.width ?? 276
         if let section = model.pouchSection {
             content.toolsHeight = min(section.preferredHeight(for: model.selectedTile), max(160, (model.canvas?.viewport.height ?? 700) * 0.46))
@@ -303,7 +324,7 @@ struct WorkspacePouchAction {
         let opacity: CGFloat = attached || flying ? 1 : (model.whisperTyping && !isCollapsed && !isDragging ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84))
         if reduceMotion || isCollapsed || isDragging { panel.alphaValue = opacity }
         else if abs(panel.alphaValue - opacity) > 0.001 {
-            WorkspaceHTMLStyle.animate(0.32) { panel.animator().alphaValue = opacity }
+            WorkspaceHTMLStyle.animate(0.12) { panel.animator().alphaValue = opacity }
         }
         panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed && !isDragging && !attached && !flying
         if attached { panel.orderOut(nil) }
@@ -321,7 +342,7 @@ struct WorkspacePouchAction {
     private var indexActions: [WorkspacePouchAction] {
         WorkspacePouchSection.sections(for: model.selectedTile).map { section in
             WorkspacePouchAction(id: "mint.workspace.pouch.index.\(section.rawValue)",
-                label: section.title(for: model.selectedTile), symbol: "",
+                label: section.title(for: model.selectedTile), symbol: section.symbol,
                 selected: { [weak self] in self?.model.pouchSection == section }) { [weak self] in
                     guard let self else { return }
                     self.returnToolFocus()
@@ -382,12 +403,13 @@ struct WorkspacePouchAction {
 
     private func attachmentFrame(expanded: Bool = false) -> (canvas: SpatialWorkspaceCanvasView, local: CGRect, screen: CGRect)? {
         guard let tile = model.selectedTile, let canvas = model.canvas,
-              canvas.window === window, let local = canvas.pouchFrame(for: tile, expanded: expanded), let window else { return nil }
+              canvas.window === window, let placement = canvas.pouchPlacement(for: tile), let window else { return nil }
+        let local = expanded ? placement.frame : placement.index.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
         return (canvas, local, window.convertToScreen(canvas.convert(local, to: nil)))
     }
 
-    /// Selection retargets the same spring. The settled pouch becomes part of the canvas,
-    /// so scrolling, Spaces and window movement cannot leave a floating seam behind.
+    /// Object selection changes the shared surface immediately. Only the 120 ms
+    /// control reveal is animated; there is no flight across the writing area.
     func syncAttachment() {
         guard !isCollapsed, !isDragging, start == nil, window?.isVisible == true else { return }
         guard let tile = model.selectedTile, let destination = attachmentFrame() else {
@@ -411,15 +433,19 @@ struct WorkspacePouchAction {
             refresh()
         }
         target = CGPoint(x: destination.screen.midX - 22, y: destination.screen.midY - 22)
-        panel?.orderFrontRegardless(); moveTowardTarget()
+        timer?.invalidate(); timer = nil
+        spring = WorkspaceSpringPoint(position: target)
+        finishAttachment()
     }
 
     private func releaseContentToPanel() {
         guard isAttached, let content, let panel, let window else { return }
         returnToolFocus()
         // Detach from the index label, not from the center of its expanded tools.
-        let lip = CGRect(x: 0, y: 0, width: content.bounds.width, height: min(36, content.bounds.height))
+        let lip = content.placement?.index ?? CGRect(x: 0, y: 0, width: content.bounds.width, height: min(36, content.bounds.height))
         let rect = window.convertToScreen(content.convert(lip, to: nil))
+        attachedHeader?.overlayLeading = nil; attachedHeader = nil
+        surface.removeFromSuperview(); content.placement = nil; toolsWereExpanded = false
         attachmentDestination = nil
         content.removeFromSuperview(); panel.contentView = content
         content.fusionProgress = 0
@@ -443,21 +469,42 @@ struct WorkspacePouchAction {
         attachmentTile = model.selectedTile
         panel.contentView = nil
         content.removeFromSuperview()
-        destination.canvas.addSubview(content, positioned: .below,
-            relativeTo: model.selectedTile.flatMap { destination.canvas.hosts[$0] })
+        if let tile = model.selectedTile, let host = destination.canvas.hosts[tile] {
+            destination.canvas.addSubview(surface, positioned: .below, relativeTo: host)
+            attachedHeader = destination.canvas.header(for: tile)
+        }
+        destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
         content.autoresizingMask = []
-        content.frame = destination.local; content.fusionProgress = 1
-        attachmentDestination = destination.local
+        content.fusionProgress = 1
+        attachmentDestination = nil
         panel.orderOut(nil); refresh(); updateAttachedFrame()
+        content.revealControls(reduceMotion: reduceMotion)
     }
     private func updateAttachedFrame() {
-        guard let content, let frame = attachmentFrame(expanded: true)?.local,
-              frame != attachmentDestination else { return }
-        attachmentDestination = frame
-        // The canvas supplies the current presentation frame on every motion
-        // tick. A second animator here would lag behind and expose a seam.
-        content.frame = frame
-        content.needsLayout = true; content.needsDisplay = true
+        guard let content, let tile = model.selectedTile, let placement = model.canvas?.pouchPlacement(for: tile) else { return }
+        let opened = !toolsWereExpanded && model.pouchSection != nil
+        toolsWereExpanded = model.pouchSection != nil
+        let changesIndex = content.placement?.index.width != placement.index.width
+        if content.placement != placement {
+            content.placement = placement; content.frame = placement.frame
+            surface.placement = placement; surface.frame = placement.frame
+        }
+        if attachedHeader == nil { attachedHeader = model.canvas?.header(for: tile) }
+        attachedHeader?.overlayLeading = placement.index.minX
+        if changesIndex { refresh() }
+        if opened { content.revealTools(reduceMotion: reduceMotion) }
+    }
+    func dismissTools() {
+        guard model.pouchSection != nil else { return }
+        returnToolFocus()
+        model.pouchSection = nil
+        refresh(); syncAttachment()
+    }
+    func dismissObject(_ tile: WorkspaceTileID) {
+        returnToolFocus()
+        if tile.documentID != nil && model.layout.openDocuments.count <= 1 {
+            collapse()
+        } else if model.close(tile) { requests?.focusEditor() }
     }
     private func screenFrame(for point: CGPoint) -> CGRect {
         (NSScreen.screens.first { $0.visibleFrame.contains(point) } ?? window?.screen ?? NSScreen.main)?.visibleFrame
@@ -518,14 +565,14 @@ struct WorkspacePouchAction {
         if let blur { imageView.layer?.filters = [blur] }
         let blurAnimation = CABasicAnimation(keyPath: "filters.collapseBlur.inputRadius")
         blurAnimation.fromValue = origin == nil ? 0 : 10; blurAnimation.toValue = origin == nil ? 12 : 0
-        blurAnimation.duration = origin == nil ? 0.36 : 0.38
+        blurAnimation.duration = origin == nil ? 0.12 : 0.14
         blurAnimation.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
         imageView.layer?.add(blurAnimation, forKey: "pouch.blur")
         ghost.contentView = imageView; transition = ghost
         if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
         ghost.orderFrontRegardless()
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = origin == nil ? 0.36 : 0.38
+            context.duration = origin == nil ? 0.12 : 0.14
             context.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
             ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = origin == nil ? 0 : 1
         } completionHandler: { [weak self, weak ghost, weak window] in

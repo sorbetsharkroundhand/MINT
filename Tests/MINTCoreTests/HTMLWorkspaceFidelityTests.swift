@@ -42,8 +42,13 @@ import XCTest
         XCTAssertNil(h.element("mint.tile.continue.\(id)"))
         let spatial = try XCTUnwrap(h.requests.spatialWorkspace)
         let before = spatial.layout
+        let canvas = try XCTUnwrap(spatial.canvas)
+        let frames = canvas.geometry.tiles
+        let extent = canvas.geometry.contentSize
         spatial.openPouchTools(); await h.layout()
         XCTAssertEqual(spatial.layout, before)
+        XCTAssertEqual(canvas.geometry.tiles, frames, "The pouch must overlay existing objects without moving or resizing them")
+        XCTAssertEqual(canvas.geometry.contentSize, extent, "An overlay must not reserve scroll space")
         XCTAssertEqual(spatial.pouchSection, .format)
         XCTAssertFalse(spatial.layout.contains(.inspector))
         XCTAssertNotNil(h.element("mint.workspace.pouch.index.format"))

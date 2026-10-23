@@ -13,6 +13,7 @@ import Combine
     private var subscription: AnyCancellable?
     private var hovered: Int?
     private var drag: (source: WorkspaceParagraphAnchor, start: CGPoint, active: Bool)?
+    var ownsEscapeKey: Bool { drag != nil }
     private var target: WorkspaceParagraphAnchor?
     private var after = false
     private weak var targetEditor: BlockTextView?
