@@ -410,3 +410,21 @@ not executed. The final `swift build` linked MINT and MINTBench successfully in
 15.63 seconds, with no warnings or errors in that invocation. No tests, application
 launch, UI automation, screenshots or IME checks were performed under the owner's
 build-only scope. The pre-existing `Package.resolved` changes are excluded.
+
+### Rectangular grain overlay correction, 2026-10-24
+
+The supplied 3182-by-1984 screenshot shows a faint rectangular tint crossing
+multiple opaque objects and ending near half the window's width and height.
+Unobstructed card pixels change from RGB (243, 241, 235) outside the rectangle to
+approximately (238, 236, 230) inside it, consistent with the grain overlay's 0.022
+opacity. The whole-workspace overlay stretched an SVG `feTurbulence` image through
+AppKit's `NSImage` rendering path; the HTML instead uses a repeating background.
+
+The grain now uses a cached, deterministic monochrome Core Graphics tile repeated
+in view coordinates at the original opacity. It redraws on resize and clears its
+own transparent backing-layer damage before repainting, preventing repeated tint
+accumulation. Glass and manuscript background colors are unchanged. Regression
+sources cover all-quadrant texture coverage at 1x/2x, resizing, and partial-redraw
+stability. They were not run. `swift build` succeeded in 15.22 seconds with no
+warnings or errors. No application launch or visual reproduction was performed;
+the renderer diagnosis is based on the supplied screenshot and source inspection.

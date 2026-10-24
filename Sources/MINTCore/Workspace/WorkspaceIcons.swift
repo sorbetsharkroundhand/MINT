@@ -30,10 +30,6 @@ import SwiftUI
         result?.size = .init(width: size, height: size)
         return result
     }
-    static func grain() -> NSImage? {
-        let svg = #"<svg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'><filter id='noiseFilter'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(#noiseFilter)'/></svg>"#
-        return NSImage(data: Data(svg.utf8))
-    }
 }
 
 struct WorkspaceIcon: View {
@@ -50,10 +46,47 @@ struct WorkspacePaperGrain: NSViewRepresentable {
     func makeNSView(context: Context) -> Grain { Grain() }
     func updateNSView(_ view: Grain, context: Context) {}
     final class Grain: NSView {
-        private let image = WorkspaceIcons.grain()
+        // The browser's filtered SVG is not a reliable AppKit texture source.
+        // Cache a native tile and repeat it in view coordinates, never stretch it
+        // through NSImage's vector/backing-scale conversion over the whole window.
+        private static let tile: CGImage? = {
+            let side = 400
+            var pixels = [UInt8](repeating: 255, count: side * side * 4)
+            var seed: UInt32 = 0x4D494E54
+            for offset in stride(from: 0, to: pixels.count, by: 4) {
+                seed ^= seed << 13; seed ^= seed >> 17; seed ^= seed << 5
+                let gray = UInt8(truncatingIfNeeded: seed >> 24)
+                pixels[offset] = gray; pixels[offset + 1] = gray; pixels[offset + 2] = gray
+            }
+            guard let provider = CGDataProvider(data: Data(pixels) as CFData) else { return nil }
+            return CGImage(width: side, height: side, bitsPerComponent: 8, bitsPerPixel: 32,
+                bytesPerRow: side * 4, space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue | CGBitmapInfo.byteOrder32Big.rawValue),
+                provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+        }()
+        override init(frame: NSRect) {
+            super.init(frame: frame)
+            wantsLayer = true
+            layerContentsRedrawPolicy = .duringViewResize
+            setAccessibilityElement(false)
+        }
+        required init?(coder: NSCoder) { nil }
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
         override func draw(_ dirtyRect: NSRect) {
-            image?.draw(in: bounds, from: .zero, operation: .sourceOver, fraction: 0.022)
+            guard let context = NSGraphicsContext.current?.cgContext else { return }
+            let damage = dirtyRect.intersection(bounds)
+            guard !damage.isEmpty, !damage.isNull else { return }
+            context.saveGState()
+            defer { context.restoreGState() }
+            context.clip(to: damage)
+            // This view owns a transparent backing layer. Repaint damage instead
+            // of accumulating translucent tint when only part of it is invalidated.
+            context.clear(damage)
+            guard let tile = Self.tile else { return }
+            context.setAlpha(0.022)
+            context.setBlendMode(.normal)
+            context.interpolationQuality = .none
+            context.draw(tile, in: CGRect(x: 0, y: 0, width: 200, height: 200), byTiling: true)
         }
     }
 }
