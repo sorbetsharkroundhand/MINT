@@ -95,13 +95,14 @@ final class WorkspacePouchView: NSView {
         dismissButton.theme = theme; dismissButton.refresh()
         toolsHost?.appearance = appearance
         grip.controller = controller
+        grip.draggable = orb
         grip.title = orb ? "M" : ""
         grip.image = attached ? WorkspaceIcons.image("slider.horizontal.3", size: 13) : nil
         grip.theme = theme; grip.selected = orb || toolsExpanded
         grip.font = MintFonts.serif(12, weight: .bold); grip.refresh()
         grip.setAccessibilityIdentifier(orb ? "mint.workspace.pouch.restore" : "mint.writer-tools.compatibility")
-        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "주머니 펼치기 · 드래그하여 이동")
-        grip.toolTip = orb ? "클릭하여 원고 펼치기 · 드래그하여 이동" : "주머니 펼치기 · 드래그하여 이동"
+        grip.setAccessibilityLabel(orb ? "MINT 전체 창 펼치기" : "주머니 펼치기")
+        grip.toolTip = orb ? "클릭하여 원고 펼치기 · 드래그하여 이동" : "주머니 펼치기"
         grip.menu = controller?.moreMenu()
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
@@ -245,6 +246,43 @@ final class WorkspacePouchButton: WorkspaceHTMLButton {
     }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
+}
+
+/// The only normal-mode pouch entry point; dragging it never moves or folds a window.
+struct WorkspacePouchTrigger: NSViewRepresentable {
+    @ObservedObject var model: SpatialWorkspaceController
+    let theme: MintTheme
+    func makeCoordinator() -> Coordinator { Coordinator(model) }
+    func makeNSView(context: Context) -> Trigger {
+        let button = Trigger(frame: .zero)
+        button.target = context.coordinator; button.action = #selector(Coordinator.open)
+        button.refusesFirstResponder = true
+        button.image = WorkspaceIcons.image("slider.horizontal.3", size: 14)
+        button.setAccessibilityIdentifier("mint.writer-tools.compatibility")
+        button.setAccessibilityLabel("주머니 열기")
+        button.toolTip = "집필 도구 · 조판 · 로컬 AI"
+        button.geometryChanged = { [weak model] in model?.pouchGeometryDidChange?() }
+        model.pouchAnchor = button
+        return button
+    }
+    func updateNSView(_ button: Trigger, context: Context) {
+        model.pouchAnchor = button
+        button.theme = theme; button.selected = model.pouchSection != nil; button.refresh()
+        button.setAccessibilityValue(NSNumber(value: button.selected))
+    }
+    final class Trigger: WorkspaceHTMLButton {
+        var geometryChanged: (() -> Void)?
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            DispatchQueue.main.async { [weak self] in self?.geometryChanged?() }
+        }
+    }
+    @MainActor final class Coordinator: NSObject {
+        let model: SpatialWorkspaceController
+        init(_ model: SpatialWorkspaceController) { self.model = model }
+        @objc func open() { model.whisperTyping = false; model.pouchController?.toggleTools() }
+    }
 }
 
 struct WorkspacePouchBridge: NSViewRepresentable {

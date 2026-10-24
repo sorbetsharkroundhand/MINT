@@ -18,6 +18,7 @@ struct WorkspacePaperSurface: NSViewRepresentable {
     let theme: MintTheme
     var identifier = "mint.workspace.frame"
     var surface: NSColor? = nil
+    var cornerRadius: CGFloat = MintRadius.lg
     func makeNSView(context: Context) -> SurfaceView {
         let view = SurfaceView(); view.wantsLayer = true
         view.setAccessibilityIdentifier(identifier)
@@ -25,7 +26,7 @@ struct WorkspacePaperSurface: NSViewRepresentable {
     }
     func updateNSView(_ view: SurfaceView, context: Context) {
         view.layer?.backgroundColor = (surface ?? theme.editorSurface).cgColor
-        view.layer?.cornerRadius = MintRadius.lg
+        view.layer?.cornerRadius = cornerRadius
         view.layer?.masksToBounds = false
     }
     final class SurfaceView: NSView {

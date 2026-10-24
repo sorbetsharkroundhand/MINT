@@ -423,12 +423,6 @@ struct EditorPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-            .overlay(alignment: .bottom) {
-                if settings.autocompleteEnabled && displayedDocument?.id == projectSession.selectedDocumentID {
-                    ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
-                        .padding(.bottom, 20)
-                }
-            }
             .overlay(alignment: .bottomLeading) {
                 if let message = editorRequests.sourceNavigationError {
                     HStack {
@@ -699,70 +693,6 @@ struct MarkdownCheatSheet: View {
                 .foregroundStyle(theme.ink2C)
         }
         .padding(.vertical, 3)
-    }
-}
-
-// MARK: - 단축키 힌트 필
-
-/// Contextual keyboard teaching while a Ghost suggestion is available.
-struct ShortcutHintPill: View {
-    let active: Bool
-    let theme: MintTheme
-
-    var body: some View {
-        if active { pill }
-    }
-
-    private var pill: some View {
-        HStack(spacing: 14) {
-            item(key: "tab", label: "수락")
-            divider
-            item(key: "→", label: "한 단어")
-            divider
-            item(key: "esc", label: "무시")
-        }
-        .fixedSize()  // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
-        .padding(.vertical, 9)
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                .fill(theme.pillC)
-                .background(
-                    .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                .strokeBorder(theme.pillBorderC)
-        )
-        .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
-        .accessibilityIdentifier("mint.ghost-shortcut-hint")
-        // 모션 없음 — Tab/→/Esc마다 도는 고빈도 경로다 (감사 표, #27).
-        // 과거 200ms fade가 키 피드백을 늦췄다.
-        .allowsHitTesting(false)
-    }
-
-    private func item(key: String, label: String) -> some View {
-        HStack(spacing: 7) {
-            Text(key)
-                .font(MintFonts.monoUI(11, .bold))
-                .foregroundStyle(theme.inkC)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.xs).fill(theme.kbdC)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: MintRadius.xs).strokeBorder(theme.sepStrongC)
-                )
-            Text(label)
-                .mintUIFont(12)
-                .foregroundStyle(theme.ink2C)
-        }
-    }
-
-    private var divider: some View {
-        theme.sepC.frame(width: 1, height: 16)
     }
 }
 

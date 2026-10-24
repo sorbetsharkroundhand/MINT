@@ -12,6 +12,8 @@ import Combine
     private weak var model: SpatialWorkspaceController?
     private var subscription: AnyCancellable?
     private var hovered: Int?
+    private(set) var optionHeld = false
+    private var modifierMonitor: Any?
     private var drag: (source: WorkspaceParagraphAnchor, start: CGPoint, active: Bool)?
     var ownsEscapeKey: Bool { drag != nil }
     private var target: WorkspaceParagraphAnchor?
@@ -54,6 +56,12 @@ import Combine
     init(editor: BlockTextView, key: ProjectDocumentKey, session: ProjectSession,
          requests: ProjectEditorRequests, model: SpatialWorkspaceController) {
         self.editor = editor; self.key = key; self.session = session; self.requests = requests; self.model = model
+        modifierMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            if let self, event.window === self.editor?.window {
+                self.setOptionHeld(event.modifierFlags.contains(.option))
+            }
+            return event
+        }
         subscription = model.objectWillChange.sink { [weak self] _ in
             DispatchQueue.main.async { [weak self] in self?.presentationDidChange() }
         }
@@ -86,7 +94,17 @@ import Combine
         let range = nativeParagraph(at: offset)
         if session?.selectedDocumentID == key.documentID,
            nativeParagraph(at: editor.selectedRange().location).location == range.location { return 1 }
-        return hovered.map { nativeParagraph(at: $0).location == range.location } == true ? 0.68 : 0.24
+        return 0.24
+    }
+    func setOptionHeld(_ held: Bool) {
+        guard held != optionHeld else { return }
+        optionHeld = held
+        if held, hovered != nil, model?.whisperTyping == true { model?.whisperTyping = false }
+        if let hovered { invalidateParagraph(at: hovered) }
+        if !held { requests?.workspaceHoverEnd?() }
+        else if let editor, let hovered, model?.whisperTyping != true {
+            requests?.workspaceHover?(editor, key, hovered)
+        }
     }
     private func presentedOpacity(at offset: Int) -> CGFloat {
         let desired = paragraphOpacity(at: offset), now = ProcessInfo.processInfo.systemUptime
@@ -184,7 +202,7 @@ import Combine
     }
 
     func mouseDown(_ event: NSEvent) -> Bool {
-        guard let editor, let session, event.buttonNumber == 0, !editor.hasMarkedText(),
+        guard let editor, let session, event.buttonNumber == 0, event.modifierFlags.contains(.option), !editor.hasMarkedText(),
               model?.isDragging != true, model?.whisperTyping != true else { return false }
         let point = editor.convert(event.locationInWindow, from: nil), position = offset(at: point)
         guard let grip = paragraphGrip(at: position), grip.contains(point) else { return false }
@@ -219,7 +237,7 @@ import Combine
         }
         if nextEditor == nil { clearTargetPreview() }
         targetEditor = nextEditor; target = nextAnchor; after = nextAfter
-        showPill(event, copying: event.modifierFlags.contains(.option))
+        showPill(event, copying: event.modifierFlags.contains(.command))
         return true
     }
     func mouseUp(_ event: NSEvent) -> Bool {
@@ -231,10 +249,10 @@ import Combine
         guard drag.active, let target, let session, let requests else { return true }
         do {
             try WorkspaceParagraphTransfer.perform(source: drag.source, target: target, after: after,
-                copy: event.modifierFlags.contains(.option), session: session, requests: requests,
+                copy: event.modifierFlags.contains(.command), session: session, requests: requests,
                 undoManager: requests.editor(for: target.key)?.undoManager)
             let remaining = (drag.source.body as NSString).replacingCharacters(in: drag.source.range, with: "")
-            let copying = event.modifierFlags.contains(.option) || remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let copying = event.modifierFlags.contains(.command) || remaining.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             model?.showToast(target.key == drag.source.key ? "문단 순서를 옮겼습니다" :
                 "‘\(session.document(target.key.documentID)?.title ?? "")’ 파일로 문단을 \(copying ? "복사" : "이동")했습니다")
         } catch { session.reportError(error) }
@@ -244,18 +262,19 @@ import Combine
     func mouseMoved(_ event: NSEvent) {
         guard let editor else { return }
         pointerInEditor = editor.convert(event.locationInWindow, from: nil)
+        setOptionHeld(event.modifierFlags.contains(.option))
         model?.notePointer(at: editor.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow)
         let previous = hovered
         hovered = offset(at: pointerInEditor)
         let oldParagraph = previous.map { nativeParagraph(at: $0).location }
         let newParagraph = hovered.map { nativeParagraph(at: $0).location }
-        if oldParagraph != newParagraph {
+        if optionHeld, oldParagraph != newParagraph {
             if let oldParagraph { invalidateParagraph(at: oldParagraph) }
             if let newParagraph { invalidateParagraph(at: newParagraph) }
-        } else if let hovered, let grip = paragraphGrip(at: hovered) {
+        } else if optionHeld, let hovered, let grip = paragraphGrip(at: hovered) {
             editor.setNeedsDisplay(grip)
         }
-        if model?.whisperTyping != true, drag == nil, model?.isDragging != true, let hovered {
+        if optionHeld, model?.whisperTyping != true, drag == nil, model?.isDragging != true, let hovered {
             requests?.workspaceHover?(editor, key, hovered)
         }
     }
@@ -340,7 +359,7 @@ import Combine
             (editor.palette.activeBg.blended(withFraction: t, of: editor.palette.activeLine) ?? editor.palette.activeBg).setFill()
             NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
         }
-        guard let editor, let term = model?.resonatingTerm, !term.isEmpty else { return }
+        guard optionHeld, let editor, let term = model?.resonatingTerm, !term.isEmpty else { return }
         for range in visibleParagraphs(in: dirtyRect) {
             guard (editor.string as NSString).substring(with: range).contains(term), let rect = paragraphRect(at: range.location), rect.intersects(dirtyRect) else { continue }
             editor.palette.hover.setFill(); NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
@@ -355,7 +374,7 @@ import Combine
                 editor.palette.editorSurface.withAlphaComponent(1 - opacity).setFill()
                 rect.insetBy(dx: -12, dy: -3).fill()
             }
-            if model?.whisperTyping != true, hovered.map({ nativeParagraph(at: $0).location == range.location }) == true,
+            if optionHeld, model?.whisperTyping != true, hovered.map({ nativeParagraph(at: $0).location == range.location }) == true,
                let grip = paragraphGrip(at: range.location) {
                 let overGrip = grip.contains(pointerInEditor)
                 if overGrip { editor.palette.hover.setFill(); NSBezierPath(roundedRect: grip, xRadius: 5, yRadius: 5).fill() }
@@ -432,7 +451,7 @@ import Combine
             pill = panel
         }
         let text = (drag.source.body as NSString).substring(with: drag.source.range)
-        let meta = NSTextField(labelWithString: copying ? "문단 복제 (다른 파일로 복사)" : "문단 이동 (Alt 누르면 복제)")
+        let meta = NSTextField(labelWithString: copying ? "문단 복제 (다른 파일로 복사)" : "문단 이동 (⌘ 누르면 복제)")
         meta.font = MintFonts.mono(10); meta.textColor = editor.palette.ink2
         let label = NSTextField(wrappingLabelWithString: text.trimmingCharacters(in: .whitespacesAndNewlines))
         label.font = MintFonts.serif(11.5); label.textColor = editor.palette.ink; label.maximumNumberOfLines = 2
@@ -456,5 +475,9 @@ import Combine
         drag = nil; target = nil; targetEditor = nil
         pointerSpring.stop(); pill?.orderOut(nil); pill?.close(); pill = nil
     }
-    func detach() { cancelDrag(); flashTask?.cancel(); flashTask = nil; presentationClock?.invalidate(); presentationClock = nil; motionRegions.removeAll(); subscription?.cancel(); subscription = nil }
+    func detach() {
+        if let modifierMonitor { NSEvent.removeMonitor(modifierMonitor); self.modifierMonitor = nil }
+        cancelDrag(); flashTask?.cancel(); flashTask = nil; presentationClock?.invalidate(); presentationClock = nil
+        motionRegions.removeAll(); subscription?.cancel(); subscription = nil
+    }
 }

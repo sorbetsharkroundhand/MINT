@@ -49,7 +49,7 @@ final class MathEditGeometryTests: XCTestCase {
         XCTAssertNil(preview.superview)
     }
 
-    func testMathEditingSuppressesProseLineHighlight() async throws {
+    func testMathAndProseEditingKeepPersistentHighlightHidden() async throws {
         let h = try await SourceNavigationHarness()
         defer { h.close() }
         h.fixture.session.updateSelectedDocumentBody("$$E=mc^2$$\nAfter")
@@ -61,7 +61,7 @@ final class MathEditGeometryTests: XCTestCase {
         XCTAssertTrue(band.isHidden)
         view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
         view.refreshActiveLineHighlight()
-        XCTAssertFalse(band.isHidden)
+        XCTAssertTrue(band.isHidden)
     }
 
     func testMultilinePreviewStaysBesideTheWholeGroupAndPreservesSelection() async throws {

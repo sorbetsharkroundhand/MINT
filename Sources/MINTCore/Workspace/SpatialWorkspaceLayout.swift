@@ -75,6 +75,7 @@ struct SpatialWorkspaceLayout: Equatable, Codable, Sendable {
     var columns: [SpatialWorkspaceColumn]
     var tiles: [WorkspaceTileID] { columns.flatMap { $0.slots.map(\.tile) } }
     var openDocuments: [WritingDocumentID] { tiles.compactMap(\.documentID) }
+    var isSingleManuscript: Bool { tiles.count == 1 && tiles.first?.documentID != nil }
 
     init(documents: [WritingDocumentID], selected: WritingDocumentID?, navigatorVisible: Bool = true) {
         columns = navigatorVisible ? [.init(width: 204, slots: [.init(tile: .navigator)])] : []

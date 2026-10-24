@@ -14,6 +14,12 @@ struct SpatialWorkspaceGeometry {
     init(layout: SpatialWorkspaceLayout, viewport: CGSize) {
         let availableWidth = max(0, viewport.width.isFinite ? viewport.width : 0)
         let availableHeight = max(0, viewport.height.isFinite ? viewport.height : 0)
+        if layout.isSingleManuscript, let tile = layout.tiles.first {
+            contentSize = CGSize(width: availableWidth, height: availableHeight)
+            let paper = CGRect(origin: .zero, size: contentSize)
+            columns = [paper]; tiles = [tile: paper]
+            return
+        }
         let gapWidth = CGFloat(max(0, layout.columns.count - 1)) * Self.columnGap
         let minimumWidths = layout.columns.map { column -> CGFloat in
             if let width = column.width, width.isFinite { return CGFloat(width) }

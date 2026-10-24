@@ -13,7 +13,10 @@ import SwiftUI
     static func present(_ mode: WorkspaceAssistance.Mode, model: WorkspaceAssistance, requests: ProjectEditorRequests, theme: MintTheme) {
         guard let editor = requests.nativeEditor, let parent = editor.window else { return }
         active?.close()
-        do { try model.capture(mode, editor: editor) } catch { return }
+        do {
+            if mode == .coauthor { try model.openCoauthor(editor: editor) }
+            else { try model.capture(mode, editor: editor) }
+        } catch { return }
         let panel = WorkspaceAssistancePanel(model: model, requests: requests)
         active = panel
         let width = min(460, max(300, parent.frame.width - 32))

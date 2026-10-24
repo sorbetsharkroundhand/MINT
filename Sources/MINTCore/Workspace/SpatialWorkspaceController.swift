@@ -29,10 +29,10 @@ struct WorkspaceEntityEvent: Equatable {
     private(set) var tileToReveal: WorkspaceTileID?
     weak var canvas: SpatialWorkspaceCanvasView?
     weak var pouchController: WorkspacePouchController?
+    weak var pouchAnchor: NSView?
     private(set) var pouchContentHeight: CGFloat = 0
     func setPouchContentHeight(_ height: CGFloat, for tile: WorkspaceTileID?) {
-        guard tile == selectedTile, tile != nil,
-              height.isFinite, height > 0, abs(pouchContentHeight - ceil(height)) > 0.5 else { return }
+        guard height.isFinite, height > 0, abs(pouchContentHeight - ceil(height)) > 0.5 else { return }
         pouchContentHeight = ceil(height)
         pouchGeometryDidChange?()
     }
@@ -45,8 +45,6 @@ struct WorkspaceEntityEvent: Equatable {
     func selectTile(_ tile: WorkspaceTileID?) {
         guard selectedTile != tile else { return }
         selectedTile = tile
-        pouchContentHeight = 0
-        pouchSection = nil
     }
     func openSearch(scope: WorkspaceSearchScope = .project, query: String? = nil) {
         if !layout.contains(.search) { layout.toggle(.search); commit() }
@@ -56,12 +54,8 @@ struct WorkspaceEntityEvent: Equatable {
         reveal(.search)
     }
     func openPouchTools() {
-        if selectedTile == nil {
-            selectTile(activeDocumentID.map(WorkspaceTileID.document))
-        }
-        guard let selectedTile else { return }
+        whisperTyping = false
         pouchSection = .overview
-        reveal(selectedTile)
     }
     @Published var navigatorDrop: SpatialNavigatorDrop?
     @Published var resonatingTerm: String?
@@ -81,9 +75,13 @@ struct WorkspaceEntityEvent: Equatable {
     private(set) var activeDocumentID: WritingDocumentID?
     private(set) var restoredPreference = false
     private var whisperOrigin = CGPoint.zero
-    func noteTyping(at point: CGPoint) { whisperOrigin = point; whisperTyping = true }
+    func noteTyping(at point: CGPoint) {
+        whisperOrigin = point
+        if !whisperTyping { whisperTyping = true }
+        if pouchSection != nil { pouchSection = nil }
+    }
     func notePointer(at point: CGPoint) {
-        if whisperTyping && hypot(point.x - whisperOrigin.x, point.y - whisperOrigin.y) > 8 { whisperTyping = false }
+        if whisperTyping && hypot(point.x - whisperOrigin.x, point.y - whisperOrigin.y) > 48 { whisperTyping = false }
     }
     var onCommit: ((SpatialWorkspaceLayout) -> Void)?
     var onActivate: ((WritingDocumentID) -> Void)?

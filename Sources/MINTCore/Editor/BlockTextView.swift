@@ -168,9 +168,9 @@ public struct MintBlockEditor: NSViewRepresentable {
         textView.isRichText = false
         textView.allowsUndo = true
         textView.drawsBackground = false
-        // 디자인: padding 46px 60px — inset은 좌우 동일 적용이라 56으로 근사.
+        // Keep the first sentence clear of window chrome without changing the text origin logic.
         textView.textContainerInset = textView.editorialWorkspaceStyle
-            ? NSSize(width: 48, height: 32) : NSSize(width: 56, height: 44)
+            ? NSSize(width: 48, height: 60) : NSSize(width: 56, height: 60)
         // 커서는 잉크색(라이트=검정/다크=하양) — 높이는 커서 위치의 글자 크기를 따른다.
         textView.insertionPointColor = theme.ink
         // 시스템 사각 선택 하이라이트는 끈다 — 선택 영역은 우리가 draw()에서
@@ -2263,11 +2263,13 @@ final class BlockTextView: NSTextView {
         switch block {
         case .p:
             if proseLayout == .continuous {
+                ps.firstLineHeadIndent = baseFontSize
+                ps.paragraphSpacing = round(baseFontSize * 0.22)
                 ps.alignment = .left
                 ps.lineBreakMode = .byWordWrapping
                 ps.lineBreakStrategy = .hangulWordPriority
             } else {
-                ps.paragraphSpacing = 10
+                ps.paragraphSpacing = round(baseFontSize * 0.65)
             }
         case .h1:
             font = MintFonts.serif(editorialWorkspaceStyle ? baseFontSize * 1.52 : 31 * fontScale, weight: .bold)
@@ -2328,12 +2330,11 @@ final class BlockTextView: NSTextView {
             .foregroundColor: color,
             .paragraphStyle: ps,
         ]
-        if editorialWorkspaceStyle, [.p, .h1, .h2, .quote].contains(block) {
+        if block == .p || block == .quote { attrs[.kern] = CGFloat.zero }
+        if editorialWorkspaceStyle, [.h1, .h2].contains(block) {
             attrs[.kern] = -font.pointSize * (block == .h1 ? 0.025 : 0.012)
-            // Keep TextKit's natural line fragments and native caret baseline.
-            // Editorial color, type and decoration must not impose a CSS line box.
-            if block == .quote { attrs[.obliqueness] = 0.18 }
         }
+        if editorialWorkspaceStyle, block == .quote { attrs[.obliqueness] = 0.18 }
         if block == .todo, checked {
             attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
             attrs[.strikethroughColor] = t.ink3
@@ -4908,8 +4909,6 @@ final class BlockTextView: NSTextView {
     /// 선택이 생기면 잠깐 안정된 뒤 툴바를 띄우고, 사라지면 감춘다.
     func updateSelectionToolbar() {
         toolbarShowTask?.cancel()
-        // Spatial editing keeps formatting in the attached index tab.
-        if editorialWorkspaceStyle && workspaceInteraction != nil { hideSelectionToolbar(); return }
         let sel = selectedRange()
         // 공백만 있는(단어 삭제용 같은) 사소한 선택이나 IME 조합 중이면 띄우지 않는다.
         let selected = sel.length > 0 ? (string as NSString).substring(with: sel) : ""
@@ -4938,7 +4937,7 @@ final class BlockTextView: NSTextView {
     }
 
     private func presentSelectionToolbar() {
-        if editorialWorkspaceStyle && workspaceInteraction != nil { hideSelectionToolbar(); return }
+        guard isEditable, !hasMarkedText() else { hideSelectionToolbar(); return }
         guard let layoutManager, let textContainer else { return }
         let sel = selectedRange()
         guard sel.length > 0 else { return }
@@ -5292,25 +5291,11 @@ final class BlockTextView: NSTextView {
         return view
     }()
 
-    /// Hide the paragraph background outside editing focus or during selection.
+    /// Ordinary editing has no persistent paragraph background.
     private func syncActiveLineView() {
-        guard let rect = activeParagraphRect() else {
-            activeLineView.isHidden = true
-            return
-        }
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0
-            context.allowsImplicitAnimation = false
-            if activeLineView.layer?.backgroundColor != palette.activeLine.cgColor {
-                activeLineView.layer?.backgroundColor = palette.activeLine.cgColor
-            }
-            if activeLineView.layer?.borderColor != palette.activeLineOutline?.cgColor {
-                activeLineView.layer?.borderColor = palette.activeLineOutline?.cgColor
-                activeLineView.layer?.borderWidth = palette.activeLineOutline == nil ? 0 : 1
-            }
-            if activeLineView.frame != rect { activeLineView.frame = rect }
-            if activeLineView.isHidden { activeLineView.isHidden = false }
-        }
+        // Source-navigation flashes are drawn by the workspace; ordinary editing
+        // shows only the caret, without a persistent paragraph background.
+        activeLineView.isHidden = true
     }
 
     /// 우리가 소유한 캐럿 뷰. 표시 조건·위치는 `syncCaretView()`가 담당.

@@ -181,7 +181,7 @@ public final class CompletionSettings: ObservableObject {    /// 입력이 멈�
     /// 있어야 부담 없는 크기라 M5에서 함께 도입한다.
     nonisolated public static let defaultNovelContextCharacters = 4_000
     /// 본문 줄 간격(pt) 기본값 — 줄 사이에 더해지는 여백. 0이면 폰트 기본 높이만.
-    public static let defaultLineSpacing = 8.0
+    public static let defaultLineSpacing = 11.5
     /// 본문 기본 글자 크기(pt) 기본값 — 디자인 기준. 모든 블록이 이 값에 비례한다.
     public static let defaultFontSize = 18.5
     /// 글자 크기 허용 범위 — ⌘+/⌘−·Settings 공용.

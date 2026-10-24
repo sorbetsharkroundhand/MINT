@@ -3,12 +3,12 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class SpatialWorkspaceControllerTests: XCTestCase {
-    func testWhisperTypingWakesAfterEightPointsOfPointerMovement() {
+    func testWhisperTypingIgnoresSmallPointerMovement() {
         let model = SpatialWorkspaceController()
         model.noteTyping(at: CGPoint(x: 100, y: 100))
         XCTAssertTrue(model.whisperTyping)
-        model.notePointer(at: CGPoint(x: 107, y: 100)); XCTAssertTrue(model.whisperTyping)
-        model.notePointer(at: CGPoint(x: 109, y: 100)); XCTAssertFalse(model.whisperTyping)
+        model.notePointer(at: CGPoint(x: 148, y: 100)); XCTAssertTrue(model.whisperTyping)
+        model.notePointer(at: CGPoint(x: 149, y: 100)); XCTAssertFalse(model.whisperTyping)
     }
     func testDragThresholdAndCancellationRestoreTheExactOrigin() throws {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!

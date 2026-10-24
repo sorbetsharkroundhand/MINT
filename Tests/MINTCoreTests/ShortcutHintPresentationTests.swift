@@ -1,19 +1,11 @@
 import AppKit
-import SwiftUI
 import XCTest
-
 @testable import MINTCore
 
-@MainActor
-final class ShortcutHintPresentationTests: XCTestCase {
-    func testGhostTeachingAppearsOnlyWhileASuggestionIsAvailable() {
-        let host = NSHostingView(rootView: ShortcutHintPill(active: false, theme: .light))
-        XCTAssertEqual(host.fittingSize.height, 0, "Idle writing must not reserve space for teaching chrome")
-
-        host.rootView = ShortcutHintPill(active: true, theme: .light)
-        XCTAssertGreaterThan(host.fittingSize.height, 0)
-
-        host.rootView = ShortcutHintPill(active: false, theme: .light)
-        XCTAssertEqual(host.fittingSize.height, 0, "Accepting or rejecting a suggestion removes the hint")
+@MainActor final class ShortcutHintPresentationTests: XCTestCase {
+    func testWorkspaceDoesNotExposeTheRetiredShortcutCapsule() async throws {
+        let h = try await FramedWorkspaceHarness(); defer { h.close() }
+        XCTAssertNil(h.element("mint.ghost-shortcut-hint"))
+        XCTAssertEqual(h.requests.nativeEditor?.selectedRange().length, 0)
     }
 }

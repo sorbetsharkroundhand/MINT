@@ -64,9 +64,6 @@ struct WorkspacePouchAction {
     private var grabOffset = CGPoint(x: 22, y: 22)
     private var dragMonitor: Any?
     private var draggingCursor = false
-    private var edge: WorkspacePouchEdge = .left
-    private var ratio = 0.45
-    private var loadedKey: String?
     private var target = CGPoint.zero
     private var spring = WorkspaceSpringPoint(position: .zero)
     private var timer: WorkspaceDisplayClock?
@@ -74,9 +71,7 @@ struct WorkspacePouchAction {
     private(set) var transition: NSPanel?
     private var transitionGeneration: UInt64 = 0
     private var collapsedImage: NSImage?
-    private var attachmentTile: WorkspaceTileID?
     private var isAttached: Bool { content?.superview === model.canvas && model.canvas != nil }
-    private struct Preference: Codable { let edge: WorkspacePouchEdge; let ratio: Double }
 
     init(model: SpatialWorkspaceController, defaults: UserDefaults = .standard) {
         self.model = model; self.defaults = defaults
@@ -95,8 +90,7 @@ struct WorkspacePouchAction {
     func attach(to window: NSWindow, from workspaceView: NSView? = nil) {
         guard self.window !== window else {
             if let workspaceView { self.workspaceView = workspaceView }
-            let changed = loadedKey != preferenceKey
-            refresh(); if changed { dock(immediate: true) }; return
+            refresh(); syncAttachment(); return
         }
         detach(); self.window = window; self.workspaceView = workspaceView
         let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -113,7 +107,7 @@ struct WorkspacePouchAction {
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
             if event.type != .keyDown {
-                let trigger = self.model.selectedTile.flatMap { self.model.canvas?.header(for: $0)?.pouchButton }
+                let trigger = self.model.pouchAnchor
                 let hitsTrigger = trigger.map { $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } ?? false
                 if self.model.pouchSection != nil, !hitsTrigger, let content = self.content,
                    !content.containsControl(at: content.convert(event.locationInWindow, from: nil)) { self.dismissTools() }
@@ -153,7 +147,7 @@ struct WorkspacePouchAction {
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
         cancelTransition(); collapsedImage = nil
-        content?.removeFromSuperview(); attachmentTile = nil
+        content?.removeFromSuperview()
         panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
         start = nil; isDragging = false; isCollapsed = false
         collapsedWindow = nil
@@ -174,6 +168,7 @@ struct WorkspacePouchAction {
 
     private weak var grabButton: WorkspacePouchButton?
     func beginDrag(at point: CGPoint, from button: WorkspacePouchButton? = nil) {
+        guard isCollapsed else { return }
         stopDragTracking()
         grabButton = button
         start = point; isDragging = false
@@ -198,45 +193,26 @@ struct WorkspacePouchAction {
         }
     }
     func updateDrag(to point: CGPoint) {
-        guard let start, let window else { return }
+        guard isCollapsed, let start else { return }
         if !isDragging {
             guard hypot(point.x - start.x, point.y - start.y) > 7 else { return }
-            releaseContentToPanel()
-            attachmentTile = nil; model.selectTile(nil)
-            spring = WorkspaceSpringPoint(position: CGPoint(x: start.x - grabOffset.x, y: start.y - grabOffset.y))
-            isDragging = true
-            NSCursor.closedHand.push(); draggingCursor = true
-            refresh()
+            isDragging = true; NSCursor.closedHand.push(); draggingCursor = true
         }
-        let screen = screenFrame(for: point)
         target = WorkspacePouchGeometry.clampOrb(
-            CGPoint(x: point.x - grabOffset.x, y: point.y - grabOffset.y), screen: screen, margin: 6)
+            CGPoint(x: point.x - grabOffset.x, y: point.y - grabOffset.y), screen: screenFrame(for: point), margin: 6)
         moveTowardTarget()
-        let orb = CGRect(origin: target, size: CGSize(width: 44, height: 44))
-        if !isCollapsed, !window.frame.insetBy(dx: -4, dy: -4).contains(orb) {
-            collapse()
-        }
     }
     @discardableResult func endDrag(at point: CGPoint) -> Bool {
         guard start != nil else { return false }
         if isDragging { updateDrag(to: point) }
         start = nil
         let moved = isDragging; isDragging = false
-        content?.clearPressedState()
-        stopDragTracking()
-        guard moved, let window else { refresh(); return false }
-        if isCollapsed {
+        content?.clearPressedState(); stopDragTracking()
+        if moved {
             target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: point))
-            moveTowardTarget(); refresh(); return true
+            moveTowardTarget()
         }
-        edge = WorkspacePouchGeometry.nearestEdge(point: point, window: window.frame)
-        if edge == .left || edge == .right {
-            ratio = min(0.95, max(0.05, (window.frame.maxY - point.y - 48) / max(100, window.frame.height - 96)))
-        } else {
-            ratio = min(0.95, max(0.05, (point.x - window.frame.minX - 48) / max(100, window.frame.width - 96)))
-        }
-        if let data = try? JSONEncoder().encode(Preference(edge: edge, ratio: ratio)) { defaults.set(data, forKey: preferenceKey) }
-        refresh(); dock(immediate: false); return true
+        refresh(); return moved
     }
 
     private func stopDragTracking() {
@@ -248,7 +224,7 @@ struct WorkspacePouchAction {
     func collapse() {
         guard !isCollapsed, let window, let panel else { return }
         model.pouchSection = nil
-        releaseContentToPanel(); attachmentTile = nil
+        releaseContentToPanel()
         target = CGPoint(x: panel.frame.midX - 22, y: panel.frame.midY - 22)
         spring.position = target
         previousResponder = window.firstResponder
@@ -297,33 +273,16 @@ struct WorkspacePouchAction {
             panel.appearance = NSAppearance(named: appearanceName)
         }
         content.appearance = panel.appearance
-        if loadedKey != preferenceKey {
-            loadedKey = preferenceKey
-            if let data = defaults.data(forKey: preferenceKey), let saved = try? JSONDecoder().decode(Preference.self, from: data), saved.ratio.isFinite {
-                edge = saved.edge; ratio = min(0.95, max(0.05, saved.ratio))
-            } else { edge = .left; ratio = 0.45 }
-        }
-        let attached = isAttached, flying = attachmentTile != nil && !attached
-        content.toolsExpanded = attached && model.pouchSection != nil
+        content.toolsExpanded = isAttached && model.pouchSection != nil
         content.targetTitle = targetTitle
-        content.configure(orb: isCollapsed || isDragging || flying,
-            horizontal: edge == .top || edge == .bottom,
-            actions: attached ? [] : actions, theme: theme, attached: attached)
-        panel.hidesOnDeactivate = !isCollapsed && !isDragging
-        panel.canHide = !isCollapsed && !isDragging
-        let opacity: CGFloat = attached || flying ? 1 : (model.whisperTyping && !isCollapsed && !isDragging ? 0.06 : (isCollapsed || isDragging || content.hovered || reduceTransparency ? 1 : 0.84))
-        if reduceMotion || isCollapsed || isDragging { panel.alphaValue = opacity }
-        else if abs(panel.alphaValue - opacity) > 0.001 {
-            WorkspaceHTMLStyle.animate(0.12) { panel.animator().alphaValue = opacity }
-        }
-        panel.ignoresMouseEvents = model.whisperTyping && !isCollapsed && !isDragging && !attached && !flying
-        if attached { panel.orderOut(nil) }
-        else if isCollapsed || isDragging || flying {
+        content.configure(orb: isCollapsed, horizontal: false, actions: [], theme: theme, attached: isAttached)
+        panel.hidesOnDeactivate = !isCollapsed; panel.canHide = !isCollapsed
+        panel.alphaValue = 1; panel.ignoresMouseEvents = false
+        if isCollapsed {
             panel.setFrame(CGRect(origin: spring.position, size: CGSize(width: 44, height: 44)), display: false)
-        }
-        else if let window { panel.setContentSize(WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).size) }
+            panel.orderFrontRegardless()
+        } else { panel.orderOut(nil) }
         content.needsLayout = true; content.needsDisplay = true
-        if isCollapsed { panel.orderFrontRegardless() }
     }
     func toggleTools(for tile: WorkspaceTileID? = nil) {
         if let tile { model.selectTile(tile) }
@@ -331,18 +290,10 @@ struct WorkspacePouchAction {
         model.openPouchTools()
         refresh(); syncAttachment()
     }
-    private var preferenceKey: String { "mint.workspace-pouch.\(model.projectID?.rawValue.uuidString ?? "window")" }
     private func dock(immediate: Bool) {
         guard let window, let panel else { return }
-        if window.isMiniaturized { panel.orderOut(nil); return }
-        if !isCollapsed && !isDragging, attachmentFrame() != nil { syncAttachment(); return }
-        refresh()
-        if !isCollapsed && !isDragging {
-            target = WorkspacePouchGeometry.dockedFrame(window: window.frame, edge: edge, ratio: ratio).origin
-            let screen = screenFrame(for: CGPoint(x: window.frame.midX, y: window.frame.midY))
-            target.x = min(max(screen.minX + 6, target.x), screen.maxX - panel.frame.width - 6)
-            target.y = min(max(screen.minY + 6, target.y), screen.maxY - panel.frame.height - 6)
-        } else if isCollapsed { target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target)) }
+        guard isCollapsed else { panel.orderOut(nil); syncAttachment(); return }
+        target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
         if immediate { spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target) }
         else { moveTowardTarget() }
         if window.isVisible || isCollapsed { panel.orderFrontRegardless() }
@@ -352,7 +303,6 @@ struct WorkspacePouchAction {
         if reduceMotion {
             timer?.invalidate(); timer = nil
             spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target)
-            if attachmentTile != nil { finishAttachment() }
             return
         }
         guard timer == nil else { return }
@@ -366,52 +316,31 @@ struct WorkspacePouchAction {
     }
     private func step() {
         let now = ProcessInfo.processInfo.systemUptime, elapsed = now - lastStep; lastStep = now
-        if attachmentTile != nil, !isCollapsed, !isDragging, let frame = attachmentFrame()?.screen {
-            target = CGPoint(x: frame.midX - 22, y: frame.midY - 22)
-        }
         spring.step(target: target, stiffness: isDragging ? 640 : 280, damping: isDragging ? 50 : 34, elapsed: elapsed)
         panel?.setFrameOrigin(spring.position)
         if spring.isSettled(at: target) {
             timer?.invalidate(); timer = nil
-            if attachmentTile != nil { finishAttachment() } else { panel?.setFrameOrigin(target) }
+            panel?.setFrameOrigin(target)
         }
     }
 
     private func attachmentFrame() -> (canvas: SpatialWorkspaceCanvasView, local: CGRect, screen: CGRect)? {
-        guard let tile = model.selectedTile, let canvas = model.canvas,
-              canvas.window === window, let placement = canvas.pouchPlacement(for: tile), let window else { return nil }
+        guard let canvas = model.canvas, canvas.window === window,
+              let placement = canvas.pouchPlacement(), let window else { return nil }
         let local = placement.trigger.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
         return (canvas, local, window.convertToScreen(canvas.convert(local, to: nil)))
     }
 
-    /// The compact trigger follows selection without moving the native object.
-    /// Its popover is an overlay with no reserved layout or scroll space.
+    /// The card is always anchored to window chrome, independently of tile selection.
     func syncAttachment() {
-        guard !isCollapsed, !isDragging, start == nil, window?.isVisible == true else { return }
-        guard let tile = model.selectedTile, let destination = attachmentFrame() else {
-            if attachmentTile != nil {
-                releaseContentToPanel(); attachmentTile = nil
-                model.pouchSection = nil
-                refresh(); dock(immediate: false)
-            }
-            return
+        guard !isCollapsed, !isDragging, window?.isVisible == true,
+              let destination = attachmentFrame(), let content, let panel else { return }
+        if !isAttached {
+            panel.contentView = nil; content.removeFromSuperview()
+            destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
+            content.autoresizingMask = []
         }
-        if attachmentTile == tile, isAttached {
-            updateAttachedFrame()
-            return
-        }
-        if attachmentTile != tile {
-            releaseContentToPanel()
-            if attachmentTile == nil, let panel {
-                spring = WorkspaceSpringPoint(position: CGPoint(x: panel.frame.midX - 22, y: panel.frame.midY - 22))
-            }
-            attachmentTile = tile
-            refresh()
-        }
-        target = CGPoint(x: destination.screen.midX - 22, y: destination.screen.midY - 22)
-        timer?.invalidate(); timer = nil
-        spring = WorkspaceSpringPoint(position: target)
-        finishAttachment()
+        panel.orderOut(nil); refresh(); updateAttachedFrame()
     }
 
     private func releaseContentToPanel() {
@@ -424,7 +353,6 @@ struct WorkspacePouchAction {
         content.removeFromSuperview(); panel.contentView = content
         panel.setFrame(rect, display: false)
         spring = WorkspaceSpringPoint(position: CGPoint(x: rect.midX - 22, y: rect.midY - 22))
-        panel.orderFrontRegardless()
     }
 
     private func returnToolFocus() {
@@ -435,19 +363,8 @@ struct WorkspacePouchAction {
         window?.makeFirstResponder(editor)
     }
 
-    private func finishAttachment() {
-        guard !isCollapsed, !isDragging, let destination = attachmentFrame(), let content, let panel else {
-            attachmentTile = nil; refresh(); dock(immediate: false); return
-        }
-        attachmentTile = model.selectedTile
-        panel.contentView = nil
-        content.removeFromSuperview()
-        destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
-        content.autoresizingMask = []
-        panel.orderOut(nil); refresh(); updateAttachedFrame()
-    }
     private func updateAttachedFrame() {
-        guard let content, let tile = model.selectedTile, let placement = model.canvas?.pouchPlacement(for: tile) else { return }
+        guard let content, let placement = model.canvas?.pouchPlacement() else { return }
         if let canvas = model.canvas, canvas.subviews.last !== content {
             canvas.addSubview(content, positioned: .above, relativeTo: nil)
         }
@@ -456,7 +373,6 @@ struct WorkspacePouchAction {
         if content.placement != placement {
             content.placement = placement; content.frame = placement.frame
         }
-        model.canvas?.header(for: tile)?.needsLayout = true
         if opened { content.revealTools(reduceMotion: reduceMotion) }
     }
     func dismissTools() {

@@ -3,7 +3,7 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class HTMLWorkspaceFidelityTests: XCTestCase {
-    func testSpatialSelectionKeepsFormattingInThePouchAndEditorFocus() async throws {
+    func testSpatialSelectionRestoresFormattingToolbarAndPreservesEditorFocus() async throws {
         let h = try await FramedWorkspaceHarness(width: 860, reduceMotion: true)
         defer { h.close() }
         h.window.makeKeyAndOrderFront(nil)
@@ -11,12 +11,12 @@ import XCTest
         let editor = try await h.editor(); h.window.makeFirstResponder(editor)
         editor.setSelectedRange(NSRange(location: 0, length: 3)); editor.updateSelectionToolbar()
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertNil(editor.workspaceSelectionPanel)
+        XCTAssertNotNil(editor.workspaceSelectionPanel)
         XCTAssertTrue(h.window.firstResponder === editor)
         editor.perform(.color("FF453A"))
         XCTAssertEqual(editor.currentSelectionState().colorHex, "FF453A")
         XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))
-        XCTAssertNil(editor.workspaceSelectionPanel)
+        XCTAssertNotNil(editor.workspaceSelectionPanel)
     }
     func testSecondaryMenuKeepsModesAndAIStateAccessible() async throws {
         let h = try await FramedWorkspaceHarness(mode: .fiction); defer { h.close() }
@@ -31,11 +31,13 @@ import XCTest
         let details = try XCTUnwrap(menu.items.firstIndex { $0.accessibilityIdentifier() == "mint.workspace.more.characters" })
         menu.performActionForItem(at: details); await h.layout()
         XCTAssertEqual(h.requests.spatialWorkspace?.selectedTile, .characters)
-        XCTAssertEqual(h.requests.spatialWorkspace?.pouchSection, .object)
+        XCTAssertNil(h.requests.spatialWorkspace?.pouchSection)
+        XCTAssertNotNil(h.window.attachedSheet)
     }
-    func testDocumentControlsBelongToTheAttachedPouch() async throws {
+    func testFixedPouchKeepsControlsSeparateFromDocumentFormatting() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
         defer { h.close() }
+        h.window.makeKeyAndOrderFront(nil)
         let id = try XCTUnwrap(h.fixture.session.selectedDocumentID).rawValue.uuidString
         XCTAssertNil(h.element("mint.tile.typewriter.\(id)"))
         XCTAssertNil(h.element("mint.tile.focus.\(id)"))
@@ -46,13 +48,12 @@ import XCTest
         let frames = canvas.geometry.tiles
         let extent = canvas.geometry.contentSize
         spatial.openPouchTools(); await h.layout()
-        let tile = try XCTUnwrap(spatial.selectedTile)
-        let header = try XCTUnwrap(canvas.header(for: tile))
-        let trigger = try XCTUnwrap(header.pouchButton)
-        header.layoutSubtreeIfNeeded()
-        XCTAssertTrue(trigger.superview === header)
-        XCTAssertTrue(header.bounds.contains(trigger.frame))
+        let trigger = try XCTUnwrap(spatial.pouchAnchor)
+        XCTAssertFalse(trigger.superview is SpatialTileHeaderView)
         XCTAssertFalse(trigger.isHidden)
+        let triggerFrame = trigger.convert(trigger.bounds, to: nil)
+        spatial.selectTile(.navigator); await h.layout()
+        XCTAssertEqual(trigger.convert(trigger.bounds, to: nil), triggerFrame)
         XCTAssertEqual(spatial.layout, before)
         XCTAssertEqual(canvas.geometry.tiles, frames, "The pouch must overlay existing objects without moving or resizing them")
         XCTAssertEqual(canvas.geometry.contentSize, extent, "An overlay must not reserve scroll space")
@@ -63,7 +64,9 @@ import XCTest
         XCTAssertNotNil(h.element("mint.workspace.pouch.dismiss"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.more"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.autocomplete"))
-        XCTAssertNotNil(h.element("mint.workspace.pouch.character-format"))
+        XCTAssertNil(h.element("mint.workspace.pouch.character-format"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.font-size"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.line-spacing"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.typewriter"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.focus"))
         let pouch = try XCTUnwrap(h.requests.pouch)

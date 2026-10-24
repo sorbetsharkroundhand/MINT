@@ -35,9 +35,6 @@ final class SpatialTileHeaderView: NSView {
     var active = false
     let title = PassthroughTitle(labelWithString: "")
     private var buttons: [WorkspacePouchButton] = []
-    var pouchButton: WorkspacePouchButton? {
-        actions.firstIndex { $0.id == "mint.tile.pouch.\(tile.id)" }.map { buttons[$0] }
-    }
     private let icon = PassthroughIcon()
     private var actions: [SpatialHeaderAction] = []
     override var isFlipped: Bool { true }
@@ -58,11 +55,6 @@ final class SpatialTileHeaderView: NSView {
                 guard let self else { return }; self.canvas?.model?.dismissObject?(self.tile)
             })
         }
-        let position = actions.firstIndex { $0.symbol == "xmark" } ?? actions.count
-        actions.insert(SpatialHeaderAction(id: "mint.tile.pouch.\(tile.id)", label: "주머니 펼치기 · 드래그하여 이동", symbol: "slider.horizontal.3") { [weak self] in
-            guard let self else { return }
-            self.canvas?.model?.pouchController?.toggleTools(for: self.tile)
-        }, at: position)
         self.actions = actions
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
@@ -74,7 +66,7 @@ final class SpatialTileHeaderView: NSView {
             let button = buttons[index]
             button.refusesFirstResponder = false
             button.tag = index; button.title = action.title
-            button.draggable = action.id == "mint.tile.pouch.\(tile.id)"
+            button.draggable = false
             button.font = MintFonts.ui(10.5, weight: action.selected ? .semibold : .regular)
             button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: action.title.isEmpty ? 12 : 10)
             button.toolTip = action.label; button.setAccessibilityLabel(action.label)
@@ -95,13 +87,6 @@ final class SpatialTileHeaderView: NSView {
         var x = bounds.width - (tile.documentID == nil ? 12 : 14)
         for button in buttons.reversed() {
             button.isHidden = false
-            if button.draggable {
-                button.controller = canvas?.model?.pouchController
-                let selected = canvas?.model?.selectedTile == tile
-                button.setAccessibilityIdentifier(selected ? "mint.writer-tools.compatibility" : actions[button.tag].id)
-                button.selected = selected && canvas?.model?.pouchSection != nil
-                button.refresh()
-            }
             if actions[button.tag].symbol == "xmark", tile.documentID != nil {
                 let label = canvas?.model?.layout.openDocuments.count == 1 ? "원고 창 닫기" : "원고 객체 닫기"
                 button.toolTip = label; button.setAccessibilityLabel(label)

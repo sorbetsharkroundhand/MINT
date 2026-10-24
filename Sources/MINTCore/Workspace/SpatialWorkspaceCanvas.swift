@@ -143,6 +143,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             updateContentSize()
         }
         for (tile, host) in hosts {
+            host.layer?.cornerRadius = presentation.isSingleManuscript ? 0 : 13
             guard let rect = geometry.tiles[tile], !host.isHidden else { continue }
             guard targetFrames[tile] != rect || newTiles.contains(tile) else { continue }
             targetFrames[tile] = rect
@@ -499,6 +500,7 @@ final class SpatialWorkspaceCanvasView: NSView {
                 if let self, event.window === self.window {
                     self.model?.notePointer(at: self.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow)
                     if event.type == .leftMouseDown {
+                        self.model?.whisperTyping = false
                         let point = self.convert(event.locationInWindow, from: nil)
                         if self.visibleRect.contains(point) {
                             var hit = self.hitTest(point)
@@ -522,10 +524,8 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
     }
 
-    func pouchPlacement(for tile: WorkspaceTileID) -> WorkspacePouchPlacement? {
-        guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        guard let header = header(for: tile), let button = header.pouchButton else { return nil }
-        header.layoutSubtreeIfNeeded()
+    func pouchPlacement() -> WorkspacePouchPlacement? {
+        guard let button = model?.pouchAnchor, button.window === window else { return nil }
         let measured = model?.pouchContentHeight ?? 0
         let height: CGFloat = model?.pouchSection == nil ? 0
             : max(80, measured + WorkspacePouchStyle.bodyInsets)
@@ -555,26 +555,27 @@ struct SpatialDocumentTile: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            documentHeader
+            if !model.layout.isSingleManuscript {
+                documentHeader.opacity(model.whisperTyping ? 0 : 1).allowsHitTesting(!model.whisperTyping)
+            }
             EditorPane(projectSession: session, editorRequests: requests, completion: completion,
                 settings: completion.settings, theme: theme, editorBridge: editorBridge,
                 positionStore: positionStore, documentID: documentID, showsChrome: false)
             HStack(spacing: 6) {
-                if hoveringStats {
-                    Text("Enter 새 문단 · 주머니에서 서식·AI · ⋮⋮ 문단 이동").mintUIFont(9).lineLimit(1)
-                }
                 Spacer(minLength: 8)
                 if hoveringStats { Text(statistics.detail).font(MintFonts.monoUI(9)).fixedSize() }
                 Circle().stroke(theme.sepC, lineWidth: 1.5).overlay {
                     Circle().trim(from: 0, to: statistics.progress).stroke(theme.blueC, style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).rotationEffect(.degrees(-90))
                 }.frame(width: 11, height: 11).accessibilityLabel("집필 목표 \(Int(statistics.progress * 100))퍼센트")
                 Text("\(statistics.characters.formatted())자").font(MintFonts.monoUI(10)).fixedSize()
-            }.foregroundStyle(theme.workspaceMutedC).padding(.horizontal, 14).frame(height: 26).opacity(model.whisperTyping ? 0.08 : (hoveringStats ? 1 : 0.65))
+            }.foregroundStyle(theme.workspaceMutedC).padding(.horizontal, 14).frame(height: 26).opacity(model.whisperTyping ? 0 : (hoveringStats ? 1 : 0.65))
+                .allowsHitTesting(!model.whisperTyping)
                 .onHover { hoveringStats = $0 }.help(statistics.detail)
                 .animation(WorkspaceHTMLStyle.animation(0.24), value: hoveringStats)
         }
-        .background(WorkspacePaperSurface(theme: theme, surface: active ? theme.editorSurface : theme.cardSurface))
-        .animation(WorkspaceHTMLStyle.animation(0.32), value: model.whisperTyping)
+        .background(WorkspacePaperSurface(theme: theme, surface: active ? theme.editorSurface : theme.cardSurface,
+            cornerRadius: model.layout.isSingleManuscript ? 0 : MintRadius.lg))
+        .animation(WorkspaceHTMLStyle.animation(0.12), value: model.whisperTyping)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mint.document-tile.\(documentID.rawValue.uuidString)")
         .task { await Task.yield(); statsRevision += 1 }

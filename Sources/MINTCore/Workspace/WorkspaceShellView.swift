@@ -177,6 +177,7 @@ struct WorkspaceSurface: View {
     @State private var assistance: WorkspaceAssistance?
     @State private var entities: WorkspaceEntityController?
     @State private var diagnosticsVisible = false
+    @State private var writerSection: SidebarSection?
     @AppStorage("mint.appearance") private var appearance = ""
     @AppStorage("mint.sidebarVisible") private var sidebarVisible = true
     @AppStorage("mint.sidebarSection") private var section = SidebarSection.files.rawValue
@@ -187,7 +188,10 @@ struct WorkspaceSurface: View {
             WorkspaceSpatialChrome(session: projectSession, model: spatial, theme: theme)
             spatialWorkspace(theme: theme)
         }
-        .background(WorkspaceLiquidGlass(theme: theme))
+        .background {
+            if spatial.layout.isSingleManuscript { theme.editorSurfaceC }
+            else { WorkspaceLiquidGlass(theme: theme) }
+        }
         .overlay { WorkspacePaperGrain().allowsHitTesting(false).accessibilityHidden(true) }
         .overlay(alignment: .bottom) {
             if let toast = spatial.toast {
@@ -216,6 +220,27 @@ struct WorkspaceSurface: View {
             }
         }
         .onDisappear { outline.stop() }
+        .onChange(of: spatial.pouchSection) { _, destination in
+            if destination == .ai { showAssistance(.coauthor, theme: theme) }
+            if destination == .object {
+                writerSection = spatial.selectedTile == .characters ? .bible : (spatial.selectedTile == .narrative ? .narrative : .context)
+                editorRequests.pouch?.dismissTools()
+            }
+        }
+        .sheet(isPresented: Binding(get: { writerSection != nil }, set: { if !$0 { writerSection = nil } })) {
+            if let writerSection {
+                VStack(spacing: 0) {
+                    HStack {
+                        Text(writerSection == .bible ? "인물·작품 정보" : (writerSection == .narrative ? "작가 수정과 기록" : "AI 문맥"))
+                            .mintUIFont(13, .semibold)
+                        Spacer()
+                        Button("닫기") { self.writerSection = nil }.keyboardShortcut(.cancelAction)
+                    }.padding(16)
+                    ProjectWriterToolsView(session: projectSession, completion: completion, editorRequests: editorRequests,
+                        section: writerSection, theme: theme, spatial: spatial)
+                }.frame(width: 460, height: 540).background(theme.editorSurfaceC)
+            }
+        }
         .onChange(of: projectSession.selectedDocumentID) { _, _ in configureSpatial() }
         .onChange(of: projectSession.activeProject?.id) { _, _ in configureSpatial() }
         .onChange(of: projectSession.activeProject?.trashedDocumentIDs) { _, _ in configureSpatial() }
@@ -261,7 +286,10 @@ struct WorkspaceSurface: View {
         if assistance == nil { assistance = completion.makeWorkspaceAssistance(session: projectSession, requests: editorRequests, margin: livingMargin) }
         if entities == nil { entities = WorkspaceEntityController(session: projectSession, requests: editorRequests) }
         editorRequests.workspaceHover = { [weak entities] editor, key, offset in entities?.hover(editor: editor, key: key, nativeOffset: offset) }
-        editorRequests.workspaceHoverEnd = { [weak entities] in entities?.scheduleHide() }
+        editorRequests.workspaceHoverEnd = { [weak entities] in
+            if NSEvent.modifierFlags.contains(.option) { entities?.scheduleHide() }
+            else { entities?.hide() }
+        }
         editorRequests.workspacePolish = { [weak assistance] editor in
             guard let assistance else { return }
             Task { await assistance.runInline(.polish, editor: editor) }
@@ -329,9 +357,8 @@ struct WorkspaceSurface: View {
         WorkspacePouchBridge(model: spatial, requests: editorRequests, defaults: projectSession.presentationPreferences,
             theme: theme, tools: AnyView(WorkspacePouchTools(session: projectSession, requests: editorRequests,
                 model: spatial, completion: completion, settings: completion.settings, theme: theme,
-                assistance: assistance, generateMargin: { showAssistance(.margin, theme: theme) },
-                openSettings: { openSettings() })), targetTitle: spatial.selectedTile?.documentID
-                    .flatMap { projectSession.document($0)?.title } ?? (spatial.selectedTile == nil ? "MINT" : WorkspacePouchSection.object.title(for: spatial.selectedTile)), actions: [
+                openCoauthor: { showAssistance(.coauthor, theme: theme) },
+                openSettings: { editorRequests.pouch?.dismissTools(); openSettings() })), targetTitle: "집필 도구", actions: [
                 pouchTool(.navigator, id: "mint.workspace.navigator-toggle", label: "문서 목록", symbol: "folder"),
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
@@ -339,7 +366,7 @@ struct WorkspaceSurface: View {
                 WorkspacePouchAction(id: "mint.source-search.show", label: "검색 · 문서, 원문, 도구 찾기", symbol: "magnifyingglass", selected: { spatial.layout.contains(.search) }, enabled: { projectSession.isEditorEditable }) {
                     spatial.openSearch()
                 },
-                WorkspacePouchAction(id: "mint.workspace.object-settings", label: "객체의 주머니 펼치기", symbol: "rectangle.topthird.inset.filled", selected: { spatial.pouchSection != nil }) {
+                WorkspacePouchAction(id: "mint.workspace.object-settings", label: "집필 도구 열기", symbol: "slider.horizontal.3", selected: { spatial.pouchSection != nil }) {
                     spatial.openPouchTools()
                 }
             ], extraActions: [
@@ -349,7 +376,6 @@ struct WorkspaceSurface: View {
                 WorkspacePouchAction(id: "mint.workspace.new-document", label: "새 원고", symbol: "plus") {
                     ProjectCommandActions(session: projectSession).newDocument(.manuscript); editorRequests.focusEditor()
                 },
-                WorkspacePouchAction(id: "mint.workspace.pouch.release", label: "주머니 떼어 놓기", symbol: "arrow.up.left.and.arrow.down.right") { spatial.selectTile(nil) },
                 WorkspacePouchAction(id: "mint.workspace.pouch.coauthor", label: "공동 집필", symbol: "sparkles") {
                     showAssistance(.coauthor, theme: theme)
                 },
@@ -445,11 +471,8 @@ struct WorkspaceSurface: View {
     private func showAssistance(_ mode: WorkspaceAssistance.Mode, theme: MintTheme) {
         guard let assistance else { return }
         if mode == .coauthor {
-            guard let id = projectSession.selectedDocumentID, let editor = editorRequests.nativeEditor else { return }
-            do { try assistance.openCoauthor(editor: editor) }
-            catch { spatial.showToast("현재 원고에서 다시 실행해 주세요."); return }
-            spatial.selectTile(.document(id))
-            spatial.openPouchTools(); spatial.pouchSection = .ai
+            editorRequests.pouch?.dismissTools()
+            WorkspaceAssistancePanel.present(.coauthor, model: assistance, requests: editorRequests, theme: theme)
         } else if let editor = editorRequests.nativeEditor {
             Task { await assistance.runInline(mode, editor: editor) }
         }

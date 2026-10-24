@@ -3,7 +3,7 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspacePouchTests: XCTestCase {
-    func testMeasuredPouchHeightTracksContentAndRejectsStaleTargets() {
+    func testMeasuredPouchHeightIsIndependentOfTileSelection() {
         let model = SpatialWorkspaceController(defaults: UserDefaults(suiteName: UUID().uuidString)!)
         model.selectTile(.navigator); model.pouchSection = .overview
         model.setPouchContentHeight(184, for: .navigator)
@@ -15,7 +15,7 @@ import XCTest
         XCTAssertEqual(model.pouchContentHeight, 184)
         model.selectTile(.characters)
         model.setPouchContentHeight(630, for: .navigator)
-        XCTAssertEqual(model.pouchContentHeight, 0)
+        XCTAssertEqual(model.pouchContentHeight, 630)
     }
 
     func testAttachingPouchPreservesNativeTrafficLightActions() throws {
@@ -44,6 +44,17 @@ import XCTest
         XCTAssertTrue(visible.contains(card))
         XCTAssertGreaterThan(card.maxX, object.maxX, "Narrow objects must not clip or compress the overlay")
         XCTAssertFalse(card.intersects(placement.trigger.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)))
+    }
+
+    func testFixedChromeAnchorOpensInsideTheCanvasWithoutReservingSpace() throws {
+        let visible = CGRect(x: 0, y: 0, width: 860, height: 504)
+        let anchor = CGRect(x: 818, y: -32, width: 28, height: 28)
+        let placement = try XCTUnwrap(WorkspacePouchPlacement(anchor: anchor, visible: visible, toolHeight: 400))
+        let card = placement.card.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
+        XCTAssertEqual(card.width, 304)
+        XCTAssertEqual(card.height, 400)
+        XCTAssertTrue(visible.contains(card))
+        XCTAssertFalse(card.intersects(anchor))
     }
 
     func testPopoverNearBottomRemainsInsideVisibleCanvas() throws {
@@ -114,7 +125,7 @@ import XCTest
         XCTAssertEqual(WorkspacePouchGeometry.nearestEdge(point: CGPoint(x: 1095, y: 500), window: window), .right)
     }
 
-    func testOutsideDragCollapsesAndOrbRestoresTheSameNativeEditor() throws {
+    func testExplicitCollapseAndOrbRestoreKeepTheSameNativeEditor() throws {
         let defaults = UserDefaults(suiteName: UUID().uuidString)!
         let model = SpatialWorkspaceController(defaults: defaults)
         let window = NSWindow(contentRect: CGRect(x: 200, y: 200, width: 900, height: 650),
@@ -134,6 +145,8 @@ import XCTest
         pouch.updateDrag(to: CGPoint(x: start.x + 3, y: start.y))
         XCTAssertFalse(pouch.isDragging)
         pouch.updateDrag(to: CGPoint(x: 130, y: 500))
+        XCTAssertFalse(pouch.isCollapsed); XCTAssertTrue(window.isVisible)
+        pouch.collapse()
         XCTAssertTrue(pouch.isCollapsed); XCTAssertFalse(window.isVisible)
         _ = pouch.endDrag(at: CGPoint(x: 130, y: 500))
         XCTAssertEqual(panel.frame.size, CGSize(width: 44, height: 44))

@@ -10,7 +10,9 @@ struct WorkspacePouchPlacement: Equatable {
     let card: CGRect
 
     init?(anchor: CGRect, visible: CGRect, toolHeight: CGFloat) {
-        guard visible.intersects(anchor) else { return nil }
+        // The fixed chrome trigger sits immediately above the scrollable canvas.
+        guard visible.width > 0, visible.height > 0,
+              anchor.maxX > visible.minX, anchor.minX < visible.maxX else { return nil }
         guard toolHeight > 0 else {
             frame = anchor; trigger = CGRect(origin: .zero, size: anchor.size); card = .zero
             return

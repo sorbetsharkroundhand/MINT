@@ -9,10 +9,9 @@ import XCTest
         XCTAssertTrue(canvas.isAccessibilityElement())
         XCTAssertEqual(canvas.accessibilityRole(), .group)
         XCTAssertEqual(canvas.accessibilityIdentifier(), "mint.workspace.tiles")
-        let pouch = try XCTUnwrap(h.requests.pouch?.panel?.contentView)
-        XCTAssertTrue(pouch.isAccessibilityElement())
-        XCTAssertEqual(pouch.accessibilityRole(), .group)
-        XCTAssertEqual(pouch.accessibilityIdentifier(), "mint.workspace.rail")
+        let trigger = try XCTUnwrap(h.requests.spatialWorkspace?.pouchAnchor)
+        XCTAssertEqual(trigger.accessibilityRole(), .button)
+        XCTAssertEqual(trigger.accessibilityIdentifier(), "mint.writer-tools.compatibility")
     }
     func testFirstGripPressInAnInitiallyInactiveTileActivatesAndStartsTheDrag() async throws {
         let h = try await SourceNavigationHarness(); defer { h.close() }
@@ -22,7 +21,7 @@ import XCTest
         XCTAssertNotEqual(h.fixture.session.selectedDocumentID, b)
         let interaction = try XCTUnwrap(editor.workspaceInteraction as? WorkspaceEditorInteraction)
         let grip = try XCTUnwrap(interaction.paragraphGrip(at: 0))
-        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: editor.convert(CGPoint(x: grip.midX, y: grip.midY), to: nil), modifierFlags: [], timestamp: 1,
+        let event = try XCTUnwrap(NSEvent.mouseEvent(with: .leftMouseDown, location: editor.convert(CGPoint(x: grip.midX, y: grip.midY), to: nil), modifierFlags: [.option], timestamp: 1,
             windowNumber: h.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         XCTAssertTrue(interaction.mouseDown(event))
         XCTAssertEqual(h.fixture.session.selectedDocumentID, b)
@@ -52,8 +51,11 @@ import XCTest
         let second = try await h.editor()
         XCTAssertEqual(second.accessibilityIdentifier(), "mint.editor")
         XCTAssertNotEqual(first.accessibilityIdentifier(), "mint.editor")
+        let selectedTile = h.requests.spatialWorkspace?.selectedTile
         h.requests.spatialWorkspace?.openPouchTools(); await h.layout()
-        XCTAssertEqual(h.requests.spatialWorkspace?.selectedTile, .document(b))
+        XCTAssertEqual(h.requests.spatialWorkspace?.selectedTile, selectedTile)
+        XCTAssertEqual(h.fixture.session.selectedDocumentID, b)
+        XCTAssertTrue(h.requests.nativeEditor === second)
     }
     func testParagraphGripMovesRichSourceAcrossLiveEditorsAndUndoesBoth() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
@@ -71,7 +73,7 @@ import XCTest
         let grip = try XCTUnwrap(interaction.paragraphGrip(at: offset))
         let targetRect = try XCTUnwrap(targetInteraction.paragraphRect(at: 0))
         func event(_ type: NSEvent.EventType, view: NSView, point: CGPoint) throws -> NSEvent {
-            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: view.convert(point, to: nil), modifierFlags: [],
+            try XCTUnwrap(NSEvent.mouseEvent(with: type, location: view.convert(point, to: nil), modifierFlags: [.option],
                 timestamp: 1, windowNumber: h.window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1))
         }
         source.mouseMoved(with: try event(.mouseMoved, view: source, point: CGPoint(x: grip.midX, y: grip.midY)))
