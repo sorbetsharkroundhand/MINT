@@ -8,25 +8,16 @@ struct ProjectWriterToolsView: View {
     let section: SidebarSection
     let theme: MintTheme
     var spatial: SpatialWorkspaceController? = nil
+    var embedded = false
     @State private var errorMessage: String?
 
     var body: some View {
         Group {
             if let snapshot = session.selectedDocumentSnapshot,
                 let writer = try? read(snapshot) {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 12) {
-                        switch section {
-                        case .bible: bible(writer, snapshot)
-                        case .narrative: records(writer, snapshot)
-                        case .context: context(writer, snapshot)
-                        default: EmptyView()
-                        }
-                    }
-                    .mintUIFont(11)
-                    .foregroundStyle(theme.ink2C)
-                    .padding(14)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                Group {
+                    if embedded { content(writer, snapshot) }
+                    else { ScrollView { content(writer, snapshot) } }
                 }
                 .disabled(!session.isEditorEditable)
             } else {
@@ -37,6 +28,18 @@ struct ProjectWriterToolsView: View {
         .alert("설정을 변경할 수 없어요", isPresented: Binding(
             get: { errorMessage != nil }, set: { if !$0 { errorMessage = nil } }
         )) { Button("확인") { errorMessage = nil } } message: { Text(errorMessage ?? "") }
+    }
+
+    private func content(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            switch section {
+            case .bible: bible(writer, snapshot)
+            case .narrative: records(writer, snapshot)
+            case .context: context(writer, snapshot)
+            default: EmptyView()
+            }
+        }.mintUIFont(11).foregroundStyle(theme.ink2C).padding(embedded ? 8 : 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     @ViewBuilder private func bible(_ writer: WriterDocumentData, _ snapshot: ProjectDocumentSnapshot) -> some View {

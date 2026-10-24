@@ -33,9 +33,11 @@ final class SpatialTileHeaderView: NSView {
     var tile: WorkspaceTileID = .navigator
     var theme: MintTheme = .light
     var active = false
-    var overlayLeading: CGFloat? { didSet { if overlayLeading != oldValue { needsLayout = true } } }
     let title = PassthroughTitle(labelWithString: "")
-    private var buttons: [WorkspaceHTMLButton] = []
+    private var buttons: [WorkspacePouchButton] = []
+    var pouchButton: WorkspacePouchButton? {
+        actions.firstIndex { $0.id == "mint.tile.pouch.\(tile.id)" }.map { buttons[$0] }
+    }
     private let icon = PassthroughIcon()
     private var actions: [SpatialHeaderAction] = []
     override var isFlipped: Bool { true }
@@ -56,10 +58,15 @@ final class SpatialTileHeaderView: NSView {
                 guard let self else { return }; self.canvas?.model?.dismissObject?(self.tile)
             })
         }
+        let position = actions.firstIndex { $0.symbol == "xmark" } ?? actions.count
+        actions.insert(SpatialHeaderAction(id: "mint.tile.pouch.\(tile.id)", label: "주머니 펼치기 · 드래그하여 이동", symbol: "slider.horizontal.3") { [weak self] in
+            guard let self else { return }
+            self.canvas?.model?.pouchController?.toggleTools(for: self.tile)
+        }, at: position)
         self.actions = actions
         while buttons.count > actions.count { buttons.removeLast().removeFromSuperview() }
         while buttons.count < actions.count {
-            let button = WorkspaceHTMLButton(frame: .zero)
+            let button = WorkspacePouchButton(frame: .zero)
             button.target = self; button.action = #selector(invoke(_:))
             buttons.append(button); addSubview(button)
         }
@@ -67,6 +74,7 @@ final class SpatialTileHeaderView: NSView {
             let button = buttons[index]
             button.refusesFirstResponder = false
             button.tag = index; button.title = action.title
+            button.draggable = action.id == "mint.tile.pouch.\(tile.id)"
             button.font = MintFonts.ui(10.5, weight: action.selected ? .semibold : .regular)
             button.image = action.symbol.isEmpty ? nil : WorkspaceIcons.image(action.symbol, size: action.title.isEmpty ? 12 : 10)
             button.toolTip = action.label; button.setAccessibilityLabel(action.label)
@@ -86,15 +94,21 @@ final class SpatialTileHeaderView: NSView {
         let leading: CGFloat = tile.documentID == nil ? 30 : 26
         var x = bounds.width - (tile.documentID == nil ? 12 : 14)
         for button in buttons.reversed() {
-            button.isHidden = overlayLeading != nil && actions[button.tag].symbol != "xmark"
+            button.isHidden = false
+            if button.draggable {
+                button.controller = canvas?.model?.pouchController
+                let selected = canvas?.model?.selectedTile == tile
+                button.setAccessibilityIdentifier(selected ? "mint.writer-tools.compatibility" : actions[button.tag].id)
+                button.selected = selected && canvas?.model?.pouchSection != nil
+                button.refresh()
+            }
             if actions[button.tag].symbol == "xmark", tile.documentID != nil {
-                let label = canvas?.model?.layout.openDocuments.count == 1 ? "주머니로 접기" : "원고 객체 닫기"
+                let label = canvas?.model?.layout.openDocuments.count == 1 ? "원고 창 닫기" : "원고 객체 닫기"
                 button.toolTip = label; button.setAccessibilityLabel(label)
             }
-            let width: CGFloat = button.title.isEmpty ? 20 : ceil((button.title as NSString).size(withAttributes: [.font: button.font!]).width) + 12 + (button.image == nil ? 0 : 14)
-            x -= width; button.frame = CGRect(x: x, y: 6, width: width, height: 20); x -= tile.documentID == nil ? 2 : 4
+            let width: CGFloat = button.title.isEmpty ? 28 : ceil((button.title as NSString).size(withAttributes: [.font: button.font!]).width) + 12 + (button.image == nil ? 0 : 14)
+            x -= width; button.frame = CGRect(x: x, y: 2, width: width, height: 28); x -= tile.documentID == nil ? 2 : 4
         }
-        if let overlayLeading { x = min(x, overlayLeading - 4) }
         title.frame = CGRect(x: leading, y: 8, width: max(0, x - leading - 5), height: 18)
         let symbol: String? = switch tile { case .navigator: "folder"; case .characters: "person.2"; case .narrative: "arrow.triangle.branch"; case .margin: "sparkles"; case .document: nil; default: "square.grid.2x2" }
         icon.isHidden = symbol == nil
@@ -106,6 +120,12 @@ final class SpatialTileHeaderView: NSView {
         if tile.documentID != nil {
             (active ? theme.ink.withAlphaComponent(0.75) : theme.workspaceMuted.withAlphaComponent(0.25)).setFill()
             NSBezierPath(ovalIn: CGRect(x: 14, y: 13, width: 6, height: 6)).fill()
+        }
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            DispatchQueue.main.async { [weak self] in self?.canvas?.model?.pouchGeometryDidChange?() }
         }
     }
     override func resetCursorRects() { addCursorRect(bounds, cursor: .openHand) }

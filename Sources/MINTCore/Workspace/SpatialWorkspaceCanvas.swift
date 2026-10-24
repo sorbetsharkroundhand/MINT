@@ -63,7 +63,7 @@ final class SpatialWorkspaceCanvasView: NSView {
         let remove: Bool
     }
     private var frameTransitions: [ObjectIdentifier: FrameTransition] = [:]
-    private var frameTimer: Timer?
+    private var frameTimer: WorkspaceDisplayClock?
     private var dragMonitor: Any?
     private var dragTracking = false
     private var draggingCursor = false
@@ -173,10 +173,11 @@ final class SpatialWorkspaceCanvasView: NSView {
         frameTransitions[ObjectIdentifier(view)] = .init(view: view, origin: view.frame, target: target,
             began: ProcessInfo.processInfo.systemUptime, duration: duration, remove: remove)
         guard frameTimer == nil else { return }
-        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stepFrames() }
+        frameTimer = WorkspaceDisplayClock(view: self) { [weak self] in
+            guard let self else { return false }
+            self.stepFrames()
+            return !self.frameTransitions.isEmpty
         }
-        frameTimer = timer; RunLoop.main.add(timer, forMode: .common)
     }
     private func stepFrames() {
         let now = ProcessInfo.processInfo.systemUptime
@@ -523,8 +524,12 @@ final class SpatialWorkspaceCanvasView: NSView {
 
     func pouchPlacement(for tile: WorkspaceTileID) -> WorkspacePouchPlacement? {
         guard let host = hosts[tile], !host.isHidden, host.frame.width >= 112, host.frame.height > 50 else { return nil }
-        let height: CGFloat = model?.pouchSection == nil ? 0 : WorkspacePouchStyle.height
-        return WorkspacePouchPlacement(object: host.frame, visible: visibleRect, toolHeight: height)
+        guard let header = header(for: tile), let button = header.pouchButton else { return nil }
+        header.layoutSubtreeIfNeeded()
+        let measured = model?.pouchContentHeight ?? 0
+        let height: CGFloat = model?.pouchSection == nil ? 0
+            : max(80, measured + WorkspacePouchStyle.bodyInsets)
+        return WorkspacePouchPlacement(anchor: button.convert(button.bounds, to: self), visible: visibleRect, toolHeight: height)
     }
     func header(for tile: WorkspaceTileID) -> SpatialTileHeaderView? {
         func find(_ view: NSView) -> SpatialTileHeaderView? {

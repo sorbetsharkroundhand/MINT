@@ -46,6 +46,13 @@ import XCTest
         let frames = canvas.geometry.tiles
         let extent = canvas.geometry.contentSize
         spatial.openPouchTools(); await h.layout()
+        let tile = try XCTUnwrap(spatial.selectedTile)
+        let header = try XCTUnwrap(canvas.header(for: tile))
+        let trigger = try XCTUnwrap(header.pouchButton)
+        header.layoutSubtreeIfNeeded()
+        XCTAssertTrue(trigger.superview === header)
+        XCTAssertTrue(header.bounds.contains(trigger.frame))
+        XCTAssertFalse(trigger.isHidden)
         XCTAssertEqual(spatial.layout, before)
         XCTAssertEqual(canvas.geometry.tiles, frames, "The pouch must overlay existing objects without moving or resizing them")
         XCTAssertEqual(canvas.geometry.contentSize, extent, "An overlay must not reserve scroll space")
@@ -57,6 +64,8 @@ import XCTest
         XCTAssertNotNil(h.element("mint.workspace.pouch.more"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.autocomplete"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.character-format"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.typewriter"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.focus"))
         let pouch = try XCTUnwrap(h.requests.pouch)
         pouch.dismissTools()
         XCTAssertNil(spatial.pouchSection, "Dismissal must be synchronous, without an animation delay")

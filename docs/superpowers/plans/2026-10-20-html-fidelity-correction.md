@@ -368,3 +368,45 @@ through the popover header. Neither tests nor the smoke script were executed.
 The final `swift build` linked MINT and MINTBench successfully in 13.38 seconds,
 with no warnings or errors in that invocation. No application launch, screenshot,
 IME or interaction verification was performed under the owner's build-only scope.
+
+### Pouch refinement priorities 1–4, 2026-10-24
+
+The owner approved all four priorities in the supplied review. This supersedes
+the fixed dark surface, fixed height and window-button behavior described above.
+The 304-point card now uses the current theme's opaque pill surface, a subtle
+border and an 18-point shadow. Its body measures its content; the viewport caps
+the resulting height. The opening edge is selected from the available space and
+stays fixed as inline content changes. The trigger remains outside the card.
+Embedded author-data controls and generated coauthor results share the outer
+card's scrolling instead of introducing separate fixed-height scroll regions.
+
+Bold, italic, inline code, font size, paragraph headings, quotation and ink colors
+are direct controls. Selected formatting uses the theme accent and accessible
+state labels. Typewriter scrolling, paragraph focus and autocomplete have native
+switches. AI actions distinguish composition, authorization, model-loading and
+memory-pressure states. Existing editor commands and marked-text guards remain
+the action boundary; the manuscript editor is not replaced.
+
+The pouch trigger is a native tile-header action, with its own layout space and
+28-point hit area. No overlay hides neighboring header controls. Native window
+close and minimize buttons retain their original targets and actions. The last
+manuscript's close action closes its window. Window-to-orb collapse remains
+available through the explicit all-tools action and the existing outside-window
+drag, preserving the retained editor and floating widget. Drag completion also
+clears the header trigger's pressed state when the gesture monitor consumes the
+mouse-up event.
+
+Paragraph hover, selection and focus fades invalidate the affected paragraph and
+gutter rectangles. Presentation changes invalidate visible paragraphs only when
+the relevant state changes. Animation regions expire when motion settles; layout
+changes rebase active regions. Tile frame transitions, pouch movement, pointer
+following and paragraph fades now use a view-bound display link rather than
+fixed 60 Hz timers. Paragraph grip targets are 28 by 28 points. This changes the
+redraw strategy; no runtime performance or frame-rate improvement is claimed.
+
+Regression sources were extended for measured height, stable popover anchoring,
+native window actions, header placement and paragraph damage bounds. They were
+not executed. The final `swift build` linked MINT and MINTBench successfully in
+15.63 seconds, with no warnings or errors in that invocation. No tests, application
+launch, UI automation, screenshots or IME checks were performed under the owner's
+build-only scope. The pre-existing `Package.resolved` changes are excluded.

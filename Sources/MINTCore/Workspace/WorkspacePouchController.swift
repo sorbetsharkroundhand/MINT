@@ -56,7 +56,6 @@ struct WorkspacePouchAction {
     private let model: SpatialWorkspaceController
     private let defaults: UserDefaults
     private var content: WorkspacePouchView?
-    private weak var attachedHeader: SpatialTileHeaderView?
     private var escapeMonitor: Any?
     private var toolsWereExpanded = false
     private var observers: [NSObjectProtocol] = []
@@ -70,9 +69,8 @@ struct WorkspacePouchAction {
     private var loadedKey: String?
     private var target = CGPoint.zero
     private var spring = WorkspaceSpringPoint(position: .zero)
-    private var timer: Timer?
+    private var timer: WorkspaceDisplayClock?
     private var lastStep = ProcessInfo.processInfo.systemUptime
-    private var savedButtons: [(NSButton, AnyObject?, Selector?)] = []
     private(set) var transition: NSPanel?
     private var transitionGeneration: UInt64 = 0
     private var collapsedImage: NSImage?
@@ -91,6 +89,7 @@ struct WorkspacePouchAction {
         }
         model.pouchGeometryDidChange = { [weak self] in self?.syncAttachment() }
         model.dismissObject = { [weak self] tile in self?.dismissObject(tile) }
+        model.pouchController = self
     }
 
     func attach(to window: NSWindow, from workspaceView: NSView? = nil) {
@@ -114,7 +113,9 @@ struct WorkspacePouchAction {
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
             guard let self, event.window === self.window else { return event }
             if event.type != .keyDown {
-                if self.model.pouchSection != nil, let content = self.content,
+                let trigger = self.model.selectedTile.flatMap { self.model.canvas?.header(for: $0)?.pouchButton }
+                let hitsTrigger = trigger.map { $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } ?? false
+                if self.model.pouchSection != nil, !hitsTrigger, let content = self.content,
                    !content.containsControl(at: content.convert(event.locationInWindow, from: nil)) { self.dismissTools() }
                 return event
             }
@@ -129,15 +130,9 @@ struct WorkspacePouchAction {
             self.dismissTools()
             return nil
         }
-        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton] {
-            if let button = window.standardWindowButton(kind) {
-                savedButtons.append((button, button.target as AnyObject?, button.action))
-                button.target = self; button.action = #selector(collapseFromButton)
-            }
-        }
         for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
                      NSWindow.didBecomeKeyNotification, NSWindow.didEnterFullScreenNotification,
-                     NSWindow.didExitFullScreenNotification] {
+                     NSWindow.didExitFullScreenNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
             observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
                 MainActor.assumeIsolated { self?.dock(immediate: false) }
             })
@@ -154,12 +149,9 @@ struct WorkspacePouchAction {
     func detach() {
         stopDragTracking()
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
-        attachedHeader?.overlayLeading = nil; attachedHeader = nil
         timer?.invalidate(); timer = nil
         for observer in observers { NotificationCenter.default.removeObserver(observer) }
         observers.removeAll()
-        for (button, owner, action) in savedButtons { button.target = owner; button.action = action }
-        savedButtons.removeAll()
         cancelTransition(); collapsedImage = nil
         content?.removeFromSuperview(); attachmentTile = nil
         panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
@@ -180,8 +172,10 @@ struct WorkspacePouchAction {
 
     func setTools(_ root: AnyView) { content?.setTools(root) }
 
-    func beginDrag(at point: CGPoint) {
+    private weak var grabButton: WorkspacePouchButton?
+    func beginDrag(at point: CGPoint, from button: WorkspacePouchButton? = nil) {
         stopDragTracking()
+        grabButton = button
         start = point; isDragging = false
         if isCollapsed, let panel {
             grabOffset = CGPoint(x: point.x - panel.frame.minX, y: point.y - panel.frame.minY)
@@ -246,11 +240,11 @@ struct WorkspacePouchAction {
     }
 
     private func stopDragTracking() {
+        grabButton?.highlight(false); grabButton = nil
         if let dragMonitor { NSEvent.removeMonitor(dragMonitor); self.dragMonitor = nil }
         if draggingCursor { NSCursor.pop(); draggingCursor = false }
     }
 
-    @objc private func collapseFromButton() { collapse() }
     func collapse() {
         guard !isCollapsed, let window, let panel else { return }
         model.pouchSection = nil
@@ -331,7 +325,8 @@ struct WorkspacePouchAction {
         content.needsLayout = true; content.needsDisplay = true
         if isCollapsed { panel.orderFrontRegardless() }
     }
-    func toggleTools() {
+    func toggleTools(for tile: WorkspaceTileID? = nil) {
+        if let tile { model.selectTile(tile) }
         if model.pouchSection != nil { dismissTools(); return }
         model.openPouchTools()
         refresh(); syncAttachment()
@@ -339,6 +334,7 @@ struct WorkspacePouchAction {
     private var preferenceKey: String { "mint.workspace-pouch.\(model.projectID?.rawValue.uuidString ?? "window")" }
     private func dock(immediate: Bool) {
         guard let window, let panel else { return }
+        if window.isMiniaturized { panel.orderOut(nil); return }
         if !isCollapsed && !isDragging, attachmentFrame() != nil { syncAttachment(); return }
         refresh()
         if !isCollapsed && !isDragging {
@@ -361,10 +357,12 @@ struct WorkspacePouchAction {
         }
         guard timer == nil else { return }
         lastStep = ProcessInfo.processInfo.systemUptime
-        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.step() }
+        guard let view = panel.contentView else { return }
+        timer = WorkspaceDisplayClock(view: view) { [weak self] in
+            guard let self else { return false }
+            self.step()
+            return self.timer != nil
         }
-        self.timer = timer; RunLoop.main.add(timer, forMode: .common)
     }
     private func step() {
         let now = ProcessInfo.processInfo.systemUptime, elapsed = now - lastStep; lastStep = now
@@ -422,7 +420,6 @@ struct WorkspacePouchAction {
         // Preserve the grab origin when the expanded card leaves the canvas.
         let lip = content.placement?.trigger ?? content.bounds
         let rect = window.convertToScreen(content.convert(lip, to: nil))
-        attachedHeader?.overlayLeading = nil; attachedHeader = nil
         content.hideToolsImmediately(); content.placement = nil; toolsWereExpanded = false
         content.removeFromSuperview(); panel.contentView = content
         panel.setFrame(rect, display: false)
@@ -445,9 +442,6 @@ struct WorkspacePouchAction {
         attachmentTile = model.selectedTile
         panel.contentView = nil
         content.removeFromSuperview()
-        if let tile = model.selectedTile {
-            attachedHeader = destination.canvas.header(for: tile)
-        }
         destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
         content.autoresizingMask = []
         panel.orderOut(nil); refresh(); updateAttachedFrame()
@@ -462,10 +456,7 @@ struct WorkspacePouchAction {
         if content.placement != placement {
             content.placement = placement; content.frame = placement.frame
         }
-        if attachedHeader == nil { attachedHeader = model.canvas?.header(for: tile) }
-        if let host = model.canvas?.hosts[tile] {
-            attachedHeader?.overlayLeading = placement.frame.minX + placement.trigger.minX - host.frame.minX
-        }
+        model.canvas?.header(for: tile)?.needsLayout = true
         if opened { content.revealTools(reduceMotion: reduceMotion) }
     }
     func dismissTools() {
@@ -479,7 +470,7 @@ struct WorkspacePouchAction {
     func dismissObject(_ tile: WorkspaceTileID) {
         returnToolFocus()
         if tile.documentID != nil && model.layout.openDocuments.count <= 1 {
-            collapse()
+            window?.performClose(nil)
         } else if model.close(tile) { requests?.focusEditor() }
     }
     private func screenFrame(for point: CGPoint) -> CGRect {

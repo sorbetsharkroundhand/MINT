@@ -93,12 +93,10 @@ struct WorkspaceAssistanceView: View {
                     }.padding(7).frame(height: embedded ? 64 : 76).background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
                 }
                 if model.generating || !model.result.isEmpty {
-                    ScrollView {
-                        Text(model.result.isEmpty ? "문장을 짓는 중…" : model.result)
-                            .font(MintFonts.serifUI(12)).lineSpacing(6).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(maxHeight: embedded ? 72 : 176).fixedSize(horizontal: false, vertical: true)
-                        .padding(embedded ? 8 : 12).background(theme.novelBgC, in: RoundedRectangle(cornerRadius: 8))
+                    Group {
+                        if embedded { resultText }
+                        else { ScrollView { resultText }.frame(maxHeight: 176).fixedSize(horizontal: false, vertical: true) }
+                    }.padding(embedded ? 8 : 12).background(theme.novelBgC, in: RoundedRectangle(cornerRadius: 8))
                 }
                 if let error = model.errorMessage { Text(error).mintUIFont(11).foregroundStyle(theme.dangerC).fixedSize(horizontal: false, vertical: true) }
             }.padding(embedded ? 0 : 16)
@@ -122,5 +120,11 @@ struct WorkspaceAssistanceView: View {
         }.foregroundStyle(theme.inkC).background(embedded ? Color.clear : theme.editorSurfaceC)
             .clipShape(RoundedRectangle(cornerRadius: embedded ? 0 : 16))
             .onAppear { promptFocused = !embedded && model.mode == .coauthor }
+    }
+    private var resultText: some View {
+        Text(model.result.isEmpty ? "문장을 짓는 중…" : model.result)
+            .font(MintFonts.serifUI(12)).lineSpacing(6).textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

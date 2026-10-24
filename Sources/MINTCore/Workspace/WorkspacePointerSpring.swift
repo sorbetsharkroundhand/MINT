@@ -5,7 +5,7 @@ import AppKit
     private weak var panel: NSPanel?
     private var spring: WorkspaceSpringPoint?
     private var target = CGPoint.zero
-    private var timer: Timer?
+    private var timer: WorkspaceDisplayClock?
     private var lastStep = 0.0
     func move(_ panel: NSPanel, to target: CGPoint, reducedMotion: Bool) {
         self.panel = panel; self.target = target
@@ -15,10 +15,12 @@ import AppKit
         spring = existing
         guard timer == nil else { return }
         lastStep = ProcessInfo.processInfo.systemUptime
-        let timer = Timer(timeInterval: 1 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.step() }
+        guard let view = panel.contentView else { return }
+        timer = WorkspaceDisplayClock(view: view) { [weak self] in
+            guard let self else { return false }
+            self.step()
+            return self.timer != nil
         }
-        self.timer = timer; RunLoop.main.add(timer, forMode: .common)
     }
     private func step() {
         let now = ProcessInfo.processInfo.systemUptime

@@ -3,12 +3,12 @@ import SwiftUI
 
 enum WorkspacePouchStyle {
     static let width: CGFloat = 304
-    static let height: CGFloat = 556
     static let radius: CGFloat = 15
-    static let theme = MintTheme.dark
-    static let surface = NSColor(hex: 0x252523)
-    static var border: NSColor {
-        NSColor(white: 1, alpha: NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.3 : 0.10)
+    static let bodyInsets: CGFloat = 54
+    static let shadowInset: CGFloat = 28
+    static func surface(_ theme: MintTheme) -> NSColor { theme.pill.withAlphaComponent(1) }
+    static func border(_ theme: MintTheme) -> NSColor {
+        theme.ink.withAlphaComponent(NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast ? 0.3 : 0.10)
     }
 }
 
@@ -38,7 +38,7 @@ final class WorkspacePouchView: NSView {
         grip.isBordered = false; grip.refusesFirstResponder = false; grip.draggable = true
         addSubview(grip)
         titleField.font = MintFonts.ui(12, weight: .semibold)
-        titleField.textColor = WorkspacePouchStyle.theme.ink
+        titleField.textColor = theme.ink
         titleField.lineBreakMode = .byTruncatingTail; titleField.maximumNumberOfLines = 1
         titleField.setAccessibilityIdentifier("mint.workspace.pouch.title")
         addSubview(titleField)
@@ -49,7 +49,7 @@ final class WorkspacePouchView: NSView {
             button.target = self; button.action = selector
             button.image = WorkspaceIcons.image(symbol, size: 12)
             button.refusesFirstResponder = false
-            button.theme = WorkspacePouchStyle.theme; button.refresh()
+            button.theme = theme; button.refresh()
             button.setAccessibilityIdentifier(identifier); button.setAccessibilityLabel(label)
             button.toolTip = label; addSubview(button)
         }
@@ -61,7 +61,8 @@ final class WorkspacePouchView: NSView {
         else {
             let host = NSHostingView(rootView: root)
             host.sizingOptions = []; host.wantsLayer = true
-            host.appearance = NSAppearance(named: .darkAqua)
+            host.frame = CGRect(x: 0, y: 0, width: WorkspacePouchStyle.width - 12, height: 1)
+            host.appearance = appearance
             addSubview(host, positioned: .below, relativeTo: dismissButton); toolsHost = host
         }
         needsLayout = true
@@ -89,6 +90,10 @@ final class WorkspacePouchView: NSView {
 
     func configure(orb: Bool, horizontal: Bool, actions: [WorkspacePouchAction], theme: MintTheme, attached: Bool = false) {
         self.orb = orb; self.horizontal = horizontal; self.actions = actions; self.theme = theme; self.attached = attached
+        titleField.textColor = theme.ink
+        moreButton.theme = theme; moreButton.refresh()
+        dismissButton.theme = theme; dismissButton.refresh()
+        toolsHost?.appearance = appearance
         grip.controller = controller
         grip.title = orb ? "M" : ""
         grip.image = attached ? WorkspaceIcons.image("slider.horizontal.3", size: 13) : nil
@@ -118,10 +123,11 @@ final class WorkspacePouchView: NSView {
     override func layout() {
         super.layout()
         let expanded = attached && toolsExpanded && placement?.card.isEmpty == false
+        setAccessibilityElement(!attached || expanded)
         toolsHost?.isHidden = !expanded; dismissButton.isHidden = !expanded
         moreButton.isHidden = !expanded; titleField.isHidden = !expanded
         if attached, let placement {
-            grip.isHidden = expanded && placement.card.intersects(placement.trigger)
+            grip.isHidden = true
             grip.frame = placement.trigger
             if expanded {
                 let card = placement.card
@@ -145,13 +151,18 @@ final class WorkspacePouchView: NSView {
     }
     override func draw(_ dirtyRect: NSRect) {
         if attached, let placement {
-            theme.pill.withAlphaComponent(1).setFill()
-            NSBezierPath(roundedRect: placement.trigger, xRadius: 8, yRadius: 8).fill()
             if toolsExpanded, !placement.card.isEmpty {
                 let card = NSBezierPath(roundedRect: placement.card.insetBy(dx: 0.5, dy: 0.5),
                     xRadius: WorkspacePouchStyle.radius, yRadius: WorkspacePouchStyle.radius)
-                WorkspacePouchStyle.surface.setFill(); card.fill()
-                WorkspacePouchStyle.border.setStroke(); card.lineWidth = 1; card.stroke()
+                NSGraphicsContext.saveGraphicsState()
+                let shadow = NSShadow()
+                shadow.shadowBlurRadius = MintElevation.floating.radius
+                shadow.shadowOffset = CGSize(width: 0, height: -MintElevation.floating.y)
+                shadow.shadowColor = NSColor.black.withAlphaComponent(theme.editorSurface.relativeLuminance < 0.5 ? 0.28 : MintElevation.floating.opacity)
+                shadow.set()
+                WorkspacePouchStyle.surface(theme).setFill(); card.fill()
+                NSGraphicsContext.restoreGraphicsState()
+                WorkspacePouchStyle.border(theme).setStroke(); card.lineWidth = 1; card.stroke()
             }
             return
         }
@@ -166,7 +177,7 @@ final class WorkspacePouchView: NSView {
     func containsControl(at point: CGPoint) -> Bool {
         guard attached, let placement else { return bounds.contains(point) }
         if toolsExpanded, placement.card.contains(point) { return true }
-        return placement.trigger.contains(point)
+        return false
     }
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard containsControl(at: convert(point, from: superview)) else { return nil }
@@ -174,7 +185,7 @@ final class WorkspacePouchView: NSView {
     }
     override func accessibilityFrame() -> NSRect {
         guard attached, let placement, let window else { return super.accessibilityFrame() }
-        let area = toolsExpanded ? placement.trigger.union(placement.card) : placement.trigger
+        let area = toolsExpanded ? placement.card : .zero
         return window.convertToScreen(convert(area, to: nil))
     }
     override func updateTrackingAreas() {
@@ -199,7 +210,7 @@ final class WorkspacePouchView: NSView {
     override func mouseDragged(with event: NSEvent) { controller?.updateDrag(to: screenPoint(event)) }
     override func mouseUp(with event: NSEvent) { _ = controller?.endDrag(at: screenPoint(event)) }
     override func rightMouseDown(with event: NSEvent) { controller?.showMoreMenu(in: self) }
-    override func resetCursorRects() { addCursorRect(grip.frame, cursor: .openHand) }
+    override func resetCursorRects() { if !grip.isHidden { addCursorRect(grip.frame, cursor: .openHand) } }
     private func screenPoint(_ event: NSEvent) -> CGPoint { window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow }
 }
 
@@ -209,7 +220,7 @@ final class WorkspacePouchButton: WorkspaceHTMLButton {
     override var mouseDownCanMoveWindow: Bool { false }
     override func mouseDown(with event: NSEvent) {
         guard draggable else { super.mouseDown(with: event); return }
-        highlight(true); controller?.beginDrag(at: screenPoint(event))
+        highlight(true); controller?.beginDrag(at: screenPoint(event), from: self)
     }
     override func mouseDragged(with event: NSEvent) {
         if draggable { controller?.updateDrag(to: screenPoint(event)) }

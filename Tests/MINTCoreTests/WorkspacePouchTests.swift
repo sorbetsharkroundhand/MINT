@@ -3,10 +3,42 @@ import XCTest
 @testable import MINTCore
 
 @MainActor final class WorkspacePouchTests: XCTestCase {
+    func testMeasuredPouchHeightTracksContentAndRejectsStaleTargets() {
+        let model = SpatialWorkspaceController(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        model.selectTile(.navigator); model.pouchSection = .overview
+        model.setPouchContentHeight(184, for: .navigator)
+        XCTAssertEqual(model.pouchContentHeight, 184)
+        model.setPouchContentHeight(630, for: .navigator)
+        XCTAssertEqual(model.pouchContentHeight, 630)
+        model.setPouchContentHeight(184, for: .navigator)
+        model.setPouchContentHeight(.nan, for: .navigator)
+        XCTAssertEqual(model.pouchContentHeight, 184)
+        model.selectTile(.characters)
+        model.setPouchContentHeight(630, for: .navigator)
+        XCTAssertEqual(model.pouchContentHeight, 0)
+    }
+
+    func testAttachingPouchPreservesNativeTrafficLightActions() throws {
+        let window = NSWindow(contentRect: CGRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let close = try XCTUnwrap(window.standardWindowButton(.closeButton))
+        let miniaturize = try XCTUnwrap(window.standardWindowButton(.miniaturizeButton))
+        let closeAction = close.action, minimizeAction = miniaturize.action
+        let closeTarget = close.target as AnyObject?, minimizeTarget = miniaturize.target as AnyObject?
+        let defaults = UserDefaults(suiteName: UUID().uuidString)!
+        let pouch = WorkspacePouchController(model: SpatialWorkspaceController(defaults: defaults), defaults: defaults)
+        pouch.attach(to: window)
+        defer { pouch.detach(); window.close() }
+        XCTAssertEqual(close.action, closeAction); XCTAssertTrue(close.target as AnyObject? === closeTarget)
+        XCTAssertEqual(miniaturize.action, minimizeAction); XCTAssertTrue(miniaturize.target as AnyObject? === minimizeTarget)
+        XCTAssertFalse(pouch.isCollapsed)
+    }
+
     func testPopoverKeepsItsWidthOnNarrowObjectsAndFitsTheViewport() throws {
         let visible = CGRect(x: 0, y: 0, width: 900, height: 700)
         let object = CGRect(x: 8, y: 8, width: 165, height: 640)
-        let placement = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 520))
+        let placement = try XCTUnwrap(WorkspacePouchPlacement(anchor: CGRect(x: object.maxX - 66, y: object.minY + 2, width: 28, height: 28), visible: visible, toolHeight: 520))
         let card = placement.card.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
         XCTAssertEqual(card.width, 304)
         XCTAssertTrue(visible.contains(card))
@@ -17,11 +49,26 @@ import XCTest
     func testPopoverNearBottomRemainsInsideVisibleCanvas() throws {
         let visible = CGRect(x: 200, y: 400, width: 780, height: 560)
         let object = CGRect(x: 610, y: 880, width: 360, height: 200)
-        let placement = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 520))
+        let placement = try XCTUnwrap(WorkspacePouchPlacement(anchor: CGRect(x: object.maxX - 66, y: object.minY + 2, width: 28, height: 28), visible: visible, toolHeight: 520))
         XCTAssertTrue(visible.contains(placement.card.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)))
-        let folded = try XCTUnwrap(WorkspacePouchPlacement(object: object, visible: visible, toolHeight: 0))
+        let folded = try XCTUnwrap(WorkspacePouchPlacement(anchor: CGRect(x: object.maxX - 66, y: object.minY + 2, width: 28, height: 28), visible: visible, toolHeight: 0))
         XCTAssertEqual(folded.frame.size, CGSize(width: 28, height: 28))
         XCTAssertTrue(folded.card.isEmpty)
+    }
+
+    func testPopoverGrowthPreservesItsOpeningEdgeAndDoesNotCoverItsTrigger() throws {
+        let visible = CGRect(x: 0, y: 0, width: 900, height: 700)
+        for y in [CGFloat(220), CGFloat(450)] {
+            let anchor = CGRect(x: 700, y: y, width: 28, height: 28)
+            let small = try XCTUnwrap(WorkspacePouchPlacement(anchor: anchor, visible: visible, toolHeight: 140))
+            let large = try XCTUnwrap(WorkspacePouchPlacement(anchor: anchor, visible: visible, toolHeight: 900))
+            let smallCard = small.card.offsetBy(dx: small.frame.minX, dy: small.frame.minY)
+            let largeCard = large.card.offsetBy(dx: large.frame.minX, dy: large.frame.minY)
+            if y < visible.midY { XCTAssertEqual(smallCard.minY, largeCard.minY) }
+            else { XCTAssertEqual(smallCard.maxY, largeCard.maxY) }
+            XCTAssertTrue(visible.contains(largeCard))
+            XCTAssertFalse(largeCard.intersects(anchor))
+        }
     }
 
     func testAnimatedCollapseAndRestoreTravelThroughIntermediateFrames() async throws {

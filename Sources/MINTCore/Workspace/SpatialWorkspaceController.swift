@@ -28,6 +28,14 @@ struct WorkspaceEntityEvent: Equatable {
     @Published private(set) var revealSequence = 0
     private(set) var tileToReveal: WorkspaceTileID?
     weak var canvas: SpatialWorkspaceCanvasView?
+    weak var pouchController: WorkspacePouchController?
+    private(set) var pouchContentHeight: CGFloat = 0
+    func setPouchContentHeight(_ height: CGFloat, for tile: WorkspaceTileID?) {
+        guard tile == selectedTile, tile != nil,
+              height.isFinite, height > 0, abs(pouchContentHeight - ceil(height)) > 0.5 else { return }
+        pouchContentHeight = ceil(height)
+        pouchGeometryDidChange?()
+    }
     var pouchGeometryDidChange: (() -> Void)?
     var dismissObject: ((WorkspaceTileID) -> Void)?
     var onClose: ((WorkspaceTileID) -> Void)?
@@ -37,6 +45,7 @@ struct WorkspaceEntityEvent: Equatable {
     func selectTile(_ tile: WorkspaceTileID?) {
         guard selectedTile != tile else { return }
         selectedTile = tile
+        pouchContentHeight = 0
         pouchSection = nil
     }
     func openSearch(scope: WorkspaceSearchScope = .project, query: String? = nil) {

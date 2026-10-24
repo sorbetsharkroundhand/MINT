@@ -328,7 +328,7 @@ struct WorkspaceSurface: View {
     private func pouchBridge(theme: MintTheme) -> some View {
         WorkspacePouchBridge(model: spatial, requests: editorRequests, defaults: projectSession.presentationPreferences,
             theme: theme, tools: AnyView(WorkspacePouchTools(session: projectSession, requests: editorRequests,
-                model: spatial, completion: completion, settings: completion.settings, theme: WorkspacePouchStyle.theme,
+                model: spatial, completion: completion, settings: completion.settings, theme: theme,
                 assistance: assistance, generateMargin: { showAssistance(.margin, theme: theme) },
                 openSettings: { openSettings() })), targetTitle: spatial.selectedTile?.documentID
                     .flatMap { projectSession.document($0)?.title } ?? (spatial.selectedTile == nil ? "MINT" : WorkspacePouchSection.object.title(for: spatial.selectedTile)), actions: [
@@ -343,6 +343,9 @@ struct WorkspaceSurface: View {
                     spatial.openPouchTools()
                 }
             ], extraActions: [
+                WorkspacePouchAction(id: "mint.workspace.pouch.collapse", label: "창을 주머니로 접기", symbol: "arrow.down.right.and.arrow.up.left") {
+                    editorRequests.pouch?.collapse()
+                },
                 WorkspacePouchAction(id: "mint.workspace.new-document", label: "새 원고", symbol: "plus") {
                     ProjectCommandActions(session: projectSession).newDocument(.manuscript); editorRequests.focusEditor()
                 },

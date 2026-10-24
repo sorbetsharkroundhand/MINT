@@ -9,8 +9,7 @@ struct WorkspacePouchPlacement: Equatable {
     let trigger: CGRect
     let card: CGRect
 
-    init?(object: CGRect, visible: CGRect, toolHeight: CGFloat) {
-        let anchor = CGRect(x: object.maxX - 66, y: object.minY + 2, width: 28, height: 28)
+    init?(anchor: CGRect, visible: CGRect, toolHeight: CGFloat) {
         guard visible.intersects(anchor) else { return nil }
         guard toolHeight > 0 else {
             frame = anchor; trigger = CGRect(origin: .zero, size: anchor.size); card = .zero
@@ -18,14 +17,18 @@ struct WorkspacePouchPlacement: Equatable {
         }
         let available = visible.insetBy(dx: 8, dy: 8)
         let width = min(WorkspacePouchStyle.width, max(0, available.width))
-        let height = min(toolHeight, max(0, available.height))
+        let below = max(available.minY, anchor.maxY + 6)
+        let above = min(available.maxY, anchor.minY - 6)
+        let belowSpace = max(0, available.maxY - below)
+        let aboveSpace = max(0, above - available.minY)
+        // Keep the opening edge stable as inline tools grow or shrink.
+        let opensBelow = belowSpace >= aboveSpace
+        let height = min(toolHeight, opensBelow ? belowSpace : aboveSpace)
+        guard width > 0, height > 0 else { return nil }
         let x = min(max(available.minX, anchor.maxX - width), available.maxX - width)
-        let below = anchor.maxY + 6
-        let above = anchor.minY - 6 - height
-        let y = below + height <= available.maxY ? below
-            : (above >= available.minY ? above : max(available.minY, available.maxY - height))
+        let y = opensBelow ? below : above - height
         let popover = CGRect(x: x, y: y, width: width, height: height)
-        frame = anchor.union(popover)
+        frame = anchor.union(popover.insetBy(dx: -WorkspacePouchStyle.shadowInset, dy: -WorkspacePouchStyle.shadowInset))
         trigger = anchor.offsetBy(dx: -frame.minX, dy: -frame.minY)
         card = popover.offsetBy(dx: -frame.minX, dy: -frame.minY)
     }

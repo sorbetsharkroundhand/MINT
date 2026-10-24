@@ -44,6 +44,7 @@ struct WorkspacePouchTools: View {
     @State private var showsModels = false
     @State private var showsCoauthor = false
     @State private var showsWriter = false
+    @State private var contentHeight: CGFloat = 0
 
     private var target: WorkspaceTileID? { model.selectedTile }
     private var editor: BlockTextView? {
@@ -52,7 +53,20 @@ struct WorkspacePouchTools: View {
     }
     private var canGenerate: Bool {
         session.isEditorEditable && !markedText && completion.engineState == .ready
-            && settings.authorization == .enabled && settings.autocompleteEnabled
+            && settings.authorization == .enabled && settings.autocompleteEnabled && !completion.isMemoryPressurePaused
+    }
+    private var generationStatus: String {
+        if markedText { return "입력 중" }
+        if !settings.autocompleteEnabled { return "자동완성 꺼짐" }
+        if settings.authorization != .enabled { return "AI 사용 꺼짐" }
+        if completion.isMemoryPressurePaused { return "메모리 부족" }
+        switch completion.engineState {
+        case .ready: return ""
+        case .loading: return "모델 로드 중"
+        case .downloading: return "모델 받는 중"
+        case .failed: return "모델 확인 필요"
+        case .idle: return "모델 대기"
+        }
     }
     private var canFormat: Bool { session.isEditorEditable && !markedText && editor != nil }
 
@@ -70,16 +84,25 @@ struct WorkspacePouchTools: View {
                 }
                 manuscriptSection
             }.padding(.horizontal, 4).padding(.bottom, 6)
+                .background(GeometryReader { geometry in
+                    Color.clear.preference(key: PouchContentHeightKey.self, value: geometry.size.height)
+                })
         }
         .mintUIFont(12).foregroundStyle(theme.inkC).tint(theme.inkC)
-        .controlSize(.small).preferredColorScheme(.dark)
+        .controlSize(.small).preferredColorScheme(theme.editorSurface.relativeLuminance < 0.5 ? .dark : .light)
         .accessibilityIdentifier("mint.workspace.pouch.tools")
+        .onPreferenceChange(PouchContentHeightKey.self) { height in
+            contentHeight = height
+            model.setPouchContentHeight(height, for: target)
+        }
         .onAppear { updateSelection(); receiveCommand() }
         .onChange(of: target) { _, _ in
             showsModels = false; showsCoauthor = false; showsWriter = false
             updateSelection(); receiveCommand()
         }
-        .onChange(of: model.pouchSection) { _, _ in updateSelection(); receiveCommand() }
+        .onChange(of: model.pouchSection) { _, _ in
+            updateSelection(); receiveCommand(); model.setPouchContentHeight(contentHeight, for: target)
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSTextView.didChangeSelectionNotification)) { note in
             if note.object as? BlockTextView === editor { updateSelection() }
         }
@@ -115,10 +138,9 @@ struct WorkspacePouchTools: View {
     private var aiSection: some View {
         VStack(alignment: .leading, spacing: 1) {
             heading("AI 집필", actionLabel: "공동 집필 열기", enabled: editor != nil && !markedText, action: openCoauthor)
-            row("자동완성", "text.cursor", status: settings.autocompleteEnabled ? "켜짐" : "꺼짐",
-                id: "mint.workspace.pouch.autocomplete", enabled: !completion.isManagingModel) {
-                completion.setAutocompleteEnabled(!settings.autocompleteEnabled)
-            }
+            toggleRow("자동완성", symbol: "text.cursor", isOn: Binding(
+                get: { settings.autocompleteEnabled }, set: { completion.setAutocompleteEnabled($0) }),
+                id: "mint.workspace.pouch.autocomplete").disabled(completion.isManagingModel)
             row("로컬 모델", "cpu", status: ModelChip.displayName(settings.modelID), id: "mint.workspace.pouch.model") {
                 showsModels.toggle()
             }
@@ -126,12 +148,12 @@ struct WorkspacePouchTools: View {
                 ModelChip(completion: completion, settings: settings, theme: theme, embedded: true)
                     .padding(.vertical, 4)
             }
-            row("커서에서 이어쓰기", "sparkles", status: canGenerate ? "" : "준비 필요", enabled: canGenerate) {
+            row("커서에서 이어쓰기", "sparkles", status: generationStatus, enabled: canGenerate) {
                 guard let editor = focusEditor() else { return }
                 model.pouchSection = nil
                 (editor.delegate as? MintBlockEditor.Coordinator)?.requestExplicitCompletion(editor)
             }
-            row("선택한 문장 다듬기", "wand.and.stars", status: hasSelection ? "" : "선택 필요",
+            row("선택한 문장 다듬기", "wand.and.stars", status: !hasSelection ? "선택 필요" : generationStatus,
                 enabled: canGenerate && hasSelection) {
                 guard let editor = focusEditor() else { return }
                 model.pouchSection = nil; editor.workspaceInteraction?.polishSelection()
@@ -148,43 +170,39 @@ struct WorkspacePouchTools: View {
     }
 
     private var formatSection: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            heading("서식·문단", actionLabel: style.bold ? "굵게 해제" : "선택한 글 굵게", symbol: "bold",
-                enabled: canFormat && hasSelection, action: { apply(.toggleBold) })
-            Menu {
-                Button(style.bold ? "굵게 해제" : "굵게") { apply(.toggleBold) }
-                Button(style.italic ? "기울임 해제" : "기울임") { apply(.toggleItalic) }
-                Button(style.code ? "인라인 코드 해제" : "인라인 코드") { apply(.toggleCode) }
-                Menu("글자 크기 · \(Int(style.fontSize)) pt") {
-                    Button("1 pt 크게") { apply(.fontSize(min(SelectionToolbarView.maxFontSize, style.fontSize + 1))) }
-                    Button("1 pt 작게") { apply(.fontSize(max(SelectionToolbarView.minFontSize, style.fontSize - 1))) }
-                    Divider()
-                    ForEach([12, 14, 16, 18, 19, 20, 22, 24, 28, 32], id: \.self) { size in
-                        Button("\(size) pt") { apply(.fontSize(Double(size))) }
-                    }
-                }
-                Menu("글자색") {
-                    Button("기본 잉크색") { apply(.color(nil)) }
-                    ForEach(Array(zip(["빨강", "주황", "초록", "파랑", "보라"], SelectionToolbarView.colorPresets)), id: \.1) { name, hex in
-                        Button(name) { apply(.color(hex)) }
-                    }
-                }
-                Divider()
-                Button("선택한 글을 메모로 발췌") {
-                    guard let editor = focusEditor() else { return }
-                    editor.workspaceInteraction?.excerptSelection()
-                }
-            } label: {
-                PouchActionLabel(title: "글자 서식", symbol: "textformat", status: hasSelection ? "\(Int(style.fontSize)) pt" : "선택 필요", theme: theme, submenu: true)
-            }.menuStyle(.borderlessButton).menuIndicator(.hidden)
+        VStack(alignment: .leading, spacing: 4) {
+            heading("서식·문단")
+            HStack(spacing: 4) {
+                formatIcon("굵게", symbol: "bold", active: style.bold) { apply(.toggleBold) }
+                formatIcon("기울임", symbol: "italic", active: style.italic) { apply(.toggleItalic) }
+                formatIcon("인라인 코드", symbol: "chevron.left.forwardslash.chevron.right", active: style.code) { apply(.toggleCode) }
+                Spacer(minLength: 4)
+                Button { apply(.fontSize(max(SelectionToolbarView.minFontSize, style.fontSize - 1))) } label: {
+                    Image(systemName: "minus").frame(width: 26, height: 28)
+                }.help("글자 크기 1 pt 줄이기").accessibilityLabel("글자 크기 줄이기")
+                Text("\(Int(style.fontSize))").font(MintFonts.monoUI(11)).frame(width: 26)
+                Button { apply(.fontSize(min(SelectionToolbarView.maxFontSize, style.fontSize + 1))) } label: {
+                    Image(systemName: "plus").frame(width: 26, height: 28)
+                }.help("글자 크기 1 pt 키우기").accessibilityLabel("글자 크기 키우기")
+            }.buttonStyle(PouchRowButtonStyle()).padding(.horizontal, 8)
                 .disabled(!canFormat || !hasSelection)
                 .accessibilityIdentifier("mint.workspace.pouch.character-format")
+            HStack(spacing: 4) {
+                blockButton("본문", block: .p)
+                blockButton("H1", block: .h1)
+                blockButton("H2", block: .h2)
+                blockButton("H3", block: .h3)
+                blockButton("인용", block: .quote)
+            }.padding(.horizontal, 8).disabled(!canFormat)
+            HStack(spacing: 9) {
+                Text("글자색").mintUIFont(10.5).foregroundStyle(theme.ink2C)
+                Spacer(minLength: 4)
+                colorButton(nil, label: "기본 잉크색")
+                ForEach(Array(zip(["빨강", "주황", "초록", "파랑", "보라"], SelectionToolbarView.colorPresets)), id: \.1) { name, hex in
+                    colorButton(hex, label: name)
+                }
+            }.frame(height: 28).padding(.horizontal, 8).disabled(!canFormat || !hasSelection)
             Menu {
-                Button("본문") { apply(.block(.p)) }
-                Button("제목 1") { apply(.block(.h1)) }
-                Button("제목 2") { apply(.block(.h2)) }
-                Button("제목 3") { apply(.block(.h3)) }
-                Button("인용") { apply(.block(.quote)) }
                 Button("글머리 목록") { apply(.block(.bullet)) }
                 Button("번호 목록") { apply(.block(.number)) }
                 Button("체크 목록") { apply(.block(.todo)) }
@@ -198,13 +216,19 @@ struct WorkspacePouchTools: View {
                         Button("\(spacing) pt") { apply(.lineSpacing(Double(spacing))) }
                     }
                 }
-            } label: {
-                PouchActionLabel(title: "문단 서식", symbol: "text.alignleft", status: blockTitle, theme: theme, submenu: true)
-            }.menuStyle(.borderlessButton).menuIndicator(.hidden).disabled(!canFormat)
-            Menu {
-                Toggle("타자기 중앙 스크롤", isOn: $model.typewriter)
-                Toggle("현재 문단에 집중", isOn: $model.focusDimming)
                 Divider()
+                Button("선택한 글을 메모로 발췌") {
+                    guard let editor = focusEditor() else { return }
+                    editor.workspaceInteraction?.excerptSelection()
+                }.disabled(!hasSelection)
+            } label: {
+                PouchActionLabel(title: "목록·정렬·간격", symbol: "text.alignleft", status: blockTitle, theme: theme, submenu: true)
+            }.menuStyle(.borderlessButton).menuIndicator(.hidden).disabled(!canFormat)
+            toggleRow("타자기 중앙 스크롤", symbol: "text.line.first.and.arrowtriangle.forward", isOn: $model.typewriter,
+                id: "mint.workspace.pouch.typewriter")
+            toggleRow("현재 문단에 집중", symbol: "viewfinder", isOn: $model.focusDimming,
+                id: "mint.workspace.pouch.focus")
+            Menu {
                 Menu("기본 글자 크기 · \(Int(settings.editorFontSize)) pt") {
                     ForEach(Int(CompletionSettings.minFontSize)...Int(CompletionSettings.maxFontSize), id: \.self) { size in
                         Button("\(size) pt") { settings.editorFontSize = Double(size) }
@@ -216,9 +240,39 @@ struct WorkspacePouchTools: View {
                     }
                 }
             } label: {
-                PouchActionLabel(title: "집필 환경", symbol: "slider.horizontal.3", status: "모든 원고", theme: theme, submenu: true)
+                PouchActionLabel(title: "기본 조판", symbol: "textformat.size", status: "모든 원고", theme: theme, submenu: true)
             }.menuStyle(.borderlessButton).menuIndicator(.hidden)
         }
+    }
+    private func formatIcon(_ title: String, symbol: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).frame(width: 32, height: 28)
+                .foregroundStyle(active ? theme.novelC : theme.inkC)
+                .background(active ? theme.activeBgC : theme.hoverC, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(PouchRowButtonStyle()).help(title).accessibilityLabel(title)
+            .accessibilityValue(active ? "켜짐" : "꺼짐")
+    }
+    private func blockButton(_ title: String, block: MintBlock) -> some View {
+        Button { apply(.block(block)) } label: {
+            Text(title).mintUIFont(11, .medium).frame(maxWidth: .infinity).frame(height: 28)
+                .foregroundStyle(style.block == block ? theme.novelC : theme.ink2C)
+                .background(style.block == block ? theme.activeBgC : theme.hoverC, in: RoundedRectangle(cornerRadius: 6))
+        }.buttonStyle(PouchRowButtonStyle()).accessibilityLabel(title)
+            .accessibilityValue(style.block == block ? "선택됨" : "")
+    }
+    private func colorButton(_ hex: String?, label: String) -> some View {
+        Button { apply(.color(hex)) } label: {
+            Circle().fill(Color(nsColor: hex.flatMap { NSColor(inlineHex: $0) } ?? theme.ink))
+                .frame(width: 14, height: 14).padding(3)
+                .overlay(Circle().strokeBorder(style.colorHex == hex ? theme.inkC : .clear, lineWidth: 1))
+        }.buttonStyle(.plain).help(label).accessibilityLabel(label + " 글자색")
+            .accessibilityValue(style.colorHex == hex ? "선택됨" : "")
+    }
+    private func toggleRow(_ title: String, symbol: String, isOn: Binding<Bool>, id: String) -> some View {
+        Toggle(isOn: isOn) {
+            Label(title, systemImage: symbol).mintUIFont(12)
+        }.toggleStyle(.switch).controlSize(.mini).tint(theme.novelC)
+            .padding(.horizontal, 8).frame(height: 30).accessibilityIdentifier(id)
     }
 
     private var blockTitle: String {
@@ -237,7 +291,7 @@ struct WorkspacePouchTools: View {
             if showsWriter {
                 ProjectWriterToolsView(session: session, completion: completion, editorRequests: requests,
                     section: target == .characters ? .bible : (target == .narrative ? .narrative : .context),
-                    theme: theme, spatial: model).frame(height: 300)
+                    theme: theme, spatial: model, embedded: true)
             }
         case .margin:
             row("마진 노트 생성", "sparkles", status: "로컬 AI", enabled: canGenerate, action: generateMargin)
@@ -272,7 +326,7 @@ struct WorkspacePouchTools: View {
             row("AI가 참고한 내용", "text.magnifyingglass") { open(.context) }
             Menu {
                 if let target {
-                    Button(target.documentID == nil ? "객체 닫기" : "원고 접기") { model.dismissObject?(target) }
+                    Button(target.documentID == nil ? "객체 닫기" : "원고 닫기") { model.dismissObject?(target) }
                 }
                 Button("주머니 떼어 놓기") { model.selectTile(nil) }
                 Divider()
@@ -313,6 +367,11 @@ struct WorkspacePouchTools: View {
               editor.window?.makeFirstResponder(editor) == true else { return nil }
         return editor
     }
+}
+
+private struct PouchContentHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
 
 private struct PouchActionLabel: View {

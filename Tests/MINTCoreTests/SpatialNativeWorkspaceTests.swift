@@ -111,6 +111,23 @@ import XCTest
         XCTAssertEqual(h.fixture.session.selectedDocument?.body, before)
     }
 
+    func testParagraphDamageIncludesItsGripWithoutInvalidatingTheWholeEditor() async throws {
+        let h = try await FramedWorkspaceHarness(width: 1100, reduceMotion: true)
+        defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("First paragraph\nSecond paragraph\nThird paragraph")
+        await h.layout()
+        let editor = try await h.editor()
+        let interaction = try XCTUnwrap(editor.workspaceInteraction as? WorkspaceEditorInteraction)
+        let offset = (editor.string as NSString).range(of: "Second").location
+        let damage = try XCTUnwrap(interaction.paragraphDamage(at: offset))
+        let grip = try XCTUnwrap(interaction.paragraphGrip(at: offset))
+        XCTAssertGreaterThanOrEqual(grip.width, 28)
+        XCTAssertTrue(damage.contains(grip.intersection(editor.visibleRect)))
+        XCTAssertTrue(editor.visibleRect.contains(damage))
+        XCTAssertLessThan(damage.height, editor.visibleRect.height)
+        XCTAssertFalse(damage.intersects(try XCTUnwrap(interaction.paragraphRect(at: 0)).insetBy(dx: 0, dy: 5)))
+    }
+
     func testNavigatorNativeDragReordersWithoutReplacingOrClosingEditors() async throws {
         let h = try await FramedWorkspaceHarness(width: 1440, reduceMotion: true)
         defer { h.close() }

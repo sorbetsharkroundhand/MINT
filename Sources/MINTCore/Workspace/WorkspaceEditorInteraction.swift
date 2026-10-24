@@ -22,16 +22,27 @@ import Combine
     private var flashTask: Task<Void, Never>?
     private var flashBegan = 0.0
     private var pointerInEditor = CGPoint.zero
-    private var presentationTask: Task<Void, Never>?
+    private var presentationClock: WorkspaceDisplayClock?
+    private struct MotionRegion { var rect: CGRect; var until: Double }
+    private var motionRegions: [Int: MotionRegion] = [:]
+    private var previousFocus = false
+    private var previousWhisper = false
+    private var previousResonance: String?
+    private var previousTerms: [String] = []
+    private var previousActive = false
+    private var previousSelection: Int?
     private var previewTask: Task<Void, Never>?
     private struct Fade { let from: CGFloat; let to: CGFloat; let began: Double }
     private var fades: [Int: Fade] = [:]
     private var renderedOpacity: [Int: CGFloat] = [:]
     func flash(_ range: NSRange) {
-        flashTask?.cancel(); flashRange = range; flashBegan = ProcessInfo.processInfo.systemUptime; redrawForMotion()
+        flashTask?.cancel()
+        if let previous = flashRange { invalidateParagraph(at: previous.location) }
+        flashRange = range; flashBegan = ProcessInfo.processInfo.systemUptime
+        invalidateParagraph(at: range.location, duration: 0.9)
         flashTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(900)); guard !Task.isCancelled else { return }
-            self?.flashRange = nil; self?.editor?.needsDisplay = true
+            self?.flashRange = nil; self?.invalidateParagraph(at: range.location)
         }
     }
     private let pointerSpring = WorkspacePointerSpring()
@@ -44,15 +55,16 @@ import Combine
          requests: ProjectEditorRequests, model: SpatialWorkspaceController) {
         self.editor = editor; self.key = key; self.session = session; self.requests = requests; self.model = model
         subscription = model.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in self?.layoutDidChange(); self?.editor?.needsDisplay = true }
+            DispatchQueue.main.async { [weak self] in self?.presentationDidChange() }
         }
         layoutDidChange()
     }
 
     func paragraphRect(at offset: Int) -> CGRect? {
         guard let editor, let manager = editor.layoutManager, let container = editor.textContainer else { return nil }
-        manager.ensureLayout(for: container)
         let native = nativeParagraph(at: offset)
+        if editor.string.isEmpty { manager.ensureLayout(for: container) }
+        else { manager.ensureLayout(forCharacterRange: native) }
         var rect: CGRect
         if native.length == 0 { rect = manager.extraLineFragmentUsedRect }
         else {
@@ -67,7 +79,7 @@ import Combine
     }
     func paragraphGrip(at offset: Int) -> CGRect? {
         guard let editor, let rect = paragraphRect(at: offset) else { return nil }
-        return CGRect(x: editor.textContainerOrigin.x - 22, y: rect.midY - 11, width: 16, height: 22)
+        return CGRect(x: max(0, editor.textContainerOrigin.x - 32), y: rect.midY - 14, width: 28, height: 28)
     }
     func paragraphOpacity(at offset: Int) -> CGFloat {
         guard let editor, model?.focusDimming == true else { return 1 }
@@ -81,24 +93,57 @@ import Combine
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return desired }
         if fades[offset]?.to != desired {
             fades[offset] = .init(from: renderedOpacity[offset] ?? 1, to: desired, began: now)
-            if renderedOpacity[offset, default: 1] != desired { redrawForMotion() }
+            if renderedOpacity[offset, default: 1] != desired { invalidateParagraph(at: offset, duration: 0.28) }
         }
         guard let fade = fades[offset] else { return desired }
         let value = fade.from + (fade.to - fade.from) * WorkspaceHTMLStyle.progress((now - fade.began) / 0.28)
         renderedOpacity[offset] = value
         return value
     }
-    private func redrawForMotion() {
-        editor?.needsDisplay = true
-        guard presentationTask == nil else { return }
-        presentationTask = Task { [weak self] in
-            for _ in 0..<60 {
-                guard !Task.isCancelled, let self else { return }
-                self.editor?.needsDisplay = true
-                try? await Task.sleep(for: .milliseconds(16))
+    /// Includes the gutter grip and background bleed, clipped to the viewport.
+    func paragraphDamage(at offset: Int) -> CGRect? {
+        guard let editor, let paragraph = paragraphRect(at: offset) else { return nil }
+        var rect = paragraph.insetBy(dx: -12, dy: -4)
+        if let grip = paragraphGrip(at: offset) { rect = rect.union(grip) }
+        rect = rect.intersection(editor.visibleRect)
+        return rect.isEmpty || rect.isNull ? nil : rect
+    }
+    private func invalidateParagraph(at offset: Int, duration: Double = 0) {
+        guard let editor, let rect = paragraphDamage(at: offset) else { return }
+        editor.setNeedsDisplay(rect)
+        guard duration > 0, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let end = ProcessInfo.processInfo.systemUptime + duration
+        motionRegions[offset] = MotionRegion(rect: rect, until: max(end, motionRegions[offset]?.until ?? 0))
+        guard presentationClock == nil else { return }
+        presentationClock = WorkspaceDisplayClock(view: editor) { [weak self] in
+            guard let self else { return false }
+            guard let editor = self.editor, editor.window != nil else {
+                self.motionRegions.removeAll(); self.presentationClock = nil; return false
             }
-            self?.presentationTask = nil
+            let now = ProcessInfo.processInfo.systemUptime
+            for (offset, region) in self.motionRegions {
+                let rect = region.rect.intersection(editor.visibleRect)
+                if !rect.isNull && !rect.isEmpty { editor.setNeedsDisplay(rect) }
+                if now >= region.until || rect.isEmpty || rect.isNull { self.motionRegions.removeValue(forKey: offset) }
+            }
+            if self.motionRegions.isEmpty { self.presentationClock = nil; return false }
+            return true
         }
+    }
+    private func presentationDidChange() {
+        layoutDidChange()
+        let focus = model?.focusDimming == true
+        let active = session?.selectedDocumentID == key.documentID
+        let whisper = model?.whisperTyping == true
+        let resonance = model?.resonatingTerm
+        let terms = model?.entityTerms ?? []
+        if focus != previousFocus || (focus && active != previousActive) {
+            for range in visibleParagraphs() { invalidateParagraph(at: range.location, duration: 0.28) }
+        } else if resonance != previousResonance || terms != previousTerms {
+            for range in visibleParagraphs() { invalidateParagraph(at: range.location) }
+        } else if whisper != previousWhisper, let hovered { invalidateParagraph(at: hovered) }
+        previousFocus = focus; previousActive = active; previousWhisper = whisper
+        previousResonance = resonance; previousTerms = terms
     }
     private func nativeParagraph(at offset: Int) -> NSRange {
         guard let editor else { return NSRange(location: 0, length: 0) }
@@ -200,12 +245,25 @@ import Combine
         guard let editor else { return }
         pointerInEditor = editor.convert(event.locationInWindow, from: nil)
         model?.notePointer(at: editor.window?.convertPoint(toScreen: event.locationInWindow) ?? event.locationInWindow)
-        hovered = offset(at: editor.convert(event.locationInWindow, from: nil)); editor.needsDisplay = true
+        let previous = hovered
+        hovered = offset(at: pointerInEditor)
+        let oldParagraph = previous.map { nativeParagraph(at: $0).location }
+        let newParagraph = hovered.map { nativeParagraph(at: $0).location }
+        if oldParagraph != newParagraph {
+            if let oldParagraph { invalidateParagraph(at: oldParagraph) }
+            if let newParagraph { invalidateParagraph(at: newParagraph) }
+        } else if let hovered, let grip = paragraphGrip(at: hovered) {
+            editor.setNeedsDisplay(grip)
+        }
         if model?.whisperTyping != true, drag == nil, model?.isDragging != true, let hovered {
             requests?.workspaceHover?(editor, key, hovered)
         }
     }
-    func mouseExited() { hovered = nil; editor?.needsDisplay = true; requests?.workspaceHoverEnd?() }
+    func mouseExited() {
+        let previous = hovered; hovered = nil
+        if let previous { invalidateParagraph(at: previous) }
+        requests?.workspaceHoverEnd?()
+    }
     func keyDown(_ event: NSEvent) {
         if event.keyCode == 53, drag != nil { cancelDrag(); return }
         guard !event.modifierFlags.contains(.command), !event.modifierFlags.contains(.control),
@@ -213,9 +271,14 @@ import Combine
         model?.noteTyping(at: NSEvent.mouseLocation); requests?.workspaceHoverEnd?()
     }
     func selectionDidChange() {
-        editor?.needsDisplay = true; centerTypewriter()
+        centerTypewriter()
         if let editor, session?.selectedDocumentID == key.documentID, !editor.hasMarkedText() {
             let range = nativeParagraph(at: editor.selectedRange().location)
+            if previousSelection != range.location {
+                if let previousSelection { invalidateParagraph(at: previousSelection) }
+                invalidateParagraph(at: range.location)
+                previousSelection = range.location
+            }
             model?.activeParagraph = (editor.string as NSString).substring(with: range)
         }
     }
@@ -224,11 +287,21 @@ import Combine
         let typewriter = model?.typewriter == true
         let changed = previousTypewriter != typewriter || previousEditorSize != editor.bounds.size
         previousTypewriter = typewriter; previousEditorSize = editor.bounds.size
-        if let scroll = editor.enclosingScrollView as? WritingScrollView {
+        if changed, let scroll = editor.enclosingScrollView as? WritingScrollView {
             scroll.workspacePresentationEnabled = true; scroll.workspaceTypewriter = typewriter
             scroll.updateWorkspaceInsets()
         }
-        if changed { centerTypewriter() }
+        if changed {
+            motionRegions.removeAll(); presentationClock?.invalidate(); presentationClock = nil
+            centerTypewriter()
+            let now = ProcessInfo.processInfo.systemUptime
+            for (offset, fade) in fades where now < fade.began + 0.28 {
+                invalidateParagraph(at: offset, duration: fade.began + 0.28 - now)
+            }
+            if let flashRange, now < flashBegan + 0.9 {
+                invalidateParagraph(at: flashRange.location, duration: flashBegan + 0.9 - now)
+            }
+        }
     }
     private func centerTypewriter() {
         guard !centering, model?.typewriter == true, let editor, !editor.hasMarkedText(),
@@ -246,9 +319,13 @@ import Combine
         clip.scroll(to: CGPoint(x: clip.bounds.minX, y: y)); scroll.reflectScrolledClipView(clip)
     }
 
-    private func visibleParagraphs() -> [NSRange] {
+    private func visibleParagraphs(in dirtyRect: CGRect? = nil) -> [NSRange] {
         guard let editor, let manager = editor.layoutManager, let container = editor.textContainer else { return [] }
-        let rect = editor.visibleRect.offsetBy(dx: -editor.textContainerOrigin.x, dy: -editor.textContainerOrigin.y)
+        var rect = (dirtyRect ?? editor.visibleRect).intersection(editor.visibleRect)
+        guard !rect.isEmpty && !rect.isNull else { return [] }
+        rect = rect.offsetBy(dx: -editor.textContainerOrigin.x, dy: -editor.textContainerOrigin.y)
+        // A gutter-only invalidation must still enumerate the adjacent text line.
+        rect.origin.x = 0; rect.size.width = container.size.width
         let glyphs = manager.glyphRange(forBoundingRect: rect, in: container)
         let characters = manager.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
         var seen: Set<Int> = []
@@ -264,15 +341,15 @@ import Combine
             NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
         }
         guard let editor, let term = model?.resonatingTerm, !term.isEmpty else { return }
-        for range in visibleParagraphs() {
+        for range in visibleParagraphs(in: dirtyRect) {
             guard (editor.string as NSString).substring(with: range).contains(term), let rect = paragraphRect(at: range.location), rect.intersects(dirtyRect) else { continue }
             editor.palette.hover.setFill(); NSBezierPath(roundedRect: rect.insetBy(dx: -12, dy: -3), xRadius: 8, yRadius: 8).fill()
         }
     }
     func draw(_ dirtyRect: CGRect) {
         guard let editor else { return }
-        for range in visibleParagraphs() {
-            guard let rect = paragraphRect(at: range.location), rect.intersects(dirtyRect) else { continue }
+        for range in visibleParagraphs(in: dirtyRect) {
+            guard let rect = paragraphRect(at: range.location), let damage = paragraphDamage(at: range.location), damage.intersects(dirtyRect) else { continue }
             let opacity = presentedOpacity(at: range.location)
             if opacity < 1 {
                 editor.palette.editorSurface.withAlphaComponent(1 - opacity).setFill()
@@ -282,7 +359,7 @@ import Combine
                let grip = paragraphGrip(at: range.location) {
                 let overGrip = grip.contains(pointerInEditor)
                 if overGrip { editor.palette.hover.setFill(); NSBezierPath(roundedRect: grip, xRadius: 5, yRadius: 5).fill() }
-                (overGrip ? editor.palette.ink : editor.palette.workspaceMuted.withAlphaComponent(0.45)).setFill()
+                (overGrip ? editor.palette.ink : editor.palette.ink2.withAlphaComponent(0.65)).setFill()
                 for row in 0..<3 { for column in 0..<2 {
                     NSBezierPath(ovalIn: CGRect(x: grip.midX - 4 + CGFloat(column) * 5,
                         y: grip.midY - 5 + CGFloat(row) * 4, width: 1.7, height: 1.7)).fill()
@@ -379,5 +456,5 @@ import Combine
         drag = nil; target = nil; targetEditor = nil
         pointerSpring.stop(); pill?.orderOut(nil); pill?.close(); pill = nil
     }
-    func detach() { cancelDrag(); flashTask?.cancel(); flashTask = nil; presentationTask?.cancel(); presentationTask = nil; subscription?.cancel(); subscription = nil }
+    func detach() { cancelDrag(); flashTask?.cancel(); flashTask = nil; presentationClock?.invalidate(); presentationClock = nil; motionRegions.removeAll(); subscription?.cancel(); subscription = nil }
 }
