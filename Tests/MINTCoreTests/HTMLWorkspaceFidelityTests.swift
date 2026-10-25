@@ -13,6 +13,17 @@ import XCTest
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertNotNil(editor.workspaceSelectionPanel)
         XCTAssertTrue(h.window.firstResponder === editor)
+        let toolbar = try XCTUnwrap(editor.workspaceSelectionPanel?.contentView)
+        let controls = h.elements(in: toolbar)
+        for identifier in ["font-size.smaller", "font-size.value", "font-size.larger", "color.default", "color.FF453A", "polish"] {
+            XCTAssertTrue(controls.contains { $0.accessibilityIdentifier() == "mint.selection.\(identifier)" })
+        }
+        XCTAssertTrue(controls.contains { $0.accessibilityLabel() == "빨강" })
+        XCTAssertFalse(controls.contains { $0.accessibilityLabel() == "메모 발췌" })
+        XCTAssertFalse(controls.contains { $0.accessibilityLabel() == "FF453A" })
+        editor.perform(.fontSize(18.5))
+        XCTAssertEqual(editor.currentSelectionState().fontSize, 18.5)
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))
         editor.perform(.color("FF453A"))
         XCTAssertEqual(editor.currentSelectionState().colorHex, "FF453A")
         XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))

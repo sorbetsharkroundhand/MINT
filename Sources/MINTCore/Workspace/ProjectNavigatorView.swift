@@ -23,7 +23,6 @@ public final class ProjectEditorRequests: ObservableObject {
     var workspaceHover: ((BlockTextView, ProjectDocumentKey, Int) -> Void)?
     var workspaceHoverEnd: (() -> Void)?
     var workspacePolish: ((BlockTextView) -> Void)?
-    var workspaceExcerpt: ((BlockTextView) -> Void)?
     func register(_ editor: BlockTextView, for key: ProjectDocumentKey, session: ProjectSession? = nil) {
         editors = editors.filter { $0.value.editor != nil }
         editors[key] = EditorReference(editor)

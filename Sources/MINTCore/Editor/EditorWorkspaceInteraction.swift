@@ -15,7 +15,6 @@ import AppKit
     func draw(_ dirtyRect: CGRect)
     func detach()
     func polishSelection()
-    func excerptSelection()
     func flash(_ range: NSRange)
 }
 

@@ -4948,8 +4948,7 @@ final class BlockTextView: NSTextView {
 
         let view = SelectionToolbarView(
             theme: palette, state: currentSelectionState(), onAction: { [weak self] action in self?.perform(action) },
-            onPolish: workspaceInteraction.map { interaction in { [weak interaction] in interaction?.polishSelection() } },
-            onExcerpt: workspaceInteraction.map { interaction in { [weak interaction] in interaction?.excerptSelection() } })
+            onPolish: workspaceInteraction.map { interaction in { [weak interaction] in interaction?.polishSelection() } })
         let host: NSHostingView<SelectionToolbarView>
         if let existing = toolbarHost {
             existing.rootView = view

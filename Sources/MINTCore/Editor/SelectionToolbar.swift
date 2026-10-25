@@ -38,7 +38,6 @@ struct SelectionToolbarView: View {
     let state: SelectionStyleState
     let onAction: (SelectionToolbarAction) -> Void
     var onPolish: (() -> Void)? = nil
-    var onExcerpt: (() -> Void)? = nil
 
     /// 인라인 색 프리셋 (시스템 팔레트 계열).
     /// ⚠️ Theme 토큰 규칙의 **문서화된 예외** (이슈 #56): 사용자가 본문에 칠하는
@@ -52,9 +51,8 @@ struct SelectionToolbarView: View {
     static let maxLineSpacing = 20.0
 
     var body: some View {
-        // 인라인 문자 서식에 집중한다 — 제목·목록·인용·정렬·코드 블록 같은 블록/구조
-        // 서식은 서식 메뉴(⌘⌥1~3 등)로 옮겨 툴바를 가볍게 했다(예전엔 ~20개가 본문을
-        // 가렸다). 툴바엔 쓰다가 바로 집는 것만: 굵게·기울임·코드·크기·색.
+        // Keep the same direct formatting controls in every editor. Workspace
+        // assistance adds an action without replacing size or color with a menu.
         HStack(spacing: 2) {
             textButton("B", weight: .bold, active: state.bold, help: "굵게 (⌘B / **텍스트**)") {
                 onAction(.toggleBold)
@@ -62,19 +60,6 @@ struct SelectionToolbarView: View {
             textButton("I", italic: true, active: state.italic, help: "기울임 (⌘I / *텍스트*)") {
                 onAction(.toggleItalic)
             }
-            if let onPolish, let onExcerpt {
-                labelButton("text.quote", "인용", active: state.block == .quote) { onAction(.block(state.block == .quote ? .p : .quote)) }
-                divider
-                labelButton("wand.and.stars", "다듬기", active: false) { onPolish() }
-                labelButton("arrow.up.forward.square", "메모 발췌", active: false) { onExcerpt() }
-                Menu {
-                    Button("인라인 코드") { onAction(.toggleCode) }
-                    Button("글자 작게") { onAction(.fontSize(max(Self.minFontSize, state.fontSize - 2))) }
-                    Button("글자 크게") { onAction(.fontSize(min(Self.maxFontSize, state.fontSize + 2))) }
-                    ForEach(Self.colorPresets, id: \.self) { hex in Button(hex) { onAction(.color(hex)) } }
-                    Button("기본색") { onAction(.color(nil)) }
-                } label: { Image(systemName: "ellipsis").frame(width: 24, height: 24) }.menuStyle(.borderlessButton).fixedSize()
-            } else {
             iconButton(
                 "chevron.left.forwardslash.chevron.right",
                 active: state.code, help: "인라인 코드 (⌘⇧C / `텍스트`)"
@@ -83,19 +68,32 @@ struct SelectionToolbarView: View {
             iconButton("textformat.size.smaller", active: false, help: "글자 작게") {
                 onAction(.fontSize(max(Self.minFontSize, state.fontSize - 2)))
             }
+            .disabled(state.fontSize <= Self.minFontSize)
+            .accessibilityIdentifier("mint.selection.font-size.smaller")
             NumberField(
                 theme: theme, value: state.fontSize,
                 range: Self.minFontSize...Self.maxFontSize,
                 help: "글자 크기 (누르면 전체 선택 · 숫자 입력 후 Enter)"
             ) { onAction(.fontSize($0)) }
+            .accessibilityLabel("글자 크기")
+            .accessibilityIdentifier("mint.selection.font-size.value")
             iconButton("textformat.size.larger", active: false, help: "글자 크게") {
                 onAction(.fontSize(min(Self.maxFontSize, state.fontSize + 2)))
             }
+            .disabled(state.fontSize >= Self.maxFontSize)
+            .accessibilityIdentifier("mint.selection.font-size.larger")
             divider
             colorDot(nil)
             ForEach(Self.colorPresets, id: \.self) { hex in
                 colorDot(hex)
             }
+            if let onPolish {
+                divider
+                iconButton("text.quote", active: state.block == .quote, help: "인용") {
+                    onAction(.block(state.block == .quote ? .p : .quote))
+                }.accessibilityIdentifier("mint.selection.quote")
+                iconButton("wand.and.stars", active: false, help: "선택한 문장 다듬기", tint: theme.novelC, action: onPolish)
+                    .accessibilityIdentifier("mint.selection.polish")
             }
         }
         .padding(.horizontal, 6)
@@ -133,36 +131,39 @@ struct SelectionToolbarView: View {
     }
 
     private func iconButton(
-        _ systemName: String, active: Bool, help: String, action: @escaping () -> Void
+        _ systemName: String, active: Bool, help: String, tint: Color? = nil, action: @escaping () -> Void
     ) -> some View {
-        ToolbarButton(theme: theme, active: active, help: help, action: action) {
+        ToolbarButton(theme: theme, active: active, help: help, tint: tint, action: action) {
             Image(systemName: systemName)
                 .font(.system(size: 11, weight: .semibold))
         }
     }
 
-    private func labelButton(_ symbol: String, _ title: String, active: Bool, action: @escaping () -> Void) -> some View {
-        ToolbarButton(theme: theme, active: active, help: title, width: title == "메모 발췌" ? 78 : (title == "다듬기" ? 62 : 52), tint: title == "다듬기" ? theme.novelC : theme.ink2C, action: action) {
-            HStack(spacing: 4) {
-                WorkspaceIcon(name: symbol, size: 12)
-                Text(title).mintUIFont(11)
-            }
-        }.accessibilityIdentifier("mint.selection.\(symbol)")
-    }
-
     private func colorDot(_ hex: String?) -> some View {
-        let active = state.colorHex == hex
+        let active = state.colorHex?.uppercased() == hex
+        let name: String = switch hex {
+        case "FF453A": "빨강"
+        case "FF9F0A": "주황"
+        case "30D158": "초록"
+        case "0A84FF": "파랑"
+        case "BF5AF2": "보라"
+        default: "기본색"
+        }
         let fill: Color =
             hex.flatMap { NSColor(inlineHex: $0).map(Color.init(nsColor:)) } ?? theme.inkC
         return ToolbarButton(
             theme: theme, active: active,
-            help: hex == nil ? "기본색" : "글자색", action: { onAction(.color(hex)) }
+            help: name, action: { onAction(.color(hex)) }
         ) {
             Circle()
                 .fill(fill)
-                .frame(width: 11, height: 11)
+                .frame(width: 12, height: 12)
                 .overlay(Circle().strokeBorder(theme.sepStrongC))
+                .padding(3)
+                .overlay(Circle().strokeBorder(active ? theme.ink2C : .clear, lineWidth: 1))
         }
+        .accessibilityIdentifier("mint.selection.color.\(hex ?? "default")")
+        .accessibilityValue(active ? "선택됨" : "")
     }
 }
 
@@ -186,7 +187,7 @@ private struct NumberField: View {
             .multilineTextAlignment(.center)
             .font(MintFonts.monoUI(11, .semibold))
             .foregroundStyle(theme.inkC)
-            .frame(width: 26)
+            .frame(width: 34)
             .focused($focused)
             .onSubmit(commit)
             .onChange(of: focused) { _, now in
@@ -208,7 +209,9 @@ private struct NumberField: View {
             .help(help)
     }
 
-    private func display(_ v: Double) -> String { String(Int(v.rounded())) }
+    private func display(_ v: Double) -> String {
+        v.formatted(.number.precision(.fractionLength(0...2)).locale(Locale(identifier: "en_US_POSIX")))
+    }
 
     /// 입력값을 숫자로 파싱해 허용 범위로 자른 뒤 커밋한다. 빈 값·오입력은 되돌린다.
     private func commit() {
@@ -247,5 +250,6 @@ private struct ToolbarButton<Label: View>: View {
         .buttonStyle(.plain)
         .onHover { hovered = $0 }
         .help(help)
+        .accessibilityLabel(help)
     }
 }

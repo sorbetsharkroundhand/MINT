@@ -1,6 +1,5 @@
 import AppKit
 import Combine
-import CryptoKit
 
 /// Captured-source assistance. Coauthor requires Insert; explicit inline actions apply with undo.
 @MainActor final class WorkspaceAssistance: ObservableObject {
@@ -240,36 +239,5 @@ import CryptoKit
         if mode != .coauthor { result = "" }
         errorMessage = "원문이나 문서가 바뀌었어요. 현재 원문에서 다시 실행해 주세요."
         contextVersion &+= 1
-    }
-    @discardableResult func excerpt(editor: BlockTextView) throws -> WritingDocumentID {
-        guard !editor.hasMarkedText(), session.isEditorEditable, case .project(let key) = editor.writingDocumentIdentity,
-            key.projectID == session.activeProject?.id, let original = session.document(key.documentID),
-            editor.serialize().utf16.elementsEqual(original.body.utf16), let storage = editor.textStorage,
-            editor.selectedRange().length > 0 else { throw ProjectSessionError.staleRuntime }
-        let quote = InlineMarkdown.serialize(storage, in: editor.selectedRange())
-        let returnPoint = requests.captureSourcePosition(in: session)
-        let existing = session.activeProject?.documents.first { $0.kind == .note && $0.id != key.documentID && session.activeProject?.trashedDocumentIDs.contains($0.id) == false }
-        let id: WritingDocumentID
-        if let existing { id = existing.id }
-        else { guard let created = session.createDocument(title: "발췌", kind: .note) else { throw ProjectSessionError.staleRuntime }; id = created }
-        guard let projectID = session.activeProject?.id, let note = session.document(id) else { throw ProjectSessionError.staleRuntime }
-        let payload = quote.components(separatedBy: "\n").map { "> " + $0 }.joined(separator: "\n")
-        let body = note.body + (note.body.isEmpty ? "" : "\n\n") + payload + "\n\n— " + original.title
-        try WorkspaceDocumentTransaction.perform([.init(key: .init(projectID: projectID, documentID: id), expectedBody: note.body, body: body)], in: session, requests: requests, undoManager: editor.undoManager, actionName: "발췌")
-        requests.spatialWorkspace?.open(id); session.selectDocument(id)
-        if let returnPoint, requests.sourceReturnPoint?.key.projectID != returnPoint.key.projectID {
-            requests.sourceReturnPoint = returnPoint
-        }
-        if let identity = session.runtimeIdentity {
-            let firstLine = (quote.components(separatedBy: "\n").first ?? "") as NSString
-            if firstLine.length > 0 {
-                let range = firstLine.rangeOfComposedCharacterSequences(for: NSRange(location: 0, length: min(firstLine.length, 1024)))
-                let reference = OriginalSourceReference(key: identity.key,
-                    revision: SHA256.hash(data: Data(body.utf8)).map { String(format: "%02x", $0) }.joined(),
-                    evidence: .init(documentID: id, quote: firstLine.substring(with: range), utf16Hint: note.body.utf16.count + (note.body.isEmpty ? 0 : 2) + 2), selection: .passage)
-                requests.issueSourceNavigation(.original(.init(identity: identity, reference: reference)))
-            }
-        }
-        return id
     }
 }

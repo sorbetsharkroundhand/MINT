@@ -294,13 +294,6 @@ struct WorkspaceSurface: View {
             guard let assistance else { return }
             Task { await assistance.runInline(.polish, editor: editor) }
         }
-        editorRequests.workspaceExcerpt = { [weak assistance, weak projectSession] editor in
-            do {
-                if let id = try assistance?.excerpt(editor: editor), let title = projectSession?.document(id)?.title {
-                    editorRequests.spatialWorkspace?.showToast("‘\(title)’에 선택한 구절을 발췌했습니다")
-                }
-            } catch { projectSession?.reportError(error) }
-        }
         for (key, editor) in editorRequests.registeredEditors {
             editorRequests.installSpatialInteraction(editor, key: key, session: projectSession)
         }

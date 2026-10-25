@@ -117,13 +117,14 @@ import XCTest
         XCTAssertEqual(h.fixture.session.selectedDocument?.body, "Changed while reading result")
     }
 
-    func testUnavailableLocalModelLeavesOriginalUntouchedAndExcerptPreservesSource() async throws {
+    func testUnavailableLocalModelLeavesOriginalUntouchedWithoutCreatingANote() async throws {
         let h = try await FramedWorkspaceHarness(reduceMotion: true)
         defer { h.close() }
         h.fixture.session.updateSelectedDocumentBody("Before **한글🙂** after")
         let editor = try await h.editor()
         editor.setSelectedRange((editor.string as NSString).range(of: "한글🙂"))
         let before = h.fixture.session.selectedDocument?.body
+        let documents = h.fixture.session.activeProject?.documents.map(\.id)
         let model = WorkspaceAssistance(session: h.fixture.session, requests: h.requests, margin: LivingMarginModel(), generate: { _, _ in
             throw CompletionEngine.ReadyInstructionError.modelUnavailable
         })
@@ -131,13 +132,7 @@ import XCTest
         await model.generate(prompt: "")
         XCTAssertFalse(model.errorMessage?.isEmpty ?? true)
         XCTAssertEqual(h.fixture.session.selectedDocument?.body, before)
-        let note = try model.excerpt(editor: editor)
-        XCTAssertTrue(h.fixture.session.document(note)?.body.contains("**한글🙂**") == true)
-        XCTAssertEqual(h.fixture.session.document(editor.writingDocumentIdentity!.documentID)?.body, before)
-        await h.layout()
-        let noteEditor = try await h.editor()
-        XCTAssertEqual(noteEditor.writingDocumentIdentity?.documentID, note)
-        XCTAssertEqual((noteEditor.string as NSString).substring(with: noteEditor.selectedRange()), "한글🙂")
+        XCTAssertEqual(h.fixture.session.activeProject?.documents.map(\.id), documents)
     }
     func testSourceABACannotReviveACompletedResult() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }

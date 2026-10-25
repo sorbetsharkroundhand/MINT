@@ -5,7 +5,6 @@ import Combine
 @MainActor final class WorkspaceEditorInteraction: EditorWorkspaceInteraction {
     let key: ProjectDocumentKey
     func polishSelection() { if let editor { requests?.workspacePolish?(editor) } }
-    func excerptSelection() { if let editor { requests?.workspaceExcerpt?(editor) } }
     private weak var editor: BlockTextView?
     private weak var session: ProjectSession?
     private weak var requests: ProjectEditorRequests?
