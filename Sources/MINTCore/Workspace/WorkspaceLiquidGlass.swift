@@ -30,8 +30,8 @@ struct WorkspaceLiquidGlass: NSViewRepresentable {
             layer?.backgroundColor = opaque ? theme.workspaceSurface.cgColor : NSColor.clear.cgColor
             let gradient = CAGradientLayer()
             gradient.colors = (dark
-                ? [NSColor(hex: 0x181816, alpha: 0.90), NSColor(hex: 0x111110, alpha: 0.86), NSColor(hex: 0x141716, alpha: 0.88)]
-                : [NSColor(hex: 0xFCFAF5, alpha: 0.88), NSColor(hex: 0xF2EEE5, alpha: 0.82), NSColor(hex: 0xFAF8F2, alpha: 0.86)]).map(\.cgColor)
+                ? [NSColor(hex: 0x181816, alpha: 0.84), NSColor(hex: 0x111110, alpha: 0.80), NSColor(hex: 0x141716, alpha: 0.82)]
+                : [NSColor(hex: 0xFCFAF5, alpha: 0.82), NSColor(hex: 0xF2EEE5, alpha: 0.76), NSColor(hex: 0xFAF8F2, alpha: 0.80)]).map(\.cgColor)
             gradient.locations = [0, 0.52, 1]; gradient.startPoint = .init(x: 0, y: 1); gradient.endPoint = .init(x: 1, y: 0)
             tint.layer?.sublayers?.forEach { $0.removeFromSuperlayer() }; tint.layer?.addSublayer(gradient)
             tint.layer?.borderWidth = 1; tint.layer?.borderColor = NSColor.white.withAlphaComponent(dark ? 0.045 : 0.35).cgColor
