@@ -36,6 +36,8 @@ struct WorkspacePouchTools: View {
     let theme: MintTheme
     let openCoauthor: () -> Void
     let openSettings: () -> Void
+    @AppStorage("mint.appearance") private var appearance = ""
+    @Environment(\.colorScheme) private var colorScheme
     @State private var markedText = false
 
     private var editor: BlockTextView? {
@@ -70,6 +72,7 @@ struct WorkspacePouchTools: View {
             }
             divider
             VStack(spacing: 8) {
+                themeRow
                 HStack(spacing: 6) {
                     focusButton("문단 집중", "viewfinder", value: $model.focusDimming, id: "mint.workspace.pouch.focus")
                     focusButton("타자기 스크롤", "text.line.first.and.arrowtriangle.forward", value: $model.typewriter, id: "mint.workspace.pouch.typewriter")
@@ -86,9 +89,11 @@ struct WorkspacePouchTools: View {
                         .toggleStyle(.switch).controlSize(.mini).tint(theme.novelC)
                         .disabled(completion.isManagingModel).fixedSize()
                         .accessibilityIdentifier("mint.workspace.pouch.autocomplete")
+                        .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.autocomplete", label: "자동완성", value: settings.autocompleteEnabled ? "켜짐" : "꺼짐", role: .checkBox))
                     Spacer(minLength: 0)
                     ModelChip(completion: completion, settings: settings, theme: theme)
                         .frame(maxWidth: 150).accessibilityIdentifier("mint.workspace.pouch.model")
+                        .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.model", label: "모델 선택"))
                 }
                 HStack(spacing: 6) {
                     actionButton("이어쓰기", "sparkles") {
@@ -99,6 +104,7 @@ struct WorkspacePouchTools: View {
                     actionButton("공동 집필", "square.and.pencil", action: openCoauthor)
                         .disabled(editor == nil || markedText || !session.isEditorEditable)
                         .accessibilityIdentifier("mint.workspace.pouch.coauthor")
+                        .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.coauthor", label: "공동 집필"))
                 }
             }
             divider
@@ -107,10 +113,12 @@ struct WorkspacePouchTools: View {
                     Label("나란히 펼치기", systemImage: "rectangle.split.3x1").mintUIFont(10.5)
                         .frame(height: 28)
                 }.help("모든 원고 나란히 펼치기").accessibilityIdentifier("mint.workspace.pouch.open-all")
+                    .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.open-all", label: "모든 원고 나란히 펼치기"))
                 Spacer(minLength: 4)
                 footerButton("전체 설정 · ⌘,", "gearshape", action: openSettings)
                 footerButton("창을 미니 오브로 접기", "arrow.down.right.and.arrow.up.left") { requests.pouch?.collapse() }
                     .accessibilityIdentifier("mint.workspace.pouch.collapse")
+                    .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.collapse", label: "창을 미니 오브로 접기"))
             }.buttonStyle(PouchRowButtonStyle())
         }
         .padding(.horizontal, 10).padding(.bottom, 8)
@@ -147,6 +155,30 @@ struct WorkspacePouchTools: View {
             .accessibilityIdentifier("mint.workspace.pouch.panel.\(tile.id)")
             .accessibilityLabel(title).accessibilityValue(active ? "열림" : "닫힘")
     }
+    private var themeRow: some View {
+        HStack(spacing: 4) {
+            themeOption("라이트", "sun.max", mode: "light", id: "mint.workspace.pouch.appearance.light")
+            themeOption("다크", "moon", mode: "dark", id: "mint.workspace.pouch.appearance.dark")
+            themeOption("시스템", "circle.lefthalf.filled", mode: "", id: "mint.workspace.pouch.appearance.system")
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("mint.workspace.pouch.appearance")
+        .accessibilityLabel("화면 테마")
+        .background(WorkspaceAccessibilityProbe(identifier: "mint.workspace.pouch.appearance", label: "화면 테마", value: appearance.isEmpty ? "system" : appearance, role: .group))
+    }
+    private func themeOption(_ title: String, _ symbol: String, mode: String, id: String) -> some View {
+        let active = appearance == mode
+        return Button { appearance = mode } label: {
+            Label(title, systemImage: symbol).mintUIFont(10.5, .medium)
+                .frame(maxWidth: .infinity).frame(height: 30)
+                .foregroundStyle(active ? theme.novelC : theme.ink2C)
+                .background(active ? theme.activeBgC : theme.hoverC, in: Capsule())
+        }.buttonStyle(PouchRowButtonStyle())
+            .accessibilityIdentifier(id)
+            .accessibilityLabel(title)
+            .accessibilityValue(active ? "선택됨" : "")
+            .background(WorkspaceAccessibilityProbe(identifier: id, label: title, value: active ? "선택됨" : ""))
+    }
     private func focusButton(_ title: String, _ symbol: String, value: Binding<Bool>, id: String) -> some View {
         Button { value.wrappedValue.toggle() } label: {
             Label(title, systemImage: symbol).mintUIFont(10.5, .medium)
@@ -155,9 +187,11 @@ struct WorkspacePouchTools: View {
                 .background(value.wrappedValue ? theme.activeBgC : theme.hoverC, in: Capsule())
         }.buttonStyle(PouchRowButtonStyle()).accessibilityIdentifier(id)
             .accessibilityValue(value.wrappedValue ? "켜짐" : "꺼짐")
+            .background(WorkspaceAccessibilityProbe(identifier: id, label: title, value: value.wrappedValue ? "켜짐" : "꺼짐"))
     }
     private func stepper(_ title: String, value: Binding<Double>, range: ClosedRange<Double>, id: String) -> some View {
-        HStack(spacing: 8) {
+        let fullID = "mint.workspace.pouch.\(id)"
+        return HStack(spacing: 8) {
             Text(title).foregroundStyle(theme.ink2C)
             Spacer(minLength: 4)
             Button { value.wrappedValue = max(range.lowerBound, value.wrappedValue - 0.5) } label: {
@@ -168,7 +202,8 @@ struct WorkspacePouchTools: View {
             Button { value.wrappedValue = min(range.upperBound, value.wrappedValue + 0.5) } label: {
                 Image(systemName: "plus").frame(width: 28, height: 28)
             }.disabled(value.wrappedValue >= range.upperBound).accessibilityLabel(title + " 늘리기")
-        }.buttonStyle(PouchRowButtonStyle()).accessibilityIdentifier("mint.workspace.pouch.\(id)")
+        }.buttonStyle(PouchRowButtonStyle()).accessibilityIdentifier(fullID)
+            .background(WorkspaceAccessibilityProbe(identifier: fullID, label: title, role: .group))
     }
     private func actionButton(_ title: String, _ symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {

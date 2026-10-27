@@ -818,6 +818,50 @@ public final class CompletionController: ObservableObject {
         folderNamingTasks[folderID] = task
     }
 
+    /// 프로젝트 탐색기에서 문서를 합쳐 만든 자동 생성 폴더("새 폴더")의 이름을
+    /// 로컬 엔진이 준비된 경우에만 조용히 지어 붙인다.
+    public func requestFolderName(for folderID: UUID, in session: ProjectSession) {
+        guard !isMemoryPressurePaused, settings.authorization == .enabled, settings.autocompleteEnabled,
+              engineState == .ready, !isManagingModel, !foregroundIsBusy,
+              let project = session.activeProject,
+              let navigation = try? ProjectNavigation.read(project) else { return }
+        guard !namingFolderIDs.contains(folderID) else { return }
+        let members = project.documents.filter {
+            !project.trashedDocumentIDs.contains($0.id) && navigation.documentFolders[$0.id] == folderID
+        }
+        guard !members.isEmpty else { return }
+        let content = String(members.enumerated().map { index, doc in
+            "[문서 \(index + 1)] 제목: \(doc.title)\n\(doc.body.prefix(300))"
+        }.joined(separator: "\n\n").prefix(settings.contextCharacters))
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let projectID = project.id
+        let epoch = session.activationEpoch
+        namingFolderIDs.insert(folderID)
+        let parameters = settings.parameters
+        let task = Task { [engine, weak session] in
+            let name = (try? await engine.generateFolderName(content: content, parameters: parameters)) ?? ""
+            guard !Task.isCancelled else { return }
+            self.folderNamingTasks[folderID] = nil
+            self.namingFolderIDs.remove(folderID)
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let session,
+                  session.activeProject?.id == projectID,
+                  session.activationEpoch == epoch,
+                  let currentProject = session.activeProject,
+                  let currentNav = try? ProjectNavigation.read(currentProject),
+                  let folder = currentNav.folders.first(where: { $0.id == folderID }),
+                  folder.name == "새 폴더" else { return }
+            let namingAnimation: Animation? =
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil : .easeOut(duration: 0.18)
+            withAnimation(namingAnimation) {
+                try? session.applyNavigation(.renameFolder(folderID, trimmed), projectID: projectID, epoch: epoch)
+            }
+        }
+        folderNamingTasks[folderID] = task
+    }
+
     /// 테스트 전용 — 실제 엔진 호출 없이 진행 상태와 장수 태스크를 심어
     /// 취소 경로(스피너 즉시 해제)를 검증한다 (이슈 #47).
     @discardableResult

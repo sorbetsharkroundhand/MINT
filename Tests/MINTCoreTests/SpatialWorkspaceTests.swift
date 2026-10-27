@@ -32,6 +32,7 @@ final class SpatialWorkspaceTests: XCTestCase {
         for target in [SpatialDropTarget.start, .end, .before(.document(b)),
                        .after(.document(b)), .above(.document(b)), .below(.document(b))] {
             var layout = SpatialWorkspaceLayout(documents: [a, b, c], selected: a)
+            layout.openAll([a, b, c])
             layout.openDocument(c); layout.move(.document(a), to: target)
             XCTAssertEqual(Set(layout.tiles), [.navigator, .document(a), .document(b), .document(c)])
             XCTAssertEqual(layout.tiles.count, 4)
@@ -87,6 +88,7 @@ final class SpatialWorkspaceTests: XCTestCase {
 
     func testGeometryUsesSourceSpacingAndKeepsOverflowReachable() throws {
         var layout = SpatialWorkspaceLayout(documents: [a, b], selected: a)
+        layout.move(.document(b), to: .after(.document(a)))
         let geometry = SpatialWorkspaceGeometry(layout: layout, viewport: CGSize(width: 1200, height: 700))
         XCTAssertEqual(try XCTUnwrap(geometry.tiles[.navigator]).width, 204)
         XCTAssertEqual(try XCTUnwrap(geometry.tiles[.document(a)]).width, 482, accuracy: 0.01)
@@ -102,7 +104,8 @@ final class SpatialWorkspaceTests: XCTestCase {
     }
 
     func testDropHitTestingUsesEdgeBandsAndTwentyEightPercentRows() throws {
-        let layout = SpatialWorkspaceLayout(documents: [a, b], selected: a)
+        var layout = SpatialWorkspaceLayout(documents: [a, b], selected: a)
+        layout.move(.document(b), to: .after(.document(a)))
         let geometry = SpatialWorkspaceGeometry(layout: layout, viewport: CGSize(width: 1200, height: 700))
         let rect = try XCTUnwrap(geometry.tiles[.document(b)])
         XCTAssertEqual(geometry.dropTarget(at: CGPoint(x: 12, y: 300), dragging: .document(a)), .start)
@@ -111,11 +114,13 @@ final class SpatialWorkspaceTests: XCTestCase {
         XCTAssertEqual(geometry.dropTarget(at: CGPoint(x: rect.midX, y: rect.minY + rect.height * 0.73), dragging: .document(a)), .below(.document(b)))
         XCTAssertEqual(geometry.dropTarget(at: CGPoint(x: rect.minX + 40, y: rect.midY), dragging: .document(a)), .before(.document(b)))
         XCTAssertEqual(geometry.dropTarget(at: CGPoint(x: rect.maxX - 40, y: rect.midY), dragging: .document(a)), .after(.document(b)))
+        XCTAssertEqual(geometry.dropTarget(at: CGPoint(x: rect.midX, y: rect.midY), dragging: .document(a)), .tab(.document(b), index: 1))
         XCTAssertNil(geometry.dropTarget(at: CGPoint(x: 600, y: -100), dragging: .document(a)))
     }
 
     func testMalformedRestorationCannotDuplicateOrLoseTheLastRealDocument() {
         var layout = SpatialWorkspaceLayout(documents: [a, b], selected: a)
+        layout.move(.document(b), to: .after(.document(a)))
         layout.columns[0].slots.append(.init(tile: .document(a), weight: .nan))
         layout.columns[1].slots[0].weight = -10
         layout.columns[2].width = .infinity

@@ -313,7 +313,9 @@ public final class ProjectSession: ObservableObject {
 
     /// Optional domain preparation must finish durably before a mutable owner is adopted.
     private func preparedForAdoption(_ project: WritingProject?) async throws -> WritingProject? {
-        guard let project, let prepareProject else { return project }
+        guard let original = project else { return nil }
+        let project = try await store.prepareDocumentNavigation(original)
+        guard let prepareProject else { return project }
         let prepared = try await prepareProject(project, store)
         guard prepared.id == project.id else { throw ProjectStoreError.invalidManifest }
         let verified = try await store.load(id: project.id)
@@ -424,7 +426,8 @@ public final class ProjectSession: ObservableObject {
     @discardableResult
     public func createDocument(
         title: String = "Untitled",
-        kind: WritingDocument.Kind = .manuscript
+        kind: WritingDocument.Kind = .manuscript,
+        in folderID: UUID? = nil
     ) -> WritingDocumentID? {
         guard !isTransitioning else { return nil }
         guard activeProject != nil else { return nil }
@@ -436,6 +439,15 @@ public final class ProjectSession: ObservableObject {
             body: "",
             kind: kind)
         project.documents.append(document)
+        do {
+            var navigation = try ProjectNavigation.read(project)
+            if let folderID {
+                guard navigation.contains(.folder(folderID), in: project) else { throw ProjectSessionError.staleRuntime }
+                navigation.documentFolders[document.id] = folderID
+            }
+            navigation.createdDates[document.id] = Date()
+            try navigation.write(to: &project)
+        } catch { reportError(error); return nil }
         activeProject = project
         selectedDocumentID = document.id
         persistSelection(document.id, for: project.id)
@@ -445,55 +457,79 @@ public final class ProjectSession: ObservableObject {
     }
 
     public func trashSelectedDocument() {
-        guard !isTransitioning else { return }
-        guard let project = activeProject,
-            let removedID = selectedDocumentID,
-            let removed = project.documents.first(where: { $0.id == removedID }),
-            !project.trashedDocumentIDs.contains(removedID)
-        else { return }
-
-        willTransition?()
-        guard var project = activeProject else { return }
-
-        project.trashedDocumentIDs.insert(removedID)
-        var replacementID = project.documents.first {
-            !project.trashedDocumentIDs.contains($0.id)
-        }?.id
-        if replacementID == nil {
-            let replacement = WritingDocument(
-                id: WritingDocumentID(),
-                title: "Untitled",
-                body: "",
-                kind: removed.kind)
-            project.documents.append(replacement)
-            replacementID = replacement.id
-        }
-
-        activeProject = project
-        selectedDocumentID = replacementID
-        if let replacementID { persistSelection(replacementID, for: project.id) }
-        noteDocumentChange()
-        markDirty()
+        guard let project = activeProject, let id = selectedDocumentID else { return }
+        do { try applyNavigation(.trash(.document(id)), projectID: project.id) }
+        catch { reportError(error) }
     }
 
     public func restoreDocument(_ id: WritingDocumentID) {
-        guard !isTransitioning else { return }
-        guard let project = activeProject,
-            project.trashedDocumentIDs.contains(id),
-            project.documents.contains(where: { $0.id == id })
-        else { return }
+        guard let project = activeProject else { return }
+        do { try applyNavigation(.restore(.document(id)), projectID: project.id) }
+        catch { reportError(error) }
+    }
 
-        if selectedDocumentID == nil { willTransition?() }
-        guard var project = activeProject else { return }
-
-        project.trashedDocumentIDs.remove(id)
-        activeProject = project
-        if selectedDocumentID == nil {
-            selectedDocumentID = id
-            persistSelection(id, for: project.id)
+    /// Organization edits use the same durable owner and activation fence as writing.
+    func applyNavigation(_ edit: ProjectNavigationEdit, projectID: WritingProjectID,
+                         epoch: UInt64? = nil, undoManager: UndoManager? = nil) throws {
+        guard phase == .ready, !isTransitioning, var project = activeProject, project.id == projectID,
+              epoch == nil || epoch == activationEpoch else { throw ProjectSessionError.staleRuntime }
+        var navigation = try ProjectNavigation.read(project)
+        var preview = project
+        try navigation.apply(edit, to: &preview)
+        if let id = selectedDocumentID,
+           preview.trashedDocumentIDs.contains(id) || preview.documents.first(where: { $0.id == id })?.kind != selectedDocument?.kind {
+            willTransition?()
+            guard let current = activeProject, current.id == projectID else { throw ProjectSessionError.staleRuntime }
+            project = current
         }
-        noteDocumentChange()
-        markDirty()
+        let before = project
+        navigation = try ProjectNavigation.read(project)
+        try navigation.apply(edit, to: &project)
+        if project.documents.allSatisfy({ project.trashedDocumentIDs.contains($0.id) }) {
+            let replacement = WritingDocument(id: WritingDocumentID(), title: "Untitled", body: "", kind: selectedDocument?.kind ?? .manuscript)
+            project.documents.append(replacement); navigation.createdDates[replacement.id] = Date()
+            try navigation.write(to: &project)
+        }
+        guard project != before else { return }
+        let previousSelection = selectedDocumentID
+        activeProject = project
+        if selectedDocumentID == nil || project.trashedDocumentIDs.contains(selectedDocumentID!) || !project.documents.contains(where: { $0.id == selectedDocumentID }) {
+            selectedDocumentID = project.documents.first { !project.trashedDocumentIDs.contains($0.id) }?.id
+            if let selectedDocumentID { persistSelection(selectedDocumentID, for: project.id) }
+        }
+        noteDocumentChange(); markDirty()
+        registerNavigationUndo(before: before, after: project, selection: previousSelection, manager: undoManager)
+    }
+
+    private func registerNavigationUndo(before: WritingProject, after: WritingProject,
+                                        selection: WritingDocumentID?, manager: UndoManager?) {
+        guard let manager else { return }
+        let epoch = activationEpoch
+        manager.registerUndo(withTarget: self) { owner in
+            MainActor.assumeIsolated {
+                guard owner.activationEpoch == epoch, !owner.isTransitioning, let current = owner.activeProject,
+                      current.id == before.id, current.userData[ProjectNavigation.key] == after.userData[ProjectNavigation.key],
+                      current.documents.map(\.id) == after.documents.map(\.id), current.trashedDocumentIDs == after.trashedDocumentIDs else { return }
+                let previousIDs = Set(before.documents.map(\.id))
+                guard current.documents.filter({ !previousIDs.contains($0.id) }).allSatisfy({ $0.body.isEmpty }) else { return }
+                owner.willTransition?()
+                guard let live = owner.activeProject else { return }
+                var restored = live
+                restored.documents = before.documents.map { old in
+                    var document = live.documents.first { $0.id == old.id } ?? old
+                    document.kind = old.kind
+                    return document
+                }
+                restored.userData[ProjectNavigation.key] = before.userData[ProjectNavigation.key]
+                restored.trashedDocumentIDs = before.trashedDocumentIDs
+                let oldSelection = owner.selectedDocumentID
+                owner.activeProject = restored; owner.selectedDocumentID = selection
+                if let selection { owner.persistSelection(selection, for: restored.id) }
+                owner.noteDocumentChange(); owner.markDirty()
+                owner.registerNavigationUndo(before: live, after: restored, selection: oldSelection, manager: manager)
+            }
+        }
+        manager.setActionName("문서 정리")
     }
 
     /// Persist every generation observed while the store actor hop is in flight. A save

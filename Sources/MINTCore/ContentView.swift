@@ -635,14 +635,12 @@ struct MarkdownCheatSheet: View {
     }
 
     private static let blocks: [Item] = [
-        Item(syntax: "# ", label: "제목 1"),
-        Item(syntax: "## ", label: "제목 2"),
-        Item(syntax: "### ", label: "제목 3"),
-        Item(syntax: "- ", label: "글머리 목록"),
-        Item(syntax: "1. ", label: "번호 목록"),
+        Item(syntax: "# ~ ###### ", label: "제목 1 ~ 6"),
+        Item(syntax: "- ", label: "글머리 목록 (Tab 들여쓰기)"),
+        Item(syntax: "1. ", label: "번호 목록 (Tab 들여쓰기)"),
         Item(syntax: "[ ] ", label: "체크리스트"),
-        Item(syntax: "> ", label: "인용"),
-        Item(syntax: "```", label: "코드 블록"),
+        Item(syntax: "> ", label: "인용 (Tab 중첩 인용)"),
+        Item(syntax: "```언어", label: "코드 블록"),
         Item(syntax: "$$ ", label: "수식 (LaTeX)"),
         Item(syntax: "---", label: "구분선"),
     ]
@@ -650,7 +648,10 @@ struct MarkdownCheatSheet: View {
     private static let inlines: [Item] = [
         Item(syntax: "**굵게**", label: "굵게"),
         Item(syntax: "*기울임*", label: "기울임"),
+        Item(syntax: "~~취소선~~", label: "취소선"),
+        Item(syntax: "==형광펜==", label: "하이라이트"),
         Item(syntax: "`코드`", label: "인라인 코드"),
+        Item(syntax: "[말](주소)", label: "링크 (⌘클릭 이동)"),
     ]
 
     var body: some View {
@@ -661,7 +662,7 @@ struct MarkdownCheatSheet: View {
             sectionTitle("인라인")
             ForEach(Self.inlines) { row($0) }
             theme.sepC.frame(height: 1).padding(.vertical, 7)
-            Text("서식 메뉴(⌘⌥1~3, ⌘B/⌘I 등)로도 적용할 수 있어요.")
+            Text("서식 메뉴(⌘⌥1~6, ⌘B/⌘I/⌘L, ⌘/ 소스 보기 등)로도 적용할 수 있어요.")
                 .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
@@ -886,6 +887,7 @@ struct LongParagraphNotice: View {
     }
 }
 
+#if canImport(PreviewsMacros)
 #Preview {
     let store = ProjectStore(
         root: FileManager.default.temporaryDirectory
@@ -905,3 +907,4 @@ struct LongParagraphNotice: View {
             editorRequests: editorRequests))
         .frame(width: 1180, height: 760)
 }
+#endif

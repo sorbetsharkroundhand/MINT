@@ -13,13 +13,12 @@ let package = Package(
     dependencies: [
         // 온디바이스 LLM 추론. MLXLLM/MLXLMCommon은 mlx-swift-examples에서
         // mlx-swift-lm 저장소로 이전됨.
-        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.31.3"),
+        .package(url: "https://github.com/ml-explore/mlx-swift-lm", from: "3.32.3"),
         // MLXArray 등 코어 타입 직접 사용 — 이어쓰기(continuation) 프롬프트는
         // 챗 템플릿 없이 수동 토크나이즈로 LMInput을 만든다.
-        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.4"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.32.3"),
         // Hugging Face 허브 다운로드 + 토크나이저.
-        // mlx-swift-lm 3.x의 #huggingFaceLoadModelContainer 매크로(MLXHuggingFace)가
-        // HubClient(swift-huggingface)와 AutoTokenizer(swift-transformers)로 확장된다.
+        // Downloads and the local tokenizer bridge use these APIs directly.
         .package(url: "https://github.com/huggingface/swift-huggingface", from: "0.9.0"),
         .package(url: "https://github.com/huggingface/swift-transformers", from: "1.3.0"),
         // 수식 블록 LaTeX 렌더링 (iosMath의 Swift 포트, CoreText 기반 네이티브).
@@ -46,7 +45,6 @@ let package = Package(
                 "MINTKoreanBackend",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
-                .product(name: "MLXHuggingFace", package: "mlx-swift-lm"),
                 .product(name: "MLX", package: "mlx-swift"),
                 .product(name: "HuggingFace", package: "swift-huggingface"),
                 .product(name: "Tokenizers", package: "swift-transformers"),

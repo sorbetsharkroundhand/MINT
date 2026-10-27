@@ -37,8 +37,10 @@ class WorkspaceHTMLButton: NSButton {
     private(set) var hovered = false
     override init(frame: NSRect) {
         super.init(frame: frame)
+        title = ""
         isBordered = false; refusesFirstResponder = true; wantsLayer = true
-        imagePosition = .imageLeading; imageHugsTitle = true
+        imagePosition = .imageOnly; imageHugsTitle = true
+        setAccessibilityElement(true); setAccessibilityRole(.button)
     }
     required init?(coder: NSCoder) { nil }
     override func updateTrackingAreas() {
@@ -48,6 +50,7 @@ class WorkspaceHTMLButton: NSButton {
     override func mouseEntered(with event: NSEvent) { hovered = true; refresh() }
     override func mouseExited(with event: NSEvent) { hovered = false; refresh() }
     func refresh() {
+        imagePosition = title.isEmpty ? .imageOnly : .imageLeading
         layer?.cornerRadius = radius
         let fill = selected ? theme.activeBg : (hovered ? theme.hover : (chip ? theme.chip : .clear))
         layer?.backgroundColor = fill.cgColor
@@ -97,4 +100,22 @@ final class WorkspaceModalPanel: NSPanel {
         parent.addChildWindow(panel, ordered: .above); panel.orderFront(nil); self.panel = panel
     }
     func close() { panel?.parent?.removeChildWindow(panel!); panel?.orderOut(nil); panel?.close(); panel = nil }
+}
+
+struct WorkspaceAccessibilityProbe: NSViewRepresentable {
+    let identifier: String
+    var label: String = ""
+    var value: String = ""
+    var role: NSAccessibility.Role = .button
+    func makeNSView(context: Context) -> ProbeView { ProbeView() }
+    func updateNSView(_ view: ProbeView, context: Context) {
+        view.setAccessibilityElement(true)
+        view.setAccessibilityRole(role)
+        view.setAccessibilityIdentifier(identifier)
+        view.setAccessibilityLabel(label.isEmpty ? nil : label)
+        view.setAccessibilityValue(value.isEmpty ? nil : value)
+    }
+    final class ProbeView: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
 }

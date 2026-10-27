@@ -172,7 +172,7 @@ final class DocumentOutlineWorkspaceTests: XCTestCase {
         XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.sidebarSection"), "bible")
         XCTAssertEqual(h.fixture.defaults.string(forKey: "mint.toolDockPosition"), "right")
         h.fixture.session.selectWorkspaceMode(.outline); await h.layout()
-        let menu = try XCTUnwrap((h.element("mint.writer-tools.compatibility") as? NSButton)?.menu)
+        let menu = try XCTUnwrap(h.requests.pouch).moreMenu()
         let item = try XCTUnwrap(menu.items.first { $0.accessibilityIdentifier() == "mint.workspace.context" })
         _ = (item.target as? NSObject)?.perform(try XCTUnwrap(item.action), with: item)
         await h.layout()

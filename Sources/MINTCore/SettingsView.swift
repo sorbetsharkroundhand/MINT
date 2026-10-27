@@ -517,6 +517,8 @@ public struct SettingsView: View {
     }
 }
 
+#if canImport(PreviewsMacros)
 #Preview {
     SettingsView(settings: CompletionSettings())
 }
+#endif

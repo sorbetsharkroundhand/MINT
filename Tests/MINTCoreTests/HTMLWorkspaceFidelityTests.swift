@@ -12,7 +12,10 @@ import XCTest
         editor.setSelectedRange(NSRange(location: 0, length: 3)); editor.updateSelectionToolbar()
         try await Task.sleep(for: .milliseconds(300))
         XCTAssertNotNil(editor.workspaceSelectionPanel)
+        XCTAssertEqual(editor.workspaceSelectionPanel?.canBecomeKey, true)
+        XCTAssertEqual(editor.workspaceSelectionPanel?.becomesKeyOnlyIfNeeded, true)
         XCTAssertTrue(h.window.firstResponder === editor)
+        XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3), "Presenting selection toolbar must not trigger selectAll on BlockTextView")
         let toolbar = try XCTUnwrap(editor.workspaceSelectionPanel?.contentView)
         let controls = h.elements(in: toolbar)
         for identifier in ["font-size.smaller", "font-size.value", "font-size.larger", "color.default", "color.FF453A", "polish"] {
@@ -24,6 +27,11 @@ import XCTest
         editor.perform(.fontSize(18.5))
         XCTAssertEqual(editor.currentSelectionState().fontSize, 18.5)
         XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))
+        editor.perform(.fontSize(22))
+        await h.layout()
+        XCTAssertEqual(editor.currentSelectionState().fontSize, 22)
+        let updatedControls = h.elements(in: try XCTUnwrap(editor.workspaceSelectionPanel?.contentView))
+        XCTAssertTrue(updatedControls.contains { $0.accessibilityIdentifier() == "mint.selection.font-size.value" && ($0.accessibilityValue() as? String) == "22" })
         editor.perform(.color("FF453A"))
         XCTAssertEqual(editor.currentSelectionState().colorHex, "FF453A")
         XCTAssertEqual(editor.selectedRange(), NSRange(location: 0, length: 3))
@@ -31,6 +39,7 @@ import XCTest
     }
     func testSecondaryMenuKeepsModesAndAIStateAccessible() async throws {
         let h = try await FramedWorkspaceHarness(mode: .fiction); defer { h.close() }
+        h.window.makeKeyAndOrderFront(nil)
         let pouch = try XCTUnwrap(h.requests.pouch)
         let menu = pouch.moreMenu()
         XCTAssertTrue(menu.items.contains { $0.accessibilityIdentifier() == "mint.workspace.mode.map" })
@@ -60,6 +69,9 @@ import XCTest
         let extent = canvas.geometry.contentSize
         spatial.openPouchTools(); await h.layout()
         let trigger = try XCTUnwrap(spatial.pouchAnchor)
+        let triggerButton = try XCTUnwrap(trigger as? NSButton)
+        XCTAssertEqual(triggerButton.title, "")
+        XCTAssertEqual(triggerButton.imagePosition, .imageOnly)
         XCTAssertFalse(trigger.superview is SpatialTileHeaderView)
         XCTAssertFalse(trigger.isHidden)
         let triggerFrame = trigger.convert(trigger.bounds, to: nil)
@@ -76,6 +88,9 @@ import XCTest
         XCTAssertNotNil(h.element("mint.workspace.pouch.more"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.autocomplete"))
         XCTAssertNil(h.element("mint.workspace.pouch.character-format"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.appearance"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.appearance.light"))
+        XCTAssertNotNil(h.element("mint.workspace.pouch.appearance.dark"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.font-size"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.line-spacing"))
         XCTAssertNotNil(h.element("mint.workspace.pouch.typewriter"))

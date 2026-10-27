@@ -88,5 +88,5 @@ public enum PinnedModelCatalog {
             .init(path: "tokenizer_config.json", size: 7308, digest: "482ccbc1096b0e9400e86e33f189681c2aebdab9", algorithm: .gitBlobSHA1),
             .init(path: "vocab.json", size: 2776833, digest: "4783fe10ac3adce15ac8f358ef5462739852c569", algorithm: .gitBlobSHA1),
         ]),
-    ]
+    ] + writingCandidates
 }

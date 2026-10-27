@@ -4,6 +4,7 @@ import Foundation
 enum MarkdownInlineScanner {
     struct Style: Sendable, Equatable {
         var bold = false, italic = false, code = false
+        var strikethrough = false, highlight = false
         var color: String?
         var fontSize: Double?
     }
@@ -20,7 +21,9 @@ enum MarkdownInlineScanner {
     static let boldItalic = regex(#"(?<!\*)\*\*\*([^*\n]+)\*\*\*(?!\*)"#)
     static let bold = regex(#"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#)
     static let italic = regex(#"(?<!\*)\*([^*\n]+)\*(?!\*)"#)
-    private enum Kind { case font, code, boldItalic, bold, italic }
+    static let strikethrough = regex(#"(?<!~)~~([^~\n]+)~~(?!~)"#)
+    static let highlight = regex(#"(?<!=)==([^=\n]+)==(?!=)"#)
+    private enum Kind { case font, code, boldItalic, bold, italic, strikethrough, highlight }
     private static func regex(_ pattern: String) -> NSRegularExpression {
         try! NSRegularExpression(pattern: pattern)
     }
@@ -34,10 +37,19 @@ enum MarkdownInlineScanner {
             spans.append(Span(text: ns.substring(with: range),
                               sourceRange: NSRange(location: offset + range.location, length: range.length), style: style))
         }
+        let rules: [(NSRegularExpression, Kind)] = [
+            (fontTag, .font),
+            (code, .code),
+            (boldItalic, .boldItalic),
+            (bold, .bold),
+            (italic, .italic),
+            (strikethrough, .strikethrough),
+            (highlight, .highlight),
+        ]
         while location < ns.length {
             let search = NSRange(location: location, length: ns.length - location)
             var best: (NSTextCheckingResult, Kind)?
-            for (rx, kind) in [(fontTag, Kind.font), (code, .code), (boldItalic, .boldItalic), (bold, .bold), (italic, .italic)] {
+            for (rx, kind) in rules {
                 if let match = rx.firstMatch(in: text, range: search),
                    best == nil || match.range.location < best!.0.range.location { best = (match, kind) }
             }
@@ -57,10 +69,32 @@ enum MarkdownInlineScanner {
                    let value = Double(attributes.substring(with: size.range(at: 1))) { style.fontSize = value }
                 let body = match.range(at: 2)
                 spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
-            case .code: style.code = true; append(match.range(at: 1), style)
-            case .boldItalic: style.bold = true; style.italic = true; append(match.range(at: 1), style)
-            case .bold: style.bold = true; append(match.range(at: 1), style)
-            case .italic: style.italic = true; append(match.range(at: 1), style)
+            case .code:
+                var codeStyle = Style()
+                codeStyle.code = true
+                codeStyle.color = inherited.color
+                codeStyle.fontSize = inherited.fontSize
+                append(match.range(at: 1), codeStyle)
+            case .boldItalic:
+                style.bold = true; style.italic = true
+                let body = match.range(at: 1)
+                spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
+            case .bold:
+                style.bold = true
+                let body = match.range(at: 1)
+                spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
+            case .italic:
+                style.italic = true
+                let body = match.range(at: 1)
+                spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
+            case .strikethrough:
+                style.strikethrough = true
+                let body = match.range(at: 1)
+                spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
+            case .highlight:
+                style.highlight = true
+                let body = match.range(at: 1)
+                spans += scan(ns.substring(with: body), inherited: style, offset: offset + body.location)
             }
             location = match.range.upperBound
         }

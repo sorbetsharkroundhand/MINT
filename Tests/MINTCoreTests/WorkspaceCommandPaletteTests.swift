@@ -21,7 +21,7 @@ import XCTest
         search.perform()
         await h.layout()
         XCTAssertTrue(h.requests.spatialWorkspace?.layout.contains(.search) == true)
-        XCTAssertNotNil(h.element("mint.workspace.search"))
+        XCTAssertNotNil(h.element("mint.workspace.search.query"))
         XCTAssertTrue(h.requests.nativeEditor === editor)
     }
     func testCommandsFilesCharactersAndOriginalsUseTheNineResultLimit() throws {

@@ -237,7 +237,7 @@ struct WorkspaceSurface: View {
                         Button("닫기") { self.writerSection = nil }.keyboardShortcut(.cancelAction)
                     }.padding(16)
                     ProjectWriterToolsView(session: projectSession, completion: completion, editorRequests: editorRequests,
-                        section: writerSection, theme: theme, spatial: spatial)
+                        section: writerSection, theme: theme, spatial: spatial, indexer: indexer)
                 }.frame(width: 460, height: 540).background(theme.editorSurfaceC)
             }
         }
@@ -303,9 +303,11 @@ struct WorkspaceSurface: View {
         spatial.onClose = { [weak projectSession] tile in
             if tile == .map || tile == .outline { projectSession?.selectWorkspaceMode(.write) }
         }
-        spatial.onCommit = { [weak projectSession] layout in
+        spatial.onTileReorder = { [weak projectSession] layout in
             guard let project = projectSession?.activeProject else { return }
             projectSession?.reorderDocuments(layout.reorderedDocuments(project.documents.map(\.id)), projectID: project.id)
+        }
+        spatial.onCommit = { [weak projectSession] layout in
             if let selected = projectSession?.selectedDocumentID, !layout.openDocuments.contains(selected),
                let next = layout.openDocuments.first { projectSession?.selectDocument(next) }
         }
@@ -339,7 +341,7 @@ struct WorkspaceSurface: View {
                     editorBridge: editorBridge, positionStore: positionStore))
             case .navigator:
                 return AnyView(SpatialNavigatorPane(session: projectSession, requests: editorRequests, model: spatial,
-                    theme: theme, onClose: { spatial.toggle(.navigator); sidebarVisible = false; editorRequests.focusEditor() }))
+                    completion: completion, theme: theme, onClose: { spatial.toggle(.navigator); sidebarVisible = false; editorRequests.focusEditor() }))
             default:
                 return AnyView(spatialTool(tile, theme: theme))
             }
@@ -351,7 +353,8 @@ struct WorkspaceSurface: View {
             theme: theme, tools: AnyView(WorkspacePouchTools(session: projectSession, requests: editorRequests,
                 model: spatial, completion: completion, settings: completion.settings, theme: theme,
                 openCoauthor: { showAssistance(.coauthor, theme: theme) },
-                openSettings: { editorRequests.pouch?.dismissTools(); openSettings() })), targetTitle: "집필 도구", actions: [
+                openSettings: { editorRequests.pouch?.dismissTools(); openSettings() })
+                .defaultAppStorage(projectSession.presentationPreferences)), targetTitle: "집필 도구", actions: [
                 pouchTool(.navigator, id: "mint.workspace.navigator-toggle", label: "문서 목록", symbol: "folder"),
                 pouchTool(.characters, id: "mint.workspace.characters", label: "인물·작품 정보", symbol: "person.2"),
                 pouchTool(.narrative, id: "mint.workspace.narrative", label: "서사 흐름", symbol: "point.topleft.down.curvedto.point.bottomright.up"),
@@ -383,6 +386,12 @@ struct WorkspaceSurface: View {
                 WorkspacePouchAction(id: "mint.workspace.more.narrative", label: "작가 수정과 기록", symbol: "text.book.closed") {
                     if !spatial.layout.contains(.narrative) { spatial.toggle(.narrative) }
                     spatial.selectTile(.narrative); spatial.pouchSection = .object
+                },
+                pouchTool(.review, id: "mint.workspace.review", label: "연속성·설정 검토", symbol: "checkmark.seal"),
+                WorkspacePouchAction(id: "mint.workspace.quick-command", label: "빠른 명령 팔레트", symbol: "command") {
+                    _ = WorkspaceQuickCommandPanel.present(session: projectSession, requests: editorRequests, theme: theme, toggleTheme: {
+                        appearance = colorScheme == .dark ? "light" : "dark"
+                    })
                 },
                 WorkspacePouchAction(id: "mint.workspace.autocomplete", label: completion.settings.autocompleteEnabled ? "자동완성 켜짐" : "자동완성 꺼짐", symbol: "sparkles", selected: { completion.settings.autocompleteEnabled }, enabled: { !completion.isManagingModel }) {
                     completion.setAutocompleteEnabled(!completion.settings.autocompleteEnabled)
@@ -431,7 +440,7 @@ struct WorkspaceSurface: View {
                 case .margin:
                     livingMarginPanel(theme: theme)
                 case .characters:
-                    WorkspaceCharacterCards(session: projectSession, requests: editorRequests, completion: completion, model: spatial, theme: theme)
+                    WorkspaceCharacterCards(session: projectSession, requests: editorRequests, completion: completion, model: spatial, indexer: indexer, theme: theme)
                 case .map:
                     StoryMapWorkspacePanel(session: projectSession, indexer: indexer, completion: completion,
                         requests: editorRequests, theme: theme)
@@ -439,9 +448,11 @@ struct WorkspaceSurface: View {
                     DocumentOutlineView(controller: outline, requests: editorRequests, session: projectSession, theme: theme)
                 case .narrative:
                     WorkspaceNarrativeCards(session: projectSession, requests: editorRequests, indexer: indexer, completion: completion, model: spatial, theme: theme)
+                case .review:
+                    WorkspaceReviewPane(session: projectSession, requests: editorRequests, indexer: indexer, theme: theme)
                 default:
                     ProjectWriterToolsView(session: projectSession, completion: completion, editorRequests: editorRequests,
-                        section: tile == .characters ? .bible : (tile == .narrative ? .narrative : .context), theme: theme, spatial: spatial)
+                        section: tile == .characters ? .bible : (tile == .narrative ? .narrative : .context), theme: theme, spatial: spatial, indexer: indexer)
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity)
         }.background(theme.cardSurfaceC)
@@ -482,6 +493,12 @@ struct WorkspaceSurface: View {
 
     private func livingMarginPanel(theme: MintTheme) -> some View {
         VStack(spacing: 0) {
+            if let writingDiagnostics {
+                WritingDiagnosticsStatusView(runtime: writingDiagnostics)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                Divider()
+            }
             LivingMarginView(model: livingMargin, mode: activeWritingMode, theme: theme,
                 onJumpToEvidence: navigateMarginEvidence,
                 onAction: writingQualityAction, supportsAction: { $0.kind == .writingQuality }, spatial: spatial)

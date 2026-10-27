@@ -257,6 +257,8 @@ struct WorkspacePouchTrigger: NSViewRepresentable {
         let button = Trigger(frame: .zero)
         button.target = context.coordinator; button.action = #selector(Coordinator.open)
         button.refusesFirstResponder = true
+        button.title = ""
+        button.imagePosition = .imageOnly
         button.image = WorkspaceIcons.image("slider.horizontal.3", size: 14)
         button.setAccessibilityIdentifier("mint.writer-tools.compatibility")
         button.setAccessibilityLabel("주머니 열기")
@@ -267,6 +269,8 @@ struct WorkspacePouchTrigger: NSViewRepresentable {
     }
     func updateNSView(_ button: Trigger, context: Context) {
         model.pouchAnchor = button
+        button.title = ""
+        button.imagePosition = .imageOnly
         button.theme = theme; button.selected = model.pouchSection != nil; button.refresh()
         button.setAccessibilityValue(NSNumber(value: button.selected))
     }

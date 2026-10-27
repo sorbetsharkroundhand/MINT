@@ -71,6 +71,38 @@ final class MathRoundTripTests: XCTestCase {
 
     // MARK: 다중 행 display 그룹
 
+    @MainActor func testComplexPastedMathRendersWithoutChangingSavedSource() throws {
+        let markdown = "# Formula\n\n$$\n" + ComplexMathFixture.pasted + "\n$$\n\nBody"
+        let view = makeEditor()
+        view.load(markdown: markdown)
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.refreshRenderedBlocks(forceRender: true)
+        XCTAssertEqual(view.mathRenders.count, 1, "Nested environments form one displayed equation")
+        XCTAssertTrue(view.mathRenderErrors.isEmpty)
+        XCTAssertEqual(view.serialize(), markdown)
+        view.load(markdown: view.serialize())
+        XCTAssertEqual(view.serialize(), markdown)
+        XCTAssertEqual(view.mathRenders.count, 1)
+    }
+
+    @MainActor func testComplexPastedMathExportsAnImageWithOriginalLatexFallback() throws {
+        let latex = ComplexMathFixture.pasted
+        let entry = JournalEntry(title: "Formula", body: "$$\n" + latex + "\n$$")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("mint-complex-math-\(UUID())")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        var images: [String] = [], missing: [String] = []
+        let chapters = EpubExporter.makeChapters(from: entry, copyingImagesInto: directory,
+            collected: &images, missing: &missing, assetURLs: [:])
+        let html = chapters.map(\.html).joined(separator: "\n")
+        XCTAssertTrue(html.contains(#"<p class="math"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block""#))
+        XCTAssertTrue(html.contains("<mtable>"))
+        XCTAssertTrue(html.contains("<mfrac>"))
+        XCTAssertTrue(html.contains(latex.replacingOccurrences(of: "&", with: "&amp;")), "The fallback must preserve every original backslash")
+        XCTAssertTrue(images.isEmpty)
+        XCTAssertTrue(missing.isEmpty)
+    }
+
     @MainActor func test다중행_aligned_왕복() {
         assertRoundTrip(
             """
@@ -316,7 +348,7 @@ final class MathRoundTripTests: XCTestCase {
 
     // MARK: EPUB
 
-    /// 이슈 #22 — 수식은 PNG로 심기고 LaTeX 원문은 alt fallback으로 남는다.
+    /// 이슈 #22 — 수식은 EPUB 3 네이티브 MathML로 변환되고 LaTeX 원문은 alttext fallback으로 남는다.
     @MainActor func testEPUB_다중행수식_PNG와altfallback() throws {
         let entry = JournalEntry(
             title: "소설",
@@ -333,21 +365,20 @@ final class MathRoundTripTests: XCTestCase {
             collected: &images, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         let html = chapters.map(\.html).joined(separator: "\n")
 
-        // PNG 참조 + LaTeX alt fallback
-        XCTAssertTrue(html.contains(#"<p class="math"><img src="images/math-"#), html)
+        // 네이티브 MathML + LaTeX alttext fallback
+        XCTAssertTrue(html.contains(#"<p class="math"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block""#), html)
+        XCTAssertTrue(html.contains("<mtable>"), html)
         XCTAssertTrue(html.contains("LaTeX: "), html)
         XCTAssertTrue(html.contains("\\begin{aligned}"), html)
-        XCTAssertTrue(html.contains("a &amp;= b"), "줄이 alt에서 보존된다")
+        XCTAssertTrue(html.contains("a &amp;= b"), "줄이 alttext에서 보존된다")
         XCTAssertFalse(html.contains("<pre><code>$$"), "구분자 줄이 코드블록으로 새면 안 된다")
-        // 실제 파일이 심기고 OPF 목록에 등록된다
-        XCTAssertEqual(images.count, 1)
-        let asset = try XCTUnwrap(images.first)
-        XCTAssertTrue(FileManager.default.fileExists(
-            atPath: oebps.appendingPathComponent(asset).path))
+        XCTAssertTrue(images.isEmpty)
+        let opf = EpubExporter.packageOPF(entry: entry, chapters: chapters, images: images)
+        XCTAssertTrue(opf.contains(#"properties="mathml""#), opf)
     }
 
     @MainActor func testEPUB_한줄수식도PNG로() throws {
-        let entry = JournalEntry(title: "소설", body: "# 1장\n$$E=mc^2$$")
+        let entry = JournalEntry(title: "소설", body: "# 1장\n$$E=mc^2$$\n인라인 $x^2$ 수식")
         let oebps = FileManager.default.temporaryDirectory
             .appendingPathComponent("mint-math-epub-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: oebps) }
@@ -360,16 +391,11 @@ final class MathRoundTripTests: XCTestCase {
             collected: &images, missing: &missing, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
         let html = chapters.map(\.html).joined(separator: "\n")
 
-        XCTAssertTrue(html.contains(#"alt="LaTeX: E=mc^2""#), html)
-        XCTAssertEqual(images, ["images/math-" + EpubExporter.stableHash("E=mc^2") + ".png"])
-        // 같은 수식 재등장 — 안정 해시로 하나의 파일만 (#22 멱등).
-        let entry2 = JournalEntry(title: "소설", body: "# 1장\n$$E=mc^2$$\n$$E=mc^2$$")
-        var images2: [String] = []
-        var missing2: [String] = []
-        _ = EpubExporter.makeChapters(
-            from: entry2, copyingImagesInto: oebps,
-            collected: &images2, missing: &missing2, assetURLs: EpubExporter.resolveAssetURLs(in: entry.body))
-        XCTAssertEqual(images2.count, 1)
+        XCTAssertTrue(html.contains(#"alttext="LaTeX: E=mc^2""#), html)
+        XCTAssertTrue(html.contains(#"display="inline" alttext="LaTeX: x^2""#), html)
+        XCTAssertTrue(html.contains("<msup><mi>c</mi><mn>2</mn></msup>"), html)
+        XCTAssertTrue(html.contains("<msup><mi>x</mi><mn>2</mn></msup>"), html)
+        XCTAssertTrue(images.isEmpty)
     }
 
     /// 렌더가 불가능한 LaTeX는 code 소스로 남아 의미가 사라지지 않는다 (#15 승계).

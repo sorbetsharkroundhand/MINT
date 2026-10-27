@@ -8,19 +8,18 @@ final class WriterCompatibilityTests: XCTestCase {
     func testRailExposesAccessibleSearchAndCompatibilityMenuInGeneral() async throws {
         let h = try await FramedWorkspaceHarness(); defer { h.close() }
         let controls = h.elements()
-        let search = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.source-search.show" })
+        let search = try h.pouchItem("mint.source-search.show")
         let compatibility = try XCTUnwrap(controls.first { $0.accessibilityIdentifier() == "mint.writer-tools.compatibility" })
-        XCTAssertEqual(search.accessibilityLabel(), "빠른 검색 및 명령 (⌘K)")
-        XCTAssertEqual(compatibility.accessibilityLabel(), "도구 더 보기 · 드래그하여 주머니 이동")
+        XCTAssertEqual(search.title, "검색 · 문서, 원문, 도구 찾기")
+        XCTAssertEqual(compatibility.accessibilityLabel(), "주머니 열기")
         XCTAssertFalse(controls.contains { $0.accessibilityLabel() == "리빙 마진" })
-        let menu = try XCTUnwrap((compatibility as? NSButton)?.menu)
+        let menu = try XCTUnwrap(h.requests.pouch).moreMenu()
         for title in ["인물과 작품 정보", "작가 수정과 기록", "제안에 쓰인 내용", "원문 검색", "설정"] {
             XCTAssertTrue(menu.items.contains { $0.title == title })
         }
         XCTAssertNotNil(menu.items.first?.image)
-        XCTAssertTrue(try XCTUnwrap(search as? NSButton).refusesFirstResponder)
-        XCTAssertTrue(h.window.makeFirstResponder(try XCTUnwrap(compatibility as? NSButton)),
-            "The compatibility route must support native keyboard focus")
+        XCTAssertNotNil(search.target); XCTAssertNotNil(search.action)
+        XCTAssertNotNil((compatibility as? NSButton)?.action)
         let view = try await h.editor(), before = h.fixture.session.activeProject
         view.setSelectedRange(NSRange(location: 3, length: 4))
         let selection = view.selectedRange()
@@ -33,11 +32,12 @@ final class WriterCompatibilityTests: XCTestCase {
             XCTAssertEqual(h.fixture.session.activeProject, before)
         }
         h.window.setContentSize(NSSize(width: 860, height: 760)); await h.layout()
-        XCTAssertEqual((search as? NSButton)?.title, "")
-        _ = search.accessibilityPerformPress()
+        if let sheet = h.window.attachedSheet { h.window.endSheet(sheet) }
+        try h.performPouchAction("mint.source-search.show")
         await h.layout()
-        let panel = try XCTUnwrap(NSApp.windows.first { $0.title == "빠른 검색 및 명령" && $0.isVisible })
-        panel.close(); await h.layout()
+        XCTAssertNotNil(h.element("mint.workspace.search.query"))
+        try XCTUnwrap(h.element("mint.tile.close.search") as? NSButton).performClick(nil)
+        await h.layout()
         XCTAssertEqual(view.selectedRange(), selection)
         XCTAssertEqual(h.fixture.session.activeProject, before)
         XCTAssertTrue(h.window.firstResponder === view)

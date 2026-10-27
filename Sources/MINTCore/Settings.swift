@@ -26,6 +26,10 @@ public enum CompletionAuthorization: String, Codable, Sendable {
 
 /// 모델 프리셋 (PLAN §3).
 public enum ModelPresets {
+    // Owner-selected writing candidates; availability still follows the memory policy.
+    public static let qwen3_5_9B = "mlx-community/Qwen3.5-9B-4bit"
+    public static let ministral3_14B = "mlx-community/Ministral-3-14B-Instruct-2512-4bit"
+    public static let gemma4_26B_A4B = "mlx-community/gemma-4-26b-a4b-it-4bit"
     /// **MINT** — Ternary-Bonsai-27B (Qwen3.5-27B dense, 2비트 삼진 ~1.71bpw), ~8.5GB.
     /// 27B **밀집** 모델이라 토큰마다 전 가중치를 읽는다 — 파일은 셋 중 가장 작지만
     /// 토큰당 대역폭은 MoE(활성 ~3B)보다 크다. 즉 "작다 = 빠르다"가 성립하지 않는
@@ -59,6 +63,7 @@ public enum ModelPresets {
     public static let qwen2_5_1_5B = "mlx-community/Qwen2.5-1.5B-Instruct-4bit"
 
     public static let all: [String] = [
+        qwen3_5_9B, ministral3_14B, gemma4_26B_A4B,
         ternaryBonsai27B, glm4_7_flash, qwen3_6_35B_A3B,
         qwen3_30B_A3B, ax4Light, qwen2_5_3B, qwen2_5_1_5B,
     ]

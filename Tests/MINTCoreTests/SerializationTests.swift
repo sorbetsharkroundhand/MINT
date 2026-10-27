@@ -489,4 +489,72 @@ final class SerializationTests: XCTestCase {
             fresh.serialize(), incremental,
             "serialize(증분 상태) != serialize(전체 문서) — 원고 손상")
     }
+
+    // MARK: - 확장 마크다운 문법 (Pillar 1~3)
+
+    @MainActor func testExtendedHeadingsH4ToH6() {
+        assertRoundTrip("# H1\n## H2\n### H3\n#### H4\n##### H5\n###### H6\n본문이다.")
+    }
+
+    @MainActor func testStrikethroughAndHighlightRoundTrip() {
+        assertRoundTrip("~~취소선~~과 ==형광펜==과 **~~굵은 취소선~~**이 공존한다.")
+    }
+
+    @MainActor func testCodeBlockWithLanguageTag() {
+        assertRoundTrip("```swift\nlet x = 42\nprint(x)\n```\n뒤에 본문이 있다.")
+    }
+
+    @MainActor func testIndentedListsAndNestedBlockquotes() {
+        assertRoundTrip(
+            """
+            - 상위 불릿
+              - 1단계 불릿
+                - 2단계 불릿
+            1. 상위 번호
+              1. 하위 번호
+            - [ ] 상위 할 일
+              - [x] 하위 완료
+            > 1단계 인용
+            > > 2단계 인용
+            """)
+    }
+
+    @MainActor func testTabAndShiftTabIndentationOnList() {
+        let view = makeEditor()
+        view.load(markdown: "- 항목")
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.insertTab(nil)
+        XCTAssertEqual(view.serialize(), "  - 항목")
+        view.insertBacktab(nil)
+        XCTAssertEqual(view.serialize(), "- 항목")
+    }
+
+    @MainActor func testSmartSelectionWrapping() {
+        let view = makeEditor()
+        view.load(markdown: "강조할 단어")
+        view.setSelectedRange(NSRange(location: 0, length: 3))
+        view.insertText("*", replacementRange: view.selectedRange())
+        XCTAssertEqual(view.serialize(), "*강조할* 단어")
+    }
+
+    @MainActor func testMoveParagraphUpAndDown() {
+        let view = makeEditor()
+        view.load(markdown: "첫째 줄\n둘째 줄\n셋째 줄")
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.moveCurrentParagraph(direction: 1)
+        XCTAssertEqual(view.serialize(), "둘째 줄\n첫째 줄\n셋째 줄")
+        view.moveCurrentParagraph(direction: -1)
+        XCTAssertEqual(view.serialize(), "첫째 줄\n둘째 줄\n셋째 줄")
+    }
+
+    @MainActor func testSourceModePreservesMarkdown() {
+        let md = "# 제목\n\n~~취소선~~과 ==형광펜==\n\n  - 중첩 목록"
+        let view = makeEditor()
+        view.load(markdown: md)
+        view.setSourceMode(true)
+        XCTAssertEqual(view.string, md)
+        XCTAssertEqual(view.serialize(), md)
+        view.setSourceMode(false)
+        XCTAssertEqual(view.serialize(), md)
+    }
 }

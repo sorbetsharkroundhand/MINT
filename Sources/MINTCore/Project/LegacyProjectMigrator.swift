@@ -27,6 +27,24 @@ enum LegacyProjectMigrator {
         var expandedFolderIDs: [UUID]?
     }
 
+    static func restoreNavigation(from data: Data, into project: inout WritingProject) throws {
+        guard project.userData[ProjectNavigation.key] == nil else { return }
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        let archive = try decoder.decode(LegacyArchive.self, from: data)
+        var navigation = ProjectNavigation()
+        navigation.folders = (archive.folders ?? []).sorted { ($0.sortOrder ?? 0) < ($1.sortOrder ?? 0) }.map {
+            ProjectFolder(id: $0.id, name: $0.name, parentID: $0.parentID)
+        }
+        let ids = Set(project.documents.map(\.id)), folders = Set(navigation.folders.map(\.id))
+        for entry in archive.entries {
+            let id = WritingDocumentID(rawValue: entry.id)
+            guard ids.contains(id) else { continue }
+            if let folder = entry.folderID, folders.contains(folder) { navigation.documentFolders[id] = folder }
+            navigation.createdDates[id] = entry.createdAt
+        }
+        try navigation.write(to: &project)
+    }
+
     static func read(from sourceURL: URL) throws -> Snapshot {
         try Task.checkCancellation()
         try ProjectPaths.rejectSymlink(sourceURL)
@@ -83,6 +101,16 @@ enum LegacyProjectMigrator {
 }
 
 extension ProjectStore {
+    /// Recover metadata from our verified copy, never from the live legacy store.
+    func prepareDocumentNavigation(_ project: WritingProject) throws -> WritingProject {
+        guard project.userData[ProjectNavigation.key] == nil, let source = try legacySource(id: project.id) else { return project }
+        var prepared = project
+        try LegacyProjectMigrator.restoreNavigation(from: source, into: &prepared)
+        try save(prepared, replacing: project)
+        let verified = try load(id: project.id)
+        guard verified == prepared else { throw ProjectStoreError.changedDuringSave }
+        return verified
+    }
     public func migrateLegacy(
         from sourceURL: URL,
         mode: WritingMode,
@@ -126,8 +154,9 @@ extension ProjectStore {
             }
             let id = reusedID ?? WritingProjectID()
             if reusedID == nil {
-                let project = WritingProject(id: id, title: title, mode: mode,
+                var project = WritingProject(id: id, title: title, mode: mode,
                     documents: snapshot.entries.map(LegacyEntryAdapter.document(from:)))
+                try LegacyProjectMigrator.restoreNavigation(from: snapshot.sourceData, into: &project)
                 try saveUnlocked(project, importedAssets: snapshot.assets, source: snapshot.sourceData)
                 let verifiedProject = try loadUnlocked(id: id)
                 guard verifiedProject == project,

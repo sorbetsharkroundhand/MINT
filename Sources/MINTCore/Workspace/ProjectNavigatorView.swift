@@ -95,391 +95,305 @@ public final class ProjectEditorRequests: ObservableObject {
     }
 }
 
-struct ProjectNavigatorView: View {
-    @ObservedObject var session: ProjectSession
-    @ObservedObject var editorRequests: ProjectEditorRequests
-    let theme: MintTheme
-    let onClose: () -> Void
-    var spatial: SpatialWorkspaceController? = nil
+import AppKit
+import UniformTypeIdentifiers
 
-    @State private var searchText = ""
-    @State private var searchResults: [ProjectSearchResult] = []
-    @State private var editingKey: ProjectDocumentKey?
-    @State private var draftTitle = ""
-    @State private var showingTrash = false
-    @State private var searchVisible = false
-    @State private var hoveredDocument: WritingDocumentID?
-    @FocusState private var searchFocused: Bool
-    @FocusState private var renameFocused: Bool
+struct ProjectNavigatorDragRegion: NSViewRepresentable {
+    let node: ProjectNavigationNode?
+    let owner: ProjectNavigatorController
+    var onClick: (() -> Void)? = nil
+    var onDoubleClick: (() -> Void)? = nil
+    var backgroundDrop: ProjectNavigationDrop? = nil
 
-    private var visibleDocuments: [WritingDocument] {
-        guard let project = session.activeProject else { return [] }
-        return project.documents.filter { !project.trashedDocumentIDs.contains($0.id) }
+    func makeNSView(context: Context) -> ProjectNavigatorRowDragView {
+        ProjectNavigatorRowDragView()
     }
 
-    private var trashedDocuments: [WritingDocument] {
+    func updateNSView(_ view: ProjectNavigatorRowDragView, context: Context) {
+        view.node = node
+        view.owner = owner
+        view.onClick = onClick
+        view.onDoubleClick = onDoubleClick
+        view.backgroundDrop = backgroundDrop
+        switch node {
+        case .document(let id):
+            view.setAccessibilityIdentifier("mint.navigator.drag.\(id.rawValue.uuidString)")
+            view.toolTip = "위·아래에 놓아 순서 변경 · 가운데에 놓아 새 폴더로 묶기 · 폴더 영역 밖에 놓아 꺼내기 · 작업 공간에 놓아 열기"
+        case .folder(let id):
+            view.setAccessibilityIdentifier("mint.navigator.drag.folder.\(id.uuidString)")
+            view.toolTip = "클릭해 펼치기 · 더블클릭해 이름 바꾸기 · 끌어서 순서 변경"
+        case nil:
+            view.setAccessibilityIdentifier("mint.navigator.drag.root")
+            view.toolTip = nil
+        }
+        if backgroundDrop != nil { view.setAccessibilityIdentifier("mint.navigator.folder-boundary") }
+        view.setAccessibilityElement(false)
+    }
+}
+
+final class ProjectNavigatorRowDragView: NSView {
+    var node: ProjectNavigationNode?
+    var backgroundDrop: ProjectNavigationDrop?
+    weak var owner: ProjectNavigatorController?
+    var onClick: (() -> Void)?
+    var onDoubleClick: (() -> Void)?
+
+    override var isFlipped: Bool { true }
+    override var mouseDownCanMoveWindow: Bool { false }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let node else { super.mouseDown(with: event); return }
+        if event.clickCount >= 2, let onDoubleClick {
+            enclosingSpatialCanvas?.cancelInteraction()
+            owner?.cancelDrag()
+            onDoubleClick()
+            return
+        }
+        if case .document(let id) = node, let canvas = enclosingSpatialCanvas {
+            canvas.beginPanelDrag(.document(id), event: event, fromNavigator: true)
+        } else {
+            owner?.beginDrag(node, event: event, from: self) { [weak self] in
+                self?.onClick?()
+            }
+        }
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        if case .document = node, let canvas = enclosingSpatialCanvas {
+            canvas.continuePanelDrag(event)
+        } else {
+            owner?.continueDrag(event)
+        }
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        if case .document = node, let canvas = enclosingSpatialCanvas {
+            let moved = canvas.model?.isDragging == true
+            canvas.finishPanelDrag(event)
+            if !moved { onClick?() }
+        } else {
+            owner?.finishDrag(event)
+        }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        enclosingSpatialCanvas?.cancelInteraction()
+        owner?.cancelDrag()
+    }
+
+    override func resetCursorRects() {
+        if node != nil {
+            addCursorRect(bounds, cursor: .openHand)
+        }
+    }
+}
+
+@MainActor
+enum ProjectNavigatorActions {
+    static func changeDate(_ documentID: WritingDocumentID, navigator: ProjectNavigatorController) {
+        let picker = NSDatePicker(frame: NSRect(x: 0, y: 0, width: 300, height: 160))
+        picker.datePickerStyle = .clockAndCalendar
+        picker.datePickerElements = [.yearMonthDay]
+        picker.dateValue = navigator.organization.createdDates[documentID] ?? Date()
+
+        let alert = NSAlert()
+        alert.messageText = "작성일 바꾸기"
+        alert.informativeText = "어제 일을 오늘 적었다면 날짜를 맞춰 두세요."
+        alert.accessoryView = picker
+        alert.addButton(withTitle: "바꾸기")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        _ = navigator.perform(.date(documentID, picker.dateValue))
+    }
+
+    static func export(_ document: WritingDocument, session: ProjectSession, epub: Bool) {
+        guard let assets = session.assetCatalog,
+              assets.projectID == session.activeProject?.id else { return }
+        let panel = NSSavePanel()
+        let ext = epub ? "epub" : "md"
+        panel.allowedContentTypes = [UTType(filenameExtension: ext) ?? .plainText]
+        let title = document.title.replacingOccurrences(of: "/", with: "-")
+        panel.nameFieldStringValue = (title.isEmpty ? "Untitled" : title) + "." + ext
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let destination = panel.url else { return }
+        let author = CompletionSettings.shared.authorName
+        Task {
+            do {
+                if epub {
+                    try await EpubExporter.exportAsync(document, assets: assets, to: destination, author: author)
+                } else {
+                    let report = try await Task.detached(priority: .userInitiated) {
+                        try MarkdownExporter.export(document, assets: assets, to: destination)
+                    }.value
+                    if !report.missingSources.isEmpty {
+                        let alert = NSAlert()
+                        alert.messageText = "일부 이미지 없이 내보냈습니다"
+                        alert.informativeText = report.missingSources.joined(separator: "\n")
+                        alert.runModal()
+                    }
+                }
+            } catch is CancellationError {} catch {
+                session.reportError(error)
+            }
+        }
+    }
+}
+
+struct ProjectNavigatorTrashView: View {
+    @ObservedObject var session: ProjectSession
+    @ObservedObject var navigator: ProjectNavigatorController
+    let theme: MintTheme
+    @Environment(\.dismiss) private var dismiss
+
+    private var trashedRootFolders: [ProjectFolder] {
+        navigator.organization.folders.filter { navigator.organization.trashBundles[$0.id] != nil }
+    }
+
+    private var bundledDocuments: Set<WritingDocumentID> {
+        navigator.organization.trashBundles.values.reduce(into: Set<WritingDocumentID>()) { $0.formUnion($1.documents) }
+    }
+
+    private var standaloneTrashedDocuments: [WritingDocument] {
+        guard let project = session.activeProject else { return [] }
+        return project.documents.filter {
+            project.trashedDocumentIDs.contains($0.id) && !bundledDocuments.contains($0.id)
+        }
+    }
+
+    private var allTrashedDocuments: [WritingDocument] {
         guard let project = session.activeProject else { return [] }
         return project.documents.filter { project.trashedDocumentIDs.contains($0.id) }
     }
 
-    private var isSearching: Bool {
-        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    private var isEmpty: Bool {
+        trashedRootFolders.isEmpty && allTrashedDocuments.isEmpty
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if spatial == nil || searchVisible { searchField }
-            if let error = session.lastErrorMessage {
-                Text(error)
-                    .mintUIFont(11)
-                    .foregroundStyle(theme.dangerC)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                theme.sepC.frame(height: 1)
-            }
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: spatial == nil ? 2 : 4) {
-                    if isSearching { searchRows } else { documentRows }
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("휴지통").mintUIFont(13, .semibold).foregroundStyle(theme.inkC)
+                Spacer()
+                if !isEmpty {
+                    Button("휴지통 비우기", role: .destructive) { confirmEmptyTrash() }
+                        .buttonStyle(.borderless)
+                        .mintUIFont(11, .medium)
+                        .foregroundStyle(theme.dangerC)
+                        .accessibilityIdentifier("mint.navigator.trash.empty")
                 }
-                .padding(spatial == nil ? 8 : 6)
+                Button("닫기") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                    .buttonStyle(.borderless)
+                    .mintUIFont(11, .medium)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            if isEmpty {
+                VStack(spacing: 6) {
+                    Image(systemName: "trash").font(.system(size: 20)).foregroundStyle(theme.workspaceMutedC)
+                    Text("휴지통이 비어 있습니다").mintUIFont(12).foregroundStyle(theme.ink2C)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(24)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(trashedRootFolders) { folder in
+                            folderTrashRow(folder)
+                        }
+                        ForEach(allTrashedDocuments) { document in
+                            documentTrashRow(document)
+                        }
+                    }
+                    .padding(12)
+                }
             }
         }
+        .frame(width: 400, height: 340)
         .background(theme.cardSurfaceC)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("mint.navigator")
-        .accessibilityLabel("문서 탐색기")
-        .task(id: searchTaskID) {
-            guard isSearching, let project = session.activeProject else {
-                searchResults = []
-                return
-            }
-            try? await Task.sleep(for: .milliseconds(200))
-            guard !Task.isCancelled else { return }
-            let snapshot = project
-            let query = searchText
-            let results = await Task.detached(priority: .userInitiated) {
-                ProjectSearch.results(query: query, in: snapshot)
-            }.value
-            guard !Task.isCancelled else { return }
-            searchResults = results
-        }
-        .task(id: editorRequests.searchFocusRequest) { await focusSearchIfRequested() }
-        .onChange(of: editorRequests.renameRequest) { _, _ in
-            if let document = session.selectedDocument { startRename(document) }
-        }
-        .onChange(of: renameFocused) { _, focused in
-            if !focused { commitRename() }
-        }
-        .onChange(of: searchFocused) { _, focused in
-            if !focused && !isSearching { searchVisible = false }
-        }
-        .sheet(isPresented: $showingTrash) {
-            ProjectTrashView(
-                documents: trashedDocuments,
-                theme: theme,
-                onRestore: { ProjectCommandActions(session: session).restoreDocument($0) })
-        }
+        .accessibilityIdentifier("mint.navigator.trash.sheet")
     }
 
-    private func focusSearchIfRequested() async {
-        guard editorRequests.consumeSearchFocusRequest() else { return }
-        searchVisible = true
-        let projectID = session.activeProject?.id
-        // Apply focus after native field insertion; an onAppear request can be lost.
-        await withCheckedContinuation { continuation in
-            DispatchQueue.main.async { continuation.resume() }
-        }
-        guard !Task.isCancelled, session.activeProject?.id == projectID else { return }
-        searchFocused = true
-    }
-
-    private var header: some View {
-        if spatial != nil {
-            return AnyView(SpatialTileHeader(tile: .navigator, title: "문서", theme: theme, actions: [
-                SpatialHeaderAction(id: "mint.navigator.new", label: "새 문서", symbol: "plus") {
-                    ProjectCommandActions(session: session).newDocument(.manuscript); editorRequests.focusEditor()
-                },
-                SpatialHeaderAction(id: "mint.navigator.close", label: "파일 목록 숨기기", symbol: "xmark", perform: onClose)
-            ]).frame(height: 32).contextMenu {
-                Button("프로젝트 검색") { spatial?.openSearch() }
-                ForEach(session.recentProjects) { recent in
-                    Button(recent.title) { Task { try? await session.activateProject(id: recent.id); editorRequests.focusEditor() } }
-                }
-                if !trashedDocuments.isEmpty { Button("휴지통") { showingTrash = true } }
-            })
-        }
-        return AnyView(legacyHeader)
-    }
-
-    private var legacyHeader: some View {
-        HStack(spacing: 8) {
-            recentProjectsMenu
-            Spacer(minLength: 8)
-            Button {
-                ProjectCommandActions(session: session).newDocument(.manuscript)
-                editorRequests.focusEditor()
-            } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.plain)
-            .help("새 문서")
-            .accessibilityLabel("새 문서")
-
-            if !trashedDocuments.isEmpty {
-                Button { showingTrash = true } label: { Image(systemName: "trash") }
-                    .buttonStyle(.plain)
-                    .help("휴지통")
-                    .accessibilityLabel("휴지통")
-            }
-            WorkspaceActionButton(identifier: "mint.navigator.close", label: "파일 목록 숨기기",
-                symbol: "xmark", theme: theme, action: onClose).frame(width: 32, height: 32)
-        }
-        .foregroundStyle(theme.ink2C)
-        .padding(.leading, 12)
-        .padding(.trailing, 12)
-        .frame(height: 36)
-    }
-
-    private var recentProjectsMenu: some View {
-        Menu {
-            if session.recentProjects.isEmpty {
-                Text("최근 프로젝트 없음")
-            } else {
-                ForEach(session.recentProjects) { recent in
-                    Button {
-                        Task {
-                            do {
-                                try await session.activateProject(id: recent.id)
-                                editorRequests.focusEditor()
-                            } catch {
-                                // ProjectSession keeps the current owner and publishes the error.
-                            }
-                        }
-                    } label: {
-                        Text(recent.title)
-                        if recent.id == session.activeProject?.id {
-                            Image(systemName: "checkmark")
-                        }
-                    }
-                }
-            }
-        } label: {
-            HStack(spacing: 5) {
-                Text(session.activeProject?.title ?? "프로젝트")
-                    .lineLimit(1).truncationMode(.middle)
-                Image(systemName: "chevron.down").font(.system(size: 8, weight: .semibold))
-            }
-            .mintUIFont(11.5, .medium)
-        }
-        .menuStyle(.borderlessButton)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityLabel("최근 프로젝트")
-    }
-
-    private var searchField: some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass").foregroundStyle(theme.workspaceMutedC)
-            TextField("프로젝트 검색", text: $searchText)
-                .textFieldStyle(.plain)
-                .focused($searchFocused)
-                .accessibilityIdentifier("mint.navigator.search")
-            if !searchText.isEmpty {
-                Button { searchText = "" } label: { Image(systemName: "xmark.circle.fill") }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(theme.workspaceMutedC)
-            }
-        }
-        .mintUIFont(12)
-        .padding(.vertical, 7)
-        .padding(.horizontal, 9)
-        .background(
-            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous).fill(theme.chipC))
-        .overlay(
-            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
-                .strokeBorder(theme.chipBorderC))
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-    }
-
-    @ViewBuilder
-    private var documentRows: some View {
-        ForEach(visibleDocuments) { document in documentRow(document) }
-    }
-
-    @ViewBuilder
-    private var searchRows: some View {
-        if searchResults.isEmpty {
-            Text("일치하는 문서가 없어요")
-                .mintUIFont(12)
-                .foregroundStyle(theme.workspaceMutedC)
-                .padding(8)
-        } else {
-            ForEach(searchResults) { result in
-                Button { editorRequests.jump(to: result, in: session) } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(result.title)
-                            .mintUIFont(13, .semibold)
-                            .foregroundStyle(theme.ink2C)
-                            .lineLimit(1)
-                        if let snippet = result.snippet {
-                            Text(snippet)
-                                .mintUIFont(11.5)
-                                .foregroundStyle(theme.workspaceMutedC)
-                                .lineLimit(2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(8)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func documentRow(_ document: WritingDocument) -> some View {
-        let selected = document.id == session.selectedDocumentID
-        let editingName = editingKey == documentKey(for: document)
+    private func folderTrashRow(_ folder: ProjectFolder) -> some View {
+        let count = navigator.organization.trashBundles[folder.id]?.documents.count ?? 0
         return HStack(spacing: 8) {
-            if let spatial {
-                Circle().fill(selected ? theme.inkC : theme.ink2C)
-                    .opacity(spatial.layout.contains(.document(document.id)) ? 0.75 : 0.20)
-                    .frame(width: 6, height: 6)
-            } else {
-                Image(systemName: document.kind == .manuscript ? "doc.text" : "note.text")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(selected ? theme.blueC : theme.workspaceMutedC)
-            }
-            if editingName {
-                TextField("문서 이름", text: $draftTitle)
-                    .textFieldStyle(.plain)
-                    .focused($renameFocused)
-                    .accessibilityIdentifier("mint.navigator.rename")
-                    .onSubmit { commitRename() }
-                    .onExitCommand { cancelRename() }
-            } else {
-                Text(document.title)
-                    .mintUIFont(spatial == nil ? 12 : 11.5, selected ? .medium : .regular)
-                    .foregroundStyle(selected ? theme.inkC : theme.ink2C)
-                    .lineLimit(1)
+            Image(systemName: "folder.fill").font(.system(size: 12)).foregroundStyle(theme.ink2C)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(folder.name).mintUIFont(12, .medium).foregroundStyle(theme.inkC).lineLimit(1)
+                Text("문서 \(count)개 포함").mintUIFont(10).foregroundStyle(theme.workspaceMutedC)
             }
             Spacer(minLength: 4)
-            if let spatial, !editingName {
-                let open = spatial.layout.contains(.document(document.id))
-                if open && spatial.layout.openDocuments.count == 1 {
-                    Text("열림").font(MintFonts.monoUI(9.5)).foregroundStyle(theme.workspaceMutedC)
-                } else if open {
-                    WorkspaceActionButton(identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)",
-                        label: "이 문서 창 닫기", symbol: "xmark", theme: theme) {
-                        _ = spatial.close(.document(document.id)); editorRequests.focusEditor()
-                    }.frame(width: 16, height: 16).opacity(hoveredDocument == document.id ? 1 : 0)
-                } else {
-                    WorkspaceTextAction(title: "열기", identifier: "mint.navigator.tile.\(document.id.rawValue.uuidString)", theme: theme) {
-                        spatial.open(document.id); editorRequests.focusEditor()
-                    }.frame(width: 30, height: 16).opacity(hoveredDocument == document.id ? 1 : 0)
+            Button("복원") { _ = navigator.perform(.restore(.folder(folder.id))) }
+                .buttonStyle(.borderless)
+                .mintUIFont(11, .medium)
+                .accessibilityIdentifier("mint.navigator.trash.restore.folder.\(folder.id.uuidString)")
+            Button("영구 삭제", role: .destructive) {
+                confirmPurge(title: "'\(folder.name)' 폴더를 영구 삭제할까요?", node: .folder(folder.id))
+            }
+            .buttonStyle(.borderless)
+            .mintUIFont(11)
+            .foregroundStyle(theme.dangerC)
+            .accessibilityIdentifier("mint.navigator.trash.purge.folder.\(folder.id.uuidString)")
+        }
+        .padding(8)
+        .background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func documentTrashRow(_ document: WritingDocument) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: document.kind.navigatorSymbol).font(.system(size: 12)).foregroundStyle(theme.ink2C)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(document.title).mintUIFont(12, .medium).foregroundStyle(theme.inkC).lineLimit(1)
+                if let folderID = navigator.organization.documentFolders[document.id] {
+                    Text(navigator.organization.path(folderID)).mintUIFont(10).foregroundStyle(theme.workspaceMutedC).lineLimit(1)
                 }
             }
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, 10)
-        .background(
-            RoundedRectangle(cornerRadius: MintRadius.md, style: .continuous)
-                .fill(selected ? theme.activeBgC : (hoveredDocument == document.id ? theme.hoverC : .clear)))
-        .onHover { hoveredDocument = $0 ? document.id : nil }
-        .animation(WorkspaceHTMLStyle.animation(0.20), value: hoveredDocument)
-        .animation(WorkspaceHTMLStyle.animation(0.24), value: spatial?.navigatorDrop)
-        .overlay {
-            if spatial != nil && !editingName {
-                SpatialNavigatorDragRegion(documentID: document.id) {
-                    spatial?.open(document.id)
-                }.padding(.trailing, 28)
+            Spacer(minLength: 4)
+            Button("복원") { _ = navigator.perform(.restore(.document(document.id))) }
+                .buttonStyle(.borderless)
+                .mintUIFont(11, .medium)
+                .accessibilityIdentifier("mint.navigator.trash.restore.document.\(document.id.rawValue.uuidString)")
+            Button("영구 삭제", role: .destructive) {
+                confirmPurge(title: "'\(document.title)' 문서를 영구 삭제할까요?", node: .document(document.id))
             }
+            .buttonStyle(.borderless)
+            .mintUIFont(11)
+            .foregroundStyle(theme.dangerC)
+            .accessibilityIdentifier("mint.navigator.trash.purge.document.\(document.id.rawValue.uuidString)")
         }
-        .padding(.top, spatial?.navigatorDrop?.target == document.id && spatial?.navigatorDrop?.after == false ? 14 : 0)
-        .padding(.bottom, spatial?.navigatorDrop?.target == document.id && spatial?.navigatorDrop?.after == true ? 14 : 0)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            guard !editingName else { return }
-            if let spatial { spatial.open(document.id) } else { session.selectDocument(document.id) }
-            editorRequests.focusEditor()
+        .padding(8)
+        .background(theme.chipC, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    private func confirmPurge(title: String, node: ProjectNavigationNode) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = "영구 삭제한 항목은 되돌릴 수 없습니다."
+        alert.addButton(withTitle: "영구 삭제")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        _ = navigator.perform(.purge(node), undo: false)
+    }
+
+    private func confirmEmptyTrash() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "휴지통을 비울까요?"
+        alert.informativeText = "휴지통에 있는 모든 폴더와 문서가 영구적으로 삭제됩니다."
+        alert.addButton(withTitle: "비우기")
+        alert.addButton(withTitle: "취소")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        for folder in trashedRootFolders {
+            _ = navigator.perform(.purge(.folder(folder.id)), undo: false)
         }
-        .accessibilityElement(children: editingName ? .contain : .combine)
-        .accessibilityIdentifier("mint.document.\(document.id.rawValue.uuidString)")
-        .accessibilityLabel(Text(document.title))
-        .accessibilityAddTraits(editingName ? [] : .isButton)
-        .accessibilityAction {
-            guard !editingName else { return }
-            if let spatial { spatial.open(document.id) } else { session.selectDocument(document.id) }
-            editorRequests.focusEditor()
+        for document in standaloneTrashedDocuments {
+            _ = navigator.perform(.purge(.document(document.id)), undo: false)
         }
-        .contextMenu {
-            Button("이름 바꾸기") { startRename(document) }
-            Button("휴지통으로 이동", role: .destructive) {
-                session.selectDocument(document.id)
-                ProjectCommandActions(session: session).trashDocument()
-                editorRequests.focusEditor()
-            }
-        }
-    }
-
-    private var searchTaskID: String {
-        "\(session.runtimeIdentity?.generation ?? 0):\(searchText)"
-    }
-
-    private func startRename(_ document: WritingDocument) {
-        guard let key = documentKey(for: document) else { return }
-        editingKey = key
-        draftTitle = document.title
-        renameFocused = true
-    }
-
-    private func commitRename() {
-        guard let editingKey else { return }
-        session.renameDocument(editingKey, to: draftTitle)
-        self.editingKey = nil
-    }
-
-    private func cancelRename() {
-        editingKey = nil
-        renameFocused = false
-    }
-
-    private func documentKey(for document: WritingDocument) -> ProjectDocumentKey? {
-        guard let projectID = session.activeProject?.id else { return nil }
-        return ProjectDocumentKey(projectID: projectID, documentID: document.id)
-    }
-}
-
-private struct ProjectTrashView: View {
-    let documents: [WritingDocument]
-    let theme: MintTheme
-    let onRestore: (WritingDocumentID) -> Void
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("휴지통").mintUIFont(15, .semibold)
-                Spacer()
-                Button("닫기") { dismiss() }
-            }
-            ForEach(documents) { document in
-                HStack {
-                    Text(document.title)
-                    Spacer()
-                    Button("복원") { onRestore(document.id) }
-                }
-            }
-            if documents.isEmpty {
-                Text("휴지통이 비어 있어요").foregroundStyle(theme.workspaceMutedC)
-            }
-            Spacer(minLength: 0)
-        }
-        .mintUIFont(12)
-        .foregroundStyle(theme.inkC)
-        .padding(18)
-        .frame(minWidth: 360, minHeight: 240)
-        .background(theme.sidebarTintC)
     }
 }

@@ -232,7 +232,7 @@ final class WritingEditorProjectionTests: XCTestCase {
         XCTAssertEqual(spans.last?.source.upperBound, source.utf16.count)
     }
 
-    func testLoadAndNativeEditMapsMatchCanonicalSource() throws {
+    func testLoadAndNativeEditMapsMatchCanonicalSource() async throws {
         let source = "# 제목\n**같은 말** 🙂한\n같은 말 🙂한\n할**수** 있다.\n앞 $x$ 뒤\n![그림](asset.png)"
         let harness = WritingEditorHarness(source)
         defer { harness.close() }
@@ -245,6 +245,8 @@ final class WritingEditorProjectionTests: XCTestCase {
         XCTAssertNil(editor.nativeRange(forSource: .init(formatted), revision: revision))
         let end = editor.string.utf16.count
         harness.edit("!", range: NSRange(location: end, length: 0))
+        await Task.yield()
+        editor.refreshActiveLineHighlight()
         XCTAssertGreaterThan(editor.writingNativeRevision, revision)
         XCTAssertNil(editor.nativeRange(forSource: .init(second), revision: revision))
         XCTAssertEqual(harness.projectedSource, harness.body)

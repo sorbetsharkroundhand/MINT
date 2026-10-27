@@ -65,7 +65,7 @@ import XCTest
             activeEditor.setSelectedRange((activeEditor.string as NSString).range(of: "한도경은"))
             activeEditor.updateSelectionToolbar(); try await Task.sleep(for: .milliseconds(350))
             h.requests.spatialWorkspace?.openPouchTools(); await h.layout()
-            try capture(try XCTUnwrap(h.element("mint.workspace.pouch.tools")), path: directory + "/selection-\(suffix).png")
+            try capture(try XCTUnwrap(h.element("mint.workspace.pouch.tools") as? NSView), path: directory + "/selection-\(suffix).png")
             h.requests.spatialWorkspace?.pouchSection = nil
             activeEditor.hideSelectionToolbar(); activeEditor.setSelectedRange(.init(location: 0, length: 0))
             let entities = WorkspaceEntityController(session: session, requests: h.requests)
@@ -77,7 +77,9 @@ import XCTest
             }
             entities.hide()
             let canvas = try XCTUnwrap(descendant(h.host, SpatialWorkspaceCanvasView.self))
-            let header = try XCTUnwrap(h.element("mint.tile.header.document.\(a.rawValue.uuidString)") as? NSView)
+            var split = model.layout; split.move(.document(b), to: .after(.document(a))); model.setLayout(split)
+            model.open(a); await h.layout()
+            let header = try XCTUnwrap(h.element("mint.binder.tab.\(a.rawValue.uuidString)") as? NSView)
             let source = try XCTUnwrap(canvas.geometry.tiles[.document(a)])
             let target = try XCTUnwrap(canvas.geometry.tiles[.document(b)])
             func event(_ type: NSEvent.EventType, _ point: CGPoint) throws -> NSEvent {
@@ -86,7 +88,7 @@ import XCTest
             }
             let origin = model.layout
             header.mouseDown(with: try event(.leftMouseDown, CGPoint(x: source.midX, y: source.minY + 12)))
-            header.mouseDragged(with: try event(.leftMouseDragged, CGPoint(x: target.midX, y: target.minY + 10)))
+            header.mouseDragged(with: try event(.leftMouseDragged, CGPoint(x: target.midX, y: target.minY + 45)))
             await h.layout(); XCTAssertTrue(model.isDragging)
             try capture(h.host, path: directory + "/drag-preview-\(dark ? "dark" : "light").png")
             header.cancelOperation(nil); await h.layout(); XCTAssertEqual(model.layout, origin)

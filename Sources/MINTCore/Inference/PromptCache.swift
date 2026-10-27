@@ -38,10 +38,13 @@ final class PromptCacheBox: @unchecked Sendable {
         let kvBits: Int?
         let kvGroupSize: Int
         let quantizedKVStart: Int
+        let kvScheme: String?
+        let kvConfiguration: KVCacheConfiguration?
         init(modelID: String, modelIdentity: ObjectIdentifier, parameters: GenerateParameters) {
             self.modelID = modelID; self.modelIdentity = modelIdentity
             maxKVSize = parameters.maxKVSize; kvBits = parameters.kvBits
             kvGroupSize = parameters.kvGroupSize; quantizedKVStart = parameters.quantizedKVStart
+            kvScheme = parameters.kvScheme; kvConfiguration = parameters.kvCache
         }
     }
     struct Lease: Equatable, Sendable {
@@ -61,27 +64,29 @@ final class PromptCacheBox: @unchecked Sendable {
     private var owner: Owner?
     private var active: (lease: Lease, tokens: [Int])?
 
-    func begin(modelID: String, tokens: [Int], model: any LanguageModel, parameters: GenerateParameters) -> Reuse? {
-        begin(owner: Owner(modelID: modelID, modelIdentity: ObjectIdentifier(model), parameters: parameters), tokens: tokens) {
-            makePromptCache(model: model, parameters: parameters)
+    func begin(modelID: String, tokens: [Int], model: any LanguageModel, parameters: GenerateParameters) throws -> Reuse? {
+        try begin(owner: Owner(modelID: modelID, modelIdentity: ObjectIdentifier(model), parameters: parameters), tokens: tokens) {
+            try makePromptCache(model: model, parameters: parameters)
         }
     }
 
     /// The factory seam shares production ownership logic without requiring a loaded model in tests.
-    func begin(owner: Owner, tokens: [Int], makeCache: () -> [KVCache]) -> Reuse? {
+    func begin(owner: Owner, tokens: [Int], makeCache: () throws -> [KVCache]) rethrows -> Reuse? {
         lock.lock(); defer { lock.unlock() }
         guard active == nil, !tokens.isEmpty else { return nil }
         let lease = Lease()
-        active = (lease, tokens)
         if self.owner == owner, let cache, !promptTokens.isEmpty,
            case .exactPrefix(let offset) = PromptCacheCapability.inspect(cache) {
             let prefix = PromptCacheMath.reusablePrefix(offset: offset, recorded: promptTokens, requested: tokens)
             if prefix > 0, PromptCacheCapability.trim(cache, to: prefix) {
+                active = (lease, tokens)
                 return Reuse(cache: cache, suffix: Array(tokens[prefix...]), reusedTokens: prefix, lease: lease)
             }
         }
-        let fresh = makeCache()
+        cache = nil; promptTokens = []; self.owner = nil
+        let fresh = try makeCache()
         cache = fresh; promptTokens = []; self.owner = owner
+        active = (lease, tokens)
         return Reuse(cache: fresh, suffix: tokens, reusedTokens: 0, lease: lease)
     }
 

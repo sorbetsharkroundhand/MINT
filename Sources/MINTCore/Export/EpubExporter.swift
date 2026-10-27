@@ -284,10 +284,18 @@ public enum EpubExporter {
                 }
                 continue
             }
-            if line.trimmingCharacters(in: .whitespaces) == "```" {
+            let trimmedFence = line.trimmingCharacters(in: .whitespaces)
+            if !inCode, trimmedFence.hasPrefix("```"), !trimmedFence.dropFirst(3).contains("`") {
                 closeList()
-                inCode.toggle()
-                html += inCode ? "<pre><code>" : "</code></pre>\n"
+                inCode = true
+                let lang = String(trimmedFence.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                let classAttr = lang.isEmpty ? "" : " class=\"language-\(attrEscape(lang))\""
+                html += "<pre><code\(classAttr)>"
+                continue
+            } else if inCode, trimmedFence == "```" {
+                closeList()
+                inCode = false
+                html += "</code></pre>\n"
                 continue
             }
             if inCode {
@@ -310,26 +318,39 @@ public enum EpubExporter {
                 title = plainTitle(String(line.dropFirst(2)))
                 html = ""
                 started = true
+            } else if line.hasPrefix("###### ") {
+                closeList()
+                html += "<h6>\(inline(String(line.dropFirst(7))))</h6>\n"
+            } else if line.hasPrefix("##### ") {
+                closeList()
+                html += "<h5>\(inline(String(line.dropFirst(6))))</h5>\n"
+            } else if line.hasPrefix("#### ") {
+                closeList()
+                html += "<h4>\(inline(String(line.dropFirst(5))))</h4>\n"
             } else if line.hasPrefix("### ") {
                 closeList()
                 html += "<h3>\(inline(String(line.dropFirst(4))))</h3>\n"
             } else if line.hasPrefix("## ") {
                 closeList()
                 html += "<h2>\(inline(String(line.dropFirst(3))))</h2>\n"
-            } else if line.hasPrefix("- [ ] ") || line.hasPrefix("- [x] ") {
-                openList("ul")
-                let mark = line.hasPrefix("- [x] ") ? "☑" : "☐"
-                html += "<li>\(mark) \(inline(String(line.dropFirst(6))))</li>\n"
-            } else if line.hasPrefix("> ") || line == ">" {
+            } else if let quoteMatch = BlockTextView.parseQuotePrefix(line) {
                 closeList()
-                let quoted = line == ">" ? "" : String(line.dropFirst(2))
-                html += "<blockquote><p>\(inline(quoted))</p></blockquote>\n"
-            } else if line.hasPrefix("- ") || line.hasPrefix("* ") {
-                openList("ul")
-                html += "<li>\(inline(String(line.dropFirst(2))))</li>\n"
-            } else if let match = line.range(of: #"^(\d+)\.\s"#, options: .regularExpression) {
-                openList("ol")
-                html += "<li>\(inline(String(line[match.upperBound...])))</li>\n"
+                html += "<blockquote><p>\(inline(quoteMatch.body))</p></blockquote>\n"
+            } else if let listMatch = BlockTextView.parseListPrefix(line) {
+                switch listMatch.block {
+                case .todo:
+                    openList("ul")
+                    let mark = listMatch.checked ? "☑" : "☐"
+                    html += "<li>\(mark) \(inline(listMatch.body))</li>\n"
+                case .bullet:
+                    openList("ul")
+                    html += "<li>\(inline(listMatch.body))</li>\n"
+                case .number:
+                    openList("ol")
+                    html += "<li>\(inline(listMatch.body))</li>\n"
+                default:
+                    break
+                }
             } else if line.range(of: #"^---+\s*$"#, options: .regularExpression) != nil {
                 closeList()
                 html += "<hr/>\n"
@@ -386,40 +407,174 @@ public enum EpubExporter {
         return chapters
     }
 
-    /// 수식을 OEBPS/images/에 PNG로 심고 (html 태그, OPF 등록용 asset 파일명?)을
-    /// 돌려준다 — 리더 호환 표현. LaTeX 원문은 alt에 남겨 의미 fallback을 제공하고,
+    /// 수식을 EPUB 3 네이티브 MathML(`<math>`) 벡터 태그로 변환해 돌려준다.
+    /// LaTeX 원문은 `alttext` 속성에 남겨 접근성·의미 fallback을 제공하고,
     /// 렌더 실패 시엔 code 소스를 남긴다 (이슈 #22).
     ///
-    /// 메인 격리가 없다 — 내보내기 경로는 공유 캐시를 거치지 않는 자체 렌더로
-    /// 백그라운드에서 돈다 (#33). 편집기 화면의 MathRenderer(메인 전용 캐시)와
-    /// 결과는 같다.
+    /// 메인 격리가 없다 — 내보내기 경로는 공유 캐시를 거치지 않는 순수 AST 변환으로
+    /// 백그라운드에서 돈다 (#33).
     static func mathHTML(
         _ source: String, into oebps: URL
     ) -> (html: String, asset: String?) {
-        guard !source.trimmingCharacters(in: .whitespaces).isEmpty,
-            let png = Self.mathPNG(source)
+        _ = oebps
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            let math = Self.mathML(source, display: true)
         else {
             // 렌더 실패 — 소스를 남겨 의미가 완전히 사라지지 않게 한다 (#15 승계).
             return ("<p class=\"math\"><code>\(escape(source))</code></p>\n", nil)
         }
-        let name = "math-\(stableHash(source)).png"
-        let dir = oebps.appendingPathComponent("images", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        try? png.write(to: dir.appendingPathComponent(name), options: .atomic)
-        return (
-            "<p class=\"math\"><img src=\"images/\(name)\""
-                + " alt=\"LaTeX: \(attrEscape(source))\"/></p>\n",
-            "images/\(name)"
-        )
+        return ("<p class=\"math\">\(math)</p>\n", nil)
+    }
+
+    /// LaTeX → EPUB 3 MathML 문자열 (`<math xmlns="http://www.w3.org/1998/Math/MathML">`).
+    static func mathML(_ source: String, display: Bool = true) -> String? {
+        guard !source.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            let list = MathRenderer.parsedMathList(
+                latex: source, labelMode: display ? .display : .text)
+        else { return nil }
+        let body = renderMathList(list)
+        guard !body.isEmpty else { return nil }
+        let mode = display ? "block" : "inline"
+        return "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"\(mode)\""
+            + " alttext=\"LaTeX: \(attrEscape(source))\">\(body)</math>"
+    }
+
+    private static func renderMathList(_ list: MTMathList?) -> String {
+        guard let list else { return "" }
+        return list.finalized.atoms.map(renderMathAtom).joined()
+    }
+
+    private static func renderMathRow(_ list: MTMathList?) -> String {
+        guard let list else { return "<mrow/>" }
+        let finalized = list.finalized
+        let rendered = finalized.atoms.map(renderMathAtom).filter { !$0.isEmpty }
+        if rendered.isEmpty { return "<mrow/>" }
+        if rendered.count == 1 { return rendered[0] }
+        return "<mrow>\(rendered.joined())</mrow>"
+    }
+
+    private static func mathVariantAttr(for atom: MTMathAtom) -> String {
+        let probe: MTMathAtom = atom.copy()
+        probe.subScript = nil
+        probe.superScript = nil
+        let tex = MTMathListBuilder.mathListToString(MTMathList(atom: probe))
+        if tex.hasPrefix("\\mathrm{") { return " mathvariant=\"normal\"" }
+        if tex.hasPrefix("\\mathbf{") { return " mathvariant=\"bold\"" }
+        if tex.hasPrefix("\\mathfrak{") { return " mathvariant=\"fraktur\"" }
+        if tex.hasPrefix("\\mathcal{") { return " mathvariant=\"script\"" }
+        if tex.hasPrefix("\\mathit{") { return " mathvariant=\"italic\"" }
+        if tex.hasPrefix("\\mathsf{") { return " mathvariant=\"sans-serif\"" }
+        if tex.hasPrefix("\\mathbb{") { return " mathvariant=\"double-struck\"" }
+        if tex.hasPrefix("\\mathtt{") { return " mathvariant=\"monospace\"" }
+        if tex.hasPrefix("\\bm{") { return " mathvariant=\"bold-italic\"" }
+        return ""
+    }
+
+    private static func renderMathAtom(_ atom: MTMathAtom) -> String {
+        let base: String
+        switch atom.type {
+        case .number:
+            base = "<mn\(mathVariantAttr(for: atom))>\(escape(atom.nucleus))</mn>"
+        case .variable:
+            base = "<mi\(mathVariantAttr(for: atom))>\(escape(atom.nucleus))</mi>"
+        case .ordinary, .placeholder:
+            if atom.nucleus.isEmpty {
+                base = (atom.subScript != nil || atom.superScript != nil) ? "<mrow/>" : ""
+            } else if atom.nucleus.allSatisfy(\.isNumber) {
+                base = "<mn\(mathVariantAttr(for: atom))>\(escape(atom.nucleus))</mn>"
+            } else {
+                base = "<mi\(mathVariantAttr(for: atom))>\(escape(atom.nucleus))</mi>"
+            }
+        case .largeOperator, .binaryOperator, .unaryOperator, .relation, .open, .close, .punctuation, .boundary:
+            base = "<mo\(mathVariantAttr(for: atom))>\(escape(atom.nucleus))</mo>"
+        case .fraction:
+            let frac = atom as? MTFraction
+            let ruleAttr = (frac?.hasRule == false) ? " linethickness=\"0\"" : ""
+            let core = "<mfrac\(ruleAttr)>\(renderMathRow(frac?.numerator))\(renderMathRow(frac?.denominator))</mfrac>"
+            let left = frac?.leftDelimiter ?? ""
+            let right = frac?.rightDelimiter ?? ""
+            if !left.isEmpty || !right.isEmpty {
+                let lTag = left.isEmpty ? "" : "<mo>\(escape(left))</mo>"
+                let rTag = right.isEmpty ? "" : "<mo>\(escape(right))</mo>"
+                base = "<mrow>\(lTag)\(core)\(rTag)</mrow>"
+            } else {
+                base = core
+            }
+        case .radical:
+            let rad = atom as? MTRadical
+            if let degree = rad?.degree {
+                base = "<mroot>\(renderMathRow(rad?.radicand))\(renderMathRow(degree))</mroot>"
+            } else {
+                base = "<msqrt>\(renderMathRow(rad?.radicand))</msqrt>"
+            }
+        case .inner:
+            let inner = atom as? MTInner
+            let left = (inner?.leftBoundary?.nucleus).flatMap { $0.isEmpty ? nil : "<mo>\(escape($0))</mo>" } ?? ""
+            let right = (inner?.rightBoundary?.nucleus).flatMap { $0.isEmpty ? nil : "<mo>\(escape($0))</mo>" } ?? ""
+            base = "<mrow>\(left)\(renderMathList(inner?.innerList))\(right)</mrow>"
+        case .overline:
+            let over = atom as? MTOverLine
+            base = "<mover>\(renderMathRow(over?.innerList))<mo>&#xAF;</mo></mover>"
+        case .underline:
+            let under = atom as? MTUnderLine
+            base = "<munder>\(renderMathRow(under?.innerList))<mo>&#x332;</mo></munder>"
+        case .accent:
+            let acc = atom as? MTAccent
+            base = "<mover accent=\"true\">\(renderMathRow(acc?.innerList))<mo>\(escape(acc?.nucleus ?? ""))</mo></mover>"
+        case .space:
+            if let mu = (atom as? MTMathSpace)?.space, mu > 0 {
+                base = "<mspace width=\"\(String(format: "%.3g", Double(mu) / 18.0))em\"/>"
+            } else {
+                base = ""
+            }
+        case .style:
+            base = ""
+        case .color, .textcolor:
+            let color = (atom as? MTMathColor)?.colorString ?? (atom as? MTMathTextColor)?.colorString ?? ""
+            let inner = (atom as? MTMathColor)?.innerList ?? (atom as? MTMathTextColor)?.innerList
+            base = "<mstyle mathcolor=\"\(attrEscape(color))\">\(renderMathList(inner))</mstyle>"
+        case .colorBox:
+            let box = atom as? MTMathColorbox
+            base = "<mstyle mathbackground=\"\(attrEscape(box?.colorString ?? ""))\">\(renderMathList(box?.innerList))</mstyle>"
+        case .table:
+            guard let table = atom as? MTMathTable else { base = ""; break }
+            var rows = ""
+            for row in table.cells {
+                var cols = ""
+                for (colIdx, cell) in row.enumerated() {
+                    let align: String
+                    switch table.get(alignmentForColumn: colIdx) {
+                    case .left: align = " columnalign=\"left\""
+                    case .right: align = " columnalign=\"right\""
+                    case .center: align = ""
+                    }
+                    cols += "<mtd\(align)>\(renderMathList(cell))</mtd>"
+                }
+                rows += "<mtr>\(cols)</mtr>"
+            }
+            base = "<mtable>\(rows)</mtable>"
+        }
+
+        guard !base.isEmpty else { return "" }
+        let isLimitsOp = (atom as? MTLargeOperator)?.limits == true
+        if let sub = atom.subScript, let sup = atom.superScript {
+            let tag = isLimitsOp ? "munderover" : "msubsup"
+            return "<\(tag)>\(base)\(renderMathRow(sub))\(renderMathRow(sup))</\(tag)>"
+        } else if let sub = atom.subScript {
+            let tag = isLimitsOp ? "munder" : "msub"
+            return "<\(tag)>\(base)\(renderMathRow(sub))</\(tag)>"
+        } else if let sup = atom.superScript {
+            let tag = isLimitsOp ? "mover" : "msup"
+            return "<\(tag)>\(base)\(renderMathRow(sup))</\(tag)>"
+        }
+        return base
     }
 
     /// LaTeX → PNG 데이터 — 메인 격리 밖의 순수 렌더. MathRenderer와 같은
     /// SwiftMath 파이프라인이지만 공유 캐시(NSImage 보관, 메인 전용)를 쓰지
     /// 않아 백그라운드 내보내기에서 안전하다 (#33).
     static func mathPNG(_ source: String) -> Data? {
-        let image = MTMathImage(
-            latex: source, fontSize: 16, textColor: .black, labelMode: .display)
-        let (error, nsImage) = image.asImage()
+        let (error, nsImage) = MathRenderer.uncachedImage(latex: source, color: .black, fontSize: 16)
         guard error == nil, let nsImage, nsImage.size.width > 0,
             let tiff = nsImage.tiffRepresentation,
             let rep = NSBitmapImageRep(data: tiff)
@@ -531,9 +686,51 @@ public enum EpubExporter {
         escape(text).replacingOccurrences(of: "\"", with: "&quot;")
     }
 
-    /// 인라인 마크다운(굵게·기울임·코드·`<font>` 색/크기)을 XHTML로 바꾼다.
+    /// 인라인 마크다운(굵게·기울임·코드·인라인 수식·`<font>` 색/크기)을 XHTML로 바꾼다.
     private static func inline(_ text: String) -> String {
-        var s = escape(text)
+        var working = text
+        var fragments: [String] = []
+        let tokenPrefix = "\u{E000}" + UUID().uuidString + ":"
+        func reserve(_ html: String) -> String {
+            let token = tokenPrefix + String(fragments.count) + "\u{E001}"
+            fragments.append(html)
+            return token
+        }
+        // Protect literal code and URL attributes before applying prose markers.
+        // Replacements run backwards so source coordinates stay valid.
+        var source = working as NSString
+        for match in codeSpan.matches(in: working, range: fullRange(working)).reversed() {
+            let html = "<code>" + escape(source.substring(with: match.range(at: 1))) + "</code>"
+            working = (working as NSString).replacingCharacters(in: match.range, with: reserve(html))
+        }
+        source = working as NSString
+        for match in inlineLink.matches(in: working, range: fullRange(working)).reversed() {
+            let label = source.substring(with: match.range(at: 1))
+            let destination = source.substring(with: match.range(at: 2))
+            let html = "<a href=\"" + attrEscape(destination) + "\">" + inline(label) + "</a>"
+            working = (working as NSString).replacingCharacters(in: match.range, with: reserve(html))
+        }
+        if working.contains("$") {
+            let skipRanges = codeSpan.matches(in: working, range: fullRange(working)).map(\.range)
+            let regions = MathScanner.regions(in: working, skipping: skipRanges)
+            if !regions.isEmpty {
+                let nsWorking = working as NSString
+                var rebuilt = ""
+                var cursor = 0
+                for region in regions {
+                    guard let math = mathML(region.latex, display: region.kind == .displayLine) else {
+                        continue
+                    }
+                    rebuilt += nsWorking.substring(
+                        with: NSRange(location: cursor, length: region.range.location - cursor))
+                    rebuilt += reserve(math)
+                    cursor = region.range.upperBound
+                }
+                rebuilt += nsWorking.substring(from: cursor)
+                working = rebuilt
+            }
+        }
+        var s = escape(working)
         // <font color size> → span style (이스케이프된 형태를 매칭).
         let ns = s as NSString
         var result = ""
@@ -562,8 +759,13 @@ public enum EpubExporter {
             in: s, range: fullRange(s), withTemplate: "<strong>$1</strong>")
         s = italic.stringByReplacingMatches(
             in: s, range: fullRange(s), withTemplate: "<em>$1</em>")
-        s = codeSpan.stringByReplacingMatches(
-            in: s, range: fullRange(s), withTemplate: "<code>$1</code>")
+        s = strikethrough.stringByReplacingMatches(
+            in: s, range: fullRange(s), withTemplate: "<del>$1</del>")
+        s = highlight.stringByReplacingMatches(
+            in: s, range: fullRange(s), withTemplate: "<mark>$1</mark>")
+        for (index, fragment) in fragments.enumerated().reversed() {
+            s = s.replacingOccurrences(of: tokenPrefix + String(index) + "\u{E001}", with: fragment)
+        }
         // Preserve native soft breaks without creating another XHTML paragraph.
         return s.replacingOccurrences(of: "\u{2028}", with: "<br />")
     }
@@ -572,7 +774,7 @@ public enum EpubExporter {
     /// EntryStore의 태그 스트리퍼(비격리 순수 정규식)를 재사용한다.
     private static func plainTitle(_ text: String) -> String {
         let stripped = EntryStore.strippedInlineTags(text)
-            .replacingOccurrences(of: #"[*`]+"#, with: "", options: .regularExpression)
+            .replacingOccurrences(of: #"[*`~=#]+"#, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespaces)
         return stripped.isEmpty ? "제목 없음" : stripped
     }
@@ -600,8 +802,14 @@ public enum EpubExporter {
         pattern: #"(?<!\*)\*\*([^*\n]+)\*\*(?!\*)"#)
     private static let italic = try! NSRegularExpression(
         pattern: #"(?<!\*)\*([^*\n]+)\*(?!\*)"#)
+    private static let strikethrough = try! NSRegularExpression(
+        pattern: #"(?<!~)~~([^~\n]+)~~(?!~)"#)
+    private static let highlight = try! NSRegularExpression(
+        pattern: #"(?<!=)==([^=\n]+)==(?!=)"#)
     private static let codeSpan = try! NSRegularExpression(
         pattern: #"`([^`\n]+)`"#)
+    private static let inlineLink = try! NSRegularExpression(
+        pattern: #"(?<!\!)\[([^\[\]\n]+)\]\(([^)\s]+)\)"#)
 
     // MARK: - 패키지 문서들
 
@@ -616,18 +824,21 @@ public enum EpubExporter {
 
     /// 소설다운 기본 조판 — 세리프·넉넉한 행간·들여쓰기 없는 문단 간격.
     private static let styleCSS = """
-        body { font-family: "Noto Serif KR", serif; line-height: 1.75; margin: 1em; }
-        h1 { font-size: 1.5em; margin: 1.6em 0 1em; }
+        html, body { margin: 0; padding: 0; }
+        body { font-family: "Noto Serif KR", serif; line-height: 1.75; margin: 1em; overflow-wrap: break-word; }
+        section { margin: 0; padding: 0; }
+        h1 { font-size: 1.5em; margin: 0 0 1em; }
         h2 { font-size: 1.25em; margin: 1.4em 0 0.8em; }
         h3 { font-size: 1.1em; margin: 1.2em 0 0.6em; }
+        h4, h5, h6 { font-size: 1em; margin: 1em 0 0.5em; }
         p { margin: 0 0 0.75em; }
         blockquote { color: #666; border-left: 3px solid #999; margin: 1em 0; padding-left: 1em; }
         pre, code { font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
         pre { background: #f2f2f2; padding: 0.8em; border-radius: 8px; overflow-x: auto; }
         hr { border: none; border-top: 1px solid #ccc; margin: 2em auto; width: 40%; }
-        .math { text-align: center; margin: 1.2em 0; }
+        .math { text-align: center; margin: 1.2em 0; overflow-x: auto; }
         .image { text-align: center; margin: 1.2em 0; }
-        img { max-width: 100%; }
+        img { max-width: 100%; height: auto; }
         """
 
     private static func chapterFile(_ index: Int) -> String { "chapter\(index).xhtml" }
@@ -705,8 +916,9 @@ public enum EpubExporter {
         ]
         var spine: [String] = []
         for index in chapters.indices {
+            let properties = chapters[index].html.contains("<math") ? " properties=\"mathml\"" : ""
             manifest.append(
-                "<item id=\"ch\(index)\" href=\"\(chapterFile(index))\" media-type=\"application/xhtml+xml\"/>")
+                "<item id=\"ch\(index)\" href=\"\(chapterFile(index))\" media-type=\"application/xhtml+xml\"\(properties)/>")
             spine.append("<itemref idref=\"ch\(index)\"/>")
         }
         for (index, image) in images.enumerated() {

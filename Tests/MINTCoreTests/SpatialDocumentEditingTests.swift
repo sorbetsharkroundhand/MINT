@@ -47,6 +47,21 @@ import XCTest
         XCTAssertEqual(f.session.activeProject?.documents.map(\.id), Array(ids.reversed()))
     }
 
+    func testOpeningOrSelectingDocumentDoesNotReorderProjectDocuments() async throws {
+        let f = try await fixture(); defer { try? FileManager.default.removeItem(at: f.root) }
+        let originalOrder = f.project.documents.map(\.id)
+        let b = originalOrder[1]
+
+        // Selecting document B must NOT move document B to the front of project.documents
+        f.session.selectDocument(b)
+        XCTAssertEqual(f.session.activeProject?.documents.map(\.id), originalOrder)
+
+        let controller = SpatialWorkspaceController(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+        controller.configure(project: f.project, selected: originalOrder[0])
+        controller.open(b)
+        XCTAssertEqual(f.session.activeProject?.documents.map(\.id), originalOrder)
+    }
+
     private func fixture() async throws -> (root: URL, store: ProjectStore, session: ProjectSession, project: WritingProject) {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("mint-spatial-\(UUID())")
         let store = ProjectStore(root: root)

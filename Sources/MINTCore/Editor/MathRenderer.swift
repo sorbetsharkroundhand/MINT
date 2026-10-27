@@ -31,9 +31,7 @@ enum MathRenderer {
     ) -> (image: NSImage?, error: String?) {
         let key = "\(labelMode == .display ? "D" : "T")|\(fontSize)|\(color.description)|\(latex)"
         if let hit = cache.find(key) { return (hit, nil) }
-        let renderer = MTMathImage(
-            latex: latex, fontSize: fontSize, textColor: color, labelMode: labelMode)
-        let (error, image) = renderer.asImage()
+        let (error, image) = uncachedImage(latex: latex, color: color, fontSize: fontSize, labelMode: labelMode)
         guard error == nil, let image, image.size.width > 0 else {
             return (nil, error?.localizedDescription ?? "수식을 해석하지 못했어요")
         }
@@ -41,6 +39,60 @@ enum MathRenderer {
         let bytes = max(1, Int(image.size.width) * Int(image.size.height) * 4 * 2)
         cache.insert(key: key, image: image, bytes: bytes)
         return (image, nil)
+    }
+
+    /// Shared by editor display and background EPUB export without touching the main-actor cache.
+    nonisolated static func uncachedImage(
+        latex: String, color: NSColor, fontSize: CGFloat, labelMode: MTMathUILabelMode = .display
+    ) -> (NSError?, NSImage?) {
+        let renderer = MTMathImage(
+            latex: renderingSource(latex), fontSize: fontSize, textColor: color, labelMode: labelMode)
+        if labelMode == .display {
+            // Leave room for antialiased glyph overhangs at the image boundary.
+            // Inline atoms keep their existing metrics and baseline alignment.
+            renderer.contentInsets = .init(top: 2, left: 2, bottom: 2, right: 2)
+        }
+        let (error, image) = renderer.asImage()
+        guard let image, image.size.width > renderer.contentInsets.left + renderer.contentInsets.right else {
+            return (error, nil)
+        }
+        return (error, image)
+    }
+
+    /// Parses and validates LaTeX into a SwiftMath AST for native EPUB MathML export,
+    /// requiring the same non-empty typeset bounds as visual rendering.
+    nonisolated static func parsedMathList(
+        latex: String, labelMode: MTMathUILabelMode = .display
+    ) -> MTMathList? {
+        let adapted = renderingSource(latex)
+        guard !adapted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        var error: NSError?
+        guard let list = MTMathListBuilder.build(fromString: adapted, error: &error),
+            error == nil,
+            uncachedImage(latex: latex, color: .black, fontSize: 16, labelMode: labelMode).1 != nil
+        else {
+            return nil
+        }
+        return list
+    }
+
+    /// TeX treats an escaped physical newline as a control space. SwiftMath's command
+    /// reader accepts `\ ` but not a newline, so adapt only that token for display.
+    /// Paired backslashes remain row breaks, including consecutive breaks in tables.
+    /// The editor, clipboard, cache key and exports retain the original source.
+    nonisolated private static func renderingSource(_ latex: String) -> String {
+        var result = "", backslashes = 0
+        for character in latex {
+            if character == "\\" { backslashes += 1; continue }
+            if backslashes > 0 {
+                result += String(repeating: "\\", count: backslashes)
+                if character.isNewline && backslashes % 2 == 1 { result += " " }
+                backslashes = 0
+            }
+            result.append(character)
+        }
+        result += String(repeating: "\\", count: backslashes)
+        return result
     }
 
     /// Draws the error and original LaTeX with a dashed red outline distinct from valid math (#22).

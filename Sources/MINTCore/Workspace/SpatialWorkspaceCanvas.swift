@@ -72,8 +72,10 @@ final class SpatialWorkspaceCanvasView: NSView {
     private var grabStart = CGPoint.zero
     private var wakeMonitor: Any?
     private var scrollObserver: NSObjectProtocol?
+    private var windowResignObserver: NSObjectProtocol?
     private var revealedSequence = 0
     private var dragPill: NSPanel?
+    private var dragOverlay = SpatialDragIndicatorOverlayView()
     private let pointerSpring = WorkspacePointerSpring()
     private var transitions: [(panel: NSPanel, host: NSView?)] = []
     private var handles: [String: SpatialResizeHandle] = [:]
@@ -102,12 +104,14 @@ final class SpatialWorkspaceCanvasView: NSView {
             geometryLayout = nil
             stopDragPresentation()
         }
+        if draggingCursor && !model.isDragging { stopDragPresentation() }
         let updateExisting = lastTheme != theme
         lastTheme = theme
         let nextLayout = model.presentationLayout
         animateLayout = lastLayout != nil && lastLayout != nextLayout && resize == nil
         lastLayout = nextLayout
-        var retained = Set(model.layout.tiles)
+        var retained = Set(model.retainedTiles)
+        retained.formUnion(model.layout.allTiles)
         if let dragged = model.draggedTile { retained.insert(dragged) }
         for key in Array(hosts.keys) where !retained.contains(key) {
             guard let host = hosts.removeValue(forKey: key) else { continue }
@@ -129,7 +133,6 @@ final class SpatialWorkspaceCanvasView: NSView {
                 hosts[tile] = host; addSubview(host)
                 newTiles.insert(tile)
             }
-            host.isHidden = model.isDragging && !model.dragFromNavigator && model.draggedTile == tile
         }
         layoutTiles()
     }
@@ -142,18 +145,43 @@ final class SpatialWorkspaceCanvasView: NSView {
             geometryLayout = presentation; geometryViewport = viewport
             updateContentSize()
         }
+        let duration: Double = 0.18
         for (tile, host) in hosts {
             host.layer?.cornerRadius = presentation.isSingleManuscript ? 0 : 13
-            guard let rect = geometry.tiles[tile], !host.isHidden else { continue }
+            let wasHidden = host.isHidden
+            host.isHidden = geometry.tiles[tile] == nil
+            guard let rect = geometry.tiles[tile] else {
+                frameTransitions.removeValue(forKey: ObjectIdentifier(host))
+                continue
+            }
+            if wasHidden {
+                frameTransitions.removeValue(forKey: ObjectIdentifier(host))
+                host.frame = rect
+            }
+            if wasHidden && !model.isDragging && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                // Dissolve only the body; tab chrome and the paper frame stay stationary.
+                func editorScroll(_ view: NSView) -> NSScrollView? {
+                    if let editor = view as? BlockTextView { return editor.enclosingScrollView }
+                    return view.subviews.lazy.compactMap(editorScroll).first
+                }
+                if let body = editorScroll(host) {
+                    body.alphaValue = 0
+                    WorkspaceHTMLStyle.animate(0.12) { body.animator().alphaValue = 1 }
+                }
+            }
+            // Invariant: Keep all frames strictly unchanged while dragging.
+            if model.isDragging {
+                continue
+            }
             guard targetFrames[tile] != rect || newTiles.contains(tile) else { continue }
             targetFrames[tile] = rect
-            if animateLayout && !reduceMotion {
+            if animateLayout && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if newTiles.contains(tile) {
                     host.frame = rect
                     host.alphaValue = 0
-                    WorkspaceHTMLStyle.animate(0.12) { host.animator().alphaValue = 1 }
+                    WorkspaceHTMLStyle.animate(duration) { host.animator().alphaValue = 1 }
                 }
-                transition(host, to: rect, duration: 0.12)
+                transition(host, to: rect, duration: duration)
             } else {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host)); host.frame = rect
             }
@@ -166,6 +194,7 @@ final class SpatialWorkspaceCanvasView: NSView {
         }
         updateContentSize()
         updateResizeHandles()
+        updateDragOverlay()
         needsDisplay = true
         model.pouchGeometryDidChange?()
     }
@@ -203,6 +232,9 @@ final class SpatialWorkspaceCanvasView: NSView {
         let bottom = hosts.values.filter { !$0.isHidden }.map { $0.frame.maxY + SpatialWorkspaceGeometry.bottomInset }.max() ?? 0
         let size = CGSize(width: geometry.contentSize.width, height: max(geometry.contentSize.height, bottom))
         if frame.size != size { setFrameSize(size) }
+        if dragOverlay.superview != nil, dragOverlay.frame.size != size {
+            dragOverlay.frame = CGRect(origin: .zero, size: size)
+        }
     }
     private func stopFrameTransitions() {
         frameTimer?.invalidate(); frameTimer = nil
@@ -291,9 +323,17 @@ final class SpatialWorkspaceCanvasView: NSView {
         animateLayout = false; layoutTiles()
         dragSequence &+= 1
         grabbedTile = tile; grabStart = screenPoint(for: event); dragTracking = true
-        if let id = tile.documentID { model.onActivate?(id) }
-        model.beginDrag(tile, at: canvasPoint(for: event), fromNavigator: fromNavigator)
-        // The source header disappears during detachment. Continue tracking at the app
+        if !fromNavigator, let id = tile.documentID { model.onActivate?(id) }
+        var base = geometry
+        for (key, host) in hosts where !host.isHidden { base.tiles[key] = host.frame }
+        model.beginDrag(
+            tile,
+            at: canvasPoint(for: event),
+            fromNavigator: fromNavigator,
+            initialFrame: hosts[tile]?.frame ?? base.tiles[tile],
+            baseGeometry: base
+        )
+        // The source header stays in place as a placeholder; continue tracking at the app
         // boundary, like the HTML's document mousemove/mouseup handlers.
         dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp, .keyDown]) { [weak self] event in
             guard let self, self.dragTracking else { return event }
@@ -314,20 +354,31 @@ final class SpatialWorkspaceCanvasView: NSView {
     func continuePanelDrag(_ event: NSEvent) {
         guard dragTracking, let model else { return }
         if event.window === window { autoscroll(with: event) }
+        let canvasPoint = canvasPoint(for: event)
+        if model.isDragging, model.isTabDrop || model.isDocumentListDrop, canvasPoint == model.pointer { return }
         let wasDragging = model.isDragging, previous = model.previewTarget
         let pointer = screenPoint(for: event)
         let beginning = !wasDragging && hypot(pointer.x - grabStart.x, pointer.y - grabStart.y) > 5
-        // Capture the retained native view before publishing a detached layout.
         let sourceHost = grabbedTile.flatMap { hosts[$0] }
         let sourceFrame = beginning ? sourceHost.map { screenFrame(of: $0) } : nil
-        let sourceImage = beginning && !model.dragFromNavigator && !reduceMotion ? sourceHost.flatMap { snapshot($0) } : nil
-        var presented = geometry
-        for (tile, host) in hosts where !host.isHidden { presented.tiles[tile] = host.frame }
-        model.updateDrag(to: canvasPoint(for: event), geometry: presented)
+        let sourceImage = beginning && !model.dragFromNavigator && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? sourceHost.flatMap { snapshot($0) } : nil
+        let baseGeometry = model.baseDragGeometry ?? geometry
+        let tabTarget: SpatialDropTarget?
+        if grabbedTile?.documentID != nil {
+            if !model.dragFromNavigator, let navigator = hosts[.navigator], !navigator.isHidden,
+               navigator.frame.contains(canvasPoint) {
+                tabTarget = .documentList
+            } else { tabTarget = tabDropTarget(at: canvasPoint) }
+        } else { tabTarget = nil }
+        model.updateDrag(to: canvasPoint, geometry: baseGeometry, tabTarget: tabTarget)
         if !wasDragging, model.isDragging {
             NSCursor.closedHand.push(); draggingCursor = true
-            showDragPill(model.draggedTile, at: pointer); positionDragPill(event)
-            if !model.dragFromNavigator, let host = sourceHost, let origin = sourceFrame {
+            if !model.dragFromNavigator, let host = sourceHost {
+                host.alphaValue = 0.35
+            }
+            if !model.isTabDrop { showDragPill(model.draggedTile, at: pointer); positionDragPill(event) }
+            if !model.dragFromNavigator, !model.isTabDrop, let host = sourceHost, let origin = sourceFrame {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host))
                 let width = origin.width * min(0.35, max(0.08, 96 / origin.width))
                 let height = origin.height * min(0.28, max(0.06, 36 / origin.height))
@@ -336,18 +387,81 @@ final class SpatialWorkspaceCanvasView: NSView {
             }
         }
         if model.isDragging {
-            if !model.dragFromNavigator { hosts[model.draggedTile!]?.isHidden = true }
+            updateDocumentListHighlight()
+            if !model.isTabDrop, dragPill == nil { showDragPill(model.draggedTile, at: pointer) }
+            if model.isTabDrop { dragPill?.orderOut(nil) }
+            else { dragPill?.orderFrontRegardless() }
             updateNavigatorDrop(event)
             if previous != model.previewTarget || !wasDragging {
-                animateLayout = true
-                layoutTiles()
+                updateDragOverlay()
             }
             positionDragPill(event)
         }
     }
+    private func tabDropTarget(at point: CGPoint) -> SpatialDropTarget? {
+        func find(_ view: NSView) -> SpatialManilaTabBarView? {
+            (view as? SpatialManilaTabBarView) ?? view.subviews.lazy.compactMap(find).first
+        }
+        for host in hosts.values where !host.isHidden && host.frame.contains(point) {
+            if let bar = find(host), !bar.isHidden, bar.alphaValue > 0,
+               let target = bar.dropTarget(at: bar.convert(point, from: self)) { return target }
+        }
+        return nil
+    }
+
+    private func updateDocumentListHighlight() {
+        let layer = hosts[.navigator]?.layer
+        layer?.borderWidth = model?.isDocumentListDrop == true ? 2 : 0
+        layer?.borderColor = theme.novel.cgColor
+    }
+
+    private func updateDragOverlay() {
+        guard let model, model.isDragging else {
+            dragOverlay.isHidden = true
+            dragOverlay.sourcePlaceholderRect = nil
+            dragOverlay.indicator = nil
+            return
+        }
+        if dragOverlay.superview == nil {
+            dragOverlay.frame = bounds
+            addSubview(dragOverlay, positioned: .above, relativeTo: nil)
+        } else {
+            dragOverlay.frame = bounds
+            addSubview(dragOverlay, positioned: .above, relativeTo: nil)
+        }
+        dragOverlay.theme = theme
+        dragOverlay.isHidden = false
+        let baseGeometry = model.baseDragGeometry ?? geometry
+        if !model.dragFromNavigator, let dragged = model.draggedTile {
+            dragOverlay.sourcePlaceholderRect = hosts[dragged]?.frame ?? baseGeometry.tiles[dragged]
+        } else {
+            dragOverlay.sourcePlaceholderRect = nil
+        }
+        if let target = model.previewTarget {
+            dragOverlay.indicator = baseGeometry.dropIndicator(for: target)
+        } else {
+            dragOverlay.indicator = nil
+        }
+        dragOverlay.needsDisplay = true
+    }
+
+    private weak var navigatorController: ProjectNavigatorController?
+
     private func updateNavigatorDrop(_ event: NSEvent) {
         guard let model, model.dragFromNavigator, let source = model.draggedTile?.documentID,
-              let navigator = hosts[.navigator] else { model?.previewNavigator(nil); return }
+              let navigator = hosts[.navigator] else {
+            navigatorController?.preview(nil); navigatorController = nil
+            model?.previewNavigator(nil); return
+        }
+        let windowPoint = window?.convertPoint(fromScreen: screenPoint(for: event)) ?? event.locationInWindow
+        if let (owner, destination) = ProjectNavigatorController.destination(for: .document(source), at: windowPoint, in: navigator) {
+            if navigatorController !== owner { navigatorController?.preview(nil) }
+            navigatorController = owner
+            owner.preview(destination)
+            model.previewNavigator(.init(source: source, target: source, after: false))
+            return
+        }
+        navigatorController?.preview(nil); navigatorController = nil
         func rows(_ view: NSView) -> [SpatialNavigatorDragView] {
             (view as? SpatialNavigatorDragView).map { [$0] } ?? view.subviews.flatMap(rows)
         }
@@ -362,13 +476,34 @@ final class SpatialWorkspaceCanvasView: NSView {
     func finishPanelDrag(_ event: NSEvent) {
         guard dragTracking, let model else { return }
         if model.isDragging { continuePanelDrag(event) }
+        if model.dragFromNavigator, let source = model.draggedTile?.documentID,
+           let owner = navigatorController, let destination = owner.dropIndicator,
+           let project = owner.session?.activeProject?.id, let epoch = owner.session?.activationEpoch {
+            navigatorController = nil
+            owner.preview(nil)
+            model.cancelDrag(); stopDragPresentation()
+            owner.performDrop(.document(source), destination: destination, project: project, epoch: epoch)
+            animateLayout = true; layoutTiles()
+            return
+        }
+        if model.dragFromNavigator, model.navigatorDrop == nil,
+           let navigator = hosts[.navigator], !navigator.isHidden,
+           navigator.frame.contains(canvasPoint(for: event)) {
+            navigatorController?.preview(nil); navigatorController = nil
+            model.cancelDrag(); stopDragPresentation()
+            animateLayout = true; layoutTiles()
+            return
+        }
         let tile = model.draggedTile
         let origin = dragPill?.frame
         let sequence = dragSequence
         model.endDrag(); stopDragPresentation()
-        if let tile { hosts[tile]?.isHidden = false }
+        if let tile {
+            hosts[tile]?.isHidden = false
+            hosts[tile]?.alphaValue = 1
+        }
         animateLayout = true; layoutTiles()
-        if let tile, let origin {
+        if let tile, let origin, !reduceMotion, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let project = projectID
             DispatchQueue.main.async { [weak self] in
                 guard let self, self.window != nil, self.projectID == project, self.dragSequence == sequence,
@@ -377,15 +512,19 @@ final class SpatialWorkspaceCanvasView: NSView {
                 self.frameTransitions.removeValue(forKey: ObjectIdentifier(host))
                 self.targetFrames[tile] = destination; host.frame = destination; host.isHidden = false
                 host.layoutSubtreeIfNeeded()
-                self.animateTile(host, from: origin, to: self.screenFrame(of: host), duration: 0.12, hidingHost: true)
+                self.animateTile(host, from: origin, to: self.screenFrame(of: host), duration: 0.18, hidingHost: true)
             }
         }
     }
     func cancelInteraction() {
         dragSequence &+= 1
+        navigatorController?.preview(nil); navigatorController = nil
         if let resize { model?.setLayout(resize.origin, persist: false); self.resize = nil }
         model?.cancelDrag(); stopDragPresentation()
-        for host in hosts.values { host.isHidden = false }
+        for host in hosts.values {
+            host.isHidden = false
+            host.alphaValue = 1
+        }
         animateLayout = true; layoutTiles()
     }
     private func showDragPill(_ tile: WorkspaceTileID?, at pointer: CGPoint) {
@@ -398,7 +537,11 @@ final class SpatialWorkspaceCanvasView: NSView {
         func header(_ view: NSView) -> SpatialTileHeaderView? {
             (view as? SpatialTileHeaderView) ?? view.subviews.compactMap(header).first
         }
-        let title = hosts[tile].flatMap(header)?.title.stringValue ?? "원고"
+        func tabTitle(_ view: NSView) -> String? {
+            if let tab = view as? SpatialManilaTabButton, tab.documentID == tile.documentID { return tab.title }
+            return view.subviews.lazy.compactMap(tabTitle).first
+        }
+        let title = hosts[tile].flatMap(tabTitle) ?? hosts[tile].flatMap(header)?.title.stringValue ?? "원고"
         let symbol: String = switch tile {
         case .navigator: "folder"; case .characters: "person.2"; case .narrative: "arrow.triangle.branch"; case .margin: "sparkles"; default: "doc.text"
         }
@@ -417,7 +560,7 @@ final class SpatialWorkspaceCanvasView: NSView {
         panel.contentView = surface; dragPill = panel; panel.alphaValue = reduceMotion ? 0.96 : 0
         panel.setFrameOrigin(.init(x: pointer.x + 12, y: pointer.y - 18))
         panel.orderFrontRegardless()
-        if !reduceMotion {
+        if !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             let grow = CABasicAnimation(keyPath: "transform.scale")
             grow.fromValue = 0.65; grow.toValue = 1; grow.duration = 0.22; grow.timingFunction = WorkspaceHTMLStyle.calm
             surface.layer?.add(grow, forKey: "pill.grow")
@@ -426,10 +569,17 @@ final class SpatialWorkspaceCanvasView: NSView {
     }
     private func positionDragPill(_ event: NSEvent) {
         let screen = screenPoint(for: event)
-        if let dragPill { pointerSpring.move(dragPill, to: CGPoint(x: screen.x + 12, y: screen.y - 18), reducedMotion: reduceMotion) }
+        if let dragPill { pointerSpring.move(dragPill, to: CGPoint(x: screen.x + 12, y: screen.y - 18), reducedMotion: reduceMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) }
     }
     private func stopDragPresentation() {
+        if let grabbedTile, let host = hosts[grabbedTile] {
+            host.alphaValue = 1
+        }
         dragTracking = false; grabbedTile = nil
+        hosts[.navigator]?.layer?.borderWidth = 0
+        dragOverlay.isHidden = true
+        dragOverlay.sourcePlaceholderRect = nil
+        dragOverlay.indicator = nil
         if draggingCursor { NSCursor.pop(); draggingCursor = false }
         pointerSpring.stop()
         for transition in transitions { transition.host?.alphaValue = 1; transition.panel.orderOut(nil); transition.panel.close() }
@@ -455,7 +605,8 @@ final class SpatialWorkspaceCanvasView: NSView {
         return image
     }
     private func animateTile(_ host: NSView, from origin: CGRect, to target: CGRect, duration: Double, hidingHost: Bool, image captured: NSImage? = nil) {
-        guard !reduceMotion, origin.width > 0, target.width > 0, let image = captured ?? snapshot(host) else { return }
+        guard !reduceMotion, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              origin.width > 0, target.width > 0, let image = captured ?? snapshot(host) else { return }
         var from = origin
         if hidingHost {
             let width = target.width * min(0.45, max(0.08, origin.width / target.width))
@@ -494,6 +645,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             model?.cancelDrag(); stopDragPresentation()
             if let wakeMonitor { NSEvent.removeMonitor(wakeMonitor); self.wakeMonitor = nil }
             if let scrollObserver { NotificationCenter.default.removeObserver(scrollObserver); self.scrollObserver = nil }
+            if let windowResignObserver { NotificationCenter.default.removeObserver(windowResignObserver); self.windowResignObserver = nil }
         } else if wakeMonitor == nil {
             window?.acceptsMouseMovedEvents = true
             wakeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown]) { [weak self] event in
@@ -518,7 +670,36 @@ final class SpatialWorkspaceCanvasView: NSView {
                 clip.postsBoundsChangedNotifications = true
                 scrollObserver = NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification,
                     object: clip, queue: .main) { [weak self] _ in
-                    MainActor.assumeIsolated { self?.model?.pouchGeometryDidChange?() }
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if self.dragTracking, let model = self.model, model.isDragging, let window = self.window {
+                            let mouseInWindow = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+                            let canvasPt = self.convert(mouseInWindow, from: nil)
+                            let baseGeom = model.baseDragGeometry ?? self.geometry
+                            let tabTarget: SpatialDropTarget?
+                            if self.grabbedTile?.documentID != nil {
+                                if !model.dragFromNavigator, let nav = self.hosts[.navigator], !nav.isHidden, nav.frame.contains(canvasPt) {
+                                    tabTarget = .documentList
+                                } else {
+                                    tabTarget = self.tabDropTarget(at: canvasPt)
+                                }
+                            } else {
+                                tabTarget = nil
+                            }
+                            model.updateDrag(to: canvasPt, geometry: baseGeom, tabTarget: tabTarget)
+                            self.updateDragOverlay()
+                        }
+                        self.model?.pouchGeometryDidChange?()
+                    }
+                }
+            }
+            if let window {
+                windowResignObserver = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification,
+                    object: window, queue: .main) { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self, self.dragTracking else { return }
+                        self.cancelInteraction()
+                    }
                 }
             }
         }
@@ -541,6 +722,40 @@ final class SpatialWorkspaceCanvasView: NSView {
     }
 }
 
+final class SpatialDragIndicatorOverlayView: NSView {
+    var theme: MintTheme = .light
+    var sourcePlaceholderRect: CGRect?
+    var indicator: SpatialWorkspaceGeometry.DropIndicator?
+    override var isFlipped: Bool { true }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func draw(_ dirtyRect: NSRect) {
+        if let rect = sourcePlaceholderRect {
+            let path = NSBezierPath(roundedRect: rect.insetBy(dx: 1, dy: 1), xRadius: 13, yRadius: 13)
+            let pattern: [CGFloat] = [5, 4]
+            path.setLineDash(pattern, count: pattern.count, phase: 0)
+            path.lineWidth = 1.5
+            theme.sepStrong.withAlphaComponent(0.75).setStroke()
+            path.stroke()
+        }
+        guard let indicator else { return }
+        switch indicator {
+        case .line(let rect):
+            let path = NSBezierPath(roundedRect: rect, xRadius: 1.5, yRadius: 1.5)
+            theme.novel.setFill()
+            path.fill()
+        case .groupHighlight(let rect):
+            let highlight = rect.insetBy(dx: 1, dy: 1)
+            let path = NSBezierPath(roundedRect: highlight, xRadius: 13, yRadius: 13)
+            theme.novel.withAlphaComponent(0.08).setFill()
+            path.fill()
+            path.lineWidth = 2
+            theme.novel.setStroke()
+            path.stroke()
+        }
+    }
+}
+
 struct SpatialDocumentTile: View {
     @ObservedObject var session: ProjectSession
     @ObservedObject var requests: ProjectEditorRequests
@@ -550,39 +765,87 @@ struct SpatialDocumentTile: View {
     let theme: MintTheme
     var editorBridge: ProjectEditorBridge?
     let positionStore: WritingPositionStore
+    @AppStorage("mint.chromeHidden") private var chromeHidden = false
     @State private var hoveringStats = false
     @State private var statsRevision = 0
+    @State private var longParagraphOpen = false
+
+    private var quietChrome: Bool { model.whisperTyping || chromeHidden }
 
     var body: some View {
         VStack(spacing: 0) {
-            if !model.layout.isSingleManuscript {
-                documentHeader.opacity(model.whisperTyping ? 0 : 1).allowsHitTesting(!model.whisperTyping)
-            }
+            documentHeader.opacity(chromeHidden ? 0 : 1).allowsHitTesting(!chromeHidden)
             EditorPane(projectSession: session, editorRequests: requests, completion: completion,
                 settings: completion.settings, theme: theme, editorBridge: editorBridge,
                 positionStore: positionStore, documentID: documentID, showsChrome: false)
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
+                if active && completion.longParagraph.count > 0 {
+                    Button { longParagraphOpen.toggle() } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "bolt.horizontal")
+                                .font(.system(size: 9, weight: .semibold))
+                            Text("긴 문단 \(completion.longParagraph.count)")
+                                .font(MintFonts.monoUI(9))
+                        }
+                        .foregroundStyle(theme.novelC)
+                        .padding(.vertical, 2)
+                        .padding(.horizontal, 6)
+                        .background(Capsule().fill(theme.novelBgC))
+                    }
+                    .buttonStyle(.plain)
+                    .help("긴 문단이 있어 입력이 느려질 수 있어요")
+                    .popover(isPresented: $longParagraphOpen, arrowEdge: .top) {
+                        LongParagraphNotice(completion: completion, theme: theme, onDismiss: { longParagraphOpen = false })
+                    }
+                }
+                if active && session.savePhase == .failed {
+                    Button {
+                        Task { try? await session.flush() }
+                    } label: {
+                        Text("저장 실패 · 재시도")
+                            .font(MintFonts.monoUI(9.5))
+                            .foregroundStyle(theme.dangerC)
+                    }
+                    .buttonStyle(.plain)
+                    .help(session.lastErrorMessage ?? "프로젝트를 저장하지 못했습니다.")
+                } else if active, let notice = session.lastErrorMessage {
+                    Text(notice)
+                        .font(MintFonts.monoUI(9.5))
+                        .foregroundStyle(theme.blueC)
+                        .lineLimit(1)
+                }
+                if active, case .failed(let msg) = completion.engineState, completion.settings.autocompleteEnabled {
+                    Button {
+                        completion.retryEngineLoad()
+                    } label: {
+                        Text("자동완성 재시도")
+                            .font(MintFonts.monoUI(9.5))
+                            .foregroundStyle(theme.dangerC)
+                    }
+                    .buttonStyle(.plain)
+                    .help(msg)
+                }
                 Spacer(minLength: 8)
                 if hoveringStats { Text(statistics.detail).font(MintFonts.monoUI(9)).fixedSize() }
                 Circle().stroke(theme.sepC, lineWidth: 1.5).overlay {
                     Circle().trim(from: 0, to: statistics.progress).stroke(theme.blueC, style: StrokeStyle(lineWidth: 1.5, lineCap: .round)).rotationEffect(.degrees(-90))
                 }.frame(width: 11, height: 11).accessibilityLabel("집필 목표 \(Int(statistics.progress * 100))퍼센트")
                 Text("\(statistics.characters.formatted())자").font(MintFonts.monoUI(10)).fixedSize()
-            }.foregroundStyle(theme.workspaceMutedC).padding(.horizontal, 14).frame(height: 26).opacity(model.whisperTyping ? 0 : (hoveringStats ? 1 : 0.65))
-                .allowsHitTesting(!model.whisperTyping)
+            }.foregroundStyle(theme.workspaceMutedC).padding(.horizontal, 14).frame(height: 26).opacity(quietChrome ? 0 : (hoveringStats ? 1 : 0.65))
+                .allowsHitTesting(!quietChrome)
                 .onHover { hoveringStats = $0 }.help(statistics.detail)
                 .animation(WorkspaceHTMLStyle.animation(0.24), value: hoveringStats)
         }
-        .background(WorkspacePaperSurface(theme: theme, surface: active ? theme.editorSurface : theme.cardSurface,
+        .background(WorkspacePaperSurface(theme: theme, surface: theme.editorSurface,
             cornerRadius: model.layout.isSingleManuscript ? 0 : MintRadius.lg))
-        .animation(WorkspaceHTMLStyle.animation(0.12), value: model.whisperTyping)
+        .animation(WorkspaceHTMLStyle.animation(0.12), value: quietChrome)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mint.document-tile.\(documentID.rawValue.uuidString)")
         .task { await Task.yield(); statsRevision += 1 }
     }
     private var documentHeader: some View {
-        SpatialTileHeader(tile: .document(documentID), title: document?.title ?? "원고", theme: theme,
-            active: active, actions: []).frame(height: 32)
+        SpatialManilaTabBar(session: session, model: model, documentID: documentID, theme: theme)
+            .frame(height: SpatialManilaTabBarView.height)
     }
 
     private var document: WritingDocument? { session.document(documentID) }

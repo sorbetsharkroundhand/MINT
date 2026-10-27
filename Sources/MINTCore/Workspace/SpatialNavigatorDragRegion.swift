@@ -5,11 +5,12 @@ struct SpatialNavigatorPane: View {
     @ObservedObject var session: ProjectSession
     @ObservedObject var requests: ProjectEditorRequests
     @ObservedObject var model: SpatialWorkspaceController
+    var completion: CompletionController? = nil
     let theme: MintTheme
     let onClose: () -> Void
     var body: some View {
         ProjectNavigatorView(session: session, editorRequests: requests, theme: theme,
-            onClose: onClose, spatial: model)
+            onClose: onClose, spatial: model, completion: completion)
     }
 }
 

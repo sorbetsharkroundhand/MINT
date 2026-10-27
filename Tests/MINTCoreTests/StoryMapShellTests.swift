@@ -41,7 +41,7 @@ final class StoryMapShellTests: XCTestCase {
         h.requests.spatialWorkspace?.selectTile(.map)
         h.requests.spatialWorkspace?.pouchSection = .object
         await h.layout()
-        let closeControl = try await waitFor("mint.story-map.close", in: h)
+        let closeControl = try await waitFor("mint.tile.close.map", in: h)
         let close = try XCTUnwrap(closeControl)
         try XCTUnwrap(close as? NSButton).performClick(nil); await h.layout()
         XCTAssertEqual(h.fixture.session.workspaceMode, .write)
