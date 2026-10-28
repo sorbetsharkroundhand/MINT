@@ -7,6 +7,10 @@ on:
       - main
   workflow_dispatch:
 
+env:
+  # MLX 0.32 requires Swift 6.3; pin the image toolchain for CLI and Xcode builds.
+  DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+
 permissions:
   contents: read
 
@@ -17,7 +21,7 @@ concurrency:
 jobs:
   mint:
     name: MINT / Debug Build & Test
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 30
 
     steps:
@@ -59,7 +63,7 @@ jobs:
 
   app:
     name: App / Release Bundle & Smoke
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
@@ -131,7 +135,7 @@ jobs:
 
   archive:
     name: App / Unsigned Xcode Archive
-    runs-on: macos-15
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:

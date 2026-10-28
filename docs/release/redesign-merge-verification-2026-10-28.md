@@ -81,3 +81,19 @@ signal; the subsequent run under a temporary awake assertion passed in 7.56
 seconds. The failed attempt remains in `merge-ministral-native-ghost.log` and is
 not counted as successful evidence. These are functional checks, not new latency
 benchmarks. The original comparative benchmark results remain in the model report.
+
+## Packaging and CI toolchain follow-up
+
+The first PR run reproduced the hosted macOS 15 / Swift 6.1 incompatibility
+with MLX 0.32's Swift 6.3 minimum. CI now uses macOS 26 and the explicitly
+installed Xcode 26.4.1 toolchain for all three existing jobs, retaining every
+check and timeout. The [runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)
+and [Xcode release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_4-release-notes)
+identify the available toolchain and Swift 6.3 support.
+
+The first local app packaging attempt correctly rejected the stale notice
+inventory. It now tracks all 16 resolved dependencies and 37 vendored/resource
+components; removed dependency components are no longer packaged. Original
+notice hashes are unchanged, and the unchanged PocketFFT header now points to
+the newly pinned MLX submodule commit. Real-checkout notice generation and all
+17 validator regressions pass; no validation rule was weakened.
