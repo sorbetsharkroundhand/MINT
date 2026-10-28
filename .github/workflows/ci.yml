@@ -19,8 +19,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  mint:
-    name: MINT / Debug Build & Test
+  purlory:
+    name: Purlory / Debug Build & Test
     runs-on: macos-26
     timeout-minutes: 30
 
@@ -42,24 +42,26 @@ jobs:
           git diff --exit-code -- Package.resolved
 
       - name: Verify support diagnostics exclude writer data
-        run: python3 scripts/test-mint-support.py
+        run: |
+          python3 scripts/test-purlory-support.py
+          python3 scripts/test-purlory-identity.py
 
       - name: Verify Korean backend artifact and budget rejection paths
         run: |
           python3 scripts/test-korean-backend-validation.py
           python3 scripts/test-korean-backend-preparation.py
 
-      - name: Build MINT
-        run: swift build --product MINT
+      - name: Build Purlory
+        run: swift build --product Purlory
 
-      - name: Test MINTCore
+      - name: Test PurloryCore
         run: swift test
 
-      - name: Build MINTBench
-        run: swift build --product MINTBench
+      - name: Build PurloryBench
+        run: swift build --product PurloryBench
 
       - name: Benchmark CLI preflight smoke (no model required)
-        run: scripts/test-mint-bench-cli.sh
+        run: scripts/test-purlory-bench-cli.sh
 
   app:
     name: App / Release Bundle & Smoke
@@ -90,26 +92,26 @@ jobs:
       - name: Allow package macros in CI
         run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
 
-      - name: Build MINT.app
-        run: scripts/build-mint-app.sh
+      - name: Build Purlory.app
+        run: scripts/build-purlory-app.sh
 
       - name: Validate app bundle
         run: |
-          test -x build/MINT.app/Contents/MacOS/MINT
-          test -s build/MINT.app/Contents/MacOS/mlx.metallib
-          plutil -lint build/MINT.app/Contents/Info.plist
-          codesign --verify --deep --strict --verbose=2 build/MINT.app
+          test -x build/Purlory.app/Contents/MacOS/Purlory
+          test -s build/Purlory.app/Contents/MacOS/mlx.metallib
+          plutil -lint build/Purlory.app/Contents/Info.plist
+          codesign --verify --deep --strict --verbose=2 build/Purlory.app
 
       - name: Verify privacy manifest packaging and rejection regressions
-        run: python3 scripts/test-mint-privacy.py build/MINT.app
+        run: python3 scripts/test-purlory-privacy.py build/Purlory.app
 
       - name: Verify dependency notices and packaged resources without launching the app
         run: |
-          python3 scripts/test-mint-notices.py
-          python3 scripts/mint-notices.py --checkouts .build/checkouts --validate-app build/MINT.app
+          python3 scripts/test-purlory-notices.py
+          python3 scripts/purlory-notices.py --checkouts .build/checkouts --validate-app build/Purlory.app
 
       - name: Launch smoke test
-        run: scripts/smoke-mint-app.sh
+        run: scripts/smoke-purlory-app.sh
 
       - name: Upload smoke failure diagnostics
         if: failure()
@@ -122,7 +124,7 @@ jobs:
 
       - name: Collect artifact support context
         if: always()
-        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-app.json --expect-source-revision "$(git rev-parse HEAD)"
+        run: python3 scripts/collect-purlory-support.py --app build/Purlory.app --output build/support-app.json --expect-source-revision "$(git rev-parse HEAD)"
 
       - name: Upload artifact support context
         if: always()
@@ -155,31 +157,31 @@ jobs:
           git diff --exit-code -- Package.resolved
 
       - name: Build and validate unsigned archive
-        run: scripts/archive-mint-app.sh
+        run: scripts/archive-purlory-app.sh
 
       - name: Verify archive validation regressions
-        run: scripts/test-mint-archive-validation.sh
+        run: scripts/test-purlory-archive-validation.sh
 
       - name: Verify sandbox container storage
-        run: scripts/test-mint-sandbox-storage.sh
+        run: scripts/test-purlory-sandbox-storage.sh
 
       - name: Verify sandboxed MLX resource errors (no GPU required)
-        run: scripts/test-mint-sandbox-mlx.sh --resource-errors-only
+        run: scripts/test-purlory-sandbox-mlx.sh --resource-errors-only
 
       - name: Package inspectable archive
-        run: ditto -c -k --sequesterRsrc --keepParent build/MINT.xcarchive build/MINT.xcarchive.zip
+        run: ditto -c -k --sequesterRsrc --keepParent build/Purlory.xcarchive build/Purlory.xcarchive.zip
 
       - name: Upload unsigned archive
         uses: actions/upload-artifact@v7
         with:
-          name: MINT-unsigned-xcarchive
-          path: build/MINT.xcarchive.zip
+          name: Purlory-unsigned-xcarchive
+          path: build/Purlory.xcarchive.zip
           if-no-files-found: error
           retention-days: 14
 
       - name: Collect archive support context
         if: always()
-        run: python3 scripts/collect-mint-support.py --app build/MINT.xcarchive/Products/Applications/MINT.app --output build/support-archive.json --expect-source-revision "$(git rev-parse HEAD)"
+        run: python3 scripts/collect-purlory-support.py --app build/Purlory.xcarchive/Products/Applications/Purlory.app --output build/support-archive.json --expect-source-revision "$(git rev-parse HEAD)"
 
       - name: Upload archive support context
         if: always()

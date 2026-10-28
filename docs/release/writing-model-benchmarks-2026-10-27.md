@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Writing candidate benchmark — 2026-10-27
 
 ## Scope and outcome

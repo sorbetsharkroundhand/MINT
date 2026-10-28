@@ -60,36 +60,36 @@ jobs:
         run: defaults write com.apple.dt.Xcode IDESkipMacroFingerprintValidation -bool YES
 
       - name: Build release app bundle
-        run: scripts/build-mint-app.sh
+        run: scripts/build-purlory-app.sh
 
       - name: Validate release app bundle
         run: |
-          test -x build/MINT.app/Contents/MacOS/MINT
-          test -s build/MINT.app/Contents/MacOS/mlx.metallib
-          plutil -lint build/MINT.app/Contents/Info.plist
-          codesign --verify --deep --strict --verbose=2 build/MINT.app
+          test -x build/Purlory.app/Contents/MacOS/Purlory
+          test -s build/Purlory.app/Contents/MacOS/mlx.metallib
+          plutil -lint build/Purlory.app/Contents/Info.plist
+          codesign --verify --deep --strict --verbose=2 build/Purlory.app
 
       - name: Launch smoke test
-        run: scripts/smoke-mint-app.sh
+        run: scripts/smoke-purlory-app.sh
 
       - name: Archive release candidate
         run: |
-          ditto -c -k --sequesterRsrc --keepParent build/MINT.app build/MINT.app.zip
-          shasum -a 256 build/MINT.app.zip | tee build/MINT.app.zip.sha256
+          ditto -c -k --sequesterRsrc --keepParent build/Purlory.app build/Purlory.app.zip
+          shasum -a 256 build/Purlory.app.zip | tee build/Purlory.app.zip.sha256
 
       - name: Upload release candidate
         uses: actions/upload-artifact@v7
         with:
-          name: MINT-macOS
+          name: Purlory-macOS
           path: |
-            build/MINT.app.zip
-            build/MINT.app.zip.sha256
+            build/Purlory.app.zip
+            build/Purlory.app.zip.sha256
           if-no-files-found: error
           retention-days: 14
 
       - name: Collect candidate support context
         if: always()
-        run: python3 scripts/collect-mint-support.py --app build/MINT.app --output build/support-candidate.json --expect-source-revision "$(git rev-parse HEAD)"
+        run: python3 scripts/collect-purlory-support.py --app build/Purlory.app --output build/support-candidate.json --expect-source-revision "$(git rev-parse HEAD)"
 
       - name: Upload candidate support context
         if: always()

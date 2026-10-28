@@ -2,7 +2,7 @@
 
 > **Issue:** #106 — Formalize Scene → Chapter → Work hierarchical memory
 >
-> **Parent contract:** `docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md`
+> **Parent contract:** `docs/superpowers/specs/2026-09-02-purlory-0.2.0-design.md`
 
 ## Goal
 
@@ -43,7 +43,7 @@ Introduce a small `SceneContentVersion` value around the current scene content h
 
 ### HierarchicalMemory
 
-Add `Sources/MINTCore/Knowledge/HierarchicalMemory.swift` with pure value types and calculations:
+Add `Sources/PurloryCore/Knowledge/HierarchicalMemory.swift` with pure value types and calculations:
 
 - `StoryMemoryScope` identifies the project/document or genuine legacy document.
 - `SceneContentVersion` identifies one version of scene content.
@@ -117,7 +117,7 @@ Add focused tests proving:
 7. Corrupt or mismatched schemas rebuild derived cache without changing user data.
 8. Project/document switch, cancellation, generation mismatch, or content-version mismatch blocks sidecar and snapshot publication.
 
-Run the focused hierarchy and indexer suites, all existing Knowledge/Narrative tests, `swift test`, `swift build`, `swift build --product MINTBench`, app-bundle build, and smoke/UI-smoke scripts.
+Run the focused hierarchy and indexer suites, all existing Knowledge/Narrative tests, `swift test`, `swift build`, `swift build --product PurloryBench`, app-bundle build, and smoke/UI-smoke scripts.
 
 ## Out of scope
 

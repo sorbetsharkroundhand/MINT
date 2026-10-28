@@ -1,6 +1,6 @@
 # Native workspace fidelity correction
 
-The supplied `mint.html` is the reference for visual appearance and native workspace interactions. Source SHA256: `8639aac6eddc5c47c3581e7ccb7190f875890bed6c86fcf1b6e231ae9d7a34e8`.
+The supplied `purlory.html` is the reference for visual appearance and native workspace interactions. Source SHA256: `8639aac6eddc5c47c3581e7ccb7190f875890bed6c86fcf1b6e231ae9d7a34e8`.
 
 ## Latest owner direction, 2026-10-20
 
@@ -49,7 +49,7 @@ The owner subsequently clarified that the supplied optimization must preserve th
 
 | HTML source | Native implementation |
 | --- | --- |
-| `.mint-liquid-glass-window`, `.mint-object-card`, chrome and navigator templates | `WorkspaceLiquidGlass`, `WorkspaceSpatialChrome`, `SpatialTileHeader`, `ProjectNavigatorView` |
+| `.purlory-liquid-glass-window`, `.purlory-object-card`, chrome and navigator templates | `WorkspaceLiquidGlass`, `WorkspaceSpatialChrome`, `SpatialTileHeader`, `ProjectNavigatorView` |
 | `spawnWindowMinimizeGhost`, `detachGrabbedWindowAndEatVoid`, `applyLiveWindowSizeAdjustment`, document mousemove/mouseup handlers | `SpatialWorkspaceCanvasView`, `SpatialWorkspaceController`, `SpatialWorkspaceGeometry` |
 | Pouch drag, four-edge docking, whole-window suck/unfold | `WorkspacePouchController`, `WorkspacePouchView`, `WorkspacePouchGeometry` |
 | Character/event/margin templates and entity peek | `WorkspaceCharacterCards`, `WorkspaceNarrativeCards`, `WorkspaceCompactCard`, `WorkspaceEntityController`, `LivingMarginView` |
@@ -97,7 +97,7 @@ are labeled as applying to all manuscripts. Clicking the settings object itself
 preserves the object being inspected. Empty-space selection or the release
 action returns the pouch to its independent edge position.
 
-`swift build` completed successfully (13.37 s), linking MINT and MINTBench with
+`swift build` completed successfully (13.37 s), linking Purlory and PurloryBench with
 no warnings or errors in the final invocation. Existing title-click and row-gap
 test expectations were updated for the requested behavior. Tests, live model
 inference and actual-app interaction checks were not run under the owner's
@@ -119,7 +119,7 @@ consistent with the owner's build-only instruction.
 
 The owner requested the pre-redesign editor's autocomplete in the spatial
 workspace. Source comparison confirms that `EditorPane` still embeds the same
-`MintBlockEditor`, with `CompletionController` edit/selection callbacks, local
+`PurloryBlockEditor`, with `CompletionController` edit/selection callbacks, local
 inference, inline Ghost rendering and Tab/right-arrow/Esc handling intact.
 The spatial tile's `showsChrome: false` removed the original toolbar, including
 its model status and autocomplete controls. The reference HTML's header has
@@ -134,7 +134,7 @@ model controls or invoking a header action focuses that tile's existing editor;
 manual continuation only proceeds after focus succeeds. No editor replacement,
 selection rewrite, new inference path or automatic authorization is introduced.
 
-`swift build` completed successfully (17.05 s), linking MINT and MINTBench.
+`swift build` completed successfully (17.05 s), linking Purlory and PurloryBench.
 Per the owner's build-only instruction, no tests, model inference or actual-app
 interaction checks were run. Completion behavior and popover/focus interaction
 still require the owner's runtime review.
@@ -162,7 +162,7 @@ from its current theme surface. Its grip also receives the resolved palette,
 preventing hover refreshes from reverting to the default light palette. Existing
 theme-based surface, border and accent colors remain shared by rail and orb.
 
-`swift build` completed successfully (18.69 s), linking MINT and MINTBench without
+`swift build` completed successfully (18.69 s), linking Purlory and PurloryBench without
 warnings or errors in that invocation. Per the owner's build-only instruction,
 actual-app typing, IME, visual checks and automated tests were not run; the
 reported first-character behavior still requires the owner's runtime review.
@@ -183,7 +183,7 @@ Alignment/font wrappers accept the internal line separator on reload and prose
 projection; EPUB emits `<br />` inside the original paragraph. Caret/Ghost geometry
 also recognizes the empty visual line after a terminal soft return.
 
-`swift build` compiled the final source and linked MINT and MINTBench successfully
+`swift build` compiled the final source and linked Purlory and PurloryBench successfully
 (15.55 s). Verification remains build-only at the owner's request; no tests or
 actual-app interaction checks were performed for this change.
 
@@ -204,17 +204,17 @@ cycling. Clicking it or reopening from the Dock restores and activates the same
 editor window. The HTML's 360 ms suction, 380 ms unfold and 44-point orb remain.
 
 The owner authorized build-only verification for this follow-up. `swift build`
-compiled the final changes and linked MINT and MINTBench successfully (13.14 s),
+compiled the final changes and linked Purlory and PurloryBench successfully (13.14 s),
 with no warnings or errors in that invocation. Runtime/UI checks and tests
 remain unperformed.
 
 On 2026-10-21 the owner authorized building after supplying a log from
-`codex/mint-editorial-redesign`. That log already completed the MINT build and
+`codex/purlory-editorial-redesign`. That log already completed the Purlory build and
 included the new `builder.cpp`; the reported output contained an AppKit font
 Sendable warning and a Kiwi character-conversion warning. Move native fonts to
 the main-actor-owned `NSMutableAttributedString` and make the guarded BMP cast
 explicit in the vendored header, recording its local patch in provenance.
-`swift build` then rebuilt both changed sources and linked MINT and MINTBench
+`swift build` then rebuilt both changed sources and linked Purlory and PurloryBench
 successfully (12.51 s), with no warnings or errors in that invocation. No tests,
 application launch, pouch interaction or visual alignment checks were run.
 
@@ -251,7 +251,7 @@ The same spring, native canvas attachment, four-edge detached docking and retain
 collapsed-window lifetime remain in use. Expansion obeys Reduce Motion. Detaching
 an expanded pouch starts from its index lip, and hiding focused tool controls
 returns focus to the original native editor. `swift build` compiled the final
-source and linked MINT and MINTBench successfully (12.99 s), with no warnings or
+source and linked Purlory and PurloryBench successfully (12.99 s), with no warnings or
 errors in that invocation. No runtime, IME, visual or UI interaction checks were
 run for this revision.
 
@@ -292,8 +292,8 @@ collapse/restore transitions remain the motion reference.
 
 Validation remains build-only at the owner's request. No application launch,
 screenshots, native interaction, IME checks or test execution were performed.
-The final `swift build` completed successfully in 12.09 seconds and linked MINT
-and MINTBench without warnings or errors in that invocation.
+The final `swift build` completed successfully in 12.09 seconds and linked Purlory
+and PurloryBench without warnings or errors in that invocation.
 
 ### Seamless overlay correction, 2026-10-23
 
@@ -323,8 +323,8 @@ longer sends the pouch flying across the writing area. Object closure is immedia
 neighbor layout settles in 120 ms, and window folding/restoration uses 120/140 ms.
 Reduce Motion continues to bypass these transitions.
 
-The final `swift build` completed successfully in 14.91 seconds and linked MINT
-and MINTBench, with no warnings or errors in that invocation. Existing geometry
+The final `swift build` completed successfully in 14.91 seconds and linked Purlory
+and PurloryBench, with no warnings or errors in that invocation. Existing geometry
 expectations now cover unchanged frames and scroll extent when tools open, but
 tests were not executed. No application launch, screenshot, native interaction or
 IME check was performed, in accordance with the owner's build-only instruction.
@@ -365,7 +365,7 @@ Updated regression sources cover viewport fitting for narrow and lower objects,
 tab removal, simultaneous action availability, unchanged tile geometry and
 synchronous dismissal. Existing smoke selectors now reach the all-tools menu
 through the popover header. Neither tests nor the smoke script were executed.
-The final `swift build` linked MINT and MINTBench successfully in 13.38 seconds,
+The final `swift build` linked Purlory and PurloryBench successfully in 13.38 seconds,
 with no warnings or errors in that invocation. No application launch, screenshot,
 IME or interaction verification was performed under the owner's build-only scope.
 
@@ -406,7 +406,7 @@ redraw strategy; no runtime performance or frame-rate improvement is claimed.
 
 Regression sources were extended for measured height, stable popover anchoring,
 native window actions, header placement and paragraph damage bounds. They were
-not executed. The final `swift build` linked MINT and MINTBench successfully in
+not executed. The final `swift build` linked Purlory and PurloryBench successfully in
 15.63 seconds, with no warnings or errors in that invocation. No tests, application
 launch, UI automation, screenshots or IME checks were performed under the owner's
 build-only scope. The pre-existing `Package.resolved` changes are excluded.

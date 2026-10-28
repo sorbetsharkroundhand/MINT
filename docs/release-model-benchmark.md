@@ -1,6 +1,6 @@
 # Release model benchmark metrics (#179)
 
-MINTBench records measurements only. Release lineup/license approval remains in #180/#155; historical benchmark claims are not approval for a new revision or hardware tier. Use one fresh process per model/hardware run and a versioned local fixture (`Fixtures/replay-novel-ko-v1.txt` by default in the documented procedure).
+PurloryBench records measurements only. Release lineup/license approval remains in #180/#155; historical benchmark claims are not approval for a new revision or hardware tier. Use one fresh process per model/hardware run and a versioned local fixture (`Fixtures/replay-novel-ko-v1.txt` by default in the documented procedure).
 
 The JSON artifact contains exact model ID/revision, fixture SHA-256, physical/Metal recommended working-set bytes, device, OS/toolchain and generation/context settings. It contains no manuscript or generated text. `completedSamples` and `failedSamples` expose incomplete cut runs.
 
@@ -27,7 +27,7 @@ Contamination is a fixed pattern counter, not language identification. `hanChara
 Run from the repository root after preparing the bundled MLX runtime (`scripts/prepare-metallib.sh` when needed):
 
 ```sh
-swift run --disable-automatic-resolution -c release MINTBench \
+swift run --disable-automatic-resolution -c release PurloryBench \
   --model mlx-community/Qwen2.5-1.5B-Instruct-4bit \
   --candidate-memory-budget-bytes 2147483648 \
   --replay Fixtures/replay-novel-ko-v1.txt --style continuation \

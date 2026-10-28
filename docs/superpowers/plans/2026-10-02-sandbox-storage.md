@@ -25,7 +25,7 @@
 
 ### Task 1: Prepare a verified modern project copy
 
-**Files:** Create `Sources/MINTCore/Project/ProjectFolderImporter.swift`, `Tests/MINTCoreTests/ProjectFolderImportTests.swift`; extend `ProjectManifest.swift` for a localized collision error.
+**Files:** Create `Sources/PurloryCore/Project/ProjectFolderImporter.swift`, `Tests/PurloryCoreTests/ProjectFolderImportTests.swift`; extend `ProjectManifest.swift` for a localized collision error.
 **Interfaces:** Produces `ProjectStore.prepareProjectImport(from: URL) throws -> WritingProjectID` on the existing actor, using the existing ProjectFileSystem and store lock.
 
 - [ ] Write `testPreservesProjectTreeAndReopensWithoutSource`: both writing modes; source/destination byte inventory equal; ID/assets/trash/UserData/previous snapshot preserved; old active marker unchanged until explicit activation; reopen after source removal.
@@ -46,12 +46,12 @@
 
 ### Task 3: Enable and verify sandbox container storage
 
-**Files:** Create `Distribution/MINT.entitlements`, `scripts/test-mint-sandbox-storage.sh`; modify native target build settings, `.github/workflows/ci.yml`, `MintStorageLocation.swift` comments, and `Distribution/README.md`.
-**Interfaces:** Consumes the existing standard MintStorageLocation source and unsigned archive; produces the sandbox entitlements and an isolated executable runtime probe.
+**Files:** Create `Distribution/Purlory.entitlements`, `scripts/test-purlory-sandbox-storage.sh`; modify native target build settings, `.github/workflows/ci.yml`, `PurloryStorageLocation.swift` comments, and `Distribution/README.md`.
+**Interfaces:** Consumes the existing standard PurloryStorageLocation source and unsigned archive; produces the sandbox entitlements and an isolated executable runtime probe.
 
 - [ ] Write the probe/configuration check first. Expected RED: target entitlements or sandbox configuration missing; the probe must also fail if the container location escapes or an ungranted external write succeeds.
 - [ ] Enable sandbox + user-selected read/write + optional-download network client on both target configurations. Keep unsigned archive signing disabled. Compile the actual storage-location source into a uniquely identified ad-hoc-signed test app; isolate CFFIXED_USER_HOME to its owned container and assert effective entitlements, container write/reopen, and denied outside write.
-- [ ] Run `scripts/test-mint-sandbox-storage.sh`. Expected GREEN: genuine sandbox and isolated storage checks pass. Add it to the archive CI job and document project-folder/legacy import boundaries.
-- [ ] Run isolated focused tests, full `swift test`, `swift build`, `swift build --product MINTBench`, archive build and archive-validation regressions, plus shell/plist/YAML/diff checks. Expected: success, no changed dependency pins or weakened jobs.
+- [ ] Run `scripts/test-purlory-sandbox-storage.sh`. Expected GREEN: genuine sandbox and isolated storage checks pass. Add it to the archive CI job and document project-folder/legacy import boundaries.
+- [ ] Run isolated focused tests, full `swift test`, `swift build`, `swift build --product PurloryBench`, archive build and archive-validation regressions, plus shell/plist/YAML/diff checks. Expected: success, no changed dependency pins or weakened jobs.
 - [ ] Review the complete branch inline against the spec and Review Focus; fix material findings with regressions. Commit `build: enable and verify sandbox container storage`.
 - [ ] Push two bounded stacked draft PRs: preparation based on `codex/173-unsigned-archive`, then UI/sandbox based on `codex/174-project-import`. Attach both and record local evidence. Keep #174 open; owner handles CI and representative-install verification.

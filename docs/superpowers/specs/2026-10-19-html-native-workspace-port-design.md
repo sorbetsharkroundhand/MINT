@@ -1,4 +1,4 @@
-# Native port of the MINT HTML interaction system
+# Native port of the Purlory HTML interaction system
 
 ## Authority and intended result
 
@@ -7,10 +7,10 @@ specification, not a palette reference. The result is a native Swift/AppKit work
 with the same spatial model, gestures, controls and visual feedback. The previous
 single-editor/frame implementation does not satisfy this contract.
 
-Source: `/Users/ryujekyeong/Downloads/mint.html`, 3,737 lines, SHA-256
+Source: `/Users/ryujekyeong/Downloads/purlory.html`, 3,737 lines, SHA-256
 `8639aac6eddc5c47c3581e7ccb7190f875890bed6c86fcf1b6e231ae9d7a34e8`.
 The complete inline CSS, markup, state and JavaScript were inspected. External CDN
-scripts are dependencies of the example, not instructions to execute or add to MINT.
+scripts are dependencies of the example, not instructions to execute or add to Purlory.
 
 The existing project remains the sole manuscript owner. No WebView replacement,
 mock manuscript, hardcoded fictional knowledge, hidden feature cap, or alternate
@@ -47,7 +47,7 @@ single-document layout constitutes completion.
 | E06 | `centerParagraphIfTypewriter`, `toggleTypewriterScroll`, 3173–3190 | Global typewriter toggle; current paragraph centered when typing/selection changes; top/bottom breathing room equivalent to 26%/38% of viewport height. |
 | E07 | `toggleFocusDimming`, CSS 301–306, 3232–3235 | Global paragraph focus: inactive paragraphs opacity .24, hovered .68, active paragraph fully visible. Decoration only; no persisted text changes. |
 | E08 | `setWhisperTypingMode`, 2455–2470; CSS 194–211 | Typing dims chrome/headers/status to .08 and pouch to .06; pouch stops pointer actions. Pointer movement greater than 8 points restores it. Keyboard/assistive access remains available. |
-| E09 | `triggerInlineGhostSuggestion`, accept/dismiss, 3237–3268 | Explicit local continuation at active cursor. Keep real MINT Tab accept / right-arrow partial / Escape reject and composition gating. Never use random sample continuations. |
+| E09 | `triggerInlineGhostSuggestion`, accept/dismiss, 3237–3268 | Explicit local continuation at active cursor. Keep real Purlory Tab accept / right-arrow partial / Escape reject and composition gating. Never use random sample continuations. |
 | E10 | `updateManuscriptStats`, 3210–3230 | Each tile displays its own character count, goal progress ring, hover reading time (450 chars/minute, minimum 10 seconds) and paragraph count. Default goal 500; persistent user goal if set. |
 | N01 | `updateChromeAndNavigatorHighlight`, 2998–3031 | Project/current document title, open-document count, selected file highlight, open markers, active tile style stay consistent across all actions. |
 | N02 | `selectDocument`, `selectDocAndJump`, 3305–3336 | Open missing target alongside, activate and reveal exact original evidence; .9-second flash; preserve return point. Never jump to a guessed match. |
@@ -143,6 +143,6 @@ gestures, multiple live editors, no-model/General writing, reduced motion and bo
 themes. Capture actual native results with two columns, vertical stacks, mixed tools,
 drag preview and restored pouch. Existing image/math/import/export/recovery and Ghost
 tests remain required. Then run `swift build`, `swift test`, `swift build --product
-MINTBench`, standard app bundle, boot smoke and actual UI smoke in CFFIXED_USER_HOME.
+PurloryBench`, standard app bundle, boot smoke and actual UI smoke in CFFIXED_USER_HOME.
 No real manuscript, model choice, human IME/VoiceOver acceptance, or Store proof is
 inferred. Commit and push the authorized feature branch after the verified full port.

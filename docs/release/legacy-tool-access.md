@@ -24,7 +24,7 @@ No underlying records, codecs, generic storage or document identifiers are remov
 Blank General documents show a quiet empty state instead of Fiction setup. Saved
 Fiction fields can still be edited after a project changes to General. This is a
 bounded data-aware demotion, as permitted by the current #186 contract; no
-Map/Review/Ask MINT or derived Knowledge producer is added.
+Map/Review/Ask Purlory or derived Knowledge producer is added.
 
 Verification covers real saved General fields, native toolbar accessibility and
 search open/close preserving selection/focus, existing source navigation and IME

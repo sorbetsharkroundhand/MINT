@@ -7,7 +7,7 @@ No model or real manuscript is required.
 
 `entries.json` uses the legacy archive envelope (`entries`, `activeID`,
 `folders`, `expandedFolderIDs`) and ISO 8601 dates used by `EntryStore` exports.
-A bare entry array or numeric date is not a MINT legacy archive. The original
+A bare entry array or numeric date is not a Purlory legacy archive. The original
 2026-10-03 owner kit mistakenly used both and failed before activation.
 
 `ImportProjectCoordinatorTests.testOwnerFixtureImportsAndReopensWithoutChangingSource`

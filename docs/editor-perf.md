@@ -23,7 +23,7 @@
 
 ### 왜 런이 터지나
 
-`MintFonts.serif()`는 Noto Serif KR이 없으면 `NSFont.systemFont(...).withDesign(.serif)`
+`PurloryFonts.serif()`는 Noto Serif KR이 없으면 `NSFont.systemFont(...).withDesign(.serif)`
 (= New York/Times)로 폴백했다. 이 폰트는 한글 글리프가 없다. NSTextStorage는
 저장 시 폰트 속성을 고정(attribute fixing)하면서 **글리프가 없는 구간마다 대체
 폰트 런을 새로 만든다**. 한글 원고에서는 사실상 텍스트 조각마다 런이 생긴다.
@@ -96,7 +96,7 @@ TextKit 1은 이미 필요한 만큼만 레이아웃한다. **"긴 문서 = O(n)
 | `drawBackground` | 5.135 ms | **0.172 ms** |
 | 마커 검사 | 16.605 ms | **0.0012 ms** |
 
-1. **`MintLayoutManager.drawBackground`** — `glyphsToShow`를 인자로 받아놓고
+1. **`PurloryLayoutManager.drawBackground`** — `glyphsToShow`를 인자로 받아놓고
    무시한 채 문서 전체를 돌고 있었다. 보이는 문단만 훑되, 코드 런은 병합
    렌더라 런의 시작·끝까지만 넓힌다(런 길이에 비례, 문서 길이와 무관).
 2. **`refreshRenderedBlocks`의 마커 검사** — 매 키 입력마다 `range(of:"$$")`·

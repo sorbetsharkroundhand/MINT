@@ -74,5 +74,5 @@
 4. **요약 헤더(장기 컨텍스트)**: 문서 앞부분(창 밖으로 밀린 부분)을 백그라운드에서
    1~2문장으로 요약해 프롬프트 머리에 붙인다 — 등장인물·설정 유지. 폴더 명명에
    쓴 one-shot instruct 경로(`generateFolderName`)와 같은 패턴으로 구현 가능.
-5. **topP를 CompletionParameters로 승격** + MINTBench에 노출 — 측정으로 확정.
+5. **topP를 CompletionParameters로 승격** + PurloryBench에 노출 — 측정으로 확정.
 6. **토큰 기준 예산**: 토크나이저로 prefix를 자르고, 모델별 컨텍스트 창에 맞춘다.

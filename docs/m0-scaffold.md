@@ -16,9 +16,9 @@
 ## 📦 생성할 파일
 | 파일 | 내용 요약 |
 |------|-----------|
-| `Package.swift` | swift-tools `6.0`, 플랫폼 `.macOS(.v14)`, 의존성 `mlx-swift-lm` `from: 3.31.3` (`MLXLLM`·`MLXLMCommon`), `executableTarget("MINT")` |
-| `Sources/MINT/MINTApp.swift` | `@main struct MINTApp: App` → `WindowGroup { ContentView() }` |
-| `Sources/MINT/ContentView.swift` | 임시 `TextEditor` (M1에서 `NSTextView` 래퍼로 교체) + 빈 상태 placeholder |
+| `Package.swift` | swift-tools `6.0`, 플랫폼 `.macOS(.v14)`, 의존성 `mlx-swift-lm` `from: 3.31.3` (`MLXLLM`·`MLXLMCommon`), `executableTarget("Purlory")` |
+| `Sources/Purlory/PurloryApp.swift` | `@main struct PurloryApp: App` → `WindowGroup { ContentView() }` |
+| `Sources/Purlory/ContentView.swift` | 임시 `TextEditor` (M1에서 `NSTextView` 래퍼로 교체) + 빈 상태 placeholder |
 | `.gitignore` | `.build/`, `.swiftpm/`, `DerivedData/`, 모델 캐시(`*.safetensors` 등) |
 
 ### 핵심 의존성 선언 (Package.swift)
@@ -40,7 +40,7 @@
 git fetch origin
 git checkout feat/m0-scaffold
 open Package.swift          # Xcode가 패키지로 엶
-# MINT 스킴 선택 → ⌘R. 첫 빌드는 MLX 컴파일로 수 분 소요.
+# Purlory 스킴 선택 → ⌘R. 첫 빌드는 MLX 컴파일로 수 분 소요.
 # → 빈 창이 뜨고 한글 타이핑이 되면 M0 성공.
 ```
 

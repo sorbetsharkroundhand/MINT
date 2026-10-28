@@ -2,7 +2,7 @@
 
 Date: 2026-10-15 (Asia/Seoul)
 Status: written specification and implementation plan approved by the owner on 2026-10-15; sequential implementation in progress.
-Authority: [#99](https://github.com/sorbetsharkroundhand/MINT/issues/99), [#126](https://github.com/sorbetsharkroundhand/MINT/issues/126), [#158](https://github.com/sorbetsharkroundhand/MINT/issues/158).
+Authority: [#99](https://github.com/sorbetsharkroundhand/Purlory/issues/99), [#126](https://github.com/sorbetsharkroundhand/Purlory/issues/126), [#158](https://github.com/sorbetsharkroundhand/Purlory/issues/158).
 Code baseline: `8a5804e78f0463834e8fbd14498d6fa6cca7df43`.
 
 ## Intent and approved experience
@@ -42,7 +42,7 @@ Responsibilities are deliberately separate:
 | `WritingDiagnostics.swift` | Existing language-neutral values and provider composition. Provider ranges address exactly the request text. |
 | Prose projection / range map | Extract analyzable prose and map analysis, canonical Markdown and native editor UTF-16 spans. Incrementally splice changed blocks. |
 | Diagnostics controller | Own runtime/revision/profile stamps, dirty windows, cache, cancellation, publication and producer health. |
-| Korean morphology adapter | Convert one pinned native backend into MINT-owned tokens, sentence/quote boundaries, grammatical families and correction candidates. |
+| Korean morphology adapter | Convert one pinned native backend into Purlory-owned tokens, sentence/quote boundaries, grammatical families and correction candidates. |
 | Korean rule units | Pure token/span-to-finding rules with stable IDs and deterministic thresholds. |
 | Style profile repository | Validate/version the durable profile and occurrence suppressions through `ProjectSession.updateUserData`. |
 | Presentation/action bridge | Produce margin values, editor decorations and validated explicit replacements. No NLP in a view or `BlockTextView`. |
@@ -51,7 +51,7 @@ Keep Foundation-level analysis independent of AppKit and Fiction. Platform resou
 
 ## Native Korean backend and integration gate
 
-Use a narrow C-ABI adapter for Kiwi, with MINT-owned token types. The candidate is `v0.24.0`, resolved to source commit `6e16bbcfc0940fabccbdde574abb4ea3a659588e`. An upstream Swift wrapper exists, but its package manifest is nested and its C target contains headers/module mapping without the library implementation; the release root has no `Package.swift`. Do not add the advertised repository URL and assume a complete SwiftPM integration.
+Use a narrow C-ABI adapter for Kiwi, with Purlory-owned token types. The candidate is `v0.24.0`, resolved to source commit `6e16bbcfc0940fabccbdde574abb4ea3a659588e`. An upstream Swift wrapper exists, but its package manifest is nested and its C target contains headers/module mapping without the library implementation; the release root has no `Package.swift`. Do not add the advertised repository URL and assume a complete SwiftPM integration.
 
 Prefer the pinned published XCFramework behind a small local package/target that owns the C module and resource lookup. Before production wiring, a self-contained integration validation must establish:
 
@@ -155,7 +155,7 @@ New behavior receives failing regressions before implementation. Keep the existi
 
 Measure cold/warm native latency, peak memory, chunk duration, cancellation-to-no-further-work latency and decoration cost with pinned synthetic fixtures. The first backend-validation unit records the baseline and fixes regression budgets before production integration. The implementation plan must make that a promotion gate; it must not invent measurements in advance. Never relax existing CI/performance gates or imply calculation timings prove actual paint/IME feel.
 
-Run appropriate `swift build`, `swift test`, `swift build --product MINTBench`, clean bundle/resource/signature validation and all required PR/main CI for implementation PRs. Native harness tests use `CFFIXED_USER_HOME` and synthetic data. Batch local actual-app/UI verification after implementation as required by the current guide; final IME/VoiceOver/visual checks identify one candidate under #119. Developer bundle evidence is not Store signing/submission proof.
+Run appropriate `swift build`, `swift test`, `swift build --product PurloryBench`, clean bundle/resource/signature validation and all required PR/main CI for implementation PRs. Native harness tests use `CFFIXED_USER_HOME` and synthetic data. Batch local actual-app/UI verification after implementation as required by the current guide; final IME/VoiceOver/visual checks identify one candidate under #119. Developer bundle evidence is not Store signing/submission proof.
 
 The implementation plan will divide this design into independently reviewable units: native-backend validation, projection/ownership, durable profile, language rules, scheduling, editor/margin integration and full-report contracts. No code/dependency install begins from this document alone. Written-spec review precedes the detailed plan; the preserved execution method is sequential inline work with no subagents and green-CI merge authorization.
 

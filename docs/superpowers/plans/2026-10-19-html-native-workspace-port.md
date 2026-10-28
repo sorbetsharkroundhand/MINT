@@ -124,4 +124,4 @@ record with source-ID coverage and generated native screenshots outside tracked 
 - [x] Run full build/test/bench, standard bundle, isolated boot and actual UI smoke.
 - [x] Exercise real native spatial gestures and capture both themes/mixed stacks/
   drag preview/pouch restore; distinguish automated evidence from human acceptance.
-- [x] Commit and push `codex/mint-editorial-redesign`; verify remote HEAD and clean status.
+- [x] Commit and push `codex/purlory-editorial-redesign`; verify remote HEAD and clean status.

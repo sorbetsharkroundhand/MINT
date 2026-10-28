@@ -7,18 +7,18 @@ import development-build manuscripts without losing the source or the current
 project. The owner approved project-folder imports, copy verification before
 activation, collision rejection, and inline execution without subagents.
 
-The current contract is [#174](https://github.com/sorbetsharkroundhand/MINT/issues/174),
-under [#150](https://github.com/sorbetsharkroundhand/MINT/issues/150). Build on
+The current contract is [#174](https://github.com/sorbetsharkroundhand/Purlory/issues/174),
+under [#150](https://github.com/sorbetsharkroundhand/Purlory/issues/150). Build on
 PR #194 at `96554ab427b0275bf2a7ea111883b81f3e8a46ad`; keep the follow-up based on
 `codex/173-unsigned-archive` until that PR lands. The owner will inspect CI later.
 Neither this design nor a follow-up PR completes #173, #174, or an owner check.
 
 ## Storage and sandbox boundary
 
-Keep `MintStorageLocation` as the single path authority. Its standard location
+Keep `PurloryStorageLocation` as the single path authority. Its standard location
 uses Foundation's user Documents directory with the existing home fallback and
-`MINT` suffix. In the sandbox this resolves inside the container; SwiftPM
-development builds retain their existing Documents/MINT location. Do not
+`Purlory` suffix. In the sandbox this resolves inside the container; SwiftPM
+development builds retain their existing Documents/Purlory location. Do not
 construct a production `~/Library/Containers` path or relocate development data
 automatically. Continue to support explicit temporary-root injection.
 
@@ -92,14 +92,14 @@ preserved; verify a successful imported project reopens independently of source.
 Reuse legacy, onboarding and project-session coverage for existing behavior.
 
 Add an isolated, genuinely sandboxed storage probe using the production
-MintStorageLocation source and the target's entitlements. Give its test app a
+PurloryStorageLocation source and the target's entitlements. Give its test app a
 unique bundle ID/container and CFFIXED_USER_HOME within that owned container.
 Verify standard storage stays there, writes/reopens a fixture, and an ungranted
 write to a separate disposable fixture is denied. Clean up only owned fixtures;
 never launch against real manuscripts. Configuration or a container-shaped
 path alone is insufficient runtime sandbox evidence.
 
-Run focused tests, `swift build`, `swift test`, `swift build --product MINTBench`,
+Run focused tests, `swift build`, `swift test`, `swift build --product PurloryBench`,
 and the existing unsigned archive validators. Wire the sandbox probe into CI
 without weakening existing jobs. Keep a bounded follow-up PR near 500 changed
 LOC, and record actual local evidence separately from owner-inspected CI.

@@ -1,0 +1,206 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 60;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A17300000000000000000001 /* PurloryApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A17300000000000000000002 /* PurloryApp.swift */; };
+		A17300000000000000000003 /* PurloryCore in Frameworks */ = {isa = PBXBuildFile; productRef = A17300000000000000000004 /* PurloryCore */; };
+		A18500000000000000000001 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A18500000000000000000002 /* PrivacyInfo.xcprivacy */; };
+		A18500000000000000000004 /* AppIcon.icns in Resources */ = {isa = PBXBuildFile; fileRef = A18500000000000000000005 /* AppIcon.icns */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A17300000000000000000002 /* PurloryApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Sources/Purlory/PurloryApp.swift; sourceTree = SOURCE_ROOT; };
+		A17300000000000000000005 /* Purlory.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; path = Purlory.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A18500000000000000000002 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = Resources/PrivacyInfo.xcprivacy; sourceTree = SOURCE_ROOT; };
+		A18500000000000000000005 /* AppIcon.icns */ = {isa = PBXFileReference; lastKnownFileType = image.icns; path = Resources/AppIcon.icns; sourceTree = SOURCE_ROOT; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A17300000000000000000006 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A17300000000000000000003 /* PurloryCore in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A17300000000000000000007 = {
+			isa = PBXGroup;
+			children = (A17300000000000000000002 /* PurloryApp.swift */, A18500000000000000000002 /* PrivacyInfo.xcprivacy */, A18500000000000000000005 /* AppIcon.icns */, A17300000000000000000008 /* Products */,);
+			sourceTree = "<group>";
+		};
+		A17300000000000000000008 /* Products */ = {
+			isa = PBXGroup;
+			children = (A17300000000000000000005 /* Purlory.app */,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A17300000000000000000009 /* Purlory */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A1730000000000000000000A /* Target configurations */;
+			buildPhases = (A1730000000000000000000B /* Sources */, A17300000000000000000006 /* Frameworks */, A1730000000000000000000C /* Resources */, A18500000000000000000003 /* Third-party notices */,);
+			buildRules = ();
+			dependencies = ();
+			name = Purlory;
+			packageProductDependencies = (A17300000000000000000004 /* PurloryCore */,);
+			productName = Purlory;
+			productReference = A17300000000000000000005 /* Purlory.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		A1730000000000000000000D /* Project object */ = {
+			isa = PBXProject;
+			attributes = { LastUpgradeCheck = 1600; };
+			buildConfigurationList = A1730000000000000000000E /* Project configurations */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = ko;
+			hasScannedForEncodings = 0;
+			knownRegions = (ko, en, Base,);
+			mainGroup = A17300000000000000000007;
+			packageReferences = (A1730000000000000000000F /* Local Purlory package */,);
+			productRefGroup = A17300000000000000000008 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (A17300000000000000000009 /* Purlory */,);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A1730000000000000000000C /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A18500000000000000000001 /* PrivacyInfo.xcprivacy in Resources */, A18500000000000000000004 /* AppIcon.icns in Resources */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A18500000000000000000003 /* Third-party notices */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = ();
+			inputPaths = ("$(SRCROOT)/../Package.resolved", "$(SRCROOT)/../Distribution/Notices/inventory.json", "$(SRCROOT)/../scripts/purlory-notices.py",);
+			name = "Third-party notices";
+			outputPaths = ("$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ThirdPartyNotices.json", "$(TARGET_BUILD_DIR)/$(UNLOCALIZED_RESOURCES_FOLDER_PATH)/ThirdPartyNotices.txt",);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "sh \"$SRCROOT/../scripts/build-purlory-notices.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A1730000000000000000000B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (A17300000000000000000001 /* PurloryApp.swift in Sources */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		A17300000000000000000010 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		A17300000000000000000011 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = arm64;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		A17300000000000000000012 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = Purlory.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Purlory-Info.plist";
+				INSTALL_PATH = "$(LOCAL_APPS_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.purlory.Purlory;
+				PRODUCT_NAME = Purlory;
+				SKIP_INSTALL = NO;
+			};
+			name = Debug;
+		};
+		A17300000000000000000013 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_ENTITLEMENTS = Purlory.entitlements;
+				CURRENT_PROJECT_VERSION = 1;
+				ENABLE_APP_SANDBOX = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Purlory-Info.plist";
+				INSTALL_PATH = "$(LOCAL_APPS_DIR)";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.purlory.Purlory;
+				PRODUCT_NAME = Purlory;
+				SKIP_INSTALL = NO;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A1730000000000000000000A /* Target configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A17300000000000000000012 /* Debug */, A17300000000000000000013 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A1730000000000000000000E /* Project configurations */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (A17300000000000000000010 /* Debug */, A17300000000000000000011 /* Release */,);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		A1730000000000000000000F /* Local Purlory package */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A17300000000000000000004 /* PurloryCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PurloryCore;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = A1730000000000000000000D /* Project object */;
+}

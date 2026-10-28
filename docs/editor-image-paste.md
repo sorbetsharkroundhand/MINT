@@ -13,13 +13,13 @@ PNG. On the tested macOS host, a JPEG-only pasteboard also supplied an AppKit
 TIFF conversion. Calling the old `paste` override directly therefore missed the
 actual failure in standard command validation.
 
-The editor now advertises the MINT image object and PNG/TIFF/JPEG types through
+The editor now advertises the Purlory image object and PNG/TIFF/JPEG types through
 [readablePasteboardTypes](https://developer.apple.com/documentation/appkit/nstextview/readablepasteboardtypes).
 Native Paste and direct pasteboard reads both enter the existing managed image
 importer through `readSelection(from:)`. Advertising types alone was insufficient:
 a regression test demonstrated that native reads could bypass managed storage.
 
-Internal MINT metadata takes priority over bitmap representations. Ordinary text
+Internal Purlory metadata takes priority over bitmap representations. Ordinary text
 continues through native NSTextView insertion. Image decoding, asynchronous
 project/selection validation, asset storage, and image controls retain their
 existing paths. Read-only editors reject pasteboard reads.

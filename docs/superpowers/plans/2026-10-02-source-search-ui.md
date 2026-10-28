@@ -27,7 +27,7 @@ Produces SourceSearchInput and SourceSearchController(session:origin:cursor:dela
 search(query:scope:), dismiss(), hits/isSearching/isInvalidated and change callbacks.
 - [x] RED: newer query, real scopes, A→B→A/body changes, close and empty query.
 - [x] Observe isolated test failure; implement cancellation handlers and ticket guards.
-- [x] Focused/full tests, app/MINTBench builds; inline review, commit/push/attach Draft.
+- [x] Focused/full tests, app/PurloryBench builds; inline review, commit/push/attach Draft.
 
 ### Task 2: Native keyboard surface and return affordance
 Files: create Workspace/SourceSearchPanel.swift and SourceSearchPanelTests.swift;

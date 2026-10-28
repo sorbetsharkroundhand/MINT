@@ -64,8 +64,8 @@ def main():
     manifest = load_manifest(manifest_path)
     fetch_missing(manifest, args.artifacts_root)
     verify_inputs(manifest, args.artifacts_root)
-    package = Path("Packages/MINTKoreanBackend")
-    resources = package / "Sources/MINTKoreanBackend/Resources/Kiwi"
+    package = Path("Packages/PurloryKoreanBackend")
+    resources = package / "Sources/PurloryKoreanBackend/Resources/Kiwi"
     artifacts = package / "Artifacts"
     for destination in (resources, artifacts):
         checked_path(Path.cwd(), str(destination)).mkdir(parents=True, exist_ok=True)
@@ -84,7 +84,7 @@ def main():
         if file_digest(source) != row["sha256"]:
             raise ValidationError("changed source attribution")
         copy_verified(source, checked_path(notices, source.name), row["sha256"])
-    print(json.dumps({"prepared": "MINTKoreanBackend", "version": manifest["source"]["tag"],
+    print(json.dumps({"prepared": "PurloryKoreanBackend", "version": manifest["source"]["tag"],
                       "nativeCallMaxUTF16": manifest["linkage"]["nativeCallMaxUTF16"]}))
 
 

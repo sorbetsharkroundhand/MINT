@@ -29,7 +29,7 @@ full document height; dirty/caret/previous-selection neighbors remain included.
 No absolute timing gate was invented: automated assertions verify bounded work,
 unchanged index build count, exact media counts and successful asset resolution.
 
-Peak memory uses #179/MINTBench's `ri_lifetime_max_phys_footprint`; the fresh focused
+Peak memory uses #179/PurloryBench's `ri_lifetime_max_phys_footprint`; the fresh focused
 process includes test host, fixture generation, layout and all sampled render passes.
 It is neither MLX memory nor an inference hardware-tier result. An unavailable
 reading stays absent, never zero. #154 currently freezes AI evidence through its
@@ -53,7 +53,7 @@ Reproduce (choose a new report destination; existing reports are never overwritt
 ```sh
 CFFIXED_USER_HOME="$PWD/.build/issue-176-home" \
 HF_HOME="$PWD/.build/issue-176-home/hf" \
-MINT_RENDER_REPORT_PATH="$PWD/.build/new-render-report.json" \
+PURLORY_RENDER_REPORT_PATH="$PWD/.build/new-render-report.json" \
 swift test --disable-automatic-resolution --filter LongDocumentRenderMeasurementTests
 ```
 

@@ -23,7 +23,7 @@ M1 에디터에 **Copilot식 인라인 고스트 텍스트 자동완성**을 얹
 
 ## 🏗️ 아키텍처 (PLAN §4·§5 구현)
 ```
-MintTextView(NSTextView) ──텍스트/커서/markedText──▶ CompletionController
+PurloryTextView(NSTextView) ──텍스트/커서/markedText──▶ CompletionController
         ▲                                                │ 프롬프트(취소 가능)
         │ 회색 고스트 렌더 / Tab·Esc                       ▼
         └───────────── 제안 문자열 ◀────────── CompletionEngine(MLX)
@@ -32,19 +32,19 @@ MintTextView(NSTextView) ──텍스트/커서/markedText──▶ CompletionCo
 ## 📦 생성/수정 파일
 | 파일 | 내용 |
 |------|------|
-| `Sources/MINTCore/Inference/CompletionEngine.swift` | **신규.** `actor`. `MLXLLM`/`MLXLMCommon`로 모델 **1회 로드**(lazy), `complete(prefix:) async throws -> String` — 이어쓰기 프롬프트 구성 + **취소 가능** 생성, 토큰 상한(~8–16)·sentence boundary stop. M2에서 검증한 프롬프트 방식 채택. |
-| `Sources/MINTCore/Editor/CompletionController.swift` | **신규.** `@MainActor ObservableObject`. 디바운스(입력 멈춤 감지), **IME 게이트**, 커서 앞 컨텍스트 추출, `CompletionEngine` 호출, `suggestion` 상태 발행, `accept()`/`dismiss()`/새 입력 시 in-flight 취소. |
-| `Sources/MINTCore/Editor/MintTextView.swift` | **수정.** ① `markedText`/커서 위치 노출(Coordinator에서 `hasMarkedText()`), ② 회색 고스트 렌더(고스트 뒤 임시 attributed substring 또는 layoutManager), ③ `Tab`=수락·`Esc`=거부 키 처리(`doCommandBy` / keyDown 가로채기), ④ 편집 발생 시 고스트 즉시 제거. |
-| `Sources/MINTCore/ContentView.swift` | **수정.** `@StateObject CompletionController` 배선, `MintTextView`에 controller 연결, `DocumentStore`와 공존(고스트는 저장 대상 아님), 하단 엔진 상태 바. |
-| `Sources/MINTCore/Settings.swift` | **신규.** `CompletionSettings`(UserDefaults) + `CompletionParameters`(엔진 스냅샷) + `ModelPresets` — 디바운스·토큰 수·모델 id·프롬프트 방식. |
-| `Sources/MINTCore/SettingsView.swift` | **신규(M4 선반영).** ⌘, 설정 화면 — 모델·프롬프트 방식·디바운스·토큰·온도. |
+| `Sources/PurloryCore/Inference/CompletionEngine.swift` | **신규.** `actor`. `MLXLLM`/`MLXLMCommon`로 모델 **1회 로드**(lazy), `complete(prefix:) async throws -> String` — 이어쓰기 프롬프트 구성 + **취소 가능** 생성, 토큰 상한(~8–16)·sentence boundary stop. M2에서 검증한 프롬프트 방식 채택. |
+| `Sources/PurloryCore/Editor/CompletionController.swift` | **신규.** `@MainActor ObservableObject`. 디바운스(입력 멈춤 감지), **IME 게이트**, 커서 앞 컨텍스트 추출, `CompletionEngine` 호출, `suggestion` 상태 발행, `accept()`/`dismiss()`/새 입력 시 in-flight 취소. |
+| `Sources/PurloryCore/Editor/PurloryTextView.swift` | **수정.** ① `markedText`/커서 위치 노출(Coordinator에서 `hasMarkedText()`), ② 회색 고스트 렌더(고스트 뒤 임시 attributed substring 또는 layoutManager), ③ `Tab`=수락·`Esc`=거부 키 처리(`doCommandBy` / keyDown 가로채기), ④ 편집 발생 시 고스트 즉시 제거. |
+| `Sources/PurloryCore/ContentView.swift` | **수정.** `@StateObject CompletionController` 배선, `PurloryTextView`에 controller 연결, `DocumentStore`와 공존(고스트는 저장 대상 아님), 하단 엔진 상태 바. |
+| `Sources/PurloryCore/Settings.swift` | **신규.** `CompletionSettings`(UserDefaults) + `CompletionParameters`(엔진 스냅샷) + `ModelPresets` — 디바운스·토큰 수·모델 id·프롬프트 방식. |
+| `Sources/PurloryCore/SettingsView.swift` | **신규(M4 선반영).** ⌘, 설정 화면 — 모델·프롬프트 방식·디바운스·토큰·온도. |
 
 ## ♻️ 재사용 (기존 코드)
 - **디바운스 + Task 취소 패턴**: `DocumentStore.scheduleSave()`
-  (`Sources/MINTCore/Storage/DocumentStore.swift`) — 이전 `Task` 취소 후 `Task.sleep`으로 재예약하는
+  (`Sources/PurloryCore/Storage/DocumentStore.swift`) — 이전 `Task` 취소 후 `Task.sleep`으로 재예약하는
   구조를 `CompletionController`의 트리거 디바운스에 그대로 차용.
-- **NSTextViewDelegate 훅**: `MintTextView.Coordinator.textDidChange`
-  (`Sources/MINTCore/Editor/MintTextView.swift`) — 여기에 IME 게이트·트리거 호출을 얹는다.
+- **NSTextViewDelegate 훅**: `PurloryTextView.Coordinator.textDidChange`
+  (`Sources/PurloryCore/Editor/PurloryTextView.swift`) — 여기에 IME 게이트·트리거 호출을 얹는다.
   파일에 이미 남겨둔 M3 확장 지점 주석 참조.
 
 ## 🔧 핵심 기술 대응 (PLAN §9)
@@ -58,7 +58,7 @@ MintTextView(NSTextView) ──텍스트/커서/markedText──▶ CompletionCo
 ## 🧪 검증 절차 (네 Mac)
 ```bash
 git fetch origin && git checkout claude/macbook-autocomplete-editor-3ejo4p
-open Package.swift        # Xcode → MINT 스킴 → ⌘R
+open Package.swift        # Xcode → Purlory 스킴 → ⌘R
 ```
 - 의존성이 바뀌었으므로 첫 열기에서 패키지 재해석(네트워크 필요) + **매크로
   신뢰(Trust & Enable)** 확인이 뜨면 허용.

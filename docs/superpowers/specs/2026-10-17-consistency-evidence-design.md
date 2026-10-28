@@ -1,7 +1,7 @@
 # Original-backed legacy consistency checks
 
 ## Intent and authority
-The owner directs completing remaining UI/internal features with recommended choices, written designs/plans, inline reviews and no subagents/repeated approval. This architectural sub-project starts #109; it does not close the remaining knowledge/object/time/identity rules. Actual MINT/native/model acceptance remains owner-later. Existing #107/#108 foundations are merged and current #109 has no active implementation PR.
+The owner directs completing remaining UI/internal features with recommended choices, written designs/plans, inline reviews and no subagents/repeated approval. This architectural sub-project starts #109; it does not close the remaining knowledge/object/time/identity rules. Actual Purlory/native/model acceptance remains owner-later. Existing #107/#108 foundations are merged and current #109 has no active implementation PR.
 
 ## Problem and decision
 The current background reader publishes legacy ConsistencyWarning values without evidence and folds discourse order across flashbacks. Its death substring check also accepts negated/uncertain death labels. Preserve existing dead-speaker and three-utterance honorific detection, but introduce an original-aware production overload and route both background publications through it.
@@ -19,6 +19,6 @@ Alternatives considered: merely attaching a quote after the old detector loses l
 - Narrative warning source navigation validates its original again against the current document and refuses stale data; no fuzzy jump. It does not mutate manuscripts or writer decisions.
 
 ## Verification and limits
-New source-backed XCTest fixtures use real DialogueAttribution and current outline/sidecar construction. Cover death/honorific positives, negation, flashback/uncertain ranges, missing/duplicate/Unicode evidence, newer unverified/competing state, deduplication and stale/cancelled source. Preserve existing legacy tests. Build/full Swift tests/MINTBench and exact-head/predecessor-main/merged-main all-three CI remain required. Synthetic tests are not actual product/IME/VoiceOver acceptance. Remaining #109 rules and #110 bounded judging are separate bounded successors.
+New source-backed XCTest fixtures use real DialogueAttribution and current outline/sidecar construction. Cover death/honorific positives, negation, flashback/uncertain ranges, missing/duplicate/Unicode evidence, newer unverified/competing state, deduplication and stale/cancelled source. Preserve existing legacy tests. Build/full Swift tests/PurloryBench and exact-head/predecessor-main/merged-main all-three CI remain required. Synthetic tests are not actual product/IME/VoiceOver acceptance. Remaining #109 rules and #110 bounded judging are separate bounded successors.
 
 Inline author review: evidence gates precede deduplication; missing new metadata never upgrades confidence. No requirement assumes named scene hashes are durable IDs or that discourse order equals absolute story time. No owner signoff or semantic claim is fabricated.

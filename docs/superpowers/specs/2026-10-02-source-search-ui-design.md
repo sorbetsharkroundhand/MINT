@@ -1,7 +1,7 @@
 # Temporary model-free source search (#112)
 
 Consume the exact scoped originals and native jump/return from #108. The current
-issue supersedes historical Ask MINT/agent/LLM breadth. Standing user authority
+issue supersedes historical Ask Purlory/agent/LLM breadth. Standing user authority
 selects continuous inline implementation, no approval pauses or subagents.
 
 Use a temporary native NSPanel with NSSearchField, scope popup (Here/Chapter/Project),

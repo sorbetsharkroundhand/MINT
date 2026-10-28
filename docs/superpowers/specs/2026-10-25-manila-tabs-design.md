@@ -1,6 +1,6 @@
 # Manila folder tabs
 
-Implement the owner's supplied three-stage design on `codex/mint-editorial-redesign`, preserving existing uncommitted work. Document slots contain ordered document IDs and one visible tile; tool slots remain singletons. Decode legacy slots without tabs as singleton binders. Opening selects an existing tab anywhere or appends to the active document's binder. Explicit “spread all” remains a comparison command.
+Implement the owner's supplied three-stage design on `codex/purlory-editorial-redesign`, preserving existing uncommitted work. Document slots contain ordered document IDs and one visible tile; tool slots remain singletons. Decode legacy slots without tabs as singleton binders. Opening selects an existing tab anywhere or appends to the active document's binder. Explicit “spread all” remains a comparison command.
 
 Use the existing AppKit canvas and sibling document hosts. Retain hidden tab editors to preserve selection, scroll and undo. A native, horizontally scrollable tab strip draws a 30pt active paper tab with 6pt outward fillets and no bottom border. Following the owner's connected-tab revision, inactive labels blend into the bar with vertical separators between adjacent inactive labels, without individual boxes. Include hover close, middle click close, new document, typewriter and focus controls. Quiet typing dims inactive tabs and plus to 0.35. Respect Reduce Motion.
 

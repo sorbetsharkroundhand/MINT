@@ -12,7 +12,7 @@ Analysis uses an NFC lookup view without modifying manuscript bytes. Proved norm
 
 ## Real-provider fixture observations
 
-The copied [synthetic fixture corpus](../../Tests/MINTCoreTests/Fixtures/KoreanDiagnostics/correctness.json) supplies original UTF-16 locations/lengths and alternatives. The real production provider produced all 18 required findings across 15 positive cases, and no correctness finding across seven negative cases. Tests assert exact original bytes, whole composed characters, native-derived alternatives, unique identities and `nil` confidence. Duplicate NFC/NFD occurrences are checked at separate exact positions. No fixture provider satisfies these assertions.
+The copied [synthetic fixture corpus](../../Tests/PurloryCoreTests/Fixtures/KoreanDiagnostics/correctness.json) supplies original UTF-16 locations/lengths and alternatives. The real production provider produced all 18 required findings across 15 positive cases, and no correctness finding across seven negative cases. Tests assert exact original bytes, whole composed characters, native-derived alternatives, unique identities and `nil` confidence. Duplicate NFC/NFD occurrences are checked at separate exact positions. No fixture provider satisfies these assertions.
 
 | Fixture | Expected correctness findings | Observed |
 | --- | ---: | ---: |
@@ -43,9 +43,9 @@ Eight real/boundary tests additionally cover learned names, ignored rules, nativ
 
 ## Verification and limits
 
-`swift build`, the full `swift test` suite (1,075 tests, two skipped, zero failures), and `swift build --product MINTBench` passed. The final eight-test fixture suite passed with the 22-case corpus above. Tests use `CFFIXED_USER_HOME` and synthetic data; no local MINT/UI launch occurred. Actual-app/IME/accessibility acceptance remains owner-handled and batched under #119.
+`swift build`, the full `swift test` suite (1,075 tests, two skipped, zero failures), and `swift build --product PurloryBench` passed. The final eight-test fixture suite passed with the 22-case corpus above. Tests use `CFFIXED_USER_HOME` and synthetic data; no local Purlory/UI launch occurred. Actual-app/IME/accessibility acceptance remains owner-handled and batched under #119.
 
-The unchanged frozen native gate passed again: cold initialization 1.042s, peak resident bytes 869,318,656, warm 1,024-unit analysis 15.62ms, and cancellation drain 14.84ms. Its developer bundle, unsigned probe archive, isolated sandbox checks and resource integrity are backend evidence, not MINT Store distribution proof. All existing 31 dependency pins are unchanged; only the manifest origin fingerprint changed for test fixtures. Ordinary and fresh-scratch resolution preserved them.
+The unchanged frozen native gate passed again: cold initialization 1.042s, peak resident bytes 869,318,656, warm 1,024-unit analysis 15.62ms, and cancellation drain 14.84ms. Its developer bundle, unsigned probe archive, isolated sandbox checks and resource integrity are backend evidence, not Purlory Store distribution proof. All existing 31 dependency pins are unchanged; only the manifest origin fingerprint changed for test fixtures. Ordinary and fresh-scratch resolution preserved them.
 
 Reproduce after preparing the verified offline inputs:
 

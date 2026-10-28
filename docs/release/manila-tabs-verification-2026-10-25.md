@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Manila folder tabs verification — 2026-10-25
 
 ## Scope and checkout

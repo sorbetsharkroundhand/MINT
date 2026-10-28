@@ -4,12 +4,12 @@
 hashes, vendored components, and distributed resource hashes. Builds generate
 `Contents/Resources/ThirdPartyNotices.txt` (readable text) and
 `ThirdPartyNotices.json` (source/provenance inventory). Open these files through
-Finder's **Show Package Contents**; generation and validation never launch MINT.
+Finder's **Show Package Contents**; generation and validation never launch Purlory.
 
 ```sh
-python3 scripts/test-mint-notices.py
-python3 scripts/mint-notices.py --checkouts .build/checkouts --validate-app build/MINT.app
-scripts/validate-mint-archive.sh
+python3 scripts/test-purlory-notices.py
+python3 scripts/purlory-notices.py --checkouts .build/checkouts --validate-app build/Purlory.app
+scripts/validate-purlory-archive.sh
 ```
 
 Native Xcode builds audit their own `SourcePackages/checkouts`, rather than the
@@ -19,12 +19,12 @@ bundle metadata/signatures and MLX Metal output are separately identified.
 Build-time dependencies are included conservatively.
 
 The owner-selected body font, Noto Serif KR, is bundled unchanged in
-`MINT_MINTCore.bundle` from Google Fonts commit
+`Purlory_PurloryCore.bundle` from Google Fonts commit
 `8b0a1d0f5983c89bc2b93f1b5fb55f9e252744b5`. Its variable TTF and original OFL 1.1
 text are hash-pinned in the inventory. Attribution retains both the embedded
 Adobe copyright and the copyright in the original Google license file.
 Repository resources receive the same source and packaged-byte audit as package
-resources. MINT registers the font for its own process only; it requires neither
+resources. Purlory registers the font for its own process only; it requires neither
 system font installation nor a network connection.
 
 The owner-selected UI family, Pretendard, is also bundled unchanged from release

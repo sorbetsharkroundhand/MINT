@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Editorial redesign integration verification — 2026-10-28
 
 ## Scope

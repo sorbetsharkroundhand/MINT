@@ -30,7 +30,7 @@ SourceAnchor.exactRange(for:in:revision:) -> NSRange?.
   UTF-16, repeated headings, corrupt metadata, duplicate/stale anchors and cancellation.
 - [x] Run isolated swift test --filter SourceSearchTests; observe missing API failures.
 - [x] Implement pure search, exact original anchors, cancellation and stable tie-breaks.
-- [x] Focused/full swift test, swift build and MINTBench build; review diff inline.
+- [x] Focused/full swift test, swift build and PurloryBench build; review diff inline.
 - [x] Commit, push Draft PR stacked on #230 and attach; record evidence.
 
 ### Task 2: Native source navigation

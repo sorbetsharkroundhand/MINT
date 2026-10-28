@@ -18,8 +18,8 @@ identity, selection, IME, Ghost acceptance, undo and storage unchanged.
    tools and coauthor separately. Only explicit collapse creates the movable orb.
 
 Add/update regression sources, then compile with `swift build`. Do not execute
-tests, launch MINT or perform UI automation under the owner's build-only scope.
-Commit and push on `codex/mint-editorial-redesign`; leave unrelated local files out.
+tests, launch Purlory or perform UI automation under the owner's build-only scope.
+Commit and push on `codex/purlory-editorial-redesign`; leave unrelated local files out.
 
 ## Implementation and delivery evidence
 
@@ -39,5 +39,5 @@ Commit and push on `codex/mint-editorial-redesign`; leave unrelated local files 
   and Option hover, typography, fixed-card geometry, selection formatting, and
   explicit collapse/restore. They were not executed under the build-only scope.
 - `swift build` completed successfully on 2026-10-25 in 22.54 seconds, including
-  MINT and MINTBench linking. No runtime, IME, accessibility or UI verification
+  Purlory and PurloryBench linking. No runtime, IME, accessibility or UI verification
   was performed; those behaviors still need review in the built app.

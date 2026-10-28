@@ -2,9 +2,9 @@
 
 > **For agentic workers:** Use superpowers:executing-plans for implementation in this chat. Follow the owner's requested sequence; no parallel agents are needed.
 
-**Goal:** Reclaim obsolete downloaded model weights and measure Qwen3.5 9B, Ministral 3 14B, and Gemma 4 26B-A4B through MINT's native local completion engine, including nonempty Korean continuation evidence.
+**Goal:** Reclaim obsolete downloaded model weights and measure Qwen3.5 9B, Ministral 3 14B, and Gemma 4 26B-A4B through Purlory's native local completion engine, including nonempty Korean continuation evidence.
 
-**Architecture:** Reuse the existing revision-pinned installation store, MLX Swift engine, cursor-bounded context assembly, and schema-2 MINTBench reports. Register the three MLX 4-bit artifacts as measurement candidates. Normal shipping model approval remains separate from this explicitly requested experiment.
+**Architecture:** Reuse the existing revision-pinned installation store, MLX Swift engine, cursor-bounded context assembly, and schema-2 PurloryBench reports. Register the three MLX 4-bit artifacts as measurement candidates. Normal shipping model approval remains separate from this explicitly requested experiment.
 
 **Tech Stack:** Swift 6, AppKit/SwiftUI, MLX Swift, Hugging Face immutable model inventories, Apple M2 Max with 32 GiB unified memory.
 

@@ -27,7 +27,7 @@
 - Provider ranges address the exact request text. Source, prose and native coordinates are distinct. Duplicate evidence never resolves by selecting the first match; unproved replacements are refused.
 - Opaque manuscript, Noto Serif KR body, Pretendard UI, existing palette. Only independently tested, exactly mapped correctness findings receive subtle underlines; style stays advisory.
 - English repo documentation/comments; Korean UI and language fixtures are allowed. Logs/support output exclude manuscript excerpts, learned words and prompts by default.
-- Keep all existing CI gates. Batch local actual-app/UI checks after implementation; do not launch MINT during these tasks. Use synthetic data and `CFFIXED_USER_HOME` for native harnesses. Owner selects the shipping LLM later.
+- Keep all existing CI gates. Batch local actual-app/UI checks after implementation; do not launch Purlory during these tasks. Use synthetic data and `CFFIXED_USER_HOME` for native harnesses. Owner selects the shipping LLM later.
 
 ## Review Focus
 
@@ -41,21 +41,21 @@
 
 ## File boundaries and delivery
 
-Existing foundations remain in place. New files below live under `Sources/MINTCore/WritingQuality/` unless an exact alternative path is given. Matching test suites live under `Tests/MINTCoreTests/`; test-only fixtures stay there.
+Existing foundations remain in place. New files below live under `Sources/PurloryCore/WritingQuality/` unless an exact alternative path is given. Matching test suites live under `Tests/PurloryCoreTests/`; test-only fixtures stay there.
 
 | Unit / files | Responsibility |
 | --- | --- |
-| `Packages/MINTKoreanBackend/`, `Distribution/KoreanBackend/`, backend preparation/validation scripts | Pinned native library, verified resources, C bridge, reproducibility and measured promotion gate; no AppKit/MLX dependency. |
+| `Packages/PurloryKoreanBackend/`, `Distribution/KoreanBackend/`, backend preparation/validation scripts | Pinned native library, verified resources, C bridge, reproducibility and measured promotion gate; no AppKit/MLX dependency. |
 | `WritingProseProjection.swift`, `WritingProjectionIndex.swift`; shared scanner in `Editor/MarkdownInlineScanner.swift` | Reversible segment maps and incremental prefix-sum index. Scanner is shared with current inline parsing, not an alternative Markdown grammar. |
 | `Editor/BlockTextView+WritingDiagnostics.swift` | Capture committed native changes and mapping metadata; later own safe mutation/decorations. No language rules or NLP. |
 | `WritingStyleRecord.swift`, `WritingStyleRepository.swift` | Versioned project choices and runtime-gated writes. |
-| `KoreanMorphology.swift`, `KoreanCorrectnessRules.swift`, `KoreanRepetitionRules.swift`, `KoreanSentenceRules.swift`, `KoreanDiagnosticsProvider.swift` | MINT-owned tokens, pure rules and provider orchestration. |
+| `KoreanMorphology.swift`, `KoreanCorrectnessRules.swift`, `KoreanRepetitionRules.swift`, `KoreanSentenceRules.swift`, `KoreanDiagnosticsProvider.swift` | Purlory-owned tokens, pure rules and provider orchestration. |
 | `WritingDiagnostics.swift`, `WritingDiagnosticsState.swift`, `WritingDiagnosticsController.swift`, `WritingDiagnosticsCache.swift`, `WritingDiagnosticsReport.swift`, `WritingDiagnosticsRuntime.swift` | Existing engine plus health, ownership, bounded scheduling, memoization, explicit reports and app lifetime. |
 | `WritingDiagnosticsPresentation.swift`, `WritingDiagnosticsActions.swift`, `WritingDiagnosticsSettingsView.swift` | Prepared margin values, validated action routing and project preference controls. |
 
 Each numbered task is an independently reviewable PR boundary; split an oversized task only at a working tested seam. No scaffolding-only PR. Task 1 is a reproducible executable backend validation, not a paper audit. Keep #126 open through integration; #270 and #114 retain their remaining work.
 
-All new production types are internal unless required by the `MINT` executable's composition root; expose only that composition surface. Existing public initializer defaults remain source compatible. Test helpers may have local constructors but are not production APIs.
+All new production types are internal unless required by the `Purlory` executable's composition root; expose only that composition surface. Existing public initializer defaults remain source compatible. Test helpers may have local constructors but are not production APIs.
 
 ### Task 1: Prove the pinned backend and freeze promotion budgets
 
@@ -75,16 +75,16 @@ All new production types are internal unless required by the `MINT` executable's
 
   `validate(case)` is this suite's subprocess helper for the validator against temporary synthetic manifests/files; no network or real home in rejection tests.
 - [x] **Step 2: Run** `python3 scripts/test-korean-backend-validation.py`; expect failure because the verifier is absent.
-- [x] **Step 3: Implement the isolated probe/verifier.** Download only into ignored build staging, verify archive SHA-256 before extraction, reject traversal/symlinks and inventory every retained file. Inspect the actual C symbols/headers and Apple Silicon macOS slice. Compile/link with Swift 6 and test resource lookup in a synthetic developer bundle and unsigned sandboxed harness archive without launching MINT. Prefer the published binary; if its C ABI is unusable, reproducibly build the same exact source and record commands/toolchain/output hashes before repeating every check.
+- [x] **Step 3: Implement the isolated probe/verifier.** Download only into ignored build staging, verify archive SHA-256 before extraction, reject traversal/symlinks and inventory every retained file. Inspect the actual C symbols/headers and Apple Silicon macOS slice. Compile/link with Swift 6 and test resource lookup in a synthetic developer bundle and unsigned sandboxed harness archive without launching Purlory. Prefer the published binary; if its C ABI is unusable, reproducibly build the same exact source and record commands/toolchain/output hashes before repeating every check.
 - [x] **Step 4: Run the rejection suite and real `--probe`.** Exercise native morphology, typo candidates and spacing/join behavior on `됬다`, `할수 있다`, `장례희망`, mixed scripts, NFC/NFD Hangul, emoji and multiline inputs. Assert every reported token/candidate range round-trips to its exact original UTF-16 substring; record actual outputs, including absent capabilities. Measure cold load, warm p50/p95/max for 256/1,024/4,096-unit inputs, peak resident memory, packaged bytes, native-call maximum and cancellation-to-no-next-call latency. Never interpret token score/typo cost as a probability.
 - [x] **Step 5: Freeze measured limits and verify.** Run 30 warm repetitions after 5 warmups, three cold processes, release optimization and synthetic fixtures on the available 32GB Mac. For each latency metric set the regression limit to `ceil(1.25 * measured maximum)` in its recorded unit; memory/size limit is `ceil(1.10 * measured maximum)`. Record the raw maxima, resulting numbers and an explicit assessment that the measured single-call bound permits foreground yielding. These are regression budgets, not evidence of responsiveness on smaller Macs. If the bound is unacceptable or required typo/spacing evidence cannot be produced, stop backend promotion, document the precise failing gate and repair/reprobe within the approved adapter design; never fill numbers or outcomes speculatively. `--verify` must reproduce artifact/quality checks and meet the frozen limits before Task 2.
 - [x] **Step 6: Commit** only the harness, immutable manifests, synthetic fixtures and report: `git commit -m "test: validate pinned Korean morphology backend"`. Record results under #126/#185; all mandatory PR CI remains required. No production success or Store-compliance claim follows from this task alone.
 
 ### Task 2: Package a lazy, verified offline native adapter
 
-**Files:** Create `Packages/MINTKoreanBackend/Package.swift`, `Packages/MINTKoreanBackend/Sources/CKiwiBridge/`, `Packages/MINTKoreanBackend/Sources/MINTKoreanBackend/`, `scripts/prepare-korean-backend.sh`; add `KoreanBackendPackagingTests.swift`. Modify root `Package.swift`, `.gitignore`, `.github/workflows/ci.yml`, `scripts/build-mint-app.sh`, `scripts/archive-mint-app.sh`, `scripts/mint-notices.py`, `scripts/test-mint-notices.py`, `Distribution/Notices/inventory.json` and `Distribution/MINT.xcodeproj/project.pbxproj` only as packaging requires.
+**Files:** Create `Packages/PurloryKoreanBackend/Package.swift`, `Packages/PurloryKoreanBackend/Sources/CKiwiBridge/`, `Packages/PurloryKoreanBackend/Sources/PurloryKoreanBackend/`, `scripts/prepare-korean-backend.sh`; add `KoreanBackendPackagingTests.swift`. Modify root `Package.swift`, `.gitignore`, `.github/workflows/ci.yml`, `scripts/build-purlory-app.sh`, `scripts/archive-purlory-app.sh`, `scripts/purlory-notices.py`, `scripts/test-purlory-notices.py`, `Distribution/Notices/inventory.json` and `Distribution/Purlory.xcodeproj/project.pbxproj` only as packaging requires.
 
-**Interfaces:** Consumes Task 1's verified manifests and gate. Produces `KoreanNativeWorker(resources: URL)`, `analyze(_ text: String) async throws -> KoreanNativeAnalysis`, `cancelPending()` and `release() async`. `KoreanNativeAnalysis` contains tokens `(form: String, tag: String, range: NSRange)`, sentence ranges `[NSRange]` and correction candidates `(originalRange: NSRange, replacement: String, origin: String)`; ranges address original request text. Define these Sendable values in the adapter, without upstream pointer/POS types or a dependency on MINTCore. `cancelPending()` synchronously closes queued admission; `release()` drains the admitted call before disposing handles.
+**Interfaces:** Consumes Task 1's verified manifests and gate. Produces `KoreanNativeWorker(resources: URL)`, `analyze(_ text: String) async throws -> KoreanNativeAnalysis`, `cancelPending()` and `release() async`. `KoreanNativeAnalysis` contains tokens `(form: String, tag: String, range: NSRange)`, sentence ranges `[NSRange]` and correction candidates `(originalRange: NSRange, replacement: String, origin: String)`; ranges address original request text. Define these Sendable values in the adapter, without upstream pointer/POS types or a dependency on PurloryCore. `cancelPending()` synchronously closes queued admission; `release()` drains the admitted call before disposing handles.
 
 - [x] **Step 1: Write failing `testOfflinePackagedResourceAndNativeResult`, `testMissingOrChangedResourceIsUnavailable` and `testReleaseWaitsForAdmittedCall`.** The suite's native test worker asserts:
 
@@ -98,12 +98,12 @@ All new production types are internal unless required by the `MINT` executable's
   Use a controllable C-call seam for drain order, plus the real backend for resource and token tests. Define the substring helper locally with NSString bounds checks.
 - [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter KoreanBackendPackagingTests`; expect missing adapter/API failure.
 - [x] **Step 3: Implement the validated linkage and resources.** Use the Task 1 binary as a checksum-pinned SwiftPM binary target behind the small C bridge, or its validated exact-source build if that is the recorded gate result. `prepare-korean-backend.sh` fetches/verifies the pinned model into the package's ignored resource directory before builds; it is build preparation only. Track its manifest/resource index, not unbounded generated binaries. Call preparation in CI/developer-bundle/archive entry points before package resolution/build; document the same prerequisite for a clean checkout. Package resources with a dedicated bundle and resolve through that bundle in SwiftPM and Xcode archives. Serialize native work on one off-main worker with a thread-safe admission epoch, checking cancellation/epoch again immediately before each C call. A blocked C call cannot prevent synchronous cancellation of queued calls. Validate all inputs at 4,096 UTF-16 units, preserve original coordinates, and lazily initialize only on admitted analysis.
-- [x] **Step 4: Extend resource/notice verification narrowly.** Inventory exact Kiwi/model/linked-component notices and hashes, including Eigen. Keep the LLM model inventory empty; permit only the explicitly inventoried NLP resources at exact paths/hashes. Retain rejection of all unlisted model-like files, tampered files and symlinks; replace inaccurate blanket “no model weights” copy with the actual NLP/LLM distinction. Test verified NLP acceptance plus unlisted `.bin`/`.safetensors` rejection. Run the suite, Task 1 `--verify`, `python3 scripts/test-mint-notices.py`, clean bundle and unsigned archive validation; expect all passing with resources present offline. No local app launch.
+- [x] **Step 4: Extend resource/notice verification narrowly.** Inventory exact Kiwi/model/linked-component notices and hashes, including Eigen. Keep the LLM model inventory empty; permit only the explicitly inventoried NLP resources at exact paths/hashes. Retain rejection of all unlisted model-like files, tampered files and symlinks; replace inaccurate blanket “no model weights” copy with the actual NLP/LLM distinction. Test verified NLP acceptance plus unlisted `.bin`/`.safetensors` rejection. Run the suite, Task 1 `--verify`, `python3 scripts/test-purlory-notices.py`, clean bundle and unsigned archive validation; expect all passing with resources present offline. No local app launch.
 - [x] **Step 5: Commit** `git commit -m "feat: package verified offline Korean backend"` after required build/test/bench checks. Backend availability is not editor integration; no automatic work yet.
 
 ### Task 3: Build reversible prose maps and a bounded index
 
-**Files:** Create `WritingProseProjection.swift`, `WritingProjectionIndex.swift`, `Sources/MINTCore/Editor/MarkdownInlineScanner.swift`, `WritingProseProjectionTests.swift`, `WritingProjectionIndexTests.swift`. Modify `Editor/InlineStyle.swift` to consume shared span scanning; preserve parsing/serialization behavior.
+**Files:** Create `WritingProseProjection.swift`, `WritingProjectionIndex.swift`, `Sources/PurloryCore/Editor/MarkdownInlineScanner.swift`, `WritingProseProjectionTests.swift`, `WritingProjectionIndexTests.swift`. Modify `Editor/InlineStyle.swift` to consume shared span scanning; preserve parsing/serialization behavior.
 
 **Interfaces:** Produces Foundation-only `WritingProseBlock` (stable in-session block ID, source/prose text, relative segment map, optional native spans), `WritingProjectionPatch(oldSourceRange: WritingDiagnosticRange, replacement: [WritingProseBlock])`, `WritingAnalysisWindow` (prose text, digest, source segment map, covered range), and `WritingProjectionIndex`. Methods: `reset(source: String)`, `apply(_ patch: WritingProjectionPatch)`, `windows(intersecting: WritingDiagnosticRange) -> WritingAnalysisWindows`, `sourceRanges(for: WritingDiagnosticRange, in: WritingAnalysisWindow) -> [WritingDiagnosticRange]?`, `sourceRanges(forProse: WritingDiagnosticRange) -> [WritingDiagnosticRange]?` for absolute report spans. `WritingAnalysisWindows: Sequence` lazily yields immutable windows over a revision-frozen piece index; it never materializes an entire huge edit. `WritingWindowSplitter.ranges(in text: String) -> AnySequence<WritingDiagnosticRange>` supplies the same bounded split/overlap policy for already-projected request text. Source/prose/native segments use relative UTF-16 ranges and an eligibility flag; index prefix sums provide absolute offsets.
 
@@ -130,7 +130,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 **Interfaces:** Consumes Task 3 blocks/patches. Produces `WritingEditorCommit(baseIdentity: ProjectRuntimeIdentity, nativeRevision: UInt64, patch: WritingProjectionPatch, markedRange: WritingDiagnosticRange?)`, emitted after the existing binding publishes committed source. `BlockTextView.writingNativeRevision: UInt64`, `writingCommitDidChange: ((WritingEditorCommit) -> Void)?`, `writingCompositionDidChange: ((WritingDiagnosticRange?) -> Void)?`, and `nativeRange(forSource: WritingDiagnosticRange, revision: UInt64) -> WritingDiagnosticRange?`. Keep language analysis outside the editor.
 
-- [x] **Step 1: Write failing `testLoadAndNativeEditMapsMatchCanonicalSource`, `testIMEIsNeverCommittedForDiagnostics`, `testHugeParagraphDeltaDoesNotReserializeForDiagnostics`, `testUndoRedoAndProgrammaticChangesEmitValidPatches`.** Use inert NSTextStorage/NSTextView and test UndoManager, without showing MINT:
+- [x] **Step 1: Write failing `testLoadAndNativeEditMapsMatchCanonicalSource`, `testIMEIsNeverCommittedForDiagnostics`, `testHugeParagraphDeltaDoesNotReserializeForDiagnostics`, `testUndoRedoAndProgrammaticChangesEmitValidPatches`.** Use inert NSTextStorage/NSTextView and test UndoManager, without showing Purlory:
 
   ```swift
   XCTAssertEqual(nativeSubstring, expectedOriginal)
@@ -172,7 +172,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 6: Add real morphology and conservative correctness findings
 
-**Files:** Create `KoreanMorphology.swift`, `KoreanCorrectnessRules.swift`, `KoreanDiagnosticsProvider.swift`, `KoreanCorrectnessTests.swift`, `Tests/MINTCoreTests/Fixtures/KoreanDiagnostics/correctness.json` (synthetic reviewed cases).
+**Files:** Create `KoreanMorphology.swift`, `KoreanCorrectnessRules.swift`, `KoreanDiagnosticsProvider.swift`, `KoreanCorrectnessTests.swift`, `Tests/PurloryCoreTests/Fixtures/KoreanDiagnostics/correctness.json` (synthetic reviewed cases).
 
 **Interfaces:** `KoreanMorphology(worker: KoreanNativeWorker)` and `analyze(_ text: String) async throws -> KoreanAnalysis` adapt Task 2's native values. `KoreanAnalysis` contains `text: String`, `[KoreanToken]` (form/tag/range), sentence ranges and correction candidates (originalRange/replacement/origin), converting NSRange to validated `WritingDiagnosticRange` at this boundary. `KoreanCorrectnessRules.evaluate(_ analysis: KoreanAnalysis, profile: WritingStyleProfile) -> [WritingDiagnostic]`. `KoreanDiagnosticsProvider(morphology: KoreanMorphology): WritingDiagnosticsProvider` implements existing `analyze(_:)`; `id = "ko.kiwi.v0.24.0"`. Rule revision is an explicit cache-key input, starting at 1.
 
@@ -195,7 +195,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 7: Detect morphological repetition with evidence
 
-**Files:** Create `KoreanRepetitionRules.swift`, `KoreanRepetitionTests.swift`, `Tests/MINTCoreTests/Fixtures/KoreanDiagnostics/repetition.json`; extend provider composition from Task 6.
+**Files:** Create `KoreanRepetitionRules.swift`, `KoreanRepetitionTests.swift`, `Tests/PurloryCoreTests/Fixtures/KoreanDiagnostics/repetition.json`; extend provider composition from Task 6.
 
 **Interfaces:** `KoreanRepetitionRules.evaluate(_ analysis: KoreanAnalysis, profile: WritingStyleProfile) -> [WritingDiagnostic]`. Stable IDs: `ko.style.repeated-word`, `ko.style.repeated-particle`, `ko.style.repeated-ending`, `ko.style.repeated-connector`. Produces suggestion severity, primary plus related original ranges, Korean explanations and no unsolicited rewrite.
 
@@ -218,7 +218,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 8: Add sentence flow rules and chunk-independent report state
 
-**Files:** Create `KoreanSentenceRules.swift`, `KoreanSentenceRulesTests.swift`, `Tests/MINTCoreTests/Fixtures/KoreanDiagnostics/sentence-flow.json`; extend provider internals.
+**Files:** Create `KoreanSentenceRules.swift`, `KoreanSentenceRulesTests.swift`, `Tests/PurloryCoreTests/Fixtures/KoreanDiagnostics/sentence-flow.json`; extend provider internals.
 
 **Interfaces:** `KoreanRuleSession(profile: WritingStyleProfile)`; `consume(_ analysis: KoreanAnalysis, proseOffset: Int, final: Bool) -> [WritingDiagnostic]`; `reset()`. Session composes correctness/repetition/flow, belongs to one request/report, and returns ranges relative to the entire exact request text. Add `KoreanDiagnosticsProvider.analyzeChunks(_ request: WritingDiagnosticsRequest, emit: @escaping @Sendable (KoreanDiagnosticsChunk) async throws -> Void) async throws`. `KoreanDiagnosticsChunk` contains diagnostics, assessed prose range and total prose UTF-16 length. Existing `analyze(_:)` collects this pipeline; `.document` internally splits using Task 3's splitter, while `.local` is already bounded. Stable new IDs: `ko.style.redundant-causality`, `ko.style.connective-chain`, `ko.style.repeated-sentence-start`, `ko.style.sentence-length`, `ko.style.sentence-rhythm`.
 
@@ -265,7 +265,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 10: Share pressure admission and expose explicit full reports
 
-**Files:** Create `WritingDiagnosticsReport.swift`, `WritingDiagnosticsRuntime.swift`, `WritingDiagnosticsReportTests.swift`, `WritingDiagnosticsPressureTests.swift`; modify `Inference/MemoryPressureRuntime.swift`, `Inference/MemoryPressureCoordinator.swift`, `ContentView.swift` consumer composition and `Sources/MINT/MINTApp.swift` lifetime wiring. Preserve existing completion/indexer callbacks.
+**Files:** Create `WritingDiagnosticsReport.swift`, `WritingDiagnosticsRuntime.swift`, `WritingDiagnosticsReportTests.swift`, `WritingDiagnosticsPressureTests.swift`; modify `Inference/MemoryPressureRuntime.swift`, `Inference/MemoryPressureCoordinator.swift`, `ContentView.swift` consumer composition and `Sources/Purlory/PurloryApp.swift` lifetime wiring. Preserve existing completion/indexer callbacks.
 
 **Interfaces:** `WritingDiagnosticsController.scanDocument(_ snapshot: ProjectDocumentSnapshot) -> WritingDiagnosticsReport` and `cancelReport()`. `WritingDiagnosticsReport: AsyncSequence` yields `WritingDiagnosticsReportEvent` through a one-event bounded asynchronous channel. Events carry runtime/profile ownership and `.progress(completed: Int, total: Int)`, `.findings([WritingDiagnosticsFinding])`, `.finished(WritingDiagnosticsCoverage)`, `.cancelled`, `.failed(WritingDiagnosticsAvailability)`, using Task 9 values. A project scan iterates immutable document snapshots through this API; no implicit project disk scan. Reports use Task 8's `analyzeChunks` with a private request/session and lower-priority admission over the same serial native worker, independent of the local engine generation. Public MainActor ObservableObject `WritingDiagnosticsRuntime.init()` owns the internal controller/repository/worker; `prepareForTermination() async` drains release. Pass this runtime into `ContentView` and add a defaulted optional runtime parameter to `MemoryPressureRuntime` to preserve existing callers. Its internal `setMemoryPressure(_ level: MemoryPressureLevel)` forwards warning/critical levels and waits for native release without blocking the main actor.
 
@@ -287,7 +287,7 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 11: Draw restrained marks and apply one validated native edit
 
-**Files:** Extend `Editor/BlockTextView+WritingDiagnostics.swift`; narrowly modify `MintLayoutManager` drawing in `Editor/BlockTextView.swift`; create `WritingDiagnosticsActions.swift`, `WritingDiagnosticsEditorTests.swift`, `WritingDiagnosticsDecorationTests.swift`.
+**Files:** Extend `Editor/BlockTextView+WritingDiagnostics.swift`; narrowly modify `PurloryLayoutManager` drawing in `Editor/BlockTextView.swift`; create `WritingDiagnosticsActions.swift`, `WritingDiagnosticsEditorTests.swift`, `WritingDiagnosticsDecorationTests.swift`.
 
 **Interfaces:** MainActor `BlockTextView.setWritingDiagnostics(_ findings: [WritingDiagnosticsFinding], revision: UInt64)`; `applyWritingCorrection(_ correction: WritingCorrection, identity: ProjectRuntimeIdentity) -> WritingCorrectionResult`. `WritingCorrection` carries finding/stamp, exact expected source/native text and replacement. Result is `.applied` or `.refused(reason: WritingCorrectionRefusal)`; refusal cases stale/composing/unmapped/ambiguous/formatting. `WritingDiagnosticsActions.apply(findingID: String, alternativeIndex: Int) -> WritingCorrectionResult` resolves only current controller values and current project/editor ownership.
 
@@ -311,9 +311,9 @@ All new production types are internal unless required by the `MINT` executable's
 
 ### Task 12: Connect Living Margin, project controls and production flow
 
-**Files:** Create `WritingDiagnosticsPresentation.swift`, `WritingDiagnosticsSettingsView.swift`, `WritingDiagnosticsPresentationTests.swift`, `WritingDiagnosticsIntegrationTests.swift`; extend `WritingDiagnosticsActions.swift`, `Intelligence/LivingMarginModel.swift`, `Intelligence/LivingMarginView.swift`, `Workspace/WorkspaceShellView.swift`, `SettingsView.swift`, `ContentView.swift` and `Sources/MINT/MINTApp.swift` composition. Add final evidence to `docs/engineering/korean-backend-validation.md`.
+**Files:** Create `WritingDiagnosticsPresentation.swift`, `WritingDiagnosticsSettingsView.swift`, `WritingDiagnosticsPresentationTests.swift`, `WritingDiagnosticsIntegrationTests.swift`; extend `WritingDiagnosticsActions.swift`, `Intelligence/LivingMarginModel.swift`, `Intelligence/LivingMarginView.swift`, `Workspace/WorkspaceShellView.swift`, `SettingsView.swift`, `ContentView.swift` and `Sources/Purlory/PurloryApp.swift` composition. Add final evidence to `docs/engineering/korean-backend-validation.md`.
 
-**Interfaces:** `WritingDiagnosticsPresentation.insights(from: WritingDiagnosticsState) -> [MarginInsight]`. Add producer-scoped `LivingMarginModel.replace(writingQuality: [MarginInsight])` so updates retain future story producers and session dismissals. Extend actions with `perform(_ action: MarginAction, findingID: String) throws`, routing deliberate apply, intentional, disable-rule and learn-word to Tasks 5/11. New project controls consume the repository/controller, not global Settings/User Canon. Add public factories/lifetime methods only where the `MINT` target needs them.
+**Interfaces:** `WritingDiagnosticsPresentation.insights(from: WritingDiagnosticsState) -> [MarginInsight]`. Add producer-scoped `LivingMarginModel.replace(writingQuality: [MarginInsight])` so updates retain future story producers and session dismissals. Extend actions with `perform(_ action: MarginAction, findingID: String) throws`, routing deliberate apply, intentional, disable-rule and learn-word to Tasks 5/11. New project controls consume the repository/controller, not global Settings/User Canon. Add public factories/lifetime methods only where the `Purlory` target needs them.
 
 - [x] **Step 1: Write failing `testPreparedMarginOpenDoesNotAnalyzeOrMoveFocus`, `testDismissIntentionalDisableAndLearnAreDistinct`, `testModelFreeFictionAndGeneralEndToEnd`, `testUnavailableProfileAndBackendRemainWritable`.** Assert:
 
@@ -327,10 +327,10 @@ All new production types are internal unless required by the `MINT` executable's
   XCTAssertTrue(editSaveSearchAndExportWorkWhenBackendUnavailable)
   ```
 
-  Use a synthetic project and real provider for the integrated edit→debounce→finding→explicit correction→Undo→flush/reopen path in both modes. Include stale action IDs, current occurrence suppression, learned inflected/name boundaries, profile corruption preservation and engine failure. No shipping LLM or visible MINT window.
+  Use a synthetic project and real provider for the integrated edit→debounce→finding→explicit correction→Undo→flush/reopen path in both modes. Include stale action IDs, current occurrence suppression, learned inflected/name boundaries, profile corruption preservation and engine failure. No shipping LLM or visible Purlory window.
 - [x] **Step 2: Run** `swift test --disable-automatic-resolution --filter 'WritingDiagnosticsPresentationTests|WritingDiagnosticsIntegrationTests|LivingMargin'`; expect disconnected production flow/actions.
 - [x] **Step 3: Implement presentation and explicit controls.** Group related style/rhythm findings with original evidence and plain Korean explanations; correctness alternatives are explicit buttons. Keep info patterns in report output unless an actionable grouped margin suggestion exists. Use existing action kinds/custom IDs with a current owned lookup, never parse replacement text from action IDs. Dismiss stays session-only; intentional, disable-rule and learn-word use the versioned project record. Add repetition/dialogue/language controls under Writing settings for the active project, with disabled/no-project and preserved-unreadable states. Compact status/details/retry controls distinguish pending, partial, paused and unavailable without forcing panels/focus or model setup. Accessibility names include category, evidence and action; do not rely on color or native scores. Wire exactly one app-lifetime controller to document commits, project transitions, foreground policy and margin actions. Opening a surface only reads prepared values.
-- [x] **Step 4: Run** targeted suites, then full deterministic tests, build, bench compile, native gate verification and clean developer-bundle/unsigned-archive resource validation. Inspect notices/support output for forbidden manuscript/profile content. Expect all existing and new checks passing; do not launch local MINT or UI scripts. Mandatory cloud CI launch/archive jobs still run unchanged.
+- [x] **Step 4: Run** targeted suites, then full deterministic tests, build, bench compile, native gate verification and clean developer-bundle/unsigned-archive resource validation. Inspect notices/support output for forbidden manuscript/profile content. Expect all existing and new checks passing; do not launch local Purlory or UI scripts. Mandatory cloud CI launch/archive jobs still run unchanged.
 - [ ] **Step 5: Commit** `git commit -m "feat: connect Korean proofreading to editor and margin"`. Review inline against the approved spec, publish/attach the bounded PR and merge only when all required CI is green.
 
 ## Verification and closeout
@@ -340,15 +340,15 @@ For every implementation PR, capture the failing regression result before implem
 ```sh
 swift build --disable-automatic-resolution
 swift test --disable-automatic-resolution
-swift build --product MINTBench --disable-automatic-resolution
+swift build --product PurloryBench --disable-automatic-resolution
 python3 scripts/test-korean-backend-validation.py
 scripts/validate-korean-backend.sh --verify --output build/korean-backend-verification
-python3 scripts/test-mint-notices.py
+python3 scripts/test-purlory-notices.py
 ```
 
-After packaging/integration changes, also build/validate the developer bundle and unsigned archive without running local smoke/UI scripts. Preserve retained bundles before scripts replace `build/MINT.app`. Record source/tree/artifact identities and frozen-budget results; never describe developer packaging as Store distribution proof.
+After packaging/integration changes, also build/validate the developer bundle and unsigned archive without running local smoke/UI scripts. Preserve retained bundles before scripts replace `build/Purlory.app`. Record source/tree/artifact identities and frozen-budget results; never describe developer packaging as Store distribution proof.
 
-Required PR jobs remain `MINT / Debug Build & Test`, `App / Release Bundle & Smoke` and `App / Unsigned Xcode Archive`. Inspect their current conclusions and matching PR head before merge; attach every created PR. Confirm main CI after merge and synchronize local main without overwriting owner changes. Task 1 may require its isolated harness commands in addition to the unchanged main-product jobs.
+Required PR jobs remain `Purlory / Debug Build & Test`, `App / Release Bundle & Smoke` and `App / Unsigned Xcode Archive`. Inspect their current conclusions and matching PR head before merge; attach every created PR. Confirm main CI after merge and synchronize local main without overwriting owner changes. Task 1 may require its isolated harness commands in addition to the unchanged main-product jobs.
 
 Keep #126 open while required E2E/native acceptance is pending. Record implementation/CI completion separately from the batched candidate checks under #119: Hangul composition, Ghost keys, correction Undo/Redo, VoiceOver, palette/underline appearance, focus and actual writing feel. The owner will perform app checks later; no new permission/unlock loop is part of this plan. #270 remains open for story/model producers, #114 for Review UI, #269 for contextual local-model answers, and #185 for complete distribution audit. No fabricated grammar completeness, smaller-device support or shipping-model evidence.
 

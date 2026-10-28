@@ -8,8 +8,8 @@ build/
 # Generated Python test/tool bytecode is not source dirtiness.
 __pycache__/
 # Reconstructed, checksum-verified Korean backend inputs; manifests stay tracked.
-Packages/MINTKoreanBackend/Artifacts/
-Packages/MINTKoreanBackend/Sources/MINTKoreanBackend/Resources/Kiwi/Notices/
+Packages/PurloryKoreanBackend/Artifacts/
+Packages/PurloryKoreanBackend/Sources/PurloryKoreanBackend/Resources/Kiwi/Notices/
 # (Package.resolved는 앱이므로 커밋 권장 — 무시하지 않음)
 
 # 격리 개발 작업 트리
@@ -22,7 +22,7 @@ xcuserdata/
 *.xcodeproj/project.xcworkspace/xcuserdata/
 *.xcworkspace/xcuserdata/
 # The archive script seeds this generated workspace from the root lockfile.
-Distribution/MINT.xcodeproj/project.xcworkspace/
+Distribution/Purlory.xcodeproj/project.xcworkspace/
 
 # 로컬 모델 캐시 (Hugging Face 다운로드 등, 실수 커밋 방지)
 *.safetensors

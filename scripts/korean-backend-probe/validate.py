@@ -10,7 +10,7 @@ from artifacts import ValidationError, load_manifest, verify_inputs
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Validate the pinned Korean backend without launching MINT")
+    parser = argparse.ArgumentParser(description="Validate the pinned Korean backend without launching Purlory")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-inputs", action="store_true", help="Verify/extract inputs only; not the promotion gate")
     mode.add_argument("--probe", action="store_true")

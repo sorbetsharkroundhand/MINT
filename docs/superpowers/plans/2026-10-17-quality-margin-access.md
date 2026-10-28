@@ -6,7 +6,7 @@
 
 **Goal:** Make existing writing suggestions reachable without analysis-on-open, and navigate their exact prepared source occurrences.
 
-**Constraints:** Editor/model-free/local-first; original UTF-16/full runtime/actual native key; IME/Ghost/focus/Undo/autosave/format invariants; no new dependency or persisted preference/schema; preserve all owner artifacts. No local MINT/UI-smoke/LLM operation. Publish only after PR #285's merged-main CI; exact successor PR/main CI all three required jobs. Partial #270 only; native acceptance and other producers remain open.
+**Constraints:** Editor/model-free/local-first; original UTF-16/full runtime/actual native key; IME/Ghost/focus/Undo/autosave/format invariants; no new dependency or persisted preference/schema; preserve all owner artifacts. No local Purlory/UI-smoke/LLM operation. Publish only after PR #285's merged-main CI; exact successor PR/main CI all three required jobs. Partial #270 only; native acceptance and other producers remain open.
 
 ## Review focus
 1. Stale/dismissed/other-project or same-byte wrong native owners cannot navigate; neither fuzzy matches nor canonical Unicode equality grant authority.
@@ -23,7 +23,7 @@
 - [x] Write failing whole-workspace access/focus/Undo/no-analysis tests using an injected paused counting backend, plus native duplicate/return/stale/marked/altered evidence navigation regressions.
 - [x] Run focused suites and read genuine absence/behavior failures; retain RED logs.
 - [x] Implement explicit rail/panel state and exact prepared navigation. Never fall back to generic quote search for quality insights. Reuse existing prepared UI, health/actions and exact source return.
-- [ ] Run focused suites, build, full tests and MINTBench with locked resolution and isolated user home. Review all four focus conditions inline; fix important findings with RED→GREEN coverage.
+- [ ] Run focused suites, build, full tests and PurloryBench with locked resolution and isolated user home. Review all four focus conditions inline; fix important findings with RED→GREEN coverage.
 - [ ] Commit, publish/attach the bounded PR after predecessor main CI, inspect owner feedback, merge on exact-head all-three CI, synchronize clean primary main and verify merged-main CI. Record partial implementation and correct the earlier reachability claim on #126/#270/#158; keep acceptance/remaining producers open.
 
 Inline plan review: existing rendering/production ownership and durable actions are reused; no duplicate analysis pipeline is added. Evidence/native mapping validation belongs in the existing action owner and is synchronous under the current stamp. Presentation flags only reserve geometry. All new behavior has named regression coverage, and current predecessor changes are immutable/verified before local successor work.

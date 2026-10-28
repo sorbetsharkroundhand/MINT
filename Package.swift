@@ -2,13 +2,13 @@
 import PackageDescription
 
 let package = Package(
-    name: "MINT",
+    name: "Purlory",
     platforms: [
         // MLX는 Apple Silicon + macOS 14+ 필요
         .macOS(.v14)
     ],
     products: [
-        .library(name: "MINTCore", targets: ["MINTCore"]),
+        .library(name: "PurloryCore", targets: ["PurloryCore"]),
     ],
     dependencies: [
         // 온디바이스 LLM 추론. MLXLLM/MLXLMCommon은 mlx-swift-examples에서
@@ -26,23 +26,23 @@ let package = Package(
     ],
     targets: [
         // Prepared from the checksum-pinned manifest before package loading/building.
-        .binaryTarget(name: "Kiwi", path: "Packages/MINTKoreanBackend/Artifacts/KiwiStatic.xcframework"),
+        .binaryTarget(name: "Kiwi", path: "Packages/PurloryKoreanBackend/Artifacts/KiwiStatic.xcframework"),
         .target(name: "CKiwiBridge", dependencies: ["Kiwi"],
-            path: "Packages/MINTKoreanBackend/Sources/CKiwiBridge",
+            path: "Packages/PurloryKoreanBackend/Sources/CKiwiBridge",
             exclude: ["Upstream/LICENSE", "Upstream/MIMALLOC-LICENSE", "Upstream/provenance.json", "Upstream/README.md"],
             cxxSettings: [.headerSearchPath("Upstream"), .define("KIWI_USE_MIMALLOC")],
             linkerSettings: [.linkedLibrary("c++"), .linkedLibrary("z")]),
-        .target(name: "MINTKoreanBackend", dependencies: ["CKiwiBridge"],
-            path: "Packages/MINTKoreanBackend/Sources/MINTKoreanBackend",
+        .target(name: "PurloryKoreanBackend", dependencies: ["CKiwiBridge"],
+            path: "Packages/PurloryKoreanBackend/Sources/PurloryKoreanBackend",
             resources: [.copy("Resources/Kiwi")]),
         // 앱의 화면·로직은 라이브러리 타깃에 둔다.
         //  · SwiftUI 프리뷰는 executableTarget에서 ENABLE_DEBUG_DYLIB 제약으로 막히지만,
         //    라이브러리 타깃의 뷰는 프리뷰가 정상 동작한다.
         //  · PLAN의 "관심사 분리는 모듈로"(Editor/Inference/Storage) 방향과도 맞다.
         .target(
-            name: "MINTCore",
+            name: "PurloryCore",
             dependencies: [
-                "MINTKoreanBackend",
+                "PurloryKoreanBackend",
                 .product(name: "MLXLLM", package: "mlx-swift-lm"),
                 .product(name: "MLXLMCommon", package: "mlx-swift-lm"),
                 .product(name: "MLX", package: "mlx-swift"),
@@ -50,28 +50,28 @@ let package = Package(
                 .product(name: "Tokenizers", package: "swift-transformers"),
                 .product(name: "SwiftMath", package: "SwiftMath"),
             ],
-            path: "Sources/MINTCore",
+            path: "Sources/PurloryCore",
             resources: [.process("Resources/Fonts"), .process("Resources/Icons")]
         ),
-        // @main 진입점만 담은 얇은 실행 셸. 실제 화면/로직은 MINTCore에 있다.
+        // @main 진입점만 담은 얇은 실행 셸. 실제 화면/로직은 PurloryCore에 있다.
         .executableTarget(
-            name: "MINT",
-            dependencies: ["MINTCore"],
-            path: "Sources/MINT"
+            name: "Purlory",
+            dependencies: ["PurloryCore"],
+            path: "Sources/Purlory"
         ),
         // M2 추론 리스크 선검증 CLI (PLAN §6 M2).
-        // Mac에서: swift run -c release MINTBench [--model <hf-id>] …
+        // Mac에서: swift run -c release PurloryBench [--model <hf-id>] …
         .executableTarget(
-            name: "MINTBench",
-            dependencies: ["MINTCore"],
-            path: "Sources/MINTBench"
+            name: "PurloryBench",
+            dependencies: ["PurloryCore"],
+            path: "Sources/PurloryBench"
         ),
         // Deterministic editor/storage and pinned offline NLP regressions.
         // No Ghost model or Metal execution is required.
         .testTarget(
-            name: "MINTCoreTests",
-            dependencies: ["MINTCore", "MINTKoreanBackend"],
-            path: "Tests/MINTCoreTests",
+            name: "PurloryCoreTests",
+            dependencies: ["PurloryCore", "PurloryKoreanBackend"],
+            path: "Tests/PurloryCoreTests",
             resources: [.copy("Fixtures/KoreanDiagnostics"), .copy("Fixtures/NativeWorkspaceHTML")]
         ),
     ],

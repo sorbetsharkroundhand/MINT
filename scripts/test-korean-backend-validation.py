@@ -21,7 +21,7 @@ from budgets import compare
 
 class KoreanBackendValidationTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="mint-korean-validation-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="purlory-korean-validation-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         (self.root / "archives").mkdir()

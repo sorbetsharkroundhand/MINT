@@ -14,12 +14,12 @@ PLAN §14 M6 체크리스트를 구현 순서·인터페이스·측정 게이트
 | `PromptCacheBox` | Inference/ | 서픽스 LCP KV 재사용 (웜 0.02s 입증) — A+B 프리웜의 기반 |
 | `CharacterCard` + 바이블 v0 팝오버 | EntryStore·CharacterBibleView | 수동 카드 — 자동 감지·프로파일링이 채울 그릇 |
 | `generateFolderName` 패턴 | 엔진 one-shot API | 백그라운드 LLM 호출의 프롬프트·파싱·실패 무시 선례 (PLAN §9) |
-| 리플레이 벤치 | MINTBench `--replay` | M6 품질 게이트 측정기 (픽스처·절차 고정됨) |
+| 리플레이 벤치 | PurloryBench `--replay` | M6 품질 게이트 측정기 (픽스처·절차 고정됨) |
 
 ## 구현 순서 (의존성 순 — 각 단계가 독립 머지 가능)
 
 **1. `KnowledgeStore` — 사이드카 저장 골격** (PLAN §6 저장 형식)
-- `~/Documents/MINT/knowledge/<entryID>.json`, 최상단 `schemaVersion` + `generation`.
+- `~/Documents/Purlory/knowledge/<entryID>.json`, 최상단 `schemaVersion` + `generation`.
 - v1 스키마는 요약 노드만: `SummaryNode(anchor: 씬 해시, headingPath, summary, updatedAt)`.
   바이블·사건은 다음 단계에서 같은 파일에 섹션 추가 (스키마 버전 올리면 삭제·재구축 — 마이그레이션 없음).
 - actor로 격리, EntryStore와 분리 (CLAUDE.md §4 — 지식 로직은 Knowledge/에).

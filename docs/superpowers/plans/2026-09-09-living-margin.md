@@ -2,7 +2,7 @@
 
 > **Issue:** #105 — Build the Living Margin presentation framework
 >
-> **Contract:** `docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md`
+> **Contract:** `docs/superpowers/specs/2026-09-02-purlory-0.2.0-design.md`
 
 ## Goal
 
@@ -20,10 +20,10 @@ Add a shared, quiet intelligence surface for General and Fiction writing without
 
 **Files**
 
-- Create `Sources/MINTCore/Knowledge/EvidenceAnchor.swift`
-- Create `Sources/MINTCore/Intelligence/MarginInsight.swift`
-- Create `Tests/MINTCoreTests/EvidenceAnchorTests.swift`
-- Create `Tests/MINTCoreTests/MarginInsightTests.swift`
+- Create `Sources/PurloryCore/Knowledge/EvidenceAnchor.swift`
+- Create `Sources/PurloryCore/Intelligence/MarginInsight.swift`
+- Create `Tests/PurloryCoreTests/EvidenceAnchorTests.swift`
+- Create `Tests/PurloryCoreTests/MarginInsightTests.swift`
 
 **Steps**
 
@@ -37,8 +37,8 @@ Add a shared, quiet intelligence surface for General and Fiction writing without
 
 **Files**
 
-- Create `Sources/MINTCore/Intelligence/LivingMarginModel.swift`
-- Create `Tests/MINTCoreTests/LivingMarginModelTests.swift`
+- Create `Sources/PurloryCore/Intelligence/LivingMarginModel.swift`
+- Create `Tests/PurloryCoreTests/LivingMarginModelTests.swift`
 
 **Steps**
 
@@ -51,8 +51,8 @@ Add a shared, quiet intelligence surface for General and Fiction writing without
 
 **Files**
 
-- Create `Sources/MINTCore/Intelligence/LivingMarginView.swift`
-- Create `Tests/MINTCoreTests/LivingMarginAccessibilityTests.swift`
+- Create `Sources/PurloryCore/Intelligence/LivingMarginView.swift`
+- Create `Tests/PurloryCoreTests/LivingMarginAccessibilityTests.swift`
 
 **Steps**
 
@@ -66,11 +66,11 @@ Add a shared, quiet intelligence surface for General and Fiction writing without
 
 **Files**
 
-- Modify `Sources/MINTCore/SidebarView.swift`
-- Modify `Sources/MINTCore/Workspace/WorkspaceShellView.swift`
-- Modify `Sources/MINTCore/ContentView.swift`
-- Modify `Sources/MINT/MINTApp.swift`
-- Modify/add `Tests/MINTCoreTests/WorkspaceShellModeTests.swift`
+- Modify `Sources/PurloryCore/SidebarView.swift`
+- Modify `Sources/PurloryCore/Workspace/WorkspaceShellView.swift`
+- Modify `Sources/PurloryCore/ContentView.swift`
+- Modify `Sources/Purlory/PurloryApp.swift`
+- Modify/add `Tests/PurloryCoreTests/WorkspaceShellModeTests.swift`
 
 **Steps**
 
@@ -82,7 +82,7 @@ Add a shared, quiet intelligence surface for General and Fiction writing without
 ## Task 5: Verification and delivery
 
 1. Run `swift test`.
-2. Run `swift build` and `swift build --product MINTBench`.
-3. Run `scripts/build-mint-app.sh`, `scripts/smoke-mint-app.sh`, and `scripts/ui-smoke-mint-app.sh` when the desktop session permits accessibility automation.
+2. Run `swift build` and `swift build --product PurloryBench`.
+3. Run `scripts/build-purlory-app.sh`, `scripts/smoke-purlory-app.sh`, and `scripts/ui-smoke-purlory-app.sh` when the desktop session permits accessibility automation.
 4. Review the diff against issue #105 and the approved design contract.
 5. Commit, push `codex/105-living-margin`, and open a PR linked to #105. Do not close the issue before merge and CI/E2E evidence.

@@ -1,10 +1,10 @@
 <div align="center">
 
-# MINT
+# Purlory
 
 **A local, editor-first writing app. Fiction first; useful without AI.**
 
-*The writer owns the story. MINT helps them keep hold of it.*
+*The writer owns the story. Purlory helps them keep hold of it.*
 
 <br>
 
@@ -12,14 +12,14 @@
 ![Chip](https://img.shields.io/badge/chip-Apple%20Silicon-111111?style=flat-square)
 ![Swift](https://img.shields.io/badge/Swift-6.3-F05138?style=flat-square&logo=swift&logoColor=white)
 ![Inference](https://img.shields.io/badge/inference-100%25%20local-2ea44f?style=flat-square)
-[![CI](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml/badge.svg)](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml)
+[![CI](https://github.com/sorbetsharkroundhand/Purlory/actions/workflows/ci.yml/badge.svg)](https://github.com/sorbetsharkroundhand/Purlory/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Source%20Available-4c1?style=flat-square)
 
 <br>
 
 <!-- TODO: replace with a real screenshot or a short GIF of Ghost Completion in action.
      A writing app README without a picture of the writing surface is doing itself a disservice. -->
-<!-- <img src="docs/assets/hero.png" width="860" alt="The MINT writing editor"> -->
+<!-- <img src="docs/assets/hero.png" width="860" alt="The Purlory writing editor"> -->
 
 </div>
 
@@ -34,7 +34,7 @@ in two directions, threads you opened and have not closed, and a hundred small f
 established once and now have to honour. Writing still needs to feel like writing, not like
 managing an AI setup or a separate database of your story.
 
-MINT's first-release goal is a dependable place to create, import, write, save, search original
+Purlory's first-release goal is a dependable place to create, import, write, save, search original
 sources and export, with optional local assistance. Fiction is the deepest first-release domain;
 General writing and AI-disabled editing remain supported paths.
 
@@ -63,8 +63,8 @@ only when it is needed and disappears when it is not.
 
 The **first Mac App Store release is under development**. The scope below is a release contract,
 not a claim that every path is complete or that this checkout is Store-ready.
-[Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) owns scope and sequence;
-[gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) owns readiness for one
+[Epic #99](https://github.com/sorbetsharkroundhand/Purlory/issues/99) owns scope and sequence;
+[gate #119](https://github.com/sorbetsharkroundhand/Purlory/issues/119) owns readiness for one
 identified release candidate.
 
 ### Write first — Fiction and General
@@ -93,9 +93,9 @@ the prediction hot path must not scan disk, call a retrieval model, or rebuild a
 
 The first-release search contract is deterministic, model-free manuscript search with a way to
 open the supporting passage and return to writing
-([#108](https://github.com/sorbetsharkroundhand/MINT/issues/108)). The planned `⌘K` flow
-([#112](https://github.com/sorbetsharkroundhand/MINT/issues/112)) is source inspection, not a
-promise of LLM-generated Ask MINT answers or a permanent chat sidebar. These integrations are
+([#108](https://github.com/sorbetsharkroundhand/Purlory/issues/108)). The planned `⌘K` flow
+([#112](https://github.com/sorbetsharkroundhand/Purlory/issues/112)) is source inspection, not a
+promise of LLM-generated Ask Purlory answers or a permanent chat sidebar. These integrations are
 still release work, not completed features inferred from UI scaffolding.
 
 ---
@@ -112,13 +112,13 @@ User Canon  >  explicit manuscript text  >  deterministic inference
 The release must preserve manuscripts and explicit writer decisions across reindexing,
 relaunch and recovery. Derived summaries, extractions and indexes are rebuildable; they must
 not replace original evidence or overwrite writer decisions. Durable project-owned writer data
-is tracked in [#111](https://github.com/sorbetsharkroundhand/MINT/issues/111), not claimed complete
+is tracked in [#111](https://github.com/sorbetsharkroundhand/Purlory/issues/111), not claimed complete
 by the existence of an Intelligence cache.
 
 Current developer project layout:
 
 ```
-~/Documents/MINT/Projects/<project-id>/
+~/Documents/Purlory/Projects/<project-id>/
 ├─ project.json
 ├─ Documents/
 ├─ Notes/
@@ -128,7 +128,7 @@ Current developer project layout:
 
 Migration from the older `entries.json` layout is **non-destructive by contract**. The original
 is never transformed in place, and a new project is verified before it is ever activated.
-Storage roots are centralized in `MintStorageLocation`; this developer layout is not proof of
+Storage roots are centralized in `PurloryStorageLocation`; this developer layout is not proof of
 the final sandbox/container migration or Store distribution path.
 
 ---
@@ -136,35 +136,35 @@ the final sandbox/container migration or Store distribution path.
 ## Status — first Mac App Store release
 
 Existing foundations and remaining release work are separate. The current issue bodies in
-[Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) take precedence over this summary.
+[Epic #99](https://github.com/sorbetsharkroundhand/Purlory/issues/99) take precedence over this summary.
 
 | Area | State |
 | :-- | :-- |
 | Native editor, Ghost Completion, document search and export | Existing foundations; integrated release verification remains |
-| Project domain, store and non-destructive migration | Existing foundations; runtime ownership remains [#118](https://github.com/sorbetsharkroundhand/MINT/issues/118) |
-| Recovery and durable writer data | Required release work: [#151](https://github.com/sorbetsharkroundhand/MINT/issues/151), [#111](https://github.com/sorbetsharkroundhand/MINT/issues/111) |
-| Model-free project source search | Required release work: [#108](https://github.com/sorbetsharkroundhand/MINT/issues/108), [#112](https://github.com/sorbetsharkroundhand/MINT/issues/112) |
-| Model lifecycle and Store distribution | Required release work: [#152](https://github.com/sorbetsharkroundhand/MINT/issues/152), [#150](https://github.com/sorbetsharkroundhand/MINT/issues/150) |
-| General/no-model, native UX and product decisions | Owner verification/decisions: [#116](https://github.com/sorbetsharkroundhand/MINT/issues/116), [#153](https://github.com/sorbetsharkroundhand/MINT/issues/153), [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155) |
+| Project domain, store and non-destructive migration | Existing foundations; runtime ownership remains [#118](https://github.com/sorbetsharkroundhand/Purlory/issues/118) |
+| Recovery and durable writer data | Required release work: [#151](https://github.com/sorbetsharkroundhand/Purlory/issues/151), [#111](https://github.com/sorbetsharkroundhand/Purlory/issues/111) |
+| Model-free project source search | Required release work: [#108](https://github.com/sorbetsharkroundhand/Purlory/issues/108), [#112](https://github.com/sorbetsharkroundhand/Purlory/issues/112) |
+| Model lifecycle and Store distribution | Required release work: [#152](https://github.com/sorbetsharkroundhand/Purlory/issues/152), [#150](https://github.com/sorbetsharkroundhand/Purlory/issues/150) |
+| General/no-model, native UX and product decisions | Owner verification/decisions: [#116](https://github.com/sorbetsharkroundhand/Purlory/issues/116), [#153](https://github.com/sorbetsharkroundhand/Purlory/issues/153), [#155](https://github.com/sorbetsharkroundhand/Purlory/issues/155) |
 
 > **Reading the code:** the primary editor flow still runs through the legacy `EntryStore`
-> compatibility path while [#118](https://github.com/sorbetsharkroundhand/MINT/issues/118)
+> compatibility path while [#118](https://github.com/sorbetsharkroundhand/Purlory/issues/118)
 > completes the project-first runtime handoff. Code or hidden UI is not evidence of a shipping
 > feature. User data must remain accessible when legacy UI is retired.
 
 Green unit tests or an ad-hoc developer bundle do not establish Store readiness. Signing,
 sandbox/archive checks, quality evidence and owner/manual checks must all refer to the same
-candidate under [#119](https://github.com/sorbetsharkroundhand/MINT/issues/119).
+candidate under [#119](https://github.com/sorbetsharkroundhand/Purlory/issues/119).
 
 ### Post-release — not first-release promises
 
 - Map and Review breadth, including broad story projections and review dashboards.
-- LLM-generated Ask MINT answers, Living Margin suggestion generation, and Writing Quality UI.
-- Advanced Story Intelligence ([#158](https://github.com/sorbetsharkroundhand/MINT/issues/158)).
+- LLM-generated Ask Purlory answers, Living Margin suggestion generation, and Writing Quality UI.
+- Advanced Story Intelligence ([#158](https://github.com/sorbetsharkroundhand/Purlory/issues/158)).
 - Generalized prompt-state reuse beyond the release topology
-  ([#149](https://github.com/sorbetsharkroundhand/MINT/issues/149)), presentation/motion/state
-  consolidation ([#163](https://github.com/sorbetsharkroundhand/MINT/issues/163)), and math-atom
-  extraction ([#165](https://github.com/sorbetsharkroundhand/MINT/issues/165)).
+  ([#149](https://github.com/sorbetsharkroundhand/Purlory/issues/149)), presentation/motion/state
+  consolidation ([#163](https://github.com/sorbetsharkroundhand/Purlory/issues/163)), and math-atom
+  extraction ([#165](https://github.com/sorbetsharkroundhand/Purlory/issues/165)).
 
 Existing frameworks or experiments for these capabilities do not make them first-release features.
 
@@ -193,17 +193,17 @@ and of fiction-specific types wherever that coupling is not required.
 **Build requirements** — Apple Silicon Mac · macOS 26.2+ · Xcode 26.4+ · Swift 6.3 toolchain. The built app targets macOS 14+.
 
 These are development prerequisites, not final supported-model/hardware claims. Release support
-and licensing decisions remain subject to [#152](https://github.com/sorbetsharkroundhand/MINT/issues/152)
-and [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155).
+and licensing decisions remain subject to [#152](https://github.com/sorbetsharkroundhand/Purlory/issues/152)
+and [#155](https://github.com/sorbetsharkroundhand/Purlory/issues/155).
 
 SwiftPM builds the executable, but MLX also needs its Metal shader library.
 
 ```bash
-git clone https://github.com/sorbetsharkroundhand/MINT.git
-cd MINT
+git clone https://github.com/sorbetsharkroundhand/Purlory.git
+cd Purlory
 
 scripts/prepare-metallib.sh
-swift run MINT
+swift run Purlory
 ```
 
 `prepare-metallib.sh` caches its output and rebuilds only when the pinned `mlx-swift`
@@ -217,12 +217,12 @@ revision changes.
 Closer to the lifecycle CI actually exercises:
 
 ```bash
-scripts/build-mint-app.sh
-open build/MINT.app
+scripts/build-purlory-app.sh
+open build/Purlory.app
 ```
 
 The script prepares `mlx.metallib`, builds the release executable, assembles
-`build/MINT.app` and applies an ad-hoc signature for local execution.
+`build/Purlory.app` and applies an ad-hoc signature for local execution.
 It does not produce an App Store-validated distribution artifact.
 
 </details>
@@ -239,14 +239,14 @@ checkout. Bundle and archive entry points run this preparation automatically.
 scripts/prepare-korean-backend.sh
 swift build
 swift test
-swift build --product MINTBench
+swift build --product PurloryBench
 
-scripts/build-mint-app.sh
+scripts/build-purlory-app.sh
 ```
 
 Required CI retains build, deterministic correctness, launch and sandbox checks.
 Local actual-app/UI tests are batched after implementation on one identified
-candidate; `scripts/ui-smoke-mint-app.sh` is an owner-triggered native check,
+candidate; `scripts/ui-smoke-purlory-app.sh` is an owner-triggered native check,
 requiring Accessibility permission. Real IME/Ghost/VoiceOver and interaction
 quality remain owner verification. See the [verification/support contract](docs/release/verification-and-support.md).
 
@@ -258,8 +258,8 @@ quality remain owner verification. See the [verification/support contract](docs/
 
 ```
 Sources/
-├─ MINT/                     @main application shell (thin)
-├─ MINTCore/
+├─ Purlory/                     @main application shell (thin)
+├─ PurloryCore/
 │  ├─ Project/               WritingProject, ProjectStore, ProjectSession
 │  ├─ Workspace/             shell, routing, navigator presentation
 │  ├─ Onboarding/            first run, project creation and import
@@ -272,10 +272,10 @@ Sources/
 │  ├─ Storage/               entries, images, trash, writing position
 │  ├─ Export/                Markdown and EPUB
 │  └─ Components/            shared view components
-└─ MINTBench/                quality and latency benchmark CLI
+└─ PurloryBench/                quality and latency benchmark CLI
 
 Tests/
-└─ MINTCoreTests/            deterministic regression coverage
+└─ PurloryCoreTests/            deterministic regression coverage
 ```
 
 ## Documentation
@@ -284,9 +284,9 @@ Tests/
 | :-- | :-- |
 | [PLAN.md](PLAN.md) | Architecture and context index |
 | [AGENTS.md](AGENTS.md) | Shared invariants and verification commands |
-| [Historical design specification](docs/superpowers/specs/2026-09-02-mint-0.2.0-design.md) | Former 0.2.0 breadth; not the current release contract |
-| [Epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) | Release scope, sequence and gates |
-| [Gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) | Evidence and owner checks for one identified release candidate |
+| [Historical design specification](docs/superpowers/specs/2026-09-02-purlory-0.2.0-design.md) | Former 0.2.0 breadth; not the current release contract |
+| [Epic #99](https://github.com/sorbetsharkroundhand/Purlory/issues/99) | Release scope, sequence and gates |
+| [Gate #119](https://github.com/sorbetsharkroundhand/Purlory/issues/119) | Evidence and owner checks for one identified release candidate |
 
 Historical plans and benchmark reports under `docs/` record their original contracts. They are
 not current implementation contracts — read them to answer a specific question, not to learn
@@ -299,9 +299,9 @@ Old inline `CLAUDE.md §N` / `PLAN §N` citations are historical references, not
 
 Source available, all rights reserved. See [LICENSE](LICENSE).
 
-You may read this source and build it locally to evaluate MINT. You may not redistribute it,
+You may read this source and build it locally to evaluate Purlory. You may not redistribute it,
 publish modified versions, or use it commercially. Licensing and commercial terms are being
-finalised in [#155](https://github.com/sorbetsharkroundhand/MINT/issues/155) and may change.
+finalised in [#155](https://github.com/sorbetsharkroundhand/Purlory/issues/155) and may change.
 
 ---
 
@@ -311,6 +311,10 @@ A dependable place to write, with optional local help and original evidence you 
 
 <br>
 
-**The writer owns the story. MINT helps them keep hold of it.**
+**The writer owns the story. Purlory helps them keep hold of it.**
 
 </div>
+
+## Previous installations
+
+See [Purlory upgrade and data preservation](docs/release/purlory-upgrade.md) before retiring a previous installation.

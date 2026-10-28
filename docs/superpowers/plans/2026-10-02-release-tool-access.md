@@ -12,7 +12,7 @@ Base: #234 / 4b65b8c, with #108/#112 implemented in attached Drafts.
 - [x] Retain existing writer information in General without creating new Fiction setup.
 - [x] Demote legacy tabs; update UI smoke selectors without weakening assertions.
 - [x] Record old/new routes and retention rationale in the release audit.
-- [x] Focused/full tests, app and MINTBench builds, release bundle.
+- [x] Focused/full tests, app and PurloryBench builds, release bundle.
 - [x] Isolated no-model launch/normal-quit smoke.
 - [x] Inline review and prepare commit/Draft text; delivery recorded in the local ledger.
 

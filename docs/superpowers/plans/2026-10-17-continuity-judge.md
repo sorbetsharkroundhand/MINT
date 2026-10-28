@@ -8,7 +8,7 @@
 **Spec:** `docs/superpowers/specs/2026-10-17-continuity-judge-design.md`.
 
 ## Global constraints
-No local MINT launch, actual model selection/download/inference, native acceptance, user-data mutation, hot-path scans or CI weakening. Low/malformed/unresolved judgments stay quiet. No automatic canon or resume.
+No local Purlory launch, actual model selection/download/inference, native acceptance, user-data mutation, hot-path scans or CI weakening. Low/malformed/unresolved judgments stay quiet. No automatic canon or resume.
 
 ## Review focus
 1. Quoted instructions, Unicode lookalikes, duplicate/root-escaped keys and citation prose must never grant source authority.
@@ -18,7 +18,7 @@ No local MINT launch, actual model selection/download/inference, native acceptan
 5. Supplemental instructions cannot claim an already-busy model, select/load one or reuse Ghost state.
 
 ### Task 1: Immutable original packet and strict verdict decoder
-**Files:** Create `Knowledge/JudgeEvidencePacket.swift`, `Knowledge/JudgeDecision.swift`, `Tests/MINTCoreTests/ContinuityJudgePacketTests.swift`.
+**Files:** Create `Knowledge/JudgeEvidencePacket.swift`, `Knowledge/JudgeDecision.swift`, `Tests/PurloryCoreTests/ContinuityJudgePacketTests.swift`.
 **Consumes:** ContinuityCandidate, ProjectDocumentSnapshot, EvidenceAnchor and current original hashes.
 **Produces:** `JudgeEvidencePacket.prepare(candidate:document:) throws`, `.userMessage()` and `JudgeDecision.decode(_:packet:) throws`, with `.visibleConflict` and real `.evidence` anchors.
 - [x] Write/run failing literal source/scope/time/origin/nonce/bounds, closed root/duplicate JSON, confidence/citation/verdict/partial/size tests; include flashback noConflict and intentionalPossible cases.
