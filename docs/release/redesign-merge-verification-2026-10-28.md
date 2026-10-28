@@ -1,0 +1,152 @@
+# Editorial redesign integration verification — 2026-10-28
+
+## Scope
+
+Integrate the editorial workspace branch with its document navigator, binder tabs,
+project-owned writer tools, expanded Markdown/math editing, native MathML EPUB
+export, and the three pinned local completion candidates. The owner's request
+explicitly includes fixing build/export regressions and merging main after checks.
+This is integration evidence, not Store distribution or shipping-model approval.
+
+## Build and editor repairs
+
+- Reproduced a normal `swift build` failure: the Hugging Face macro target imported
+  a Swift 6.4 prebuilt module with Swift 6.3.3. Replaced the macro-only dependency
+  with a direct local `AutoTokenizer` bridge. Normal builds require no prebuilt
+  override and tokenizer loading remains local to the verified installation.
+- Reproduced selected-text loss on `*`, a source-mode load that reset its own flag,
+  and unstable nested bold/strikethrough serialization. Existing failing round-trip
+  tests now pass with the expected manuscript intact.
+- Traced native undo/layout exceptions with LLDB. TextKit emitted selection changes
+  while applying a storage delta; inline math collapse then recursively changed
+  the storage length. Defer selection processing until layout invalidation returns,
+  and measure caret overlays after the native edit completes. The regression also
+  checks the next run-loop/layout update, not merely the synchronous edit.
+- Added failing EPUB regressions for XML attribute escaping, literal code spans,
+  formatted-looking URL destinations, MathML structure, and the OPF mathml property.
+  Protect code/URLs before prose formatting and escape link attributes.
+- Migrated obsolete rail-based UI checks to the visible pouch menu, native search,
+  and current tile close controls. Retained IME, focus, selection, undo, durable
+  settings, passive-analysis, and project ownership assertions.
+- Selection toolbar has a borderless native panel with no window shadow; the
+  toolbar surface no longer draws an outer stroke or shadow.
+
+## Local evidence
+
+Logs are under `build/redesign-merge-verification/` (ignored build artifacts).
+
+| Check | Result |
+| --- | --- |
+| Default `swift build` | Passed (`build-direct-tokenizer.log`) |
+| Full `swift test`, isolated `CFFIXED_USER_HOME` | 1,469 tests, 4 opt-in skips, 0 failures (`full-suite.log`) |
+| Final EPUB/math/editor/projection/undo subset | 101 tests, 1 opt-in skip, 0 failures (`final-focused.log`) |
+| `swift build --product MINTBench` | Passed (`bench-build.log`) |
+| Benchmark CLI preflight smoke | Passed; no model download (`bench-cli.log`) |
+| Support diagnostics | 9 tests passed |
+| Korean backend validation/preparation | 14 + 3 tests passed |
+| Dependency notices | 18 tests passed; real packaged resources verified |
+| `git diff --check` | Passed |
+
+The final subset includes the restored backslash punctuation boundary in the
+incremental diagnostic projection. All test manuscripts and real-model runs use
+isolated storage. The earlier failures recorded in the model experiment report
+were resolved in this integration pass. Required PR CI and release-bundle/app
+checks are also required before the merge; their final results belong to the PR.
+
+## Review
+
+Reviewed inline as requested by the active #99 integration directive: model
+installation/ownership and cache failure handling; project navigation and legacy
+copy preparation; storage and editor identity across tool transitions; EPUB XML
+and MathML output; native selection/undo ordering; and the native test assertions.
+No CI job, required check, model-memory approval, or data protection was relaxed.
+
+## Real-model editor verification after the tokenizer bridge change
+
+Each candidate loaded its already installed pinned weights into the native
+redesigned editor, produced visible Korean Ghost text, accepted it with native
+Tab, persisted the accepted body, and restored the original with undo.
+
+| Candidate | Prompt style | Observed continuation |
+| --- | --- | --- |
+| Qwen3.5 9B | continuation | ` 아무도 없었다.` |
+| Ministral 3 14B | continuation | ` 한 남자가 서 있었다.` |
+| Gemma 4 26B-A4B | instruct | `어둠이 짙게 깔려 있었다.` |
+
+Evidence and captures are in `build/writing-model-benchmarks-2026-10-26/`:
+`merge-qwen-native-ghost`, `merge-ministral-awake-native-ghost`, and
+`merge-gemma-native-ghost` (`.log` and `.png`). The first Ministral attempt timed
+out waiting for Ghost across a 539-second wall-clock interval and exited with a
+signal; the subsequent run under a temporary awake assertion passed in 7.56
+seconds. The failed attempt remains in `merge-ministral-native-ghost.log` and is
+not counted as successful evidence. These are functional checks, not new latency
+benchmarks. The original comparative benchmark results remain in the model report.
+
+## Packaging and CI toolchain follow-up
+
+The first PR run reproduced the hosted macOS 15 / Swift 6.1 incompatibility
+with MLX 0.32's Swift 6.3 minimum. CI now uses macOS 26 and the explicitly
+installed Xcode 26.4.1 toolchain for all three existing jobs, retaining every
+check and timeout. The [runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)
+and [Xcode release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_4-release-notes)
+identify the available toolchain and Swift 6.3 support.
+
+The first local app packaging attempt correctly rejected the stale notice
+inventory. It now tracks all 16 resolved dependencies and 37 vendored/resource
+components; removed dependency components are no longer packaged. Original
+notice hashes are unchanged, and the unchanged PocketFFT header now points to
+the newly pinned MLX submodule commit. Real-checkout notice generation and all
+17 validator regressions pass; no validation rule was weakened.
+
+The next packaging check exposed a pre-existing redesign mapping gap: SwiftPM
+flattens both Fonts and Icons into `MINT_MINTCore.bundle`, but the bundle audit
+only mapped Fonts. Added explicit multiple source directories, with required-file
+and original-byte checks for every mapped artifact. The new regression fails
+before the fix, then verifies success, missing-icon rejection, and tampered-icon
+rejection. All 18 notice regressions and the actual packaged resource audit pass.
+
+Hosted UI failures also exposed environment-dependent fixtures: the runner's
+1024-point display constrained wide test windows, legacy scrollbars consumed
+17 points, and inherited Reduce Motion disabled animation checks. The harness now
+preserves its requested window sizes and explicitly configures overlay scrollers.
+A debug-only preference seam makes both motion modes testable; production always
+honors the real system preference. Canvas motion uses that single resolved
+preference and an injectable clock for intermediate-frame assertions. All 49
+focused workspace checks passed locally (`ci-geometry-final.log`).
+
+The final full-suite rerun after these fixture and resource changes passed all
+1,469 tests, with four opt-in model/fixture skips and zero failures
+(`build/redesign-merge-verification/full-final.log`).
+
+## Final local app artifact
+
+A clean `b1da5a45917292f262e4fdcee79ee83080c9d57c` release bundle built
+successfully (`app-build-complete.log`). Its embedded source revision matches and
+`MINTSourceDirty` is false. Strict deep signature validation, both privacy
+packaging regressions, and the resource/notice audit passed. The isolated launch
+smoke passed model-free startup, normal termination, and the crash-report check
+(`app-smoke-final.log`).
+
+The full keyboard-driven UI smoke first stopped at an obsolete rail identifier.
+The script now follows the visible pouch/menu, separate workspace search tile,
+and new-document menu action. A subsequent attempt stopped before typing because
+the isolated app could not acquire foreground focus; a bounded activation retry
+also failed safely. This environmental interruption is not a UI-smoke pass. Full
+keyboard-driven evidence remains pending a foreground-available desktop session;
+the isolated native editor/IME/undo suite and three real-model Ghost tests passed
+separately as recorded above.
+
+## Final hosted animation follow-up
+
+CI run 40648389254 passed both release-bundle/smoke and unsigned-archive jobs.
+Its 1,469-test debug run had one remaining failure: the pouch's 100-millisecond
+sleep sometimes resumed after its 120-millisecond native frame animation had
+already finished. Collapse/restore snapshots now use the same display clock as
+canvas motion, retaining their original durations and cubic easing curves.
+The regression advances an injected monotonic clock and checks both intermediate
+sizes and final editor/selection state. A new interruption regression also checks
+restore-during-collapse and detach-during-animation cleanup. All 19 focused pouch
+and workspace fidelity tests pass (`pouch-clock-final.log`).
+
+The owner explicitly deferred the full keyboard-driven desktop smoke; it remains
+an uncompleted owner check, separate from required PR CI.

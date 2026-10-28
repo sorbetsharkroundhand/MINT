@@ -181,6 +181,8 @@ final class WritingEditorProjectionCapture {
         if !result.code {
             result.bold = attributes[.mintBold] as? Bool == true
             result.italic = attributes[.mintItalic] as? Bool == true
+            result.strikethrough = attributes[.mintStrikethrough] as? Bool == true
+            result.highlight = attributes[.mintHighlight] as? Bool == true
         }
         result.color = attributes[.mintColor] as? String
         result.fontSize = attributes[.mintFontSize] as? Double
@@ -274,7 +276,7 @@ final class WritingEditorProjectionCapture {
         guard draft.replace(oldNative, with: capturedRows.map(\.row)), draft.nativeLength == storage.length else { return false }
         var replacement: (range: NSRange, text: String)?
         var literalReplacement = false
-        let punctuation = CharacterSet(charactersIn: "[]()!$`*_<>\\\n")
+        let punctuation = CharacterSet(charactersIn: "[]()!$`*_~=<>\\\n")
         if projectionTask == nil, deferred.isEmpty, changes.count == 1, capturedRows.count == 1, let change = changes.first,
            change.new.length <= 4096, change.old.length <= 4096,
            let oldRow = nativeRows.row(containingNative: change.old.location),
@@ -300,14 +302,20 @@ final class WritingEditorProjectionCapture {
             var fragments: [String] = [], previousCode = first.native.location > 0
                 ? draft.row(containingNative: first.native.location - 1)?.row.isCode ?? false : false
             for captured in capturedRows {
-                if previousCode != captured.row.isCode { fragments.append("```\n") }
+                if previousCode != captured.row.isCode {
+                    let lang = captured.row.isCode ? (captured.row.blockStyle.codeLang ?? "") : ""
+                    fragments.append("```\(lang)\n")
+                }
                 fragments.append(captured.row.text)
                 if captured.row.hasLineFeed { fragments.append("\n") }
                 previousCode = captured.row.isCode
             }
             if last.native.upperBound == draft.nativeLength {
                 if previousCode { fragments.append(last.row.hasLineFeed ? "```\n" : "\n```") }
-            } else if let next = draft.row(containingNative: last.native.upperBound), next.row.isCode != previousCode { fragments.append("```\n") }
+            } else if let next = draft.row(containingNative: last.native.upperBound), next.row.isCode != previousCode {
+                let lang = next.row.isCode ? (next.row.blockStyle.codeLang ?? "") : ""
+                fragments.append("```\(lang)\n")
+            }
             let width = capturedRows.reduce(0, { $0 + $1.row.baseSourceLength })
             if projectionTask != nil || !deferred.isEmpty || width > 4096 || coverage.length > 4096 {
                 guard ownerChanged else { return false }

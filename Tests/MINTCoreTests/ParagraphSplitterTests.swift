@@ -38,9 +38,10 @@ final class ParagraphSplitterTests: XCTestCase {
     }
 
     func testRealGatsbyParagraphPreservesText() throws {
-        let url = FileManager.default
-            .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("MINT/entries.json")
+        guard let path = ProcessInfo.processInfo.environment["MINT_TEST_JOURNAL_FIXTURE"] else {
+            throw XCTSkip("No explicit synthetic journal fixture")
+        }
+        let url = URL(fileURLWithPath: path)
         guard let data = try? Data(contentsOf: url),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let entries = json["entries"] as? [[String: Any]],

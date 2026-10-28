@@ -992,6 +992,79 @@ public final class BackgroundIndexer: ObservableObject {
         characterCandidates.removeAll { $0.name == candidate.name }
     }
 
+    public func approveCandidate(
+        _ candidate: CharacterDetector.Candidate,
+        in session: ProjectSession,
+        identity: ProjectRuntimeIdentity
+    ) {
+        guard let snapshot = session.selectedDocumentSnapshot, snapshot.identity == identity else { return }
+        let card = CharacterCard(
+            name: candidate.name,
+            aliases: candidate.aliasForms.joined(separator: ", "))
+        guard (try? ProjectWriterEditing.perform(.character(card), in: session, identity: identity)) != nil else { return }
+        characterCandidates.removeAll { $0.name == candidate.name }
+        profileInBackground(card: card, name: candidate.name, body: snapshot.body, session: session, identity: identity)
+    }
+
+    public func approveCandidateAsAlias(
+        _ candidate: CharacterDetector.Candidate,
+        of ownerName: String,
+        in session: ProjectSession,
+        identity: ProjectRuntimeIdentity
+    ) {
+        guard let snapshot = session.selectedDocumentSnapshot, snapshot.identity == identity else { return }
+        let docID = identity.key.documentID
+        guard let writer = try? WriterDocumentData.decode(snapshot.userData[WriterDocumentData.key(for: docID)], documentID: docID),
+              var owner = writer.characters.first(where: { $0.name == ownerName }) else { return }
+        var aliases = owner.aliases.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        for form in [candidate.name] + candidate.aliasForms where !aliases.contains(form) {
+            aliases.append(form)
+        }
+        owner.aliases = aliases.joined(separator: ", ")
+        guard (try? ProjectWriterEditing.perform(.character(owner), in: session, identity: identity)) != nil else { return }
+        characterCandidates.removeAll { $0.name == candidate.name }
+    }
+
+    public func rejectCandidate(
+        _ candidate: CharacterDetector.Candidate,
+        in session: ProjectSession,
+        identity: ProjectRuntimeIdentity
+    ) {
+        guard (try? ProjectWriterEditing.perform(.rejectName(candidate.name), in: session, identity: identity)) != nil else { return }
+        characterCandidates.removeAll { $0.name == candidate.name }
+    }
+
+    private func profileInBackground(
+        card: CharacterCard,
+        name: String,
+        body: String,
+        session: ProjectSession,
+        identity: ProjectRuntimeIdentity
+    ) {
+        guard !memoryPressurePaused else { return }
+        let parameters = settings.parameters
+        let token = UUID(), generation = profileGeneration
+        profileTasks[token] = Task { [engine, weak session, weak self] in
+            defer { self?.profileTasks[token] = nil }
+            guard !Task.isCancelled else { return }
+            let note = await Self.profileCharacter(
+                named: name, in: body,
+                engine: engine, parameters: parameters)
+            guard !Task.isCancelled, let note, let session, let self,
+                  !self.memoryPressurePaused, self.profileGeneration == generation,
+                  let currentSnapshot = session.selectedDocumentSnapshot,
+                  currentSnapshot.identity == identity else { return }
+            let docID = identity.key.documentID
+            guard let writer = try? WriterDocumentData.decode(currentSnapshot.userData[WriterDocumentData.key(for: docID)], documentID: docID),
+                  var current = writer.characters.first(where: { $0.id == card.id }),
+                  current.note.isEmpty, current.locked != true else { return }
+            current.note = note
+            try? ProjectWriterEditing.perform(.character(current), in: session, identity: identity)
+        }
+    }
+
     /// 등록 직후의 인물 프로파일링 — 이름이 등장하는 문장들만 모아 한 번의
     /// instruct로 성격·말투 초안을 뽑는다 (PLAN §7, `generateFolderName` 규율).
     nonisolated private static func profileCharacter(

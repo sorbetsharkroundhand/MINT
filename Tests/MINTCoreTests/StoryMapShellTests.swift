@@ -38,7 +38,11 @@ final class StoryMapShellTests: XCTestCase {
         try XCTUnwrap(back as? NSButton).performClick(nil); await h.layout()
         XCTAssertEqual(editor.selectedRange(), selection)
         XCTAssertEqual(editor.enclosingScrollView?.contentView.bounds.origin, scroll)
-        let close = try XCTUnwrap(h.element("mint.story-map.close"))
+        h.requests.spatialWorkspace?.selectTile(.map)
+        h.requests.spatialWorkspace?.pouchSection = .object
+        await h.layout()
+        let closeControl = try await waitFor("mint.tile.close.map", in: h)
+        let close = try XCTUnwrap(closeControl)
         try XCTUnwrap(close as? NSButton).performClick(nil); await h.layout()
         XCTAssertEqual(h.fixture.session.workspaceMode, .write)
         XCTAssertNil(h.element("mint.story-map"))

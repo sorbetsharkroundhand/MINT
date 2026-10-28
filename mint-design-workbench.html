@@ -1,0 +1,3803 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MINT — Spatial Workspace Design Workbench</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Noto+Serif+KR:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* Local Bundled Fonts from Sources/MINTCore/Resources/Fonts */
+    @font-face {
+      font-family: 'MintPretendard';
+      src: url('./Sources/MINTCore/Resources/Fonts/PretendardVariable.ttf') format('truetype');
+      font-weight: 100 900;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'MintNotoSerifKR';
+      src: url('./Sources/MINTCore/Resources/Fonts/NotoSerifKR%5Bwght%5D.ttf') format('truetype');
+      font-weight: 200 900;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'MintJetBrainsMono';
+      src: url('./Sources/MINTCore/Resources/Fonts/JetBrainsMono%5Bwght%5D.ttf') format('truetype');
+      font-weight: 400 700;
+      font-display: swap;
+    }
+
+    :root {
+      --font-ui: 'MintPretendard', -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Pretendard Variable', sans-serif;
+      --font-serif: 'MintNotoSerifKR', 'Noto Serif KR', 'AppleMyungjo', Georgia, serif;
+      --font-mono: 'MintJetBrainsMono', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+      /* MintRadius & MintSpacing tokens (Theme.swift) */
+      --radius-window: 18px;
+      --radius-lg: 13px;       /* Tiles & sheets */
+      --radius-pouch: 15px;    /* 2026-10-24 Vertical Pouch Popover */
+      --radius-md: 9px;        /* Rows & cards */
+      --radius-sm: 7px;        /* Chips & row buttons */
+      --radius-xs: 4px;        /* Badges */
+
+      --canvas-inset: 8px;
+      --col-gap: 8px;
+      --row-gap: 8px;
+      --chrome-height: 36px;
+      --tile-header-height: 32px;
+      --status-height: 26px;
+      --pouch-width: 304px;
+
+      /* Editor Typography Defaults */
+      --editor-font-size: 18.5px;
+      --editor-line-spacing: 8px;
+      --editor-measure: 680px;
+
+      /* Motion Timing (WorkspaceHTMLStyle.swift) */
+      --ease-calm: cubic-bezier(0.25, 1, 0.5, 1);
+      --ease-suck: cubic-bezier(0.4, 0, 0.2, 1);
+
+      /* Light Theme Tokens (MintTheme.light) */
+      --ink: #191816;
+      --ink2: #57544E;
+      --ink3: #716D65;
+      --workspace-muted: #8C877E;
+      --ghost: #A8A298;
+      --ghost-suggestion: #57544E;
+      --blue: #0F6E63;
+      --novel: #0F6E63;
+      --novel-bg: rgba(15, 110, 99, 0.08);
+      --active-bg: rgba(15, 110, 99, 0.10);
+      --sep: rgba(25, 24, 22, 0.07);
+      --sep-strong: rgba(25, 24, 22, 0.13);
+      --hover: rgba(25, 24, 22, 0.04);
+      --chip: rgba(25, 24, 22, 0.028);
+      --pill: rgba(251, 249, 244, 0.94);
+      --pill-opaque: #FBF9F4;
+      --pill-border: rgba(255, 255, 255, 0.45);
+      --pouch-border: rgba(25, 24, 22, 0.10);
+      --kbd: #F4F1EA;
+      --code-bg: rgba(25, 24, 22, 0.04);
+      --editor-surface: #FAF8F3;
+      --card-surface: #F4F1EA;
+      --toolbar: rgba(245, 242, 234, 0.78);
+      --statusbar: rgba(244, 241, 233, 0.80);
+      --active-line: rgba(25, 24, 22, 0.038);
+      --selection: rgba(15, 110, 99, 0.16);
+      --selection-border: rgba(15, 110, 99, 0.45);
+      --danger: #D93025;
+      --danger-bg: rgba(217, 48, 37, 0.14);
+      --warning: #C77800;
+      --terracotta: #C86446;
+
+      /* Outer Liquid Glass (WorkspaceLiquidGlass.swift) */
+      --liquid-glass-bg: linear-gradient(135deg, rgba(252, 250, 245, 0.88) 0%, rgba(242, 238, 229, 0.82) 52%, rgba(250, 248, 242, 0.86) 100%);
+      --liquid-glass-border: rgba(255, 255, 255, 0.35);
+      --window-shadow: 0 28px 70px rgba(18, 17, 15, 0.22), 0 4px 16px rgba(18, 17, 15, 0.08);
+      --floating-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.06);
+      --desktop-bg: radial-gradient(circle at 20% 20%, #E7E2D8 0%, #D5CFC2 55%, #C8C1B4 100%);
+    }
+
+    [data-theme="dark"] {
+      --ink: #F2EFE9;
+      --ink2: #A8A39A;
+      --ink3: #969188;
+      --workspace-muted: #6E6B64;
+      --ghost: #5C5953;
+      --ghost-suggestion: #A8A39A;
+      --blue: #4CC9BD;
+      --novel: #4CC9BD;
+      --novel-bg: rgba(76, 201, 189, 0.11);
+      --active-bg: rgba(76, 201, 189, 0.13);
+      --sep: rgba(242, 239, 233, 0.062);
+      --sep-strong: rgba(242, 239, 233, 0.115);
+      --hover: rgba(242, 239, 233, 0.045);
+      --chip: rgba(242, 239, 233, 0.028);
+      --pill: rgba(28, 28, 26, 0.94);
+      --pill-opaque: #1C1C1A;
+      --pill-border: rgba(255, 255, 255, 0.07);
+      --pouch-border: rgba(242, 239, 233, 0.10);
+      --kbd: rgba(242, 239, 233, 0.06);
+      --code-bg: rgba(242, 239, 233, 0.045);
+      --editor-surface: #171715;
+      --card-surface: #141413;
+      --toolbar: rgba(21, 21, 19, 0.80);
+      --statusbar: rgba(20, 20, 18, 0.82);
+      --active-line: rgba(242, 239, 233, 0.038);
+      --selection: rgba(76, 201, 189, 0.26);
+      --selection-border: rgba(76, 201, 189, 0.55);
+      --danger: #FF453A;
+      --danger-bg: rgba(255, 69, 58, 0.18);
+      --warning: #FF9F0A;
+      --terracotta: #E07A5F;
+
+      --liquid-glass-bg: linear-gradient(135deg, rgba(24, 24, 22, 0.90) 0%, rgba(17, 17, 16, 0.86) 52%, rgba(20, 23, 22, 0.88) 100%);
+      --liquid-glass-border: rgba(255, 255, 255, 0.045);
+      --window-shadow: 0 32px 80px rgba(0, 0, 0, 0.58), 0 4px 18px rgba(0, 0, 0, 0.35);
+      --floating-shadow: 0 8px 30px rgba(0, 0, 0, 0.36), 0 2px 8px rgba(0, 0, 0, 0.24);
+      --desktop-bg: radial-gradient(circle at 20% 20%, #232524 0%, #161716 60%, #0E0F0E 100%);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      font-family: var(--font-ui);
+      background: var(--desktop-bg);
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      transition: background 0.3s var(--ease-calm);
+    }
+
+    /* Outer macOS Liquid Glass Window (WorkspaceLiquidGlass.swift) */
+    .mint-liquid-glass-window {
+      position: relative;
+      width: calc(100vw - 36px);
+      height: calc(100vh - 36px);
+      max-width: 1680px;
+      max-height: 1040px;
+      background: var(--liquid-glass-bg);
+      backdrop-filter: blur(36px) saturate(140%);
+      -webkit-backdrop-filter: blur(36px) saturate(140%);
+      border: 1px solid var(--liquid-glass-border);
+      border-radius: var(--radius-window);
+      box-shadow: var(--window-shadow);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      transition: transform 0.36s var(--ease-suck), opacity 0.36s var(--ease-suck), width 0.28s var(--ease-calm), height 0.28s var(--ease-calm), border-radius 0.28s var(--ease-calm);
+    }
+
+    .mint-liquid-glass-window.maximized {
+      width: 100vw;
+      height: 100vh;
+      max-width: none;
+      max-height: none;
+      border-radius: 0;
+    }
+
+    .mint-liquid-glass-window.collapsed-to-orb {
+      transform: scale(0.08) translate(var(--orb-suck-x, 400px), var(--orb-suck-y, -300px));
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Paper Grain Overlay */
+    .paper-grain {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 2;
+      opacity: 0.018;
+      background-image: radial-gradient(var(--ink) 0.55px, transparent 0.55px);
+      background-size: 12px 12px;
+    }
+
+    /* Top Window Chrome (WorkspaceSpatialChrome.swift & WorkspaceFrame.swift) */
+    .workspace-chrome {
+      height: var(--chrome-height);
+      min-height: var(--chrome-height);
+      display: flex;
+      align-items: center;
+      padding: 0 16px 0 18px;
+      gap: 14px;
+      z-index: 10;
+      transition: opacity 0.32s var(--ease-calm);
+    }
+
+    body.whisper-typing .workspace-chrome,
+    body.whisper-typing .tile-header,
+    body.whisper-typing .tile-statusbar {
+      opacity: 0.08 !important;
+      pointer-events: none;
+    }
+    body.whisper-typing .detached-pouch {
+      opacity: 0.06 !important;
+      pointer-events: none;
+    }
+
+    .traffic-lights {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-right: 4px;
+    }
+
+    .traffic-btn {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      border: 0.5px solid rgba(0, 0, 0, 0.15);
+      cursor: pointer;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 8px;
+      color: transparent;
+      transition: transform 0.12s ease;
+    }
+    .traffic-lights:hover .traffic-btn {
+      color: rgba(0, 0, 0, 0.65);
+    }
+    .traffic-btn.close { background: #FF5F56; }
+    .traffic-btn.minimize { background: #FFBD2E; }
+    .traffic-btn.zoom { background: #27C93F; }
+
+    .chrome-title {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      font-size: 11.5px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+    }
+
+    .chrome-project-name {
+      font-family: var(--font-serif);
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--ink2);
+    }
+
+    .chrome-sep {
+      color: var(--workspace-muted);
+      opacity: 0.35;
+      font-size: 11.5px;
+    }
+
+    .chrome-doc-name {
+      font-family: var(--font-ui);
+      font-size: 11.5px;
+      color: var(--workspace-muted);
+    }
+
+    .chrome-open-count {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--workspace-muted);
+      margin-left: 6px;
+    }
+
+    .chrome-right-pills {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chrome-mode-badge {
+      font-size: 10.5px;
+      font-weight: 500;
+      color: var(--ink2);
+      background: var(--chip);
+      padding: 3px 8px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      transition: background 0.15s ease, color 0.15s ease;
+    }
+    .chrome-mode-badge:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+    .chrome-mode-badge.active {
+      background: var(--active-bg);
+      color: var(--novel);
+      font-weight: 600;
+    }
+
+    /* Spatial Canvas (SpatialWorkspaceCanvas.swift) */
+    .spatial-canvas-scroll {
+      position: relative;
+      flex: 1;
+      overflow: auto;
+      padding: var(--canvas-inset);
+      display: flex;
+      gap: var(--col-gap);
+      z-index: 5;
+    }
+
+    .spatial-column {
+      display: flex;
+      flex-direction: column;
+      gap: var(--row-gap);
+      height: 100%;
+      position: relative;
+      transition: width 0.12s var(--ease-calm), flex 0.12s var(--ease-calm);
+      min-width: 165px;
+    }
+
+    .spatial-slot {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+      transition: flex 0.12s var(--ease-calm), transform 0.12s var(--ease-calm), opacity 0.12s var(--ease-calm);
+      min-height: 95px;
+    }
+
+    .spatial-slot.document-tile {
+      background: var(--card-surface);
+    }
+    .spatial-slot.document-tile.active {
+      background: var(--editor-surface);
+    }
+    .spatial-slot.tool-tile {
+      background: var(--card-surface);
+    }
+
+    /* Drop Target Preview Slot */
+    .spatial-slot.drop-preview {
+      border: 1.5px dashed var(--selection-border);
+      background: var(--active-bg);
+      border-radius: var(--radius-lg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--novel);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    /* Column & Row Resize Handles (SpatialResizeHandle.swift) */
+    .col-resize-handle {
+      width: 8px;
+      margin: 0 -4px;
+      cursor: col-resize;
+      z-index: 15;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .col-resize-handle::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 3px;
+      transform: translateY(-50%);
+      width: 2px;
+      height: 28px;
+      border-radius: 1px;
+      background: transparent;
+      transition: background 0.15s ease;
+    }
+    .col-resize-handle:hover::after,
+    .col-resize-handle.dragging::after {
+      background: var(--sep-strong);
+    }
+
+    .row-resize-handle {
+      height: 8px;
+      margin: -4px 0;
+      cursor: row-resize;
+      z-index: 15;
+      position: relative;
+      flex-shrink: 0;
+    }
+    .row-resize-handle::after {
+      content: '';
+      position: absolute;
+      left: 50%;
+      top: 3px;
+      transform: translateX(-50%);
+      width: 28px;
+      height: 2px;
+      border-radius: 1px;
+      background: transparent;
+      transition: background 0.15s ease;
+    }
+    .row-resize-handle:hover::after {
+      background: var(--sep-strong);
+    }
+
+    /* Spatial Tile Header (SpatialTileHeader.swift) */
+    .tile-header {
+      height: var(--tile-header-height);
+      min-height: var(--tile-header-height);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      cursor: grab;
+      position: relative;
+      transition: opacity 0.32s var(--ease-calm);
+    }
+    .tile-header:active {
+      cursor: grabbing;
+    }
+
+    .tile-status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-left: 2px;
+      margin-right: 6px;
+      background: var(--workspace-muted);
+      opacity: 0.25;
+      flex-shrink: 0;
+    }
+    .spatial-slot.active .tile-status-dot {
+      background: var(--ink);
+      opacity: 0.75;
+    }
+
+    .tile-header-icon {
+      width: 12px;
+      height: 12px;
+      color: var(--workspace-muted);
+      margin-right: 6px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .tile-header-title {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--workspace-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 1;
+      pointer-events: none;
+    }
+    .spatial-slot.document-tile.active .tile-header-title {
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .spatial-slot.tool-tile .tile-header-title {
+      color: var(--ink2);
+    }
+
+    .tile-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: 6px;
+    }
+
+    .header-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      color: var(--workspace-muted);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .header-btn:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+    .header-btn.pouch-trigger {
+      color: var(--ink2);
+    }
+    .header-btn.pouch-trigger.selected {
+      background: rgba(25, 24, 22, 0.08);
+      color: var(--ink);
+    }
+    [data-theme="dark"] .header-btn.pouch-trigger.selected {
+      background: rgba(242, 239, 233, 0.10);
+      color: var(--ink);
+    }
+
+    /* Navigator Tile (ProjectNavigatorView.swift) */
+    .navigator-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .nav-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      transition: background 0.15s ease, margin 0.2s var(--ease-calm);
+      position: relative;
+    }
+    .nav-row:hover {
+      background: var(--hover);
+    }
+    .nav-row.selected {
+      background: var(--active-bg);
+    }
+
+    .nav-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ink2);
+      opacity: 0.2;
+      flex-shrink: 0;
+    }
+    .nav-row.open .nav-dot {
+      opacity: 0.75;
+    }
+    .nav-row.selected .nav-dot {
+      background: var(--ink);
+      opacity: 0.85;
+    }
+
+    .nav-title {
+      font-size: 11.5px;
+      color: var(--ink2);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .nav-row.selected .nav-title {
+      font-weight: 500;
+      color: var(--ink);
+    }
+
+    .nav-action-chip {
+      font-family: var(--font-ui);
+      font-size: 10px;
+      font-weight: 500;
+      color: var(--workspace-muted);
+      background: var(--chip);
+      border: none;
+      padding: 2px 6px;
+      border-radius: 5px;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease;
+    }
+    .nav-row:hover .nav-action-chip {
+      opacity: 1;
+    }
+    .nav-action-chip:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+    .nav-status-label {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      color: var(--workspace-muted);
+    }
+
+    /* Manuscript Editor Surface (BlockTextView & SpatialDocumentTile) */
+    .editor-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 28px 36px 25% 44px;
+      position: relative;
+      scroll-behavior: smooth;
+    }
+    .editor-scroll.typewriter-mode {
+      padding-top: 26%;
+      padding-bottom: 38%;
+    }
+
+    .editor-measure-box {
+      max-width: var(--editor-measure);
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .manuscript-block {
+      position: relative;
+      font-family: var(--font-serif);
+      font-size: var(--editor-font-size);
+      line-height: calc(var(--editor-font-size) + var(--editor-line-spacing) + 6px);
+      color: var(--ink);
+      padding: 3px 12px;
+      margin: 0 -12px;
+      border-radius: 8px;
+      outline: none;
+      transition: opacity 0.28s var(--ease-calm), background 0.18s ease, margin 0.22s var(--ease-calm);
+      user-select: text;
+      cursor: text;
+      word-break: keep-all;
+    }
+
+    /* Paragraph Focus Dimming (E07) */
+    .focus-dimming-active .manuscript-block {
+      opacity: 0.24;
+    }
+    .focus-dimming-active .manuscript-block:hover {
+      opacity: 0.68;
+    }
+    .focus-dimming-active .spatial-slot.active .manuscript-block.active-paragraph {
+      opacity: 1 !important;
+    }
+
+    /* Active Line / Paragraph Band (Theme.swift activeLine) */
+    .spatial-slot.active .manuscript-block.active-paragraph {
+      background: var(--active-line);
+    }
+
+    .manuscript-block.resonating-paragraph {
+      background: var(--hover);
+    }
+
+    .manuscript-block.flash-highlight {
+      animation: sourceFlash 0.9s var(--ease-calm);
+    }
+
+    @keyframes sourceFlash {
+      0% { background: var(--active-bg); }
+      100% { background: transparent; }
+    }
+
+    .manuscript-block[data-block="h1"] {
+      font-size: calc(var(--editor-font-size) * 1.38);
+      font-weight: 700;
+      margin-top: 8px;
+      margin-bottom: 4px;
+    }
+
+    .manuscript-block[data-block="h2"] {
+      font-size: calc(var(--editor-font-size) * 1.12);
+      font-weight: 600;
+      color: var(--workspace-muted);
+      margin-top: 6px;
+    }
+
+    .manuscript-block[data-block="h3"] {
+      font-size: calc(var(--editor-font-size) * 1.02);
+      font-weight: 600;
+      color: var(--ink2);
+    }
+
+    .manuscript-block[data-block="quote"] {
+      border-left: 2.5px solid var(--novel);
+      padding-left: 14px;
+      color: var(--ink2);
+      font-style: italic;
+    }
+
+    /* 28x28 Paragraph Gutter Grip (WorkspaceEditorInteraction.swift) */
+    .paragraph-grip {
+      position: absolute;
+      left: -30px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 28px;
+      height: 28px;
+      border-radius: 5px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      opacity: 0;
+      cursor: grab;
+      color: var(--ink2);
+      transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease;
+      user-select: none;
+    }
+    .manuscript-block:hover .paragraph-grip {
+      opacity: 0.65;
+    }
+    .paragraph-grip:hover {
+      opacity: 1 !important;
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    /* Entity Dotted Underline (drawEntityUnderlines) */
+    .entity-term {
+      border-bottom: 1px dotted var(--sep-strong);
+      cursor: pointer;
+      transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      border-radius: 3px;
+      padding: 0 1px;
+    }
+    .entity-term:hover,
+    .entity-term.active-entity {
+      color: var(--novel);
+      background: var(--novel-bg);
+      border-bottom-color: var(--novel);
+    }
+
+    /* Inline Ghost Suggestion (CompletionController) */
+    .ghost-inline {
+      color: var(--ghost-suggestion);
+      opacity: 0.72;
+      user-select: none;
+      pointer-events: none;
+    }
+    .ghost-kbd-hint {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      background: var(--kbd);
+      color: var(--ink2);
+      padding: 1px 5px;
+      border-radius: 4px;
+      margin-left: 6px;
+      vertical-align: middle;
+    }
+
+    /* Per-Tile Status Bar (SpatialDocumentTile) */
+    .tile-statusbar {
+      height: var(--status-height);
+      min-height: var(--status-height);
+      padding: 0 14px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 9.5px;
+      color: var(--workspace-muted);
+      opacity: 0.65;
+      transition: opacity 0.24s var(--ease-calm);
+    }
+    .tile-statusbar:hover {
+      opacity: 1;
+    }
+    .status-hint {
+      opacity: 0;
+      transition: opacity 0.2s ease;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .tile-statusbar:hover .status-hint {
+      opacity: 1;
+    }
+    .status-detail {
+      font-family: var(--font-mono);
+      font-size: 9px;
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .tile-statusbar:hover .status-detail {
+      opacity: 1;
+    }
+    .status-count {
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    /* Compact Cards for Characters, Narrative, Margin (WorkspaceCompactCard.swift) */
+    .tool-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .compact-card {
+      background: var(--chip);
+      border-radius: 8px;
+      padding: 8px 10px;
+      cursor: pointer;
+      transition: background 0.2s var(--ease-calm);
+    }
+    .compact-card:hover {
+      background: var(--hover);
+    }
+    .compact-card.matches-active {
+      background: var(--active-bg);
+    }
+
+    .compact-card-header {
+      display: flex;
+      align-items: center;
+      height: 18px;
+      gap: 8px;
+    }
+
+    .card-initial-badge {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--novel-bg);
+      color: var(--novel);
+      font-family: var(--font-serif);
+      font-size: 10px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .card-order-num {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--novel);
+      flex-shrink: 0;
+    }
+
+    .card-title {
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--ink);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .card-title.serif {
+      font-family: var(--font-serif);
+      font-weight: 600;
+    }
+
+    .card-role {
+      font-size: 10px;
+      color: var(--workspace-muted);
+      white-space: nowrap;
+    }
+
+    .compact-card-body {
+      margin-top: 12px;
+      font-size: 11px;
+      line-height: 1.55;
+      color: var(--ink2);
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .compact-card.expanded .compact-card-body {
+      display: flex;
+    }
+
+    .card-footer-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      margin-top: 2px;
+    }
+    .card-tags {
+      font-size: 9.5px;
+      color: var(--workspace-muted);
+    }
+    .card-jump-btn {
+      border: none;
+      background: transparent;
+      color: var(--novel);
+      font-family: var(--font-ui);
+      font-size: 10px;
+      font-weight: 500;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 4px;
+    }
+    .card-jump-btn:hover {
+      background: var(--novel-bg);
+    }
+
+    /* Unified Search Pane (WorkspaceSearchPane.swift) */
+    .search-pane {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 12px;
+      gap: 10px;
+      overflow: hidden;
+    }
+
+    .search-input-wrap {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: var(--chip);
+      border: 1px solid var(--sep);
+      border-radius: var(--radius-md);
+      padding: 0 9px;
+      height: 28px;
+    }
+    .search-input-wrap input {
+      border: none;
+      background: transparent;
+      outline: none;
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      flex: 1;
+    }
+
+    .segmented-picker {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      background: var(--chip);
+      padding: 2px;
+      border-radius: var(--radius-sm);
+      gap: 2px;
+    }
+    .seg-btn {
+      border: none;
+      background: transparent;
+      color: var(--ink2);
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 4px 0;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .seg-btn.active {
+      background: var(--editor-surface);
+      color: var(--ink);
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+    }
+
+    .search-meta-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      color: var(--ink2);
+    }
+
+    .search-results-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .search-result-item {
+      padding: 9px 10px;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      transition: background 0.12s ease;
+    }
+    .search-result-item:hover {
+      background: var(--hover);
+    }
+    .search-result-item.selected {
+      background: var(--active-bg);
+    }
+    .search-result-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink);
+      line-height: 1.35;
+    }
+    .search-result-detail {
+      font-size: 10px;
+      color: var(--ink2);
+    }
+    .search-footer-hint {
+      font-size: 9px;
+      color: var(--ink3);
+      text-align: center;
+    }
+
+    /* ==========================================================================
+       2026-10-24 Vertical Pouch Popover (WorkspacePouchView.swift & WorkspacePouchTools.swift)
+       ========================================================================== */
+    .pouch-popover {
+      position: absolute;
+      width: var(--pouch-width);
+      max-height: calc(100vh - 110px);
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      border-radius: var(--radius-pouch);
+      box-shadow: var(--floating-shadow);
+      z-index: 60;
+      display: none;
+      flex-direction: column;
+      overflow: hidden;
+      animation: pouchReveal 0.08s ease-out;
+    }
+    .pouch-popover.open {
+      display: flex;
+    }
+
+    @keyframes pouchReveal {
+      from { opacity: 0.7; }
+      to { opacity: 1; }
+    }
+
+    .pouch-popover-header {
+      height: 44px;
+      min-height: 44px;
+      padding: 10px 8px 6px 16px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .pouch-popover-title {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pouch-popover-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 0 6px 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+    .pouch-divider {
+      height: 1px;
+      background: var(--sep-strong);
+      margin: 7px 8px;
+      flex-shrink: 0;
+    }
+
+    .pouch-section-heading {
+      height: 26px;
+      padding: 0 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10.5px;
+      font-weight: 600;
+      color: var(--ink2);
+    }
+
+    .pouch-heading-btn {
+      width: 24px;
+      height: 24px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      color: var(--ink2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .pouch-heading-btn:hover {
+      background: var(--hover);
+      color: var(--ink);
+    }
+
+    .pouch-row {
+      height: 30px;
+      padding: 0 8px;
+      border-radius: var(--radius-sm);
+      border: none;
+      background: transparent;
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 12px;
+      text-align: left;
+      transition: background 0.1s ease;
+    }
+    .pouch-row:hover {
+      background: var(--hover);
+    }
+    .pouch-row:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .pouch-row-icon {
+      width: 17px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--ink2);
+      flex-shrink: 0;
+    }
+    .pouch-row-title {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pouch-row-status {
+      font-size: 10.5px;
+      color: var(--ink2);
+      max-width: 96px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Pouch Switch Row */
+    .pouch-switch {
+      position: relative;
+      width: 28px;
+      height: 16px;
+      background: var(--sep-strong);
+      border-radius: 99px;
+      transition: background 0.15s ease;
+      flex-shrink: 0;
+      cursor: pointer;
+    }
+    .pouch-switch.on {
+      background: var(--novel);
+    }
+    .pouch-switch::after {
+      content: '';
+      position: absolute;
+      top: 2px;
+      left: 2px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #FFFFFF;
+      box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+      transition: transform 0.15s var(--ease-calm);
+    }
+    .pouch-switch.on::after {
+      transform: translateX(12px);
+    }
+
+    /* Pouch Character Format & Block Format Bars */
+    .pouch-format-bar {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+    }
+    .pouch-fmt-btn {
+      height: 28px;
+      min-width: 32px;
+      padding: 0 6px;
+      border: none;
+      border-radius: 6px;
+      background: var(--hover);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .pouch-fmt-btn.icon-only {
+      flex: 0 0 32px;
+    }
+    .pouch-fmt-btn:hover {
+      background: var(--sep-strong);
+    }
+    .pouch-fmt-btn.active {
+      background: var(--active-bg);
+      color: var(--novel);
+      font-weight: 600;
+    }
+
+    .pouch-fontsize-stepper {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: auto;
+    }
+    .pouch-step-btn {
+      width: 26px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      color: var(--ink);
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .pouch-step-btn:hover {
+      background: var(--hover);
+    }
+    .pouch-fontsize-val {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      width: 26px;
+      text-align: center;
+    }
+
+    /* Color Swatches inside Pouch */
+    .pouch-color-row {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 8px;
+      gap: 9px;
+    }
+    .pouch-color-label {
+      font-size: 10.5px;
+      color: var(--ink2);
+      margin-right: auto;
+    }
+    .color-dot-btn {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 1.5px solid transparent;
+      padding: 2px;
+      background: transparent;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .color-dot-btn.active {
+      border-color: var(--ink);
+    }
+    .color-dot-inner {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+    }
+
+    /* Embedded Expandable Sections inside Pouch (ModelChip, Coauthor, Writer Info) */
+    .pouch-expand-box {
+      margin: 4px 8px;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--chip);
+      border: 1px solid var(--sep);
+      display: none;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .pouch-expand-box.open {
+      display: flex;
+    }
+    .coauthor-textarea {
+      width: 100%;
+      height: 60px;
+      border: none;
+      background: var(--editor-surface);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 11.5px;
+      padding: 7px;
+      border-radius: 6px;
+      resize: none;
+      outline: 1px solid var(--sep);
+    }
+    .coauthor-result-preview {
+      font-family: var(--font-serif);
+      font-size: 11.5px;
+      line-height: 1.6;
+      padding: 8px;
+      border-radius: 6px;
+      background: var(--novel-bg);
+      color: var(--ink);
+      display: none;
+    }
+    .coauthor-result-preview.visible {
+      display: block;
+    }
+
+    /* ==========================================================================
+       Detached 4-Edge Docked Pouch & 44x44 Desktop Orb (WorkspacePouchGeometry.swift)
+       ========================================================================== */
+    .detached-pouch {
+      position: absolute;
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      border-radius: 12px;
+      box-shadow: var(--floating-shadow);
+      z-index: 55;
+      display: none;
+      align-items: center;
+      padding: 4px;
+      gap: 4px;
+      transition: opacity 0.25s ease, transform 0.2s var(--ease-calm);
+    }
+    .detached-pouch.visible {
+      display: flex;
+    }
+    .detached-pouch.edge-bottom {
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 38px;
+      flex-direction: row;
+    }
+    .detached-pouch.edge-top {
+      top: 44px;
+      left: 50%;
+      transform: translateX(-50%);
+      height: 38px;
+      flex-direction: row;
+    }
+    .detached-pouch.edge-right {
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 38px;
+      flex-direction: column;
+    }
+    .detached-pouch.edge-left {
+      left: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 38px;
+      flex-direction: column;
+    }
+
+    .pouch-grip-bar {
+      width: 12px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+    }
+    .detached-pouch.edge-left .pouch-grip-bar,
+    .detached-pouch.edge-right .pouch-grip-bar {
+      width: 28px;
+      height: 12px;
+    }
+    .pouch-grip-pill {
+      width: 3px;
+      height: 14px;
+      border-radius: 1.5px;
+      background: var(--workspace-muted);
+      opacity: 0.6;
+    }
+    .detached-pouch.edge-left .pouch-grip-pill,
+    .detached-pouch.edge-right .pouch-grip-pill {
+      width: 14px;
+      height: 3px;
+    }
+
+    .detached-pouch-btn {
+      width: 28px;
+      height: 28px;
+      border: none;
+      background: transparent;
+      border-radius: 6px;
+      color: var(--ink);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+    }
+    .detached-pouch-btn:hover {
+      background: var(--hover);
+    }
+    .detached-pouch-btn.active {
+      background: rgba(25, 24, 22, 0.08);
+      color: var(--novel);
+    }
+
+    /* 44x44 Collapsed M Orb Widget */
+    .floating-m-orb {
+      position: fixed;
+      top: 36px;
+      right: 36px;
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      box-shadow: var(--floating-shadow);
+      font-family: var(--font-serif);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--ink);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      z-index: 200;
+      transition: transform 0.2s var(--ease-calm);
+    }
+    .floating-m-orb.visible {
+      display: flex;
+    }
+    .floating-m-orb:hover {
+      transform: scale(1.06);
+    }
+
+    /* ==========================================================================
+       268px Entity Peek Popover (WorkspaceEntityController.swift)
+       ========================================================================== */
+    .entity-peek-card {
+      position: fixed;
+      width: 268px;
+      padding: 12px;
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--floating-shadow);
+      z-index: 80;
+      display: none;
+      flex-direction: column;
+      gap: 6px;
+      pointer-events: auto;
+      animation: peekFadeIn 0.18s var(--ease-calm);
+    }
+    .entity-peek-card.visible {
+      display: flex;
+    }
+    @keyframes peekFadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .peek-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .peek-badge {
+      font-size: 9.5px;
+      font-weight: 600;
+      color: var(--novel);
+      background: var(--novel-bg);
+      padding: 1px 6px;
+      border-radius: var(--radius-xs);
+    }
+    .peek-name {
+      font-family: var(--font-serif);
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .peek-role {
+      font-size: 10px;
+      color: var(--workspace-muted);
+      margin-left: auto;
+    }
+    .peek-note {
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--ink2);
+    }
+    .peek-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 2px;
+    }
+    .peek-tags {
+      font-size: 10px;
+      color: var(--workspace-muted);
+    }
+
+    /* ==========================================================================
+       Floating Drag Pill (SpatialWorkspaceCanvas.swift showDragPill)
+       ========================================================================== */
+    .drag-cursor-pill {
+      position: fixed;
+      height: 36px;
+      padding: 0 14px;
+      background: var(--pill);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--pouch-border);
+      border-radius: 10px;
+      box-shadow: var(--floating-shadow);
+      display: none;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--ink);
+      pointer-events: none;
+      z-index: 999;
+    }
+    .drag-cursor-pill.visible {
+      display: flex;
+    }
+
+    /* ==========================================================================
+       Quick Command Palette Modal (WorkspaceQuickCommandPanel.swift)
+       ========================================================================== */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.26);
+      backdrop-filter: blur(2px);
+      z-index: 120;
+      display: none;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 13vh;
+    }
+    .modal-backdrop.open {
+      display: flex;
+    }
+    .cmd-palette-card {
+      width: 520px;
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--floating-shadow);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .cmd-palette-top {
+      display: flex;
+      align-items: center;
+      padding: 12px 14px;
+      gap: 10px;
+      border-bottom: 1px solid var(--sep);
+    }
+    .cmd-palette-top input {
+      flex: 1;
+      border: none;
+      background: transparent;
+      outline: none;
+      font-family: var(--font-ui);
+      font-size: 13px;
+      color: var(--ink);
+    }
+    .esc-badge {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      background: var(--kbd);
+      color: var(--ink2);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .cmd-palette-list {
+      max-height: 330px;
+      overflow-y: auto;
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .cmd-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .cmd-item:hover,
+    .cmd-item.active {
+      background: var(--active-bg);
+    }
+    .cmd-cat {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--novel);
+      background: var(--novel-bg);
+      padding: 2px 6px;
+      border-radius: 4px;
+      min-width: 44px;
+      text-align: center;
+    }
+    .cmd-main {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      flex: 1;
+    }
+    .cmd-title {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--ink);
+    }
+    .cmd-desc {
+      font-size: 10.5px;
+      color: var(--ink2);
+    }
+
+    /* Toast Capsule (WorkspaceSurface) */
+    .workspace-toast {
+      position: absolute;
+      bottom: 32px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      padding: 6px 14px;
+      border-radius: 999px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--ink);
+      opacity: 0;
+      pointer-events: none;
+      z-index: 95;
+      transition: opacity 0.22s var(--ease-calm), transform 0.22s var(--ease-calm);
+    }
+    .workspace-toast.visible {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+    .toast-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--ink2);
+    }
+
+    /* ==========================================================================
+       Gemini Interactive Design Workbench HUD (Bottom-Left Collapsible Panel)
+       ========================================================================== */
+    .design-workbench-hud {
+      position: fixed;
+      bottom: 14px;
+      left: 14px;
+      z-index: 150;
+      background: var(--pill-opaque);
+      border: 1px solid var(--pouch-border);
+      border-radius: 12px;
+      box-shadow: var(--floating-shadow);
+      font-family: var(--font-ui);
+      color: var(--ink);
+      overflow: hidden;
+      transition: width 0.22s var(--ease-calm), height 0.22s var(--ease-calm);
+    }
+    .hud-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 11px;
+      gap: 10px;
+      cursor: pointer;
+      background: var(--chip);
+      border-bottom: 1px solid var(--sep);
+    }
+    .design-workbench-hud.collapsed .hud-header {
+      border-bottom: none;
+    }
+    .design-workbench-hud.collapsed .hud-body {
+      display: none;
+    }
+    .hud-badge {
+      font-family: var(--font-mono);
+      font-size: 9.5px;
+      font-weight: 600;
+      color: #FFFFFF;
+      background: var(--novel);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .hud-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .hud-body {
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 340px;
+    }
+    .hud-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--ink2);
+    }
+    .hud-pill-group {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+    .hud-chip {
+      border: 1px solid var(--sep-strong);
+      background: var(--editor-surface);
+      color: var(--ink);
+      font-family: var(--font-ui);
+      font-size: 10.5px;
+      font-weight: 500;
+      padding: 3px 8px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+    }
+    .hud-chip:hover {
+      background: var(--hover);
+    }
+    .hud-chip.active {
+      background: var(--active-bg);
+      color: var(--novel);
+      border-color: var(--selection-border);
+      font-weight: 600;
+    }
+    .hud-color-inputs {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .hud-color-inputs input[type="color"] {
+      width: 22px;
+      height: 22px;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body data-theme="light">
+
+  <!-- Collapsed Floating Desktop M Orb (P03: suckWindowIntoPouch / unfoldWindowFromPouch) -->
+  <div class="floating-m-orb" id="floatingMOrb" title="클릭하여 원고 펼치기 · 드래그하여 이동" onclick="restoreWindowFromOrb()">
+    M
+  </div>
+
+  <!-- Main macOS Liquid Glass Window (WorkspaceLiquidGlass + WorkspaceSurface) -->
+  <div class="mint-liquid-glass-window" id="mainWindow">
+    <div class="paper-grain"></div>
+
+    <!-- Top 36pt Window Chrome (WorkspaceSpatialChrome) -->
+    <header class="workspace-chrome" id="windowChrome">
+      <div class="traffic-lights">
+        <div class="traffic-btn close" title="창 닫기 (주머니로 접기 체험)" onclick="collapseWindowToOrb()">×</div>
+        <div class="traffic-btn minimize" title="최소화 (주머니로 접기)" onclick="collapseWindowToOrb()">−</div>
+        <div class="traffic-btn zoom" title="전체 화면 전환" onclick="toggleMaximizeWindow()">+</div>
+      </div>
+
+      <div class="chrome-title">
+        <span class="chrome-project-name">등대지기의 겨울</span>
+        <span class="chrome-sep">/</span>
+        <span class="chrome-doc-name" id="chromeActiveDocTitle">1장. 램프실의 아침</span>
+        <span class="chrome-open-count" id="chromeOpenCount">2개 열림</span>
+      </div>
+
+      <div class="chrome-right-pills">
+        <span class="chrome-mode-badge active" id="modeWriteBtn" onclick="setWorkspaceMode('write')">글쓰기</span>
+        <span class="chrome-mode-badge" id="modeMapBtn" onclick="setWorkspaceMode('map')">이야기 지도</span>
+        <span class="chrome-mode-badge" id="modeOutlineBtn" onclick="setWorkspaceMode('outline')">문서 개요</span>
+        <span class="chrome-mode-badge" onclick="toggleTheme()" title="라이트 / 다크 테마 전환">◐ 테마</span>
+      </div>
+    </header>
+
+    <!-- 2D Spatial Tiling Canvas (SpatialWorkspaceCanvas) -->
+    <main class="spatial-canvas-scroll" id="spatialCanvas">
+      <!-- Dynamically rendered columns & slots from state.columns -->
+    </main>
+
+    <!-- 2026-10-24 Attached Vertical Pouch Popover (WorkspacePouchView + WorkspacePouchTools) -->
+    <aside class="pouch-popover" id="pouchPopover" aria-label="주머니 도구 팝오버">
+      <div class="pouch-popover-header">
+        <div class="pouch-popover-title" id="pouchTargetTitle">1장. 램프실의 아침</div>
+        <button class="header-btn" title="모든 도구 · 단축 메뉴 (⌘K)" onclick="openCommandPalette()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/><circle cx="5" cy="12" r="1.5"/></svg>
+        </button>
+        <button class="header-btn" title="주머니 닫기 · Esc" onclick="closePouchPopover()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+
+      <div class="pouch-popover-body" id="pouchPopoverBody">
+        <!-- Manuscript Contextual Sections (AI 집필 + 서식·문단) -->
+        <div id="pouchManuscriptSections">
+          <!-- AI 집필 Section -->
+          <div class="pouch-section-heading">
+            <span>AI 집필</span>
+            <button class="pouch-heading-btn" title="공동 집필 열기" onclick="togglePouchSubbox('coauthorBox')">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+          </div>
+
+          <div class="pouch-row" onclick="toggleSwitch('autocomplete')">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 22h-1a4 4 0 0 1-4-4V6a4 4 0 0 1 4-4h1M7 22h1a4 4 0 0 0 4-4v-1M7 2h1a4 4 0 0 1 4 4v1"/></svg>
+            </span>
+            <span class="pouch-row-title">자동완성</span>
+            <div class="pouch-switch on" id="switch-autocomplete"></div>
+          </div>
+
+          <button class="pouch-row" onclick="togglePouchSubbox('modelChipBox')">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>
+            </span>
+            <span class="pouch-row-title">로컬 모델</span>
+            <span class="pouch-row-status" id="modelStatusLabel">Qwen 2.5 7B · 준비됨</span>
+          </button>
+
+          <div class="pouch-expand-box" id="modelChipBox">
+            <div style="display:flex; justify-content:space-between; font-size:11px; font-weight:600;">
+              <span>로컬 MLX 추론 엔진</span>
+              <span style="color:var(--novel);">● 활성</span>
+            </div>
+            <div style="display:flex; gap:4px;">
+              <button class="hud-chip active" onclick="selectModel('Qwen 2.5 7B')">Qwen 2.5 7B</button>
+              <button class="hud-chip" onclick="selectModel('Gemma 2 9B')">Gemma 2 9B</button>
+              <button class="hud-chip" onclick="selectModel('Llama 3.1 8B')">Llama 3.1 8B</button>
+            </div>
+            <div style="font-size:10px; color:var(--ink2);">온디바이스 전용 · 원문 외부 전송 없음</div>
+          </div>
+
+          <button class="pouch-row" onclick="triggerGhostContinuation()">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+            </span>
+            <span class="pouch-row-title">커서에서 이어쓰기</span>
+            <span class="pouch-row-status">Tab 수락</span>
+          </button>
+
+          <button class="pouch-row" onclick="polishSelectedSentence()">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m15 4-1 1 4 4 1-1a2.8 2.8 0 1 0-4-4Z"/><path d="m13 6-8.5 8.5a2.1 2.1 0 0 0-.5 1L3 20l4.5-1a2.1 2.1 0 0 0 1-.5L17 10"/></svg>
+            </span>
+            <span class="pouch-row-title">선택한 문장 다듬기</span>
+            <span class="pouch-row-status">인라인 교정</span>
+          </button>
+
+          <button class="pouch-row" onclick="togglePouchSubbox('coauthorBox')">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+            </span>
+            <span class="pouch-row-title">공동 집필</span>
+            <span class="pouch-row-status" id="coauthorToggleStatus">열기</span>
+          </button>
+
+          <!-- Embedded Coauthor Box (WorkspacePouchCoauthor) -->
+          <div class="pouch-expand-box" id="coauthorBox">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+              <span style="font-size:11px; font-weight:600;">공동 집필</span>
+              <span style="font-size:9.5px; color:var(--workspace-muted);">세션 초안 유지됨</span>
+            </div>
+            <textarea class="coauthor-textarea" id="coauthorPromptInput" placeholder="어떤 장면을 이어 쓸까요? (예: 등탑 아래로 내려온 도경이 일지 스물일곱 권을 어루만지는 묘사)">등탑 아래로 내려온 도경이 오랜 근무 일지의 가죽 표지를 쓸어내리는 장면을 고요한 호흡으로 이어 써줘.</textarea>
+            <div class="coauthor-result-preview" id="coauthorResultPreview">
+              도경은 창고 선반에서 가장 낡은 일지 한 권을 꺼내 들었다. 소금기를 머금은 남색 표지는 모서리가 닳아 해져 있었으나, 연필로 눌러 쓴 날짜와 풍향 기록만은 어제 적힌 듯 선명했다.
+            </div>
+            <div style="display:flex; justify-content:flex-end; gap:6px;">
+              <button class="hud-chip" id="coauthorInsertBtn" style="display:none; color:var(--novel); font-weight:600;" onclick="insertCoauthorResult()">본문에 넣기</button>
+              <button class="hud-chip active" style="background:var(--novel); color:#fff; border:none;" onclick="generateCoauthorDraft()">생성</button>
+            </div>
+          </div>
+
+          <div class="pouch-divider"></div>
+
+          <!-- 서식·문단 Section -->
+          <div class="pouch-section-heading">
+            <span>서식·문단</span>
+          </div>
+
+          <div class="pouch-format-bar">
+            <button class="pouch-fmt-btn icon-only" id="fmtBoldBtn" title="굵게 (⌘B)" onclick="applyInlineFormat('bold')"><b>B</b></button>
+            <button class="pouch-fmt-btn icon-only" id="fmtItalicBtn" title="기울임 (⌘I)" onclick="applyInlineFormat('italic')"><i>I</i></button>
+            <button class="pouch-fmt-btn icon-only" id="fmtCodeBtn" title="인라인 코드" onclick="applyInlineFormat('code')">&lt;/&gt;</button>
+            <div class="pouch-fontsize-stepper">
+              <button class="pouch-step-btn" title="글자 크기 1pt 줄이기" onclick="changeEditorFontSize(-1)">−</button>
+              <span class="pouch-fontsize-val" id="pouchFontSizeVal">19</span>
+              <button class="pouch-step-btn" title="글자 크기 1pt 키우기" onclick="changeEditorFontSize(1)">+</button>
+            </div>
+          </div>
+
+          <div class="pouch-format-bar">
+            <button class="pouch-fmt-btn active" id="blk-p" onclick="setBlockStyle('p')">본문</button>
+            <button class="pouch-fmt-btn" id="blk-h1" onclick="setBlockStyle('h1')">H1</button>
+            <button class="pouch-fmt-btn" id="blk-h2" onclick="setBlockStyle('h2')">H2</button>
+            <button class="pouch-fmt-btn" id="blk-h3" onclick="setBlockStyle('h3')">H3</button>
+            <button class="pouch-fmt-btn" id="blk-quote" onclick="setBlockStyle('quote')">인용</button>
+          </div>
+
+          <div class="pouch-color-row">
+            <span class="pouch-color-label">글자색</span>
+            <button class="color-dot-btn active" title="기본 잉크색" onclick="applyTextColor('var(--ink)', this)">
+              <span class="color-dot-inner" style="background:var(--ink);"></span>
+            </button>
+            <button class="color-dot-btn" title="빨강" onclick="applyTextColor('#FF453A', this)">
+              <span class="color-dot-inner" style="background:#FF453A;"></span>
+            </button>
+            <button class="color-dot-btn" title="주황" onclick="applyTextColor('#FF9F0A', this)">
+              <span class="color-dot-inner" style="background:#FF9F0A;"></span>
+            </button>
+            <button class="color-dot-btn" title="초록" onclick="applyTextColor('#30D158', this)">
+              <span class="color-dot-inner" style="background:#30D158;"></span>
+            </button>
+            <button class="color-dot-btn" title="파랑" onclick="applyTextColor('#0A84FF', this)">
+              <span class="color-dot-inner" style="background:#0A84FF;"></span>
+            </button>
+            <button class="color-dot-btn" title="보라" onclick="applyTextColor('#BF5AF2', this)">
+              <span class="color-dot-inner" style="background:#BF5AF2;"></span>
+            </button>
+          </div>
+
+          <button class="pouch-row" onclick="excerptCurrentParagraphToNote()">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+            </span>
+            <span class="pouch-row-title">선택한 글을 메모로 발췌</span>
+            <span class="pouch-row-status">고증 노트</span>
+          </button>
+
+          <div class="pouch-row" onclick="toggleSwitch('typewriter')">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16M4 6h16M4 18h10"/></svg>
+            </span>
+            <span class="pouch-row-title">타자기 중앙 스크롤</span>
+            <div class="pouch-switch" id="switch-typewriter"></div>
+          </div>
+
+          <div class="pouch-row" onclick="toggleSwitch('focusDimming')">
+            <span class="pouch-row-icon">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+            </span>
+            <span class="pouch-row-title">현재 문단에 집중</span>
+            <div class="pouch-switch" id="switch-focusDimming"></div>
+          </div>
+
+          <div class="pouch-divider"></div>
+        </div>
+
+        <!-- Contextual Section for Tool Tiles (shown when a tool tile is selected) -->
+        <div id="pouchContextualToolSection" style="display:none;">
+          <div class="pouch-section-heading">
+            <span id="pouchContextHeadingTitle">인물·작품</span>
+          </div>
+          <button class="pouch-row" onclick="togglePouchSubbox('writerEditBox')">
+            <span class="pouch-row-icon">✎</span>
+            <span class="pouch-row-title" id="pouchContextActionTitle">인물과 작품 정보 편집</span>
+            <span class="pouch-row-status">열기</span>
+          </button>
+          <div class="pouch-expand-box" id="writerEditBox">
+            <div style="font-size:11px; font-weight:600;">새 인물 카드 추가</div>
+            <input type="text" id="newCharName" placeholder="이름 (예: 박선장)" style="padding:5px 7px; border-radius:5px; border:1px solid var(--sep); background:var(--editor-surface); color:var(--ink); font-size:11px;" />
+            <input type="text" id="newCharRole" placeholder="역할 (예: 우편선 선장)" style="padding:5px 7px; border-radius:5px; border:1px solid var(--sep); background:var(--editor-surface); color:var(--ink); font-size:11px;" />
+            <input type="text" id="newCharNote" placeholder="소개 및 특징 메모" style="padding:5px 7px; border-radius:5px; border:1px solid var(--sep); background:var(--editor-surface); color:var(--ink); font-size:11px;" />
+            <button class="hud-chip active" onclick="addCharacterFromPouch()">인물 등록</button>
+          </div>
+          <div class="pouch-divider"></div>
+        </div>
+
+        <!-- 원고·도구 Section (Always shown at bottom of Pouch) -->
+        <div class="pouch-section-heading">
+          <span>원고·도구</span>
+          <button class="pouch-heading-btn" title="새 원고 추가" onclick="createNewManuscript()">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          </button>
+        </div>
+
+        <button class="pouch-row" onclick="toggleToolTile('search'); closePouchPopover();">
+          <span class="pouch-row-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          </span>
+          <span class="pouch-row-title">검색</span>
+          <span class="pouch-row-status">⌘F</span>
+        </button>
+
+        <button class="pouch-row" onclick="togglePouchSubbox('refToolsSubmenu')">
+          <span class="pouch-row-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/></svg>
+          </span>
+          <span class="pouch-row-title">원고와 참고 도구</span>
+          <span class="pouch-row-status">▸</span>
+        </button>
+
+        <div class="pouch-expand-box" id="refToolsSubmenu">
+          <div class="hud-pill-group">
+            <button class="hud-chip" onclick="toggleToolTile('navigator')">문서 목록</button>
+            <button class="hud-chip" onclick="toggleToolTile('characters')">인물·작품 정보</button>
+            <button class="hud-chip" onclick="toggleToolTile('narrative')">서사 흐름</button>
+            <button class="hud-chip" onclick="toggleToolTile('margin')">마진 노트</button>
+            <button class="hud-chip" onclick="openAllDocumentsSideBySide()">문서 나란히 펼치기</button>
+          </div>
+        </div>
+
+        <button class="pouch-row" onclick="toggleToolTile('context'); closePouchPopover();">
+          <span class="pouch-row-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+          </span>
+          <span class="pouch-row-title">AI가 참고한 내용</span>
+          <span class="pouch-row-status">문맥</span>
+        </button>
+
+        <button class="pouch-row" onclick="detachPouchToEdge()">
+          <span class="pouch-row-icon">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+          </span>
+          <span class="pouch-row-title">주머니 떼어 놓기 (4면 도킹 모드)</span>
+          <span class="pouch-row-status">독립</span>
+        </button>
+      </div>
+    </aside>
+
+    <!-- Detached 4-Edge Docked Pouch (P01: dockPouchToEdge) -->
+    <div class="detached-pouch edge-bottom" id="detachedPouch">
+      <div class="pouch-grip-bar" title="드래그하여 4면 이동 또는 창 밖으로 끌어 접기" onmousedown="startDetachedPouchDrag(event)">
+        <div class="pouch-grip-pill"></div>
+      </div>
+      <button class="detached-pouch-btn" title="문서 목록" onclick="toggleToolTile('navigator')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+      </button>
+      <button class="detached-pouch-btn" title="인물·작품 정보" onclick="toggleToolTile('characters')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
+      <button class="detached-pouch-btn" title="서사 흐름" onclick="toggleToolTile('narrative')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
+      </button>
+      <button class="detached-pouch-btn" title="마진 노트" onclick="toggleToolTile('margin')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>
+      </button>
+      <div style="width:1px; height:16px; background:var(--sep-strong); margin:0 2px;"></div>
+      <button class="detached-pouch-btn" title="검색 (⌘F)" onclick="toggleToolTile('search')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+      </button>
+      <button class="detached-pouch-btn" title="선택 객체 주머니 펼치기" onclick="reattachPouchAndOpen()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/></svg>
+      </button>
+    </div>
+
+    <!-- Entity Peek Floating Popover (WorkspaceEntityController) -->
+    <div class="entity-peek-card" id="entityPeekCard" onmouseenter="keepPeekAlive()" onmouseleave="scheduleHidePeek()">
+      <div class="peek-header">
+        <span class="peek-badge" id="peekBadge">인물</span>
+        <span class="peek-name" id="peekName">한도경</span>
+        <span class="peek-role" id="peekRole">등대 소장</span>
+      </div>
+      <div class="peek-note" id="peekNote">삼십 년을 섬에서 보냈고 이십칠 년을 등대와 함께한 등대지기. 프레넬 렌즈를 닦을 때 늘 면장갑을 두 겹으로 낀다.</div>
+      <div class="peek-footer">
+        <span class="peek-tags" id="peekTags">#면장갑 #27년근무 #무인화반대</span>
+        <button class="card-jump-btn" id="peekJumpBtn" onclick="jumpFromEntityPeek()">관련 문단 →</button>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div class="workspace-toast" id="workspaceToast">
+      <span class="toast-dot"></span>
+      <span id="workspaceToastText">알림 메시지</span>
+    </div>
+  </div>
+
+  <!-- Floating Cursor Pill during 2D Tile / Paragraph Drag -->
+  <div class="drag-cursor-pill" id="dragCursorPill">
+    <span style="color:var(--novel);">●</span>
+    <span id="dragCursorPillLabel">1장. 램프실의 아침</span>
+  </div>
+
+  <!-- Quick Command Palette Modal (WorkspaceQuickCommandPanel) -->
+  <div class="modal-backdrop" id="cmdPaletteBackdrop" onclick="if(event.target===this) closeCommandPalette()">
+    <div class="cmd-palette-card">
+      <div class="cmd-palette-top">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--workspace-muted);"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="cmdPaletteInput" placeholder="명령, 문서, 인물, 원문 구절 검색…" oninput="renderCommandPaletteList()" />
+        <span class="esc-badge">ESC</span>
+      </div>
+      <div class="cmd-palette-list" id="cmdPaletteList"></div>
+    </div>
+  </div>
+
+  <!-- Interactive Design Workbench HUD (For Live Session Design Iteration) -->
+  <section class="design-workbench-hud" id="workbenchHud">
+    <div class="hud-header" onclick="document.getElementById('workbenchHud').classList.toggle('collapsed')">
+      <div style="display:flex; align-items:center; gap:7px;">
+        <span class="hud-badge">DESIGN WORKBENCH</span>
+        <span class="hud-title">MINT 디자인 실험실</span>
+      </div>
+      <span style="font-size:10px; color:var(--workspace-muted);">접기/펼치기 ▾</span>
+    </div>
+    <div class="hud-body">
+      <div class="hud-row">
+        <span>테마 &amp; 팔레트</span>
+        <div class="hud-pill-group">
+          <button class="hud-chip active" id="hudLightBtn" onclick="setThemeExplicit('light')">라이트 (Warm Paper)</button>
+          <button class="hud-chip" id="hudDarkBtn" onclick="setThemeExplicit('dark')">다크 (Obsidian)</button>
+          <button class="hud-chip" id="hudCustomPaletteBtn" onclick="toggleCustomPalettePreset()">커스텀 팔레트</button>
+        </div>
+      </div>
+
+      <div class="hud-row">
+        <span>주머니(Pouch) 상태</span>
+        <div class="hud-pill-group">
+          <button class="hud-chip active" onclick="openPouchOnActiveTile()">헤더 팝오버 (10-24)</button>
+          <button class="hud-chip" onclick="detachPouchToEdge()">4면 도킹 바</button>
+          <button class="hud-chip" onclick="cycleDetachedEdge()">도킹 위치 회전</button>
+          <button class="hud-chip" onclick="collapseWindowToOrb()">M 오브 접기</button>
+        </div>
+      </div>
+
+      <div class="hud-row">
+        <span>공간 타일 프리셋</span>
+        <div class="hud-pill-group">
+          <button class="hud-chip" onclick="applyLayoutPreset('focused')">집필 집중</button>
+          <button class="hud-chip active" onclick="applyLayoutPreset('editorial')">2단 원고+도구</button>
+          <button class="hud-chip" onclick="applyLayoutPreset('allTools')">전체 도구 스택</button>
+          <button class="hud-chip" onclick="openCommandPalette()">⌘K 팔레트</button>
+        </div>
+      </div>
+
+      <div class="hud-row">
+        <span>에디터 인터랙션</span>
+        <div class="hud-pill-group">
+          <button class="hud-chip" onclick="triggerGhostContinuation()">✨ Ghost 제안</button>
+          <button class="hud-chip" onclick="toggleSwitch('focusDimming')">문단 집중</button>
+          <button class="hud-chip" onclick="toggleSwitch('typewriter')">타자기 스크롤</button>
+          <button class="hud-chip" onclick="toggleWhisperModeDemo()">속삭임(Whisper) 모드</button>
+        </div>
+      </div>
+
+      <div class="hud-row">
+        <span>토큰 실시간 조절</span>
+        <div class="hud-color-inputs">
+          <label title="배경 종이색" style="font-size:10px;">종이 <input type="color" id="tokenPaperColor" value="#FAF8F3" oninput="updateLiveToken('--editor-surface', this.value)" /></label>
+          <label title="카드/사이드바 표면색" style="font-size:10px;">카드 <input type="color" id="tokenCardColor" value="#F4F1EA" oninput="updateLiveToken('--card-surface', this.value)" /></label>
+          <label title="보태니컬 민트 액센트" style="font-size:10px;">액센트 <input type="color" id="tokenAccentColor" value="#0F6E63" oninput="updateLiveAccent(this.value)" /></label>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    /* ==========================================================================
+       MINT Spatial Workspace State & Data (Mirrors ProjectSession & SpatialWorkspaceLayout)
+       ========================================================================== */
+    const state = {
+      theme: 'light',
+      customPaletteActive: false,
+      workspaceMode: 'write',
+      selectedTile: 'doc-1',
+      activeDocumentID: 'doc-1',
+      activeParagraphIndex: 0,
+      pouchOpen: false,
+      pouchDetached: false,
+      pouchEdge: 'bottom',
+      autocomplete: true,
+      typewriter: false,
+      focusDimming: false,
+      whisperTyping: false,
+      expandedCardId: 'char-1',
+      searchScope: 'project',
+      searchQuery: '',
+      searchSelectedIndex: 0,
+      ghostVisibleOnDoc: 'doc-1',
+      ghostParagraphIndex: 3,
+      ghostText: ' 차가운 유리 너머로 등불의 회전 주기가 바람에 흔들림 없이 열다섯 초를 세고 있었다.',
+
+      documents: [
+        {
+          id: 'doc-1',
+          title: '1장. 램프실의 아침',
+          kind: 'manuscript',
+          goal: 1200,
+          blocks: [
+            { type: 'h1', text: '등대지기의 겨울' },
+            { type: 'h2', text: '1장 · 램프실의 아침' },
+            { type: 'p', text: '서리가 유리창에 별 모양으로 얼어붙은 아침이었다. 한도경은 등대 꼭대기의 램프실에서 프레넬 렌즈를 닦고 있었다. 물결무늬 유리는 손바닥 온기만 닿아도 뿌옇게 흐려져서, 그는 늘 면장갑을 두 겹으로 끼고 일했다. 삼십 년을 이 섬에서 보냈고, 그중 이십칠 년을 등대와 함께였다.' },
+            { type: 'p', text: '계단 아래에서 발소리가 올라왔다. 규칙적이지 않고 두 칸씩 건너뛰는 소리. 도경은 렌즈에서 눈을 떼지 않은 채 말했다.' },
+            { type: 'quote', text: '“난간 잡고 올라와라. 지난번처럼 무릎 깨지지 말고.”' },
+            { type: 'p', text: '문을 밀고 들어온 것은 윤소리였다. 열일곱 살, 뭍의 고등학교에 다니다가 겨울방학마다 섬으로 돌아오는 손녀였다. 소리는 패딩 주머니에서 얼어서 껍질이 딱딱해진 귤 두 개를 꺼내 창턱에 올려놓았다.' },
+            { type: 'p', text: '그날 오후, 창고 문을 열고 들어온 사십 대 남자는 해양수산청에서 나온 최인호였다. 1992년 겨울 통통배가 뒤집혔을 때 도경이 등불 각도를 낮춰 살려낸 중학생이 이제 등대 해양문화유산 지정 신청서를 들고 찾아온 것이었다.' }
+          ]
+        },
+        {
+          id: 'doc-2',
+          title: '2장. 봄, 공사',
+          kind: 'manuscript',
+          goal: 1000,
+          blocks: [
+            { type: 'h2', text: '2장 · 봄, 공사' },
+            { type: 'p', text: '봄이 오기 전에 공사가 시작되었다. 등탑 외벽의 페인트를 벗겨내자 그 아래에서 옛 벽돌이 드러났고, 최인호는 그때마다 사진을 찍어 문화재 위원회에 보냈다.' },
+            { type: 'p', text: '여름방학이 되자 윤소리가 내려왔다. 스물일곱 권의 등대 근무 일지를 연도별로 목록을 만들고, 태풍 셀마가 지나간 1987년 7월의 기록에는 접착 메모지를 다섯 장 붙였다.' },
+            { type: 'quote', text: '“파도가 등탑 허리까지 쳤는데 등불은 돌았다. 그것이면 됐다.”' },
+            { type: 'p', text: '가을에 등명기 교체 공사가 끝났고, 겨울이 다시 왔을 때 전시관이 문을 열었다. 등불은 변함없이 십오 초에 한 번씩 어둠을 쓸었다.' }
+          ]
+        },
+        {
+          id: 'doc-3',
+          title: '고증 노트 — 등대 구조와 렌즈',
+          kind: 'note',
+          goal: 600,
+          blocks: [
+            { type: 'h2', text: '프레넬 렌즈와 태엽식 회전 장치' },
+            { type: 'p', text: '프레넬 렌즈는 동심원 계단형 유리 링으로 빛을 수평 빔으로 모아준다. 맨손의 유분이 닿으면 열팽창과 굴절 얼룩이 생기므로 한도경은 반드시 면장갑 두 겹을 착용한다.' },
+            { type: 'p', text: '태엽식 회전 장치는 중추(무게추)가 내려가는 힘으로 15초당 1회전 주기를 유지하며, 전국에 순수 원형이 남은 곳은 이 섬이 유일하다.' }
+          ]
+        }
+      ],
+
+      characters: [
+        {
+          id: 'char-1',
+          name: '한도경',
+          initial: '한',
+          role: '등대 소장 · 27년 근무',
+          note: '삼십 년을 섬에서 보냈고 이십칠 년을 등대와 함께한 등대지기. 프레넬 렌즈를 닦을 때 늘 면장갑을 두 겹으로 낀다.',
+          traits: ['면장갑', '27년근무', '과묵함'],
+          docId: 'doc-1',
+          paragraphIdx: 2
+        },
+        {
+          id: 'char-2',
+          name: '윤소리',
+          initial: '윤',
+          role: '손녀 · 고등학교 3학년',
+          note: '겨울과 여름 방학마다 섬으로 내려오는 손녀. 창고의 스물일곱 권 일지를 읽고 기록 보존(사학)의 길을 꿈꾼다.',
+          traits: ['사학과지망', '일지정리', '언귤'],
+          docId: 'doc-1',
+          paragraphIdx: 5
+        },
+        {
+          id: 'char-3',
+          name: '최인호',
+          initial: '최',
+          role: '해양수산청 담당관',
+          note: '1992년 겨울 조난당했을 때 도경이 낮춰준 등불 덕분에 구조된 소년. 등대를 해양문화유산 전시관으로 남기려 자원했다.',
+          traits: ['92년겨울', '문화유산지정', '보은'],
+          docId: 'doc-1',
+          paragraphIdx: 6
+        }
+      ],
+
+      narratives: [
+        {
+          id: 'nar-1',
+          order: '01',
+          title: '무인화 공문과 언 귤',
+          quote: '자동화 등명기 교체 및 유인 등대 무인화 계획. 소리는 깐 귤의 반을 도경에게 내밀었다.',
+          docId: 'doc-1',
+          paragraphIdx: 2
+        },
+        {
+          id: 'nar-2',
+          order: '02',
+          title: '1992년 겨울의 조난과 등대 유산 신청서',
+          quote: '“없애는 게 아니라, 남기러 왔습니다.” 등대 해양문화유산 지정 신청서와 전직 등대지기 위촉 조항.',
+          docId: 'doc-1',
+          paragraphIdx: 6
+        },
+        {
+          id: 'nar-3',
+          order: '03',
+          title: '태풍 셀마(1987) 일지 발굴',
+          quote: '“파도가 등탑 허리까지 쳤는데 등불은 돌았다. 그것이면 됐다.”',
+          docId: 'doc-2',
+          paragraphIdx: 2
+        },
+        {
+          id: 'nar-4',
+          order: '04',
+          title: '전시관 개관과 스물여덟 번째 일지',
+          quote: '등불은 십오 초에 한 번 돈다. 다만 오늘은, 그것 말고도 된 것이 많은 날이다.',
+          docId: 'doc-2',
+          paragraphIdx: 4
+        }
+      ],
+
+      margins: [
+        {
+          id: 'mrg-1',
+          category: '이어짐 확인',
+          title: '등불 회전 주기 (15초) 일관성 검증됨',
+          message: '1장 창고 일지(1999년), 1장 램프실의 밤, 2장 마지막 점등과 개관 장면 모두 회전 주기가 “십오 초에 한 번”으로 정확히 일치합니다.',
+          term: '십오 초',
+          docId: 'doc-2',
+          paragraphIdx: 4
+        },
+        {
+          id: 'mrg-2',
+          category: '장면 맥락',
+          title: '프레넬 렌즈와 면장갑 디테일 연결',
+          message: '고증 노트의 유분 굴절 방지 설정이 1장 첫 문단의 “면장갑을 두 겹으로 끼고 일했다” 묘사와 자연스럽게 호응합니다.',
+          term: '프레넬 렌즈',
+          docId: 'doc-1',
+          paragraphIdx: 2
+        },
+        {
+          id: 'mrg-3',
+          category: '문장 리듬',
+          title: '대화문 뒤 행동 묘사의 여운',
+          message: '짧은 대사 직후 소품(언 귤, 놋쇠 테두리, 벽시계 초침)을 배치해 도경의 과묵한 정서를 효과적으로 드러내고 있습니다.',
+          term: '면장갑',
+          docId: 'doc-1',
+          paragraphIdx: 3
+        }
+      ],
+
+      /* SpatialWorkspaceLayout: Ordered columns with optional fixed width and weighted slots */
+      columns: [
+        { id: 'col-nav', width: 204, slots: [{ tile: 'navigator', weight: 1.0 }] },
+        { id: 'col-doc1', width: null, slots: [{ tile: 'doc-1', weight: 1.0 }] },
+        { id: 'col-doc2', width: null, slots: [{ tile: 'doc-2', weight: 1.0 }] },
+        { id: 'col-tools', width: 256, slots: [
+          { tile: 'characters', weight: 0.52 },
+          { tile: 'margin', weight: 0.48 }
+        ]}
+      ]
+    };
+
+    const entitiesCatalog = {
+      '한도경': { badge: '인물', name: '한도경', role: '등대 소장', note: '삼십 년을 섬에서 보냈고 이십칠 년을 등대와 함께한 등대지기. 프레넬 렌즈를 닦을 때 늘 면장갑을 두 겹으로 낀다.', tags: '#면장갑 #27년근무', docId: 'doc-1', paragraphIdx: 2 },
+      '도경': { badge: '인물', name: '한도경', role: '등대 소장', note: '삼십 년을 섬에서 보냈고 이십칠 년을 등대와 함께한 등대지기.', tags: '#면장갑 #27년근무', docId: 'doc-1', paragraphIdx: 2 },
+      '윤소리': { badge: '인물', name: '윤소리', role: '손녀 · 고3', note: '방학마다 섬으로 돌아오는 손녀. 할아버지의 근무 일지 27권을 정리하며 사학과 진학을 결심한다.', tags: '#사학과 #일지정리', docId: 'doc-1', paragraphIdx: 5 },
+      '소리': { badge: '인물', name: '윤소리', role: '손녀 · 고3', note: '방학마다 섬으로 돌아오는 손녀. 할아버지의 근무 일지 27권을 정리한다.', tags: '#사학과 #일지정리', docId: 'doc-1', paragraphIdx: 5 },
+      '최인호': { badge: '인물', name: '최인호', role: '해양수산청 담당관', note: '1992년 겨울 조난에서 도경의 등불로 살아남은 중학생. 등대를 문화유산 전시관으로 보존하려 한다.', tags: '#92년겨울 #문화유산', docId: 'doc-1', paragraphIdx: 6 },
+      '프레넬 렌즈': { badge: '고증', name: '프레넬 렌즈', role: '고증 노트', note: '동심원 계단형 유리 링으로 빛을 수평 빔으로 모으는 렌즈. 유분 방지를 위해 면장갑 착용이 필수다.', tags: '#광학 #등명기', docId: 'doc-3', paragraphIdx: 1 },
+      '태풍 셀마': { badge: '사건', name: '태풍 셀마 (1987. 7)', role: '서사 흐름', note: '파도가 등탑 허리까지 쳤으나 도경이 사흘 밤을 새워 등불을 지켜낸 사건.', tags: '#1987년 #근무일지', docId: 'doc-2', paragraphIdx: 2 },
+      '1992년 겨울': { badge: '사건', name: '1992년 겨울 통통배 조난', role: '서사 흐름', note: '도경이 규정을 어기고 등불 각도를 낮춰 바위섬에 고립된 중학생 최인호를 구조하게 한 밤.', tags: '#시말서 #구조', docId: 'doc-1', paragraphIdx: 6 }
+    };
+
+    /* ==========================================================================
+       Spatial Canvas Rendering
+       ========================================================================== */
+    function renderWorkspace() {
+      const canvas = document.getElementById('spatialCanvas');
+      canvas.innerHTML = '';
+
+      document.body.classList.toggle('focus-dimming-active', state.focusDimming);
+      document.body.classList.toggle('whisper-typing', state.whisperTyping);
+
+      // Update Top Chrome
+      const activeDoc = state.documents.find(d => d.id === state.activeDocumentID) || state.documents[0];
+      document.getElementById('chromeActiveDocTitle').textContent = activeDoc ? activeDoc.title : '원고';
+      const openDocCount = state.columns.flatMap(c => c.slots).filter(s => s.tile.startsWith('doc-')).length;
+      document.getElementById('chromeOpenCount').textContent = `${openDocCount}개 열림`;
+
+      state.columns.forEach((col, colIdx) => {
+        const colEl = document.createElement('div');
+        colEl.className = 'spatial-column';
+        if (col.width) {
+          colEl.style.width = `${col.width}px`;
+          colEl.style.flex = '0 0 auto';
+        } else {
+          colEl.style.flex = '1 1 0%';
+        }
+
+        col.slots.forEach((slot, rowIdx) => {
+          const slotEl = buildTileElement(slot.tile, slot.weight);
+          colEl.appendChild(slotEl);
+
+          if (rowIdx < col.slots.length - 1) {
+            const rowHandle = document.createElement('div');
+            rowHandle.className = 'row-resize-handle';
+            rowHandle.title = '드래그하여 행 높이 조절 · 더블클릭: 50:50 균등 분할';
+            rowHandle.ondblclick = () => equalizeColumnRows(colIdx, rowIdx);
+            rowHandle.onmousedown = (e) => startRowResize(e, colIdx, rowIdx);
+            colEl.appendChild(rowHandle);
+          }
+        });
+
+        canvas.appendChild(colEl);
+
+        if (colIdx < state.columns.length - 1) {
+          const colHandle = document.createElement('div');
+          colHandle.className = 'col-resize-handle';
+          colHandle.title = '드래그하여 열 너비 조절';
+          colHandle.onmousedown = (e) => startColResize(e, colIdx);
+          canvas.appendChild(colHandle);
+        }
+      });
+
+      if (state.pouchOpen && !state.pouchDetached) {
+        positionPouchPopover();
+      }
+    }
+
+    function buildTileElement(tileId, weight) {
+      const slotEl = document.createElement('div');
+      const isDoc = tileId.startsWith('doc-');
+      const isActiveDoc = isDoc && state.activeDocumentID === tileId;
+      const isSelectedTile = state.selectedTile === tileId;
+
+      slotEl.className = `spatial-slot ${isDoc ? 'document-tile' : 'tool-tile'} ${isActiveDoc ? 'active' : ''}`;
+      slotEl.style.flex = `${weight} 1 0%`;
+      slotEl.dataset.tileId = tileId;
+
+      slotEl.addEventListener('mousedown', () => {
+        state.selectedTile = tileId;
+        if (isDoc && state.activeDocumentID !== tileId) {
+          state.activeDocumentID = tileId;
+          updateChromeTitles();
+        }
+      });
+
+      // Build Tile Header (SpatialTileHeader.swift)
+      const header = document.createElement('div');
+      header.className = 'tile-header';
+      header.onmousedown = (e) => {
+        if (e.target.closest('button')) return;
+        startTileHeaderDrag(e, tileId);
+      };
+
+      if (isDoc) {
+        const dot = document.createElement('div');
+        dot.className = 'tile-status-dot';
+        header.appendChild(dot);
+      } else {
+        const iconSpan = document.createElement('span');
+        iconSpan.className = 'tile-header-icon';
+        iconSpan.innerHTML = getToolSvgIcon(tileId);
+        header.appendChild(iconSpan);
+      }
+
+      const titleEl = document.createElement('div');
+      titleEl.className = 'tile-header-title';
+      titleEl.textContent = getTileTitle(tileId);
+      header.appendChild(titleEl);
+
+      const actions = document.createElement('div');
+      actions.className = 'tile-header-actions';
+
+      if (tileId === 'navigator') {
+        const addBtn = document.createElement('button');
+        addBtn.className = 'header-btn';
+        addBtn.title = '새 문서';
+        addBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>`;
+        addBtn.onclick = (e) => { e.stopPropagation(); createNewManuscript(); };
+        actions.appendChild(addBtn);
+      }
+
+      // Pouch Trigger Button (mint.tile.pouch.<id>)
+      const pouchBtn = document.createElement('button');
+      pouchBtn.className = `header-btn pouch-trigger ${isSelectedTile && state.pouchOpen ? 'selected' : ''}`;
+      pouchBtn.id = `pouch-trigger-${tileId}`;
+      pouchBtn.title = '주머니 펼치기 · 드래그하여 이동';
+      pouchBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></svg>`;
+      pouchBtn.onclick = (e) => {
+        e.stopPropagation();
+        togglePouchForTile(tileId);
+      };
+      actions.appendChild(pouchBtn);
+
+      // Close Button (mint.tile.close.<id>)
+      const closeBtn = document.createElement('button');
+      closeBtn.className = 'header-btn';
+      closeBtn.title = isDoc ? '원고 객체 닫기' : '객체 닫기';
+      closeBtn.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg>`;
+      closeBtn.onclick = (e) => {
+        e.stopPropagation();
+        closeTile(tileId);
+      };
+      actions.appendChild(closeBtn);
+
+      header.appendChild(actions);
+      slotEl.appendChild(header);
+
+      // Build Tile Body
+      if (isDoc) {
+        buildDocumentTileBody(slotEl, tileId);
+      } else if (tileId === 'navigator') {
+        buildNavigatorTileBody(slotEl);
+      } else if (tileId === 'characters') {
+        buildCharactersTileBody(slotEl);
+      } else if (tileId === 'narrative') {
+        buildNarrativeTileBody(slotEl);
+      } else if (tileId === 'margin') {
+        buildMarginTileBody(slotEl);
+      } else if (tileId === 'search') {
+        buildSearchTileBody(slotEl);
+      } else {
+        buildAuxToolTileBody(slotEl, tileId);
+      }
+
+      return slotEl;
+    }
+
+    /* ==========================================================================
+       Manuscript Editor Body & Interactions
+       ========================================================================== */
+    function buildDocumentTileBody(slotEl, docId) {
+      const doc = state.documents.find(d => d.id === docId);
+      if (!doc) return;
+
+      const scroll = document.createElement('div');
+      scroll.className = `editor-scroll ${state.typewriter ? 'typewriter-mode' : ''}`;
+
+      const measureBox = document.createElement('div');
+      measureBox.className = 'editor-measure-box';
+
+      doc.blocks.forEach((blk, idx) => {
+        const p = document.createElement('div');
+        const isActivePara = state.activeDocumentID === docId && state.activeParagraphIndex === idx;
+        p.className = `manuscript-block ${isActivePara ? 'active-paragraph' : ''}`;
+        p.dataset.block = blk.type;
+        p.dataset.docId = docId;
+        p.dataset.idx = idx;
+        p.contentEditable = 'true';
+        p.spellcheck = false;
+
+        // 28x28 Gutter Grip
+        const grip = document.createElement('div');
+        grip.className = 'paragraph-grip';
+        grip.contentEditable = 'false';
+        grip.title = '드래그하여 문단 순서·문서 간 이동 (Option: 복제)';
+        grip.innerHTML = `<svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor"><circle cx="2.5" cy="2.5" r="1.2"/><circle cx="7.5" cy="2.5" r="1.2"/><circle cx="2.5" cy="7" r="1.2"/><circle cx="7.5" cy="7" r="1.2"/><circle cx="2.5" cy="11.5" r="1.2"/><circle cx="7.5" cy="11.5" r="1.2"/></svg>`;
+        grip.onmousedown = (e) => {
+          e.stopPropagation();
+          startParagraphSlipDrag(e, docId, idx);
+        };
+        p.appendChild(grip);
+
+        // Decorate text with Entity Peek spans
+        const textSpan = document.createElement('span');
+        textSpan.innerHTML = decorateEntitiesHtml(blk.text);
+        p.appendChild(textSpan);
+
+        // Inline Ghost Suggestion if active on this paragraph
+        if (state.ghostVisibleOnDoc === docId && state.ghostParagraphIndex === idx && state.autocomplete) {
+          const ghost = document.createElement('span');
+          ghost.className = 'ghost-inline';
+          ghost.contentEditable = 'false';
+          ghost.innerHTML = `${state.ghostText}<span class="ghost-kbd-hint">Tab 수락 · Esc 닫기</span>`;
+          p.appendChild(ghost);
+        }
+
+        p.addEventListener('focus', () => {
+          state.activeDocumentID = docId;
+          state.selectedTile = docId;
+          state.activeParagraphIndex = idx;
+          document.querySelectorAll('.spatial-slot.document-tile').forEach(el => {
+            el.classList.toggle('active', el.dataset.tileId === docId);
+          });
+          document.querySelectorAll('.manuscript-block').forEach(el => {
+            el.classList.toggle('active-paragraph', el === p);
+          });
+          updateBlockStyleButtons(blk.type);
+          syncActiveParagraphResonance(blk.text);
+          updateChromeTitles();
+        });
+
+        p.addEventListener('keydown', (e) => {
+          if (e.key === 'Tab' && state.ghostVisibleOnDoc === docId && state.ghostParagraphIndex === idx) {
+            e.preventDefault();
+            blk.text += state.ghostText;
+            state.ghostVisibleOnDoc = null;
+            renderWorkspace();
+            showToast('Ghost 이어쓰기 제안을 수락했습니다');
+          } else if (e.key === 'Escape' && state.ghostVisibleOnDoc === docId) {
+            e.preventDefault();
+            state.ghostVisibleOnDoc = null;
+            renderWorkspace();
+          }
+        });
+
+        p.addEventListener('input', () => {
+          blk.text = textSpan.innerText;
+        });
+
+        measureBox.appendChild(p);
+      });
+
+      scroll.appendChild(measureBox);
+      slotEl.appendChild(scroll);
+
+      // 26pt Tile Status Bar (E10: updateManuscriptStats)
+      const fullText = doc.blocks.map(b => b.text).join('\n');
+      const charCount = fullText.replace(/\s+/g, '').length;
+      const progress = Math.min(1, charCount / (doc.goal || 1000));
+      const readSeconds = Math.max(10, Math.round((charCount / 450) * 60));
+      const readLabel = readSeconds >= 60 ? `약 ${Math.round(readSeconds / 60)}분` : `${readSeconds}초`;
+      const dashOffset = (28.27 * (1 - progress)).toFixed(1);
+
+      const statusbar = document.createElement('div');
+      statusbar.className = 'tile-statusbar';
+      statusbar.innerHTML = `
+        <span class="status-hint">Enter 새 문단 · 주머니에서 서식·AI · ⋮⋮ 문단 이동</span>
+        <span style="flex:1;"></span>
+        <span class="status-detail">${doc.blocks.length}문단 · 읽기 ${readLabel} · 목표 ${doc.goal}자</span>
+        <svg width="11" height="11" viewBox="0 0 12 12" aria-label="집필 목표 ${Math.round(progress * 100)}%">
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--sep-strong)" stroke-width="1.5"/>
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="var(--novel)" stroke-width="1.5"
+            stroke-dasharray="28.27" stroke-dashoffset="${dashOffset}" stroke-linecap="round"
+            transform="rotate(-90 6 6)"/>
+        </svg>
+        <span class="status-count">${charCount.toLocaleString()}자</span>
+      `;
+      slotEl.appendChild(statusbar);
+    }
+
+    function decorateEntitiesHtml(text) {
+      let safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const terms = Object.keys(entitiesCatalog).sort((a, b) => b.length - a.length);
+      terms.forEach(term => {
+        const reg = new RegExp(`(${term})`, 'g');
+        safe = safe.replace(reg, `<span class="entity-term" data-term="$1" onmouseenter="showEntityPeek(event, '$1')" onmouseleave="scheduleHidePeek()">$1</span>`);
+      });
+      return safe;
+    }
+
+    function syncActiveParagraphResonance(paragraphText) {
+      document.querySelectorAll('.compact-card').forEach(card => {
+        const term = card.dataset.term;
+        if (term && paragraphText.includes(term)) {
+          card.classList.add('matches-active');
+        } else {
+          card.classList.remove('matches-active');
+        }
+      });
+    }
+
+    /* ==========================================================================
+       Tool Tile Builders (Navigator, Characters, Narrative, Margin, Search)
+       ========================================================================== */
+    function buildNavigatorTileBody(slotEl) {
+      const body = document.createElement('div');
+      body.className = 'navigator-body';
+
+      state.documents.forEach(doc => {
+        const isOpen = state.columns.flatMap(c => c.slots).some(s => s.tile === doc.id);
+        const isSelected = state.activeDocumentID === doc.id;
+        const openDocCount = state.columns.flatMap(c => c.slots).filter(s => s.tile.startsWith('doc-')).length;
+
+        const row = document.createElement('div');
+        row.className = `nav-row ${isOpen ? 'open' : ''} ${isSelected ? 'selected' : ''}`;
+        row.onclick = () => openOrFocusDocument(doc.id);
+
+        row.innerHTML = `
+          <div class="nav-dot"></div>
+          <div class="nav-title">${doc.title}</div>
+          ${isOpen && openDocCount === 1
+            ? `<span class="nav-status-label">열림</span>`
+            : isOpen
+              ? `<button class="nav-action-chip" title="이 문서 창 닫기" onclick="event.stopPropagation(); closeTile('${doc.id}')">×</button>`
+              : `<button class="nav-action-chip" onclick="event.stopPropagation(); openOrFocusDocument('${doc.id}')">열기</button>`
+          }
+        `;
+        body.appendChild(row);
+      });
+
+      slotEl.appendChild(body);
+    }
+
+    function buildCharactersTileBody(slotEl) {
+      const scroll = document.createElement('div');
+      scroll.className = 'tool-scroll';
+
+      const activeDoc = state.documents.find(d => d.id === state.activeDocumentID);
+      const activeParaText = activeDoc?.blocks[state.activeParagraphIndex]?.text || '';
+
+      state.characters.forEach(ch => {
+        const expanded = state.expandedCardId === ch.id;
+        const matches = activeParaText.includes(ch.name) || activeParaText.includes(ch.name.slice(1));
+        const card = document.createElement('div');
+        card.className = `compact-card ${expanded ? 'expanded' : ''} ${matches ? 'matches-active' : ''}`;
+        card.dataset.term = ch.name.slice(1);
+        card.onclick = () => {
+          state.expandedCardId = expanded ? null : ch.id;
+          renderWorkspace();
+        };
+
+        card.innerHTML = `
+          <div class="compact-card-header">
+            <div class="card-initial-badge">${ch.initial}</div>
+            <div class="card-title serif">${ch.name}</div>
+            <div class="card-role">${ch.role}</div>
+          </div>
+          <div class="compact-card-body">
+            <div>${ch.note}</div>
+            <div class="card-footer-row">
+              <span class="card-tags">${ch.traits.map(t => '#' + t).join('  ')}</span>
+              <button class="card-jump-btn" onclick="event.stopPropagation(); jumpToSource('${ch.docId}', ${ch.paragraphIdx})">본문 이동 →</button>
+            </div>
+          </div>
+        `;
+        scroll.appendChild(card);
+      });
+
+      slotEl.appendChild(scroll);
+    }
+
+    function buildNarrativeTileBody(slotEl) {
+      const scroll = document.createElement('div');
+      scroll.className = 'tool-scroll';
+
+      state.narratives.forEach(item => {
+        const expanded = state.expandedCardId === item.id;
+        const card = document.createElement('div');
+        card.className = `compact-card ${expanded ? 'expanded' : ''}`;
+        card.onclick = () => {
+          state.expandedCardId = expanded ? null : item.id;
+          renderWorkspace();
+        };
+
+        card.innerHTML = `
+          <div class="compact-card-header">
+            <span class="card-order-num">${item.order}</span>
+            <div class="card-title">${item.title}</div>
+            <span style="font-size:10px; color:var(--workspace-muted);">${expanded ? '▴' : '▾'}</span>
+          </div>
+          <div class="compact-card-body">
+            <div style="font-family:var(--font-serif);">${item.quote}</div>
+            <div class="card-footer-row">
+              <span></span>
+              <button class="card-jump-btn" onclick="event.stopPropagation(); jumpToSource('${item.docId}', ${item.paragraphIdx})">본문 이동 →</button>
+            </div>
+          </div>
+        `;
+        scroll.appendChild(card);
+      });
+
+      slotEl.appendChild(scroll);
+    }
+
+    function buildMarginTileBody(slotEl) {
+      const scroll = document.createElement('div');
+      scroll.className = 'tool-scroll';
+
+      state.margins.forEach(ins => {
+        const expanded = state.expandedCardId === ins.id;
+        const card = document.createElement('div');
+        card.className = `compact-card ${expanded ? 'expanded' : ''}`;
+        card.dataset.term = ins.term;
+        card.onclick = () => {
+          state.expandedCardId = expanded ? null : ins.id;
+          renderWorkspace();
+        };
+
+        card.innerHTML = `
+          <div class="compact-card-header">
+            <div class="card-title serif">${ins.title}</div>
+            <div class="card-role">${ins.category}</div>
+          </div>
+          <div class="compact-card-body">
+            <div>${ins.message}</div>
+            <div class="card-footer-row">
+              <span class="card-tags">원문 근거 연결됨</span>
+              <button class="card-jump-btn" onclick="event.stopPropagation(); jumpToSource('${ins.docId}', ${ins.paragraphIdx})">본문 이동 →</button>
+            </div>
+          </div>
+        `;
+        scroll.appendChild(card);
+      });
+
+      slotEl.appendChild(scroll);
+    }
+
+    function buildSearchTileBody(slotEl) {
+      const pane = document.createElement('div');
+      pane.className = 'search-pane';
+
+      const results = computeSearchResults(state.searchQuery, state.searchScope);
+
+      pane.innerHTML = `
+        <div class="search-input-wrap">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--workspace-muted);"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <input type="text" id="unifiedSearchInput" placeholder="문장, 문서, 인물 또는 도구 찾기" value="${state.searchQuery}" />
+        </div>
+        <div class="segmented-picker">
+          <button class="seg-btn ${state.searchScope === 'document' ? 'active' : ''}" onclick="setSearchScope('document')">현재 문서</button>
+          <button class="seg-btn ${state.searchScope === 'project' ? 'active' : ''}" onclick="setSearchScope('project')">프로젝트</button>
+          <button class="seg-btn ${state.searchScope === 'commands' ? 'active' : ''}" onclick="setSearchScope('commands')">도구·명령</button>
+        </div>
+        <div class="search-meta-bar">
+          <span>${state.searchScope === 'document' ? '현재 문서 일치' : '문서·인물·원문·도구'}</span>
+          <span>${results.length === 0 ? '0개' : `${state.searchSelectedIndex + 1} / ${results.length}`}</span>
+        </div>
+        <div class="search-results-list">
+          ${results.map((r, i) => `
+            <div class="search-result-item ${i === state.searchSelectedIndex ? 'selected' : ''}" onclick="activateSearchResult(${i})">
+              <div class="search-result-title">${r.title}</div>
+              <div class="search-result-detail">${r.detail}</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="search-footer-hint">↑↓ 선택 · Enter 열기 · ⌘G 다음 찾기</div>
+      `;
+
+      slotEl.appendChild(pane);
+      setTimeout(() => {
+        const input = pane.querySelector('#unifiedSearchInput');
+        if (input) {
+          input.oninput = (e) => {
+            state.searchQuery = e.target.value;
+            state.searchSelectedIndex = 0;
+            renderWorkspace();
+          };
+        }
+      }, 0);
+    }
+
+    function buildAuxToolTileBody(slotEl, tileId) {
+      const scroll = document.createElement('div');
+      scroll.className = 'tool-scroll';
+      if (tileId === 'map') {
+        scroll.innerHTML = `
+          <div style="padding:6px; font-size:11px; color:var(--ink2); line-height:1.5;">
+            <b>이야기 지도 (Story Map)</b> — 원고에서 검증된 장면과 사건의 인과 흐름을 보여줍니다.
+          </div>
+          ${state.narratives.map(n => `
+            <div class="compact-card expanded" onclick="jumpToSource('${n.docId}', ${n.paragraphIdx})">
+              <div class="compact-card-header">
+                <span class="card-order-num">장면 ${n.order}</span>
+                <div class="card-title serif">${n.title}</div>
+              </div>
+              <div class="compact-card-body" style="display:flex;">
+                <div>${n.quote}</div>
+              </div>
+            </div>
+          `).join('')}
+        `;
+      } else if (tileId === 'outline') {
+        const activeDoc = state.documents.find(d => d.id === state.activeDocumentID) || state.documents[0];
+        scroll.innerHTML = `
+          <div style="padding:6px; font-size:11px; color:var(--ink2);">
+            <b>${activeDoc.title}</b> 구조 개요
+          </div>
+          ${activeDoc.blocks.map((b, idx) => `
+            <div class="compact-card" onclick="jumpToSource('${activeDoc.id}', ${idx})">
+              <div class="compact-card-header">
+                <span class="card-order-num">${b.type.toUpperCase()}</span>
+                <div class="card-title">${b.text.slice(0, 38)}</div>
+              </div>
+            </div>
+          `).join('')}
+        `;
+      } else {
+        scroll.innerHTML = `
+          <div class="compact-card expanded">
+            <div class="compact-card-header">
+              <div class="card-title">AI가 제안에 참고한 문맥</div>
+              <span class="card-role">커서 이전 범위</span>
+            </div>
+            <div class="compact-card-body" style="display:flex;">
+              <div>커서 이후의 미래 지식은 배제되며, 현재 열린 원고의 직전 문단과 등록된 인물 카드(한도경, 윤소리, 최인호) 및 고증 노트만 로컬 추론 문맥에 포함됩니다.</div>
+            </div>
+          </div>
+        `;
+      }
+      slotEl.appendChild(scroll);
+    }
+
+    function computeSearchResults(query, scope) {
+      const q = (query || '').trim().toLowerCase();
+      const items = [];
+      if (scope !== 'commands') {
+        state.documents.forEach(doc => {
+          doc.blocks.forEach((b, idx) => {
+            if (!q || b.text.toLowerCase().includes(q)) {
+              items.push({
+                title: b.text.slice(0, 62) + (b.text.length > 62 ? '…' : ''),
+                detail: `원문 · ${doc.title} (${idx + 1}번째 문단)`,
+                docId: doc.id,
+                paragraphIdx: idx
+              });
+            }
+          });
+        });
+      }
+      if (scope !== 'document') {
+        state.characters.forEach(c => {
+          if (!q || c.name.includes(q) || c.note.includes(q)) {
+            items.push({
+              title: `${c.name} (${c.role})`,
+              detail: `인물 · ${c.note.slice(0, 42)}…`,
+              docId: c.docId,
+              paragraphIdx: c.paragraphIdx
+            });
+          }
+        });
+        [
+          { title: '타자기 중앙 스크롤 전환', detail: '명령 · 현재 문단을 화면 눈높이 중앙에 유지', cmd: () => toggleSwitch('typewriter') },
+          { title: '현재 문단에 집중 전환', detail: '명령 · 작업 중인 문단만 선명하게 표시', cmd: () => toggleSwitch('focusDimming') },
+          { title: '문서 나란히 펼치기', detail: '명령 · 모든 원고를 공간 타일로 나란히 배치', cmd: () => openAllDocumentsSideBySide() },
+          { title: '라이트/다크 테마 전환', detail: '명령 · 종이 테마와 흑요석 다크 테마 전환', cmd: () => toggleTheme() }
+        ].forEach(c => {
+          if (!q || c.title.toLowerCase().includes(q) || c.detail.toLowerCase().includes(q)) {
+            items.push(c);
+          }
+        });
+      }
+      return items.slice(0, 12);
+    }
+
+    function setSearchScope(scope) {
+      state.searchScope = scope;
+      state.searchSelectedIndex = 0;
+      renderWorkspace();
+    }
+
+    function activateSearchResult(idx) {
+      const results = computeSearchResults(state.searchQuery, state.searchScope);
+      const item = results[idx];
+      if (!item) return;
+      state.searchSelectedIndex = idx;
+      if (item.cmd) {
+        item.cmd();
+      } else if (item.docId) {
+        jumpToSource(item.docId, item.paragraphIdx);
+      }
+    }
+
+    /* ==========================================================================
+       2026-10-24 Vertical Pouch Popover Positioning & Actions
+       ========================================================================== */
+    function togglePouchForTile(tileId) {
+      if (state.pouchDetached) {
+        state.pouchDetached = false;
+        document.getElementById('detachedPouch').classList.remove('visible');
+      }
+      if (state.pouchOpen && state.selectedTile === tileId) {
+        closePouchPopover();
+        return;
+      }
+      state.selectedTile = tileId;
+      state.pouchOpen = true;
+      renderWorkspace();
+      positionPouchPopover();
+    }
+
+    function positionPouchPopover() {
+      const popover = document.getElementById('pouchPopover');
+      const trigger = document.getElementById(`pouch-trigger-${state.selectedTile}`);
+      const mainWin = document.getElementById('mainWindow');
+      if (!trigger || !mainWin) {
+        popover.classList.remove('open');
+        return;
+      }
+
+      const isDoc = state.selectedTile.startsWith('doc-');
+      document.getElementById('pouchTargetTitle').textContent = getTileTitle(state.selectedTile);
+      document.getElementById('pouchManuscriptSections').style.display = isDoc ? 'block' : 'none';
+      document.getElementById('pouchContextualToolSection').style.display = isDoc ? 'none' : 'block';
+      if (!isDoc) {
+        document.getElementById('pouchContextHeadingTitle').textContent = getTileTitle(state.selectedTile);
+      }
+
+      popover.classList.add('open');
+
+      const winRect = mainWin.getBoundingClientRect();
+      const trigRect = trigger.getBoundingClientRect();
+      const pouchWidth = 304;
+
+      let left = (trigRect.right - winRect.left) - pouchWidth;
+      left = Math.max(8, Math.min(left, winRect.width - pouchWidth - 8));
+      let top = (trigRect.bottom - winRect.top) + 6;
+
+      popover.style.left = `${left}px`;
+      popover.style.top = `${top}px`;
+    }
+
+    function closePouchPopover() {
+      state.pouchOpen = false;
+      document.getElementById('pouchPopover').classList.remove('open');
+      renderWorkspace();
+    }
+
+    function openPouchOnActiveTile() {
+      state.pouchDetached = false;
+      document.getElementById('detachedPouch').classList.remove('visible');
+      state.selectedTile = state.activeDocumentID || 'doc-1';
+      state.pouchOpen = true;
+      renderWorkspace();
+    }
+
+    function detachPouchToEdge() {
+      state.pouchOpen = false;
+      state.pouchDetached = true;
+      document.getElementById('pouchPopover').classList.remove('open');
+      const dp = document.getElementById('detachedPouch');
+      dp.classList.add('visible');
+      showToast('주머니를 독립 도킹 바로 분리했습니다 (4면 이동 가능)');
+      renderWorkspace();
+    }
+
+    function cycleDetachedEdge() {
+      if (!state.pouchDetached) detachPouchToEdge();
+      const edges = ['bottom', 'right', 'top', 'left'];
+      const next = edges[(edges.indexOf(state.pouchEdge) + 1) % edges.length];
+      state.pouchEdge = next;
+      const dp = document.getElementById('detachedPouch');
+      dp.className = `detached-pouch visible edge-${next}`;
+      showToast(`주머니를 ${next.toUpperCase()} 가장자리에 도킹했습니다`);
+    }
+
+    function reattachPouchAndOpen() {
+      state.pouchDetached = false;
+      document.getElementById('detachedPouch').classList.remove('visible');
+      state.selectedTile = state.activeDocumentID || 'doc-1';
+      state.pouchOpen = true;
+      renderWorkspace();
+    }
+
+    function togglePouchSubbox(id) {
+      const box = document.getElementById(id);
+      if (!box) return;
+      box.classList.toggle('open');
+      if (id === 'coauthorBox') {
+        document.getElementById('coauthorToggleStatus').textContent = box.classList.contains('open') ? '접기' : '열기';
+      }
+    }
+
+    /* ==========================================================================
+       Editor Formatting, AI & Presentation Actions
+       ========================================================================== */
+    function toggleSwitch(key) {
+      state[key] = !state[key];
+      const sw = document.getElementById(`switch-${key}`);
+      if (sw) sw.classList.toggle('on', state[key]);
+      renderWorkspace();
+      const names = { autocomplete: '자동완성', typewriter: '타자기 중앙 스크롤', focusDimming: '현재 문단에 집중' };
+      showToast(`${names[key]} ${state[key] ? '켜짐' : '꺼짐'}`);
+    }
+
+    function setBlockStyle(type) {
+      const doc = state.documents.find(d => d.id === state.activeDocumentID);
+      if (!doc || !doc.blocks[state.activeParagraphIndex]) return;
+      doc.blocks[state.activeParagraphIndex].type = type;
+      updateBlockStyleButtons(type);
+      renderWorkspace();
+    }
+
+    function updateBlockStyleButtons(type) {
+      ['p', 'h1', 'h2', 'h3', 'quote'].forEach(t => {
+        const btn = document.getElementById(`blk-${t}`);
+        if (btn) btn.classList.toggle('active', t === type);
+      });
+    }
+
+    function applyInlineFormat(cmd) {
+      if (cmd === 'bold') document.execCommand('bold');
+      else if (cmd === 'italic') document.execCommand('italic');
+      else if (cmd === 'code') {
+        const sel = window.getSelection();
+        if (sel && sel.toString()) {
+          document.execCommand('insertHTML', false, `<code style="background:var(--code-bg); padding:1px 5px; border-radius:4px; font-family:var(--font-mono); font-size:0.9em;">${sel.toString()}</code>`);
+        }
+      }
+    }
+
+    function applyTextColor(color, btn) {
+      document.querySelectorAll('.color-dot-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      const activePara = document.querySelector('.spatial-slot.active .manuscript-block.active-paragraph');
+      if (activePara) activePara.style.color = color;
+    }
+
+    function changeEditorFontSize(delta) {
+      const current = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--editor-font-size')) || 18.5;
+      const next = Math.max(13, Math.min(28, Math.round(current + delta)));
+      document.documentElement.style.setProperty('--editor-font-size', `${next}px`);
+      document.getElementById('pouchFontSizeVal').textContent = next;
+    }
+
+    function triggerGhostContinuation() {
+      state.ghostVisibleOnDoc = state.activeDocumentID;
+      state.ghostParagraphIndex = state.activeParagraphIndex;
+      closePouchPopover();
+      renderWorkspace();
+      showToast('커서 위치에 로컬 AI Ghost 제안이 표시되었습니다 (Tab으로 수락)');
+    }
+
+    function polishSelectedSentence() {
+      const doc = state.documents.find(d => d.id === state.activeDocumentID);
+      if (!doc) return;
+      const blk = doc.blocks[state.activeParagraphIndex];
+      if (!blk) return;
+      blk.text = blk.text.replace('닦고 있었다.', '조심스레 닦아내고 있었다.');
+      closePouchPopover();
+      renderWorkspace();
+      showToast('선택한 문단을 다듬었습니다 (⌘Z로 실행 취소 가능)');
+    }
+
+    function generateCoauthorDraft() {
+      const preview = document.getElementById('coauthorResultPreview');
+      const insertBtn = document.getElementById('coauthorInsertBtn');
+      preview.classList.add('visible');
+      insertBtn.style.display = 'inline-block';
+      showToast('로컬 모델이 공동 집필 초안을 생성했습니다');
+    }
+
+    function insertCoauthorResult() {
+      const doc = state.documents.find(d => d.id === state.activeDocumentID);
+      const previewText = document.getElementById('coauthorResultPreview').textContent.trim();
+      if (!doc || !previewText) return;
+      doc.blocks.splice(state.activeParagraphIndex + 1, 0, { type: 'p', text: previewText });
+      state.activeParagraphIndex += 1;
+      closePouchPopover();
+      renderWorkspace();
+      showToast(`‘${doc.title}’에 공동 집필 문단을 삽입했습니다`);
+    }
+
+    function excerptCurrentParagraphToNote() {
+      const doc = state.documents.find(d => d.id === state.activeDocumentID);
+      const noteDoc = state.documents.find(d => d.kind === 'note');
+      if (!doc || !noteDoc) return;
+      const quoteText = doc.blocks[state.activeParagraphIndex]?.text || '';
+      noteDoc.blocks.push({ type: 'quote', text: quoteText });
+      openOrFocusDocument(noteDoc.id);
+      closePouchPopover();
+      showToast(`‘${noteDoc.title}’에 선택한 구절을 발췌했습니다`);
+    }
+
+    function addCharacterFromPouch() {
+      const name = document.getElementById('newCharName').value.trim();
+      const role = document.getElementById('newCharRole').value.trim() || '등장인물';
+      const note = document.getElementById('newCharNote').value.trim() || '새로 등록된 인물 기록입니다.';
+      if (!name) return;
+      const id = 'char-' + (state.characters.length + 1);
+      state.characters.push({
+        id,
+        name,
+        initial: name.charAt(0),
+        role,
+        note,
+        traits: ['신규등록'],
+        docId: state.activeDocumentID,
+        paragraphIdx: state.activeParagraphIndex
+      });
+      state.expandedCardId = id;
+      renderWorkspace();
+      showToast(`‘${name}’ 인물 카드를 추가했습니다`);
+    }
+
+    /* ==========================================================================
+       Spatial Layout Operations (Open, Close, Drag, Resize, Presets)
+       ========================================================================== */
+    function openOrFocusDocument(docId) {
+      const exists = state.columns.some(c => c.slots.some(s => s.tile === docId));
+      if (!exists) {
+        let lastDocCol = -1;
+        state.columns.forEach((c, idx) => {
+          if (c.slots.some(s => s.tile.startsWith('doc-'))) lastDocCol = idx;
+        });
+        const insertAt = lastDocCol >= 0 ? lastDocCol + 1 : state.columns.length;
+        state.columns.splice(insertAt, 0, { id: 'col-' + Date.now(), width: null, slots: [{ tile: docId, weight: 1.0 }] });
+      }
+      state.activeDocumentID = docId;
+      state.selectedTile = docId;
+      state.activeParagraphIndex = 0;
+      renderWorkspace();
+    }
+
+    function openAllDocumentsSideBySide() {
+      state.documents.forEach(doc => {
+        if (!state.columns.some(c => c.slots.some(s => s.tile === doc.id))) {
+          state.columns.push({ id: 'col-' + doc.id, width: null, slots: [{ tile: doc.id, weight: 1.0 }] });
+        }
+      });
+      renderWorkspace();
+      showToast('모든 문서를 나란히 펼쳤습니다');
+    }
+
+    function toggleToolTile(tileId) {
+      const exists = state.columns.some(c => c.slots.some(s => s.tile === tileId));
+      if (exists) {
+        closeTile(tileId);
+        return;
+      }
+      if (tileId === 'navigator') {
+        state.columns.unshift({ id: 'col-nav', width: 204, slots: [{ tile: 'navigator', weight: 1.0 }] });
+      } else {
+        const lastCol = state.columns[state.columns.length - 1];
+        const isToolCol = lastCol && lastCol.slots.every(s => !s.tile.startsWith('doc-') && s.tile !== 'navigator');
+        if (isToolCol) {
+          const w = 1 / (lastCol.slots.length + 1);
+          lastCol.slots.forEach(s => s.weight *= (1 - w));
+          lastCol.slots.push({ tile: tileId, weight: w });
+        } else {
+          state.columns.push({ id: 'col-' + tileId, width: tileId === 'search' ? 320 : 256, slots: [{ tile: tileId, weight: 1.0 }] });
+        }
+      }
+      state.selectedTile = tileId;
+      renderWorkspace();
+    }
+
+    function closeTile(tileId) {
+      const isDoc = tileId.startsWith('doc-');
+      const openDocs = state.columns.flatMap(c => c.slots).filter(s => s.tile.startsWith('doc-'));
+      if (isDoc && openDocs.length <= 1) {
+        showToast('최소 1개의 원고 타일은 열려 있어야 합니다');
+        return;
+      }
+      state.columns.forEach(c => {
+        c.slots = c.slots.filter(s => s.tile !== tileId);
+        const sum = c.slots.reduce((a, b) => a + b.weight, 0);
+        if (sum > 0) c.slots.forEach(s => s.weight /= sum);
+      });
+      state.columns = state.columns.filter(c => c.slots.length > 0);
+      if (state.activeDocumentID === tileId) {
+        const remainingDoc = state.columns.flatMap(c => c.slots).find(s => s.tile.startsWith('doc-'));
+        if (remainingDoc) state.activeDocumentID = remainingDoc.tile;
+      }
+      if (state.selectedTile === tileId) {
+        state.selectedTile = state.activeDocumentID;
+        state.pouchOpen = false;
+      }
+      renderWorkspace();
+    }
+
+    function createNewManuscript() {
+      const num = state.documents.filter(d => d.kind === 'manuscript').length + 1;
+      const newId = 'doc-' + Date.now();
+      state.documents.push({
+        id: newId,
+        title: `${num}장. 새로운 장면`,
+        kind: 'manuscript',
+        goal: 1000,
+        blocks: [
+          { type: 'h2', text: `${num}장 · 새로운 장면` },
+          { type: 'p', text: '여기에 새 장면을 작성하세요. 문단 왼쪽의 그립(⋮⋮)을 끌어 다른 원고와 문단을 주고받을 수 있습니다.' }
+        ]
+      });
+      openOrFocusDocument(newId);
+      closePouchPopover();
+      showToast(`‘${num}장. 새로운 장면’ 원고를 생성해 나란히 열었습니다`);
+    }
+
+    function jumpToSource(docId, paragraphIdx) {
+      openOrFocusDocument(docId);
+      state.activeParagraphIndex = paragraphIdx;
+      renderWorkspace();
+      setTimeout(() => {
+        const target = document.querySelector(`.manuscript-block[data-doc-id="${docId}"][data-idx="${paragraphIdx}"]`);
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          target.classList.add('flash-highlight');
+          setTimeout(() => target.classList.remove('flash-highlight'), 950);
+        }
+      }, 40);
+    }
+
+    /* Column & Row Interactive Resize */
+    function startColResize(e, colIdx) {
+      e.preventDefault();
+      const startX = e.clientX;
+      const colEls = document.querySelectorAll('.spatial-column');
+      const targetIdx = state.columns[colIdx].width == null && state.columns[colIdx + 1]?.width != null ? colIdx + 1 : colIdx;
+      const direction = targetIdx === colIdx + 1 ? -1 : 1;
+      const startWidth = state.columns[targetIdx].width || colEls[targetIdx].getBoundingClientRect().width;
+
+      function onMove(ev) {
+        const delta = (ev.clientX - startX) * direction;
+        state.columns[targetIdx].width = Math.max(165, Math.min(900, Math.round(startWidth + delta)));
+        renderWorkspace();
+      }
+      function onUp() {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    function startRowResize(e, colIdx, rowIdx) {
+      e.preventDefault();
+      const startY = e.clientY;
+      const colEl = document.querySelectorAll('.spatial-column')[colIdx];
+      const colHeight = colEl.getBoundingClientRect().height || 500;
+      const slotA = state.columns[colIdx].slots[rowIdx];
+      const slotB = state.columns[colIdx].slots[rowIdx + 1];
+      const combined = slotA.weight + slotB.weight;
+      const startA = slotA.weight;
+
+      function onMove(ev) {
+        const deltaRatio = ((ev.clientY - startY) / colHeight) * combined;
+        slotA.weight = Math.max(combined * 0.2, Math.min(combined * 0.8, startA + deltaRatio));
+        slotB.weight = combined - slotA.weight;
+        renderWorkspace();
+      }
+      function onUp() {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    function equalizeColumnRows(colIdx, rowIdx) {
+      const slotA = state.columns[colIdx].slots[rowIdx];
+      const slotB = state.columns[colIdx].slots[rowIdx + 1];
+      if (!slotA || !slotB) return;
+      const half = (slotA.weight + slotB.weight) / 2;
+      slotA.weight = half;
+      slotB.weight = half;
+      renderWorkspace();
+      showToast('인접한 두 행의 비율을 50:50으로 맞췄습니다');
+    }
+
+    /* 2D Spatial Tile Header Drag & Reorder (T08 - T11) */
+    function startTileHeaderDrag(e, tileId) {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let dragging = false;
+      const pill = document.getElementById('dragCursorPill');
+      const pillLabel = document.getElementById('dragCursorPillLabel');
+
+      function onMove(ev) {
+        if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 5) {
+          dragging = true;
+          closePouchPopover();
+          pillLabel.textContent = getTileTitle(tileId);
+          pill.classList.add('visible');
+        }
+        if (dragging) {
+          pill.style.left = `${ev.clientX + 14}px`;
+          pill.style.top = `${ev.clientY - 18}px`;
+        }
+      }
+
+      function onUp(ev) {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (!dragging) return;
+        pill.classList.remove('visible');
+
+        const targetEl = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.spatial-slot');
+        const targetTileId = targetEl?.dataset?.tileId;
+        if (targetTileId && targetTileId !== tileId) {
+          const rect = targetEl.getBoundingClientRect();
+          const relY = (ev.clientY - rect.top) / rect.height;
+          const relX = (ev.clientX - rect.left) / rect.width;
+
+          // Remove dragged tile from old slot
+          let oldWidth = tileId === 'navigator' ? 204 : (tileId.startsWith('doc-') ? null : 256);
+          state.columns.forEach(c => {
+            c.slots = c.slots.filter(s => s.tile !== tileId);
+            const sum = c.slots.reduce((a, b) => a + b.weight, 0);
+            if (sum > 0) c.slots.forEach(s => s.weight /= sum);
+          });
+          state.columns = state.columns.filter(c => c.slots.length > 0);
+
+          // Find target column & row
+          let tCol = -1, tRow = -1;
+          state.columns.forEach((c, ci) => {
+            const ri = c.slots.findIndex(s => s.tile === targetTileId);
+            if (ri !== -1) { tCol = ci; tRow = ri; }
+          });
+
+          if (tCol !== -1) {
+            if (relY < 0.28) {
+              const half = Math.max(0.25, state.columns[tCol].slots[tRow].weight / 2);
+              state.columns[tCol].slots[tRow].weight = half;
+              state.columns[tCol].slots.splice(tRow, 0, { tile: tileId, weight: half });
+            } else if (relY > 0.72) {
+              const half = Math.max(0.25, state.columns[tCol].slots[tRow].weight / 2);
+              state.columns[tCol].slots[tRow].weight = half;
+              state.columns[tCol].slots.splice(tRow + 1, 0, { tile: tileId, weight: half });
+            } else if (relX < 0.5) {
+              state.columns.splice(tCol, 0, { id: 'col-' + Date.now(), width: oldWidth, slots: [{ tile: tileId, weight: 1.0 }] });
+            } else {
+              state.columns.splice(tCol + 1, 0, { id: 'col-' + Date.now(), width: oldWidth, slots: [{ tile: tileId, weight: 1.0 }] });
+            }
+          }
+          renderWorkspace();
+          showToast(`‘${getTileTitle(tileId)}’ 타일 위치를 재배치했습니다`);
+        }
+      }
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    /* Paragraph Slip Drag (E01: startParagraphSlipDrag) */
+    function startParagraphSlipDrag(e, sourceDocId, sourceIdx) {
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let dragging = false;
+      const pill = document.getElementById('dragCursorPill');
+      const pillLabel = document.getElementById('dragCursorPillLabel');
+
+      function onMove(ev) {
+        if (!dragging && Math.hypot(ev.clientX - startX, ev.clientY - startY) > 6) {
+          dragging = true;
+          pillLabel.textContent = ev.altKey ? '문단 복제 (Alt)' : '문단 이동';
+          pill.classList.add('visible');
+        }
+        if (dragging) {
+          pillLabel.textContent = ev.altKey ? '문단 복제 (Alt)' : '문단 이동';
+          pill.style.left = `${ev.clientX + 14}px`;
+          pill.style.top = `${ev.clientY - 18}px`;
+        }
+      }
+
+      function onUp(ev) {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        if (!dragging) return;
+        pill.classList.remove('visible');
+
+        const targetBlock = document.elementFromPoint(ev.clientX, ev.clientY)?.closest('.manuscript-block');
+        if (!targetBlock) return;
+        const targetDocId = targetBlock.dataset.docId;
+        const targetIdx = parseInt(targetBlock.dataset.idx, 10);
+        if (targetDocId === sourceDocId && targetIdx === sourceIdx) return;
+
+        const srcDoc = state.documents.find(d => d.id === sourceDocId);
+        const dstDoc = state.documents.find(d => d.id === targetDocId);
+        if (!srcDoc || !dstDoc) return;
+
+        const movedBlock = { ...srcDoc.blocks[sourceIdx] };
+        const copyMode = ev.altKey || srcDoc.blocks.length <= 1;
+        if (!copyMode) {
+          srcDoc.blocks.splice(sourceIdx, 1);
+        }
+        dstDoc.blocks.splice(targetIdx, 0, movedBlock);
+        renderWorkspace();
+        showToast(sourceDocId === targetDocId ? '문단 순서를 옮겼습니다' : `‘${dstDoc.title}’로 문단을 ${copyMode ? '복사' : '이동'}했습니다`);
+      }
+
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    /* Detached Pouch Drag (4-Edge Docking + Outside Window Collapse to Orb) */
+    function startDetachedPouchDrag(e) {
+      e.preventDefault();
+      const mainWin = document.getElementById('mainWindow');
+      const pill = document.getElementById('dragCursorPill');
+      const pillLabel = document.getElementById('dragCursorPillLabel');
+      pillLabel.textContent = 'M 주머니 이동 (창 밖으로 끌면 접기)';
+      pill.classList.add('visible');
+
+      function onMove(ev) {
+        pill.style.left = `${ev.clientX + 12}px`;
+        pill.style.top = `${ev.clientY - 18}px`;
+      }
+      function onUp(ev) {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        pill.classList.remove('visible');
+
+        const winRect = mainWin.getBoundingClientRect();
+        const outside = ev.clientX < winRect.left - 4 || ev.clientX > winRect.right + 4 || ev.clientY < winRect.top - 4 || ev.clientY > winRect.bottom + 4;
+        if (outside) {
+          collapseWindowToOrb();
+          return;
+        }
+        const dists = [
+          { edge: 'left', d: Math.abs(ev.clientX - winRect.left) },
+          { edge: 'right', d: Math.abs(winRect.right - ev.clientX) },
+          { edge: 'top', d: Math.abs(ev.clientY - winRect.top) },
+          { edge: 'bottom', d: Math.abs(winRect.bottom - ev.clientY) }
+        ];
+        dists.sort((a, b) => a.d - b.d);
+        state.pouchEdge = dists[0].edge;
+        const dp = document.getElementById('detachedPouch');
+        dp.className = `detached-pouch visible edge-${state.pouchEdge}`;
+      }
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    }
+
+    /* ==========================================================================
+       Entity Peek Hover Lifecycle (190ms dismiss, cross-pane highlight)
+       ========================================================================== */
+    let peekHideTimer = null;
+    let currentPeekEntity = null;
+
+    function showEntityPeek(e, term) {
+      if (state.whisperTyping) return;
+      clearTimeout(peekHideTimer);
+      const data = entitiesCatalog[term];
+      if (!data) return;
+      currentPeekEntity = data;
+
+      document.getElementById('peekBadge').textContent = data.badge;
+      document.getElementById('peekName').textContent = data.name;
+      document.getElementById('peekRole').textContent = data.role;
+      document.getElementById('peekNote').textContent = data.note;
+      document.getElementById('peekTags').textContent = data.tags;
+
+      const card = document.getElementById('entityPeekCard');
+      card.classList.add('visible');
+      const rect = e.target.getBoundingClientRect();
+      const left = Math.max(16, Math.min(window.innerWidth - 284, rect.left - 80));
+      const top = Math.max(16, rect.top - 118);
+      card.style.left = `${left}px`;
+      card.style.top = `${top}px`;
+
+      // Highlight matching paragraphs across all open panes
+      document.querySelectorAll('.manuscript-block').forEach(blk => {
+        blk.classList.toggle('resonating-paragraph', blk.innerText.includes(term));
+      });
+    }
+
+    function keepPeekAlive() {
+      clearTimeout(peekHideTimer);
+    }
+
+    function scheduleHidePeek() {
+      clearTimeout(peekHideTimer);
+      peekHideTimer = setTimeout(() => {
+        document.getElementById('entityPeekCard').classList.remove('visible');
+        document.querySelectorAll('.manuscript-block.resonating-paragraph').forEach(el => el.classList.remove('resonating-paragraph'));
+      }, 190);
+    }
+
+    function jumpFromEntityPeek() {
+      if (!currentPeekEntity) return;
+      document.getElementById('entityPeekCard').classList.remove('visible');
+      jumpToSource(currentPeekEntity.docId, currentPeekEntity.paragraphIdx);
+    }
+
+    /* ==========================================================================
+       Window Collapse to Orb, Theme, Modes, Command Palette & Workbench Helpers
+       ========================================================================== */
+    function collapseWindowToOrb() {
+      closePouchPopover();
+      document.getElementById('mainWindow').classList.add('collapsed-to-orb');
+      document.getElementById('floatingMOrb').classList.add('visible');
+      showToast('창을 플로팅 M 주머니 오브로 접었습니다');
+    }
+
+    function restoreWindowFromOrb() {
+      document.getElementById('floatingMOrb').classList.remove('visible');
+      document.getElementById('mainWindow').classList.remove('collapsed-to-orb');
+    }
+
+    function toggleMaximizeWindow() {
+      document.getElementById('mainWindow').classList.toggle('maximized');
+      if (state.pouchOpen) positionPouchPopover();
+    }
+
+    function setWorkspaceMode(mode) {
+      state.workspaceMode = mode;
+      document.getElementById('modeWriteBtn').classList.toggle('active', mode === 'write');
+      document.getElementById('modeMapBtn').classList.toggle('active', mode === 'map');
+      document.getElementById('modeOutlineBtn').classList.toggle('active', mode === 'outline');
+
+      // Remove existing map/outline tiles first
+      state.columns.forEach(c => {
+        c.slots = c.slots.filter(s => s.tile !== 'map' && s.tile !== 'outline');
+      });
+      state.columns = state.columns.filter(c => c.slots.length > 0);
+
+      if (mode === 'map') toggleToolTile('map');
+      else if (mode === 'outline') toggleToolTile('outline');
+      else renderWorkspace();
+    }
+
+    function toggleTheme() {
+      setThemeExplicit(state.theme === 'light' ? 'dark' : 'light');
+    }
+
+    function setThemeExplicit(theme) {
+      state.theme = theme;
+      document.body.setAttribute('data-theme', theme);
+      document.getElementById('hudLightBtn').classList.toggle('active', theme === 'light');
+      document.getElementById('hudDarkBtn').classList.toggle('active', theme === 'dark');
+      // Clear inline overrides if switching theme
+      if (!state.customPaletteActive) {
+        document.documentElement.style.removeProperty('--editor-surface');
+        document.documentElement.style.removeProperty('--card-surface');
+        document.documentElement.style.removeProperty('--novel');
+        document.documentElement.style.removeProperty('--blue');
+      }
+      renderWorkspace();
+    }
+
+    function toggleCustomPalettePreset() {
+      state.customPaletteActive = !state.customPaletteActive;
+      document.getElementById('hudCustomPaletteBtn').classList.toggle('active', state.customPaletteActive);
+      if (state.customPaletteActive) {
+        // MintPalettetinted botanical warm preset
+        if (state.theme === 'light') {
+          updateLiveToken('--editor-surface', '#FBF8EB');
+          updateLiveToken('--card-surface', '#F2EED9');
+          updateLiveAccent('#2D6A4F');
+        } else {
+          updateLiveToken('--editor-surface', '#181D16');
+          updateLiveToken('--card-surface', '#121610');
+          updateLiveAccent('#74C69D');
+        }
+        showToast('사용자 5슬롯 커스텀 팔레트(MintPalette)를 적용했습니다');
+      } else {
+        setThemeExplicit(state.theme);
+        showToast('기본 릴리즈 테마로 복원했습니다');
+      }
+    }
+
+    function updateLiveToken(prop, val) {
+      document.documentElement.style.setProperty(prop, val);
+    }
+
+    function updateLiveAccent(hex) {
+      document.documentElement.style.setProperty('--novel', hex);
+      document.documentElement.style.setProperty('--blue', hex);
+    }
+
+    function applyLayoutPreset(preset) {
+      closePouchPopover();
+      if (preset === 'focused') {
+        state.columns = [
+          { id: 'col-doc1', width: null, slots: [{ tile: 'doc-1', weight: 1.0 }] }
+        ];
+      } else if (preset === 'editorial') {
+        state.columns = [
+          { id: 'col-nav', width: 204, slots: [{ tile: 'navigator', weight: 1.0 }] },
+          { id: 'col-doc1', width: null, slots: [{ tile: 'doc-1', weight: 1.0 }] },
+          { id: 'col-doc2', width: null, slots: [{ tile: 'doc-2', weight: 1.0 }] },
+          { id: 'col-tools', width: 256, slots: [
+            { tile: 'characters', weight: 0.52 },
+            { tile: 'margin', weight: 0.48 }
+          ]}
+        ];
+      } else if (preset === 'allTools') {
+        state.columns = [
+          { id: 'col-nav', width: 200, slots: [
+            { tile: 'navigator', weight: 0.55 },
+            { tile: 'search', weight: 0.45 }
+          ]},
+          { id: 'col-doc1', width: null, slots: [{ tile: 'doc-1', weight: 1.0 }] },
+          { id: 'col-doc2', width: null, slots: [{ tile: 'doc-3', weight: 1.0 }] },
+          { id: 'col-tools', width: 268, slots: [
+            { tile: 'characters', weight: 0.34 },
+            { tile: 'narrative', weight: 0.33 },
+            { tile: 'margin', weight: 0.33 }
+          ]}
+        ];
+      }
+      renderWorkspace();
+    }
+
+    function toggleWhisperModeDemo() {
+      state.whisperTyping = !state.whisperTyping;
+      document.body.classList.toggle('whisper-typing', state.whisperTyping);
+      if (state.whisperTyping) {
+        showToast('속삭임(Whisper) 타이핑 모드: 크롬과 헤더가 0.08 투명도로 낮아집니다');
+      }
+    }
+
+    function selectModel(name) {
+      document.getElementById('modelStatusLabel').textContent = `${name} · 준비됨`;
+      document.querySelectorAll('#modelChipBox .hud-chip').forEach(b => {
+        b.classList.toggle('active', b.textContent === name);
+      });
+      showToast(`로컬 추론 모델을 ${name}(으)로 변경했습니다`);
+    }
+
+    /* Quick Command Palette (WorkspaceQuickCommandPanel) */
+    function openCommandPalette() {
+      closePouchPopover();
+      document.getElementById('cmdPaletteBackdrop').classList.add('open');
+      const input = document.getElementById('cmdPaletteInput');
+      input.value = '';
+      renderCommandPaletteList();
+      setTimeout(() => input.focus(), 20);
+    }
+
+    function closeCommandPalette() {
+      document.getElementById('cmdPaletteBackdrop').classList.remove('open');
+    }
+
+    function renderCommandPaletteList() {
+      const q = document.getElementById('cmdPaletteInput').value.trim().toLowerCase();
+      const commands = [
+        { cat: '명령', title: '타자기 중앙 스크롤', desc: '현재 문단을 화면 눈높이 중앙에 유지', act: () => toggleSwitch('typewriter') },
+        { cat: '명령', title: '현재 문단에 집중', desc: '작업 중인 문단 외 주변 문단을 부드럽게 흐림 처리', act: () => toggleSwitch('focusDimming') },
+        { cat: '명령', title: '문서 나란히 펼치기', desc: '프로젝트의 모든 원고를 2차원 공간 타일로 열기', act: () => openAllDocumentsSideBySide() },
+        { cat: '명령', title: '테마 전환', desc: '라이트 종이 테마와 다크 흑요석 테마 전환', act: () => toggleTheme() },
+        { cat: '문서', title: '1장. 램프실의 아침', desc: '원고 열기 및 이동', act: () => openOrFocusDocument('doc-1') },
+        { cat: '문서', title: '2장. 봄, 공사', desc: '원고 열기 및 이동', act: () => openOrFocusDocument('doc-2') },
+        { cat: '문서', title: '고증 노트 — 등대 구조와 렌즈', desc: '참고 노트 열기', act: () => openOrFocusDocument('doc-3') },
+        { cat: '인물', title: '한도경 (등대 소장)', desc: '면장갑을 끼고 프레넬 렌즈를 닦는 27년 경력 등대지기', act: () => jumpToSource('doc-1', 2) },
+        { cat: '인물', title: '윤소리 (손녀 · 고3)', desc: '일지 스물일곱 권을 정리하며 사학과를 꿈꾸는 손녀', act: () => jumpToSource('doc-1', 5) }
+      ].filter(c => !q || c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q) || c.cat.includes(q)).slice(0, 9);
+
+      const list = document.getElementById('cmdPaletteList');
+      list.innerHTML = commands.map((c, i) => `
+        <div class="cmd-item ${i === 0 ? 'active' : ''}" onclick="executePaletteItem(${i})">
+          <span class="cmd-cat">${c.cat}</span>
+          <div class="cmd-main">
+            <span class="cmd-title">${c.title}</span>
+            <span class="cmd-desc">${c.desc}</span>
+          </div>
+        </div>
+      `).join('');
+      window._currentPaletteCmds = commands;
+    }
+
+    function executePaletteItem(idx) {
+      const item = window._currentPaletteCmds?.[idx];
+      closeCommandPalette();
+      if (item && item.act) item.act();
+    }
+
+    /* Helpers */
+    function getTileTitle(tileId) {
+      if (tileId.startsWith('doc-')) {
+        return state.documents.find(d => d.id === tileId)?.title || '원고';
+      }
+      const map = {
+        navigator: '문서',
+        characters: '인물',
+        narrative: '서사 흐름',
+        margin: '마진 노트',
+        search: '검색',
+        context: '참고 기록',
+        map: '이야기 지도',
+        outline: '문서 개요'
+      };
+      return map[tileId] || '도구';
+    }
+
+    function getToolSvgIcon(tileId) {
+      const icons = {
+        navigator: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>`,
+        characters: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>`,
+        narrative: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>`,
+        margin: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/></svg>`,
+        search: `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>`
+      };
+      return icons[tileId] || `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`;
+    }
+
+    function updateChromeTitles() {
+      const activeDoc = state.documents.find(d => d.id === state.activeDocumentID) || state.documents[0];
+      document.getElementById('chromeActiveDocTitle').textContent = activeDoc ? activeDoc.title : '원고';
+    }
+
+    let toastTimer = null;
+    function showToast(msg) {
+      const toast = document.getElementById('workspaceToast');
+      document.getElementById('workspaceToastText').textContent = msg;
+      toast.classList.add('visible');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove('visible'), 2400);
+    }
+
+    // Global Keyboard Shortcuts & Outside Click Dismissal
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        openCommandPalette();
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        if (!state.columns.some(c => c.slots.some(s => s.tile === 'search'))) {
+          toggleToolTile('search');
+        }
+        setTimeout(() => document.getElementById('unifiedSearchInput')?.focus(), 50);
+      } else if (e.key === 'Escape') {
+        if (document.getElementById('cmdPaletteBackdrop').classList.contains('open')) {
+          closeCommandPalette();
+        } else if (state.pouchOpen) {
+          closePouchPopover();
+        }
+      }
+    });
+
+    window.addEventListener('mousedown', (e) => {
+      if (state.whisperTyping) {
+        state.whisperTyping = false;
+        document.body.classList.remove('whisper-typing');
+      }
+      if (state.pouchOpen) {
+        const popover = document.getElementById('pouchPopover');
+        const trigger = e.target.closest('.pouch-trigger');
+        const hud = e.target.closest('.design-workbench-hud');
+        if (!popover.contains(e.target) && !trigger && !hud) {
+          closePouchPopover();
+        }
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      if (state.pouchOpen) positionPouchPopover();
+    });
+
+    // Initial render
+    renderWorkspace();
+  </script>
+</body>
+</html>

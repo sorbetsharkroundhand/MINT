@@ -161,8 +161,14 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("b", modifiers: .command)
             Button("기울임") { send(#selector(BlockTextView.mintFormatItalic(_:))) }
                 .keyboardShortcut("i", modifiers: .command)
+            Button("취소선") { send(#selector(BlockTextView.mintFormatStrikethrough(_:))) }
+                .keyboardShortcut("x", modifiers: [.command, .shift])
+            Button("형광펜 하이라이트") { send(#selector(BlockTextView.mintFormatHighlight(_:))) }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
             Button("인라인 코드") { send(#selector(BlockTextView.mintFormatCode(_:))) }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("링크 삽입") { send(#selector(BlockTextView.mintFormatLink(_:))) }
+                .keyboardShortcut("l", modifiers: .command)
 
             Divider()
 
@@ -174,6 +180,12 @@ public struct MintCommands: Commands {
                 .keyboardShortcut("2", modifiers: [.command, .option])
             Button("제목 3") { send(#selector(BlockTextView.mintHeading3(_:))) }
                 .keyboardShortcut("3", modifiers: [.command, .option])
+            Button("제목 4") { send(#selector(BlockTextView.mintHeading4(_:))) }
+                .keyboardShortcut("4", modifiers: [.command, .option])
+            Button("제목 5") { send(#selector(BlockTextView.mintHeading5(_:))) }
+                .keyboardShortcut("5", modifiers: [.command, .option])
+            Button("제목 6") { send(#selector(BlockTextView.mintHeading6(_:))) }
+                .keyboardShortcut("6", modifiers: [.command, .option])
 
             Divider()
 
@@ -186,6 +198,13 @@ public struct MintCommands: Commands {
 
             Divider()
 
+            Button("문단 위로 이동") { send(#selector(BlockTextView.mintMoveParagraphUp(_:))) }
+                .keyboardShortcut(.upArrow, modifiers: [.option])
+            Button("문단 아래로 이동") { send(#selector(BlockTextView.mintMoveParagraphDown(_:))) }
+                .keyboardShortcut(.downArrow, modifiers: [.option])
+
+            Divider()
+
             Button("왼쪽 정렬") { send(#selector(BlockTextView.mintAlignLeft(_:))) }
             Button("가운데 정렬") { send(#selector(BlockTextView.mintAlignCenter(_:))) }
             Button("오른쪽 정렬") { send(#selector(BlockTextView.mintAlignRight(_:))) }
@@ -194,14 +213,28 @@ public struct MintCommands: Commands {
 
             Button("이미지 삽입…") { send(#selector(BlockTextView.insertImageFromMenu(_:))) }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
+            Button("원본 마크다운 소스 보기 전환") { send(#selector(BlockTextView.mintToggleSourceMode(_:))) }
+                .keyboardShortcut("/", modifiers: .command)
             }
             .disabled(hasMintEditor != true)
         }
 
         // 보기 ▸ 검색 · 사이드바 · 외형.
         CommandMenu("보기") {
-            Button("원문 검색…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
-                .keyboardShortcut("k", modifiers: .command)
+            Button("검색 객체 열기") { editorRequests.spatialWorkspace?.openSearch() }
+                .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
+            Button("빠른 명령 팔레트…") {
+                _ = WorkspaceQuickCommandPanel.present(
+                    session: session,
+                    requests: editorRequests,
+                    theme: effectiveDark ? .dark : .light,
+                    toggleTheme: { appearance = effectiveDark ? "light" : "dark" }
+                )
+            }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
+            Button("원문 확인·질문…") { SourceSearchPanel.present(session: session, requests: editorRequests) }
+                .keyboardShortcut("k", modifiers: [.command, .option])
                 .disabled(!session.isEditorEditable || legacyWorkspace.mode == .legacy || legacyWorkspace.isTransitioning)
             Button("이전 집필 위치로 돌아가기") { editorRequests.returnToWriting(in: session) }
                 .keyboardShortcut("k", modifiers: [.command, .shift])
@@ -211,11 +244,20 @@ public struct MintCommands: Commands {
             // 문서 내 검색 — 에디터의 performKeyEquivalent(⌘F)가 우선 처리하고,
             // 한글 IME 등으로 뷰에 닿지 못한 경우 이 메뉴가 안전망이 된다.
             Group {
-                Button("문서에서 찾기") { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                Button("문서에서 찾기") {
+                    if let spatial = editorRequests.spatialWorkspace, legacyWorkspace.mode != .legacy { spatial.openSearch(scope: .document) }
+                    else { send(#selector(BlockTextView.mintFindInDocument(_:))) }
+                }
                     .keyboardShortcut("f", modifiers: .command)
-                Button("다음 찾기") { send(#selector(BlockTextView.mintFindNext(_:))) }
+                Button("다음 찾기") {
+                    if legacyWorkspace.mode != .legacy, let advance = editorRequests.spatialWorkspace?.advanceSearch { advance(1) }
+                    else { send(#selector(BlockTextView.mintFindNext(_:))) }
+                }
                     .keyboardShortcut("g", modifiers: .command)
-                Button("이전 찾기") { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                Button("이전 찾기") {
+                    if legacyWorkspace.mode != .legacy, let advance = editorRequests.spatialWorkspace?.advanceSearch { advance(-1) }
+                    else { send(#selector(BlockTextView.mintFindPrevious(_:))) }
+                }
                     .keyboardShortcut("g", modifiers: [.command, .shift])
             }
             .disabled(hasMintEditor != true)
@@ -223,7 +265,7 @@ public struct MintCommands: Commands {
             Button(legacyWorkspace.mode == .legacy ? "라이브러리 검색" : "프로젝트 검색") {
                 sidebarVisible = true
                 if let store = legacyWorkspace.legacyStore { store.requestSearchFocus() }
-                else { editorRequests.focusSearch() }
+                else { editorRequests.spatialWorkspace?.openSearch() }
             }
             .keyboardShortcut("f", modifiers: [.command, .shift])
 

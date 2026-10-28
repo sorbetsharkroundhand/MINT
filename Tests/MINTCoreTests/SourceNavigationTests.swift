@@ -159,6 +159,7 @@ final class SourceNavigationHarness {
     func layout() async { for _ in 0..<25 { host.layoutSubtreeIfNeeded(); await Task.yield() } }
     func editor() async throws -> BlockTextView {
         await layout()
+        if let key = fixture.session.runtimeIdentity?.key, let editor = requests.editor(for: key) { return editor }
         func find(_ v: NSView) -> BlockTextView? {
             (v as? BlockTextView) ?? v.subviews.compactMap { find($0) }.first
         }

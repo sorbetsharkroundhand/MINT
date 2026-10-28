@@ -49,7 +49,7 @@ final class MathEditGeometryTests: XCTestCase {
         XCTAssertNil(preview.superview)
     }
 
-    func testMathEditingSuppressesProseLineHighlight() async throws {
+    func testMathAndProseEditingKeepPersistentHighlightHidden() async throws {
         let h = try await SourceNavigationHarness()
         defer { h.close() }
         h.fixture.session.updateSelectedDocumentBody("$$E=mc^2$$\nAfter")
@@ -61,13 +61,18 @@ final class MathEditGeometryTests: XCTestCase {
         XCTAssertTrue(band.isHidden)
         view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
         view.refreshActiveLineHighlight()
-        XCTAssertFalse(band.isHidden)
+        XCTAssertTrue(band.isHidden)
     }
 
     func testMultilinePreviewStaysBesideTheWholeGroupAndPreservesSelection() async throws {
         let markdown = "$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\nAfter"
         let h = try await SourceNavigationHarness()
         defer { h.close() }
+        // This is the wide, side-by-side preview contract. A tiled document may
+        // intentionally omit a preview when it would cover the source glyphs.
+        if let active = h.fixture.session.selectedDocumentID, let model = h.requests.spatialWorkspace {
+            for id in model.layout.openDocuments where id != active { _ = model.close(.document(id)) }
+        }
         h.fixture.session.updateSelectedDocumentBody(markdown)
         let view = try await h.editor()
         view.window?.makeFirstResponder(view)
@@ -91,6 +96,21 @@ final class MathEditGeometryTests: XCTestCase {
         view.refreshRenderedBlocks()
         XCTAssertEqual(view.mathDrawnRect(forParagraphAt: 0), rendered)
         XCTAssertNil(preview.superview)
+    }
+
+    func testNarrowMathSourceKeepsItsOriginalWhenNoPreviewFits() async throws {
+        let h = try await SourceNavigationHarness(); defer { h.close() }
+        let original = "$$\n\\begin{aligned}\na &= b \\\\\nc &= d\n\\end{aligned}\n$$\nAfter"
+        h.fixture.session.updateSelectedDocumentBody(original)
+        let editor = try await h.editor(); editor.window?.makeFirstResponder(editor)
+        editor.setSelectedRange((editor.string as NSString).range(of: "a &"))
+        editor.refreshRenderedBlocks()
+        try await Task.sleep(for: .milliseconds(180))
+        XCTAssertEqual(editor.serialize(), original)
+        XCTAssertEqual((editor.string as NSString).substring(with: editor.selectedRange()), "a &")
+        if let preview = editor.subviews.first(where: { $0 is NSHostingView<MathPreviewView> }) {
+            XCTAssertLessThanOrEqual(preview.frame.maxX, editor.bounds.maxX)
+        }
     }
 
     func testTallAndInvalidMathKeepNativeLayoutAcrossEditingModes() async throws {

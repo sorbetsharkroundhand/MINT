@@ -130,12 +130,12 @@ struct WorkspaceResolvedLayout {
 
 /// Resolves complete frame allocations without writing preferences or domain state.
 enum WorkspaceLayoutPolicy {
-    static let outerInset: CGFloat = 10
-    static let surfaceGap: CGFloat = 10
-    static let railWidth: CGFloat = 56
-    static let chromeHeight: CGFloat = 52
+    static let outerInset: CGFloat = 8
+    static let surfaceGap: CGFloat = 8
+    static let railWidth: CGFloat = 44
+    static let chromeHeight: CGFloat = 36
     static let overlayThreshold: CGFloat = 1024
-    static let toolSeparatorWidth: CGFloat = 1
+    static let toolSeparatorWidth: CGFloat = surfaceGap
 
     static func resolve(availableWidth: CGFloat, presentation: WorkspacePresentationState,
                         railWidth: CGFloat = railWidth,

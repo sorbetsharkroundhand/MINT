@@ -332,24 +332,24 @@ struct EditorPane: View {
     let theme: MintTheme
     var editorBridge: ProjectEditorBridge? = nil
     var positionStore: WritingPositionStore = .shared
+    var documentID: WritingDocumentID? = nil
+    var showsChrome = true
     /// 집중 모드 — 툴바·상태 바를 숨겨 글에만 집중 (L10). 본문 상단 inset(44pt)이
     /// 신호등 아래에서 시작하므로 타이틀바 없이도 첫 줄이 신호등과 겹치지 않는다.
     @AppStorage("mint.chromeHidden") private var chromeHidden = false
 
     var body: some View {
         VStack(spacing: 0) {
-            if !chromeHidden {
+            if showsChrome && !chromeHidden {
                 EditorToolbar(
                     projectSession: projectSession,
                     editorRequests: editorRequests,
                     completion: completion,
                     settings: settings,
                     theme: theme)
-                theme.sepC.frame(height: 1)
             }
             editor
-            if !chromeHidden {
-                theme.sepC.frame(height: 1)
+            if showsChrome && !chromeHidden {
                 EditorStatusBar(
                     projectSession: projectSession,
                     completion: completion,
@@ -369,15 +369,17 @@ struct EditorPane: View {
                     lineSpacing: CGFloat(settings.lineSpacing),
                     baseFontSize: CGFloat(settings.editorFontSize),
                     proseLayout: projectSession.activeProject?.mode == .fiction
-                        && projectSession.selectedDocument?.kind == .manuscript ? .indented : .spaced,
+                        && displayedDocument?.kind == .manuscript ? .continuous : .spaced,
                     documentIdentity: identity,
                     positionStore: positionStore,
-                    isEditable: projectSession.isEditorEditable,
+                    isEditable: projectSession.phase == .ready && !projectSession.isTransitioning,
                     focusRequest: editorRequests.editorFocusRequest,
-                    searchJump: editorRequests.searchJump,
+                    searchJump: editorRequests.spatialWorkspace != nil ? nil : editorRequests.searchJump,
                     assetCatalog: projectSession.assetCatalog,
-                    assetImporter: { [runtime = projectSession.runtimeIdentity] data, reference in
-                        guard let runtime else { throw ProjectSessionError.staleRuntime }
+                    assetImporter: { [key = editorIdentity, epoch = projectSession.activationEpoch] data, reference in
+                        guard case .project(let documentKey) = key,
+                              projectSession.activationEpoch == epoch,
+                              let runtime = projectSession.runtimeIdentity, runtime.key == documentKey else { throw ProjectSessionError.staleRuntime }
                         _ = try await projectSession.importAsset(data: data, reference: reference, for: runtime)
                         guard let catalog = projectSession.assetCatalog else { throw ProjectSessionError.staleRuntime }
                         return catalog
@@ -385,6 +387,10 @@ struct EditorPane: View {
                     onEditorWindowChange: { [weak projectSession, weak editorBridge, weak editorRequests] view in
                         guard let editor = view as? BlockTextView else { return }
                         if view.window != nil {
+                            if case .project(let key) = editor.writingDocumentIdentity {
+                                if let projectSession { editorRequests?.register(editor, for: key, session: projectSession) }
+                            }
+                            guard editor.writingDocumentIdentity?.documentID == projectSession?.selectedDocumentID else { return }
                             editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in
                                 projectSession?.selectedDocumentSnapshot
                             })
@@ -399,6 +405,16 @@ struct EditorPane: View {
                     },
                     onSourceNavigation: { [weak editorRequests] succeeded, jump in
                         editorRequests?.didNavigateSource(succeeded, jump: jump)
+                    }, isActiveEditor: displayedDocument?.id == projectSession.selectedDocumentID,
+                    onEditorActivation: { [weak projectSession, weak editorBridge, weak editorRequests] view in
+                        guard let editor = view as? BlockTextView,
+                              case .project(let key) = editor.writingDocumentIdentity,
+                              key.projectID == projectSession?.activeProject?.id else { return }
+                        projectSession?.selectDocument(key.documentID)
+                        editorBridge?.connect(editor, currentSnapshot: { [weak projectSession] in projectSession?.selectedDocumentSnapshot })
+                        editorRequests?.nativeEditor = editor; editorRequests?.nativeEditorKey = key
+                        editor.isEditable = projectSession?.isEditorEditable == true
+                        editorRequests?.scheduleSpatialNavigation()
                     })
             } else {
                 Text("프로젝트에서 문서를 선택하세요")
@@ -407,26 +423,6 @@ struct EditorPane: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-            .overlay(alignment: .topLeading) {
-                if projectSession.selectedDocument?.body.isEmpty == true {
-                    // 본문 가독 폭(EditorMetrics)에 맞춰 placeholder도 같은 좌우 여백을
-                    // 따라간다 — 넓은 창에서 본문은 가운데인데 안내문만 왼쪽에 뜨지 않게.
-                    GeometryReader { geo in
-                        Text("여기서 글을 시작하세요…")
-                            .mintSerifFont(20)
-                            .foregroundStyle(theme.ghostSuggestionC)
-                            .padding(.top, 51)
-                            .padding(.leading, EditorMetrics.sideInset(forWidth: geo.size.width) + 5)
-                    }
-                    .allowsHitTesting(false)
-                }
-            }
-            .overlay(alignment: .bottom) {
-                if settings.autocompleteEnabled {
-                    ShortcutHintPill(active: completion.suggestion != nil, theme: theme)
-                        .padding(.bottom, 20)
-                }
-            }
             .overlay(alignment: .bottomLeading) {
                 if let message = editorRequests.sourceNavigationError {
                     HStack {
@@ -440,15 +436,22 @@ struct EditorPane: View {
     }
 
     private var bodyBinding: Binding<String> {
-        Binding(
-            get: { projectSession.selectedDocument?.body ?? "" },
-            set: { projectSession.updateSelectedDocumentBody($0) }
-        )
+        let id = displayedDocument?.id
+        let projectID = projectSession.activeProject?.id
+        let epoch = projectSession.activationEpoch
+        return Binding(get: { id.flatMap { projectSession.document($0)?.body } ?? "" }, set: { body in
+            guard let id, let projectID else { return }
+            projectSession.updateDocumentBody(body, for: .init(projectID: projectID, documentID: id), activationEpoch: epoch)
+        })
+    }
+
+    private var displayedDocument: WritingDocument? {
+        (documentID ?? projectSession.selectedDocumentID).flatMap { projectSession.document($0) }
     }
 
     private var editorIdentity: EditorDocumentIdentity? {
         guard let projectID = projectSession.activeProject?.id,
-            let documentID = projectSession.selectedDocumentID
+            let documentID = displayedDocument?.id
         else { return nil }
         return .project(ProjectDocumentKey(projectID: projectID, documentID: documentID))
     }
@@ -469,15 +472,16 @@ struct EditorToolbar: View {
         GeometryReader { geometry in
             toolbar(density: WorkspaceLayoutState.toolbarDensity(forEditorWidth: geometry.size.width))
         }
-        .frame(height: 52)
-        .background(theme.toolbarC)
+        .frame(height: 36)
     }
 
     private func toolbar(density: WorkspaceToolbarDensity) -> some View {
         HStack(spacing: density == .compact ? 6 : 10) {
+            Circle().fill(theme.novelC).frame(width: 5, height: 5)
+                .accessibilityHidden(true)
             Text(projectSession.selectedDocument?.title ?? "문서")
-                .mintUIFont(12, .medium)
-                .foregroundStyle(theme.inkC)
+                .mintUIFont(11.5, .medium)
+                .foregroundStyle(theme.ink2C)
                 .lineLimit(1)
                 .truncationMode(.middle)
                 .frame(maxWidth: density == .compact ? 150 : 260, alignment: .leading)
@@ -490,6 +494,7 @@ struct EditorToolbar: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                    .labelsHidden()
                     .fixedSize()
                     .accessibilityIdentifier("mint.workspace-mode")
                     .accessibilityLabel("작업 공간")
@@ -630,14 +635,12 @@ struct MarkdownCheatSheet: View {
     }
 
     private static let blocks: [Item] = [
-        Item(syntax: "# ", label: "제목 1"),
-        Item(syntax: "## ", label: "제목 2"),
-        Item(syntax: "### ", label: "제목 3"),
-        Item(syntax: "- ", label: "글머리 목록"),
-        Item(syntax: "1. ", label: "번호 목록"),
+        Item(syntax: "# ~ ###### ", label: "제목 1 ~ 6"),
+        Item(syntax: "- ", label: "글머리 목록 (Tab 들여쓰기)"),
+        Item(syntax: "1. ", label: "번호 목록 (Tab 들여쓰기)"),
         Item(syntax: "[ ] ", label: "체크리스트"),
-        Item(syntax: "> ", label: "인용"),
-        Item(syntax: "```", label: "코드 블록"),
+        Item(syntax: "> ", label: "인용 (Tab 중첩 인용)"),
+        Item(syntax: "```언어", label: "코드 블록"),
         Item(syntax: "$$ ", label: "수식 (LaTeX)"),
         Item(syntax: "---", label: "구분선"),
     ]
@@ -645,7 +648,10 @@ struct MarkdownCheatSheet: View {
     private static let inlines: [Item] = [
         Item(syntax: "**굵게**", label: "굵게"),
         Item(syntax: "*기울임*", label: "기울임"),
+        Item(syntax: "~~취소선~~", label: "취소선"),
+        Item(syntax: "==형광펜==", label: "하이라이트"),
         Item(syntax: "`코드`", label: "인라인 코드"),
+        Item(syntax: "[말](주소)", label: "링크 (⌘클릭 이동)"),
     ]
 
     var body: some View {
@@ -656,7 +662,7 @@ struct MarkdownCheatSheet: View {
             sectionTitle("인라인")
             ForEach(Self.inlines) { row($0) }
             theme.sepC.frame(height: 1).padding(.vertical, 7)
-            Text("서식 메뉴(⌘⌥1~3, ⌘B/⌘I 등)로도 적용할 수 있어요.")
+            Text("서식 메뉴(⌘⌥1~6, ⌘B/⌘I/⌘L, ⌘/ 소스 보기 등)로도 적용할 수 있어요.")
                 .mintUIFont(11)
                 .foregroundStyle(theme.ink3C)
                 .fixedSize(horizontal: false, vertical: true)
@@ -688,70 +694,6 @@ struct MarkdownCheatSheet: View {
                 .foregroundStyle(theme.ink2C)
         }
         .padding(.vertical, 3)
-    }
-}
-
-// MARK: - 단축키 힌트 필
-
-/// Contextual keyboard teaching while a Ghost suggestion is available.
-struct ShortcutHintPill: View {
-    let active: Bool
-    let theme: MintTheme
-
-    var body: some View {
-        if active { pill }
-    }
-
-    private var pill: some View {
-        HStack(spacing: 14) {
-            item(key: "tab", label: "수락")
-            divider
-            item(key: "→", label: "한 단어")
-            divider
-            item(key: "esc", label: "무시")
-        }
-        .fixedSize()  // 폭이 좁아도 "t…"처럼 생략하지 않고 전부 그린다
-        .padding(.vertical, 9)
-        .padding(.horizontal, 14)
-        .background(
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                .fill(theme.pillC)
-                .background(
-                    .ultraThinMaterial,
-                    in: RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: MintRadius.lg, style: .continuous)
-                .strokeBorder(theme.pillBorderC)
-        )
-        .shadow(color: .black.opacity(0.16), radius: 15, y: 5)
-        .accessibilityIdentifier("mint.ghost-shortcut-hint")
-        // 모션 없음 — Tab/→/Esc마다 도는 고빈도 경로다 (감사 표, #27).
-        // 과거 200ms fade가 키 피드백을 늦췄다.
-        .allowsHitTesting(false)
-    }
-
-    private func item(key: String, label: String) -> some View {
-        HStack(spacing: 7) {
-            Text(key)
-                .font(MintFonts.monoUI(11, .bold))
-                .foregroundStyle(theme.inkC)
-                .padding(.vertical, 2)
-                .padding(.horizontal, 7)
-                .background(
-                    RoundedRectangle(cornerRadius: MintRadius.xs).fill(theme.kbdC)
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: MintRadius.xs).strokeBorder(theme.sepStrongC)
-                )
-            Text(label)
-                .mintUIFont(12)
-                .foregroundStyle(theme.ink2C)
-        }
-    }
-
-    private var divider: some View {
-        theme.sepC.frame(width: 1, height: 16)
     }
 }
 
@@ -820,11 +762,10 @@ struct EditorStatusBar: View {
             separator
             Text("Markdown")
         }
-        .font(MintFonts.monoUI(11))
+        .font(MintFonts.monoUI(10))
         .foregroundStyle(theme.ink3C)
-        .padding(.horizontal, 22)
-        .frame(height: 34)
-        .background(theme.statusbarC)
+        .padding(.horizontal, 16)
+        .frame(height: 26)
         // 통계 재계산 — 키가 바뀌고(편집·문서 전환) 0.25s 조용해진 뒤에만.
         // 그 사이 새 키 입력이 오면 이 task가 취소되고 새로 걸린다(디바운스).
         // 계산은 detached — 88k자 한 패스가 메인 프레임을 막지 않는다.
@@ -946,6 +887,7 @@ struct LongParagraphNotice: View {
     }
 }
 
+#if canImport(PreviewsMacros)
 #Preview {
     let store = ProjectStore(
         root: FileManager.default.temporaryDirectory
@@ -965,3 +907,4 @@ struct LongParagraphNotice: View {
             editorRequests: editorRequests))
         .frame(width: 1180, height: 760)
 }
+#endif

@@ -1,7 +1,6 @@
 import Foundation
 import HuggingFace
 import MLX
-import MLXHuggingFace
 import MLXLLM
 import MLXLMCommon
 import Tokenizers
@@ -554,7 +553,7 @@ public actor CompletionEngine {
                         switch value {
                         case .chunk(let chunk): try onChunk(chunk)
                         case .info: break
-                        case .toolCall: throw ReadyInstructionError.unsupportedResponse
+                        case .toolCall, .rejectedToolCall: throw ReadyInstructionError.unsupportedResponse
                         }
                     }
                 } catch {
@@ -669,7 +668,7 @@ public actor CompletionEngine {
             onProgress?(fraction)
         }
         try Task.checkCancellation()
-        return try await loadModelContainer(from: directory, using: #huggingFaceTokenizerLoader())
+        return try await loadModelContainer(from: directory, using: LocalTokenizerLoader())
     }
 
     @_spi(Benchmark) public nonisolated static var benchmarkMLXPeakBytes: UInt64 { UInt64(Memory.peakMemory) }
@@ -720,7 +719,7 @@ public actor CompletionEngine {
                 }
                 promptTokenCount = tokens.count
                 if parameters.kvCacheEnabled,
-                    let reuse = promptCache.begin(
+                    let reuse = try promptCache.begin(
                         modelID: parameters.modelID, tokens: tokens,
                         model: context.model, parameters: generateParameters)
                 {
@@ -768,7 +767,7 @@ public actor CompletionEngine {
                         if stopAfterFirstChunk { stoppedAfterFirstChunk = true }
                     case .info(let generationInfo):
                         info = generationInfo
-                    case .toolCall:
+                    case .toolCall, .rejectedToolCall:
                         break
                     }
                     // 루프 이탈 뒤 아래에서 내부 생성 Task를 취소·종료 대기한다.

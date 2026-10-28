@@ -77,13 +77,19 @@ final class AskAnswerView: NSScrollView, NSTextViewDelegate {
             let display = (packet?.sources ?? []).reduce(block.text) { text, source in
                 text.replacingOccurrences(of: "[\(source.id)]", with: "[\(source.id.dropFirst())]")
             }
-            var markdown = (try? AttributedString(markdown: display)) ?? AttributedString(display)
+            let markdown = (try? AttributedString(markdown: display)) ?? AttributedString(display)
+            let body = NSMutableAttributedString(attributedString: NSAttributedString(markdown))
+            var runOffset = 0
             for run in markdown.runs {
                 let intent = run.inlinePresentationIntent
-                markdown[run.range].font = intent?.contains(.code) == true ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                let font = intent?.contains(.code) == true ? NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
                     : intent?.contains(.stronglyEmphasized) == true ? NSFont.boldSystemFont(ofSize: 13) : NSFont.systemFont(ofSize: 13)
+                // AppKit fonts stay in the main-actor-owned native string. Swift's
+                // AttributedString attribute values require Sendable conformance.
+                let length = String(markdown[run.range].characters).utf16.count
+                body.addAttribute(.font, value: font, range: NSRange(location: runOffset, length: length))
+                runOffset += length
             }
-            let body = NSMutableAttributedString(attributedString: NSAttributedString(markdown))
             let whole = NSRange(location: 0, length: body.length)
             body.removeAttribute(.link, range: whole); body.removeAttribute(.attachment, range: whole)
             body.append(NSAttributedString(string: "\n"))

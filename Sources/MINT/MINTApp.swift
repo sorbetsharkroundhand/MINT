@@ -126,7 +126,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        true
+        // Closing the suction animation's temporary panel must not quit the app
+        // while its document window lives inside the floating pouch.
+        !WorkspacePouchLifetime.hasCollapsedWorkspace
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        // Dock reopening uses the retained workspace and its original editor.
+        !WorkspacePouchLifetime.restoreCollapsedWorkspaces()
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {

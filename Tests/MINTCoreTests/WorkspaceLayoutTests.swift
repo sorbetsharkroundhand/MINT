@@ -3,7 +3,7 @@ import XCTest
 
 final class WorkspaceLayoutTests: XCTestCase {
     func testExplicitMarginUsesExistingDockAndKeepsStoredEmptyChoiceQuiet() {
-        for (navigator, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
+        for (navigator, boundary) in [(true, CGFloat(1234)), (false, CGFloat(976))] {
             let closed = WorkspacePresentationState(navigatorVisible: navigator, navigatorWidth: 250,
                 rawToolSection: "margin", rawToolDock: "right", chromeHidden: false)
             var opened = closed; opened.marginVisible = true
@@ -14,13 +14,13 @@ final class WorkspaceLayoutTests: XCTestCase {
             let wide = WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: opened)
             XCTAssertEqual(narrow.toolDock, .bottom)
             XCTAssertEqual(wide.toolDock, .right); XCTAssertEqual(wide.manuscriptWidth, 560)
-            XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: closed).manuscriptWidth, 901)
+            XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: closed).manuscriptWidth, 908)
         }
     }
 
     func testOutlineReservesExistingDockWithoutOverwritingStoredTool() {
         for section in ["files", "bible", "margin", "unknown"] {
-            for (visible, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
+            for (visible, boundary) in [(true, CGFloat(1234)), (false, CGFloat(976))] {
                 let state = WorkspacePresentationState(navigatorVisible: visible, navigatorWidth: 250,
                     rawToolSection: section, rawToolDock: "right", chromeHidden: false, outlineVisible: true)
                 XCTAssertTrue(state.contextVisible)
@@ -35,7 +35,7 @@ final class WorkspaceLayoutTests: XCTestCase {
 
     func testSideFitIncludesRenderedDivider() {
         for dock in [ToolDockPosition.automatic, .left, .right] {
-            for (visible, boundary) in [(true, CGFloat(1151)), (false, CGFloat(901))] {
+            for (visible, boundary) in [(true, CGFloat(1158)), (false, CGFloat(908))] {
                 XCTAssertEqual(WorkspaceLayoutState.effectiveToolDock(preferred: dock,
                     availableWidth: boundary - 1, navigatorVisible: visible, navigatorWidth: 250), .bottom)
                 XCTAssertEqual(WorkspaceLayoutState.effectiveToolDock(preferred: dock,
@@ -47,8 +47,8 @@ final class WorkspaceLayoutTests: XCTestCase {
 
     func testFramedNavigatorWidthMatrix() {
         let cases: [(CGFloat, WorkspaceNavigatorPlacement, CGFloat, CGFloat)] = [
-            (860, .overlay, 0, 774), (1023, .overlay, 0, 937),
-            (1024, .inline, 260, 678), (1180, .inline, 260, 834), (1440, .inline, 260, 1094),
+            (860, .overlay, 0, 792), (1023, .overlay, 0, 955),
+            (1024, .inline, 258, 698), (1180, .inline, 258, 854), (1440, .inline, 258, 1114),
         ]
         for (width, placement, reservation, manuscript) in cases {
             let layout = WorkspaceLayoutPolicy.resolve(availableWidth: width, presentation: presentation())
@@ -61,7 +61,7 @@ final class WorkspaceLayoutTests: XCTestCase {
 
     func testFramedSideFitUsesAllAllocatedGeometry() {
         for dock in [ToolDockPosition.automatic, .left, .right] {
-            for (visible, boundary) in [(true, CGFloat(1247)), (false, CGFloat(987))] {
+            for (visible, boundary) in [(true, CGFloat(1234)), (false, CGFloat(976))] {
                 let state = presentation(visible: visible, section: "bible", dock: dock.rawValue)
                 let narrow = WorkspaceLayoutPolicy.resolve(availableWidth: boundary - 1, presentation: state)
                 let wide = WorkspaceLayoutPolicy.resolve(availableWidth: boundary, presentation: state)
@@ -72,8 +72,8 @@ final class WorkspaceLayoutTests: XCTestCase {
             }
             // Below the overlay threshold, showing the navigator does not reserve width.
             let state = presentation(section: "bible", dock: dock.rawValue)
-            XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: 986, presentation: state).toolDock, .bottom)
-            let fit = WorkspaceLayoutPolicy.resolve(availableWidth: 987, presentation: state)
+            XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: 975, presentation: state).toolDock, .bottom)
+            let fit = WorkspaceLayoutPolicy.resolve(availableWidth: 976, presentation: state)
             XCTAssertEqual(fit.navigatorPlacement, .overlay)
             XCTAssertEqual(fit.toolDock, dock == .automatic ? .right : dock)
             XCTAssertEqual(fit.manuscriptWidth, 560)
@@ -87,7 +87,7 @@ final class WorkspaceLayoutTests: XCTestCase {
         for section in ["files", "unknown", "margin"] {
             let layout = WorkspaceLayoutPolicy.resolve(availableWidth: 1440,
                 presentation: presentation(section: section, dock: "left"))
-            XCTAssertEqual(layout.manuscriptWidth, 1094)
+            XCTAssertEqual(layout.manuscriptWidth, 1114)
         }
     }
 
@@ -119,7 +119,7 @@ final class WorkspaceLayoutTests: XCTestCase {
             presentation: presentation(width: 999))
         XCTAssertGreaterThanOrEqual(constrained.manuscriptWidth, 560)
         XCTAssertEqual(WorkspaceLayoutPolicy.resolve(availableWidth: 860,
-            presentation: presentation(), railWidth: 0).manuscriptWidth, 840)
+            presentation: presentation(), railWidth: 0).manuscriptWidth, 844)
     }
 
     private func presentation(visible: Bool = true, width: Double = 250,

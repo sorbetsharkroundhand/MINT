@@ -6,8 +6,8 @@ import XCTest
 @MainActor
 final class ReleaseAccentContrastTests: XCTestCase {
     func testWritingAndFictionCommandAccentsShareOneReadableFamily() {
-        XCTAssertEqual(MintTheme.light.blue.hexValue, 0x00857D)
-        XCTAssertEqual(MintTheme.dark.blue.hexValue, 0x4DE0D6)
+        XCTAssertEqual(MintTheme.light.blue.hexValue, 0x0F6E63)
+        XCTAssertEqual(MintTheme.dark.blue.hexValue, 0x4CC9BD)
         for scheme in [ColorScheme.light, .dark] {
             let theme = MintTheme.of(scheme)
             XCTAssertEqual(theme.blue, theme.novel,

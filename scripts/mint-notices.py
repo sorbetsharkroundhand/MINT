@@ -185,14 +185,19 @@ def validate_app(app, manifest, text):
         base = name + ("/Contents/Resources/" if (root / "Contents").is_dir() else "/")
         allowed.update({name + "/Info.plist", name + "/Contents/Info.plist",
                         name + "/Contents/_CodeSignature/CodeResources"})
-        prefix = bundle.get("sourcePrefix")
+        prefixes = bundle.get("sourcePrefixes", [bundle["sourcePrefix"]] if bundle.get("sourcePrefix") else [])
+        if not isinstance(prefixes, list) or any(
+                not isinstance(prefix, str) or not prefix.endswith("/") or prefix.startswith("/")
+                or any(part in ("", ".", "..") for part in prefix[:-1].split("/")) for prefix in prefixes):
+            raise NoticeError("Invalid resource source directory")
         for component in manifest["components"]:
-            if component["package"] == package and prefix:
+            if component["package"] == package:
                 for artifact in component["artifacts"]:
-                    if artifact["path"].startswith(prefix):
-                        relative = base + artifact["path"][len(prefix):]
-                        verified_bytes(resources, {**artifact, "path": relative})
-                        allowed.add(relative)
+                    for prefix in prefixes:
+                        if artifact["path"].startswith(prefix):
+                            relative = base + artifact["path"][len(prefix):]
+                            verified_bytes(resources, {**artifact, "path": relative})
+                            allowed.add(relative)
         for generated in bundle.get("generated", []):
             relative = base + generated
             if not checked_file(resources, relative).stat().st_size:

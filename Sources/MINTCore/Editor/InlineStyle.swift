@@ -3,12 +3,14 @@ import AppKit
 /// 인라인 서식 속성 키 (서식 툴바 · `**…**` 타이핑 변환).
 ///
 /// 폰트·색 같은 실제 표시 속성은 이 키에서 파생돼 `decorateInline`이 조립한다.
-/// 저장은 항상 마크다운 마커(`**` `*` `` ` `` `<font>` `<p align>`)로 되돌린다 —
+/// 저장은 항상 마크다운 마커(`**` `*` `~~` `==` `` ` `` `<font>` `<p align>`)로 되돌린다 —
 /// 파일 포맷은 순수 텍스트를 유지하고, 속성은 로드 때 다시 파싱된다.
 extension NSAttributedString.Key {
     static let mintBold = NSAttributedString.Key("mint.bold")
     static let mintItalic = NSAttributedString.Key("mint.italic")
     static let mintCode = NSAttributedString.Key("mint.code")
+    static let mintStrikethrough = NSAttributedString.Key("mint.strikethrough")
+    static let mintHighlight = NSAttributedString.Key("mint.highlight")
     /// 글자색 hex ("FF453A") — 저장은 `<font color="#…">` 태그.
     static let mintColor = NSAttributedString.Key("mint.color")
     /// 글자 크기 pt (Double) — 저장은 `<font size="…">` 태그. 블록 기본 크기와
@@ -26,8 +28,8 @@ enum InlineMarkdown {
 
     /// 인라인 서식 키 전체 — 블록 재스타일 시 보존 대상.
     static let inlineKeys: [NSAttributedString.Key] = [
-        .mintBold, .mintItalic, .mintCode, .mintColor, .mintFontSize, .mintAlign,
-        .mintLineSpacing,
+        .mintBold, .mintItalic, .mintCode, .mintStrikethrough, .mintHighlight,
+        .mintColor, .mintFontSize, .mintAlign, .mintLineSpacing,
     ]
 
     typealias Segment = (text: String, attrs: [NSAttributedString.Key: Any])
@@ -38,6 +40,8 @@ enum InlineMarkdown {
         (MarkdownInlineScanner.boldItalic, [.mintBold: true, .mintItalic: true]),
         (MarkdownInlineScanner.bold, [.mintBold: true]),
         (MarkdownInlineScanner.italic, [.mintItalic: true]),
+        (MarkdownInlineScanner.strikethrough, [.mintStrikethrough: true]),
+        (MarkdownInlineScanner.highlight, [.mintHighlight: true]),
         (MarkdownInlineScanner.code, [.mintCode: true]),
     ]
 
@@ -47,6 +51,8 @@ enum InlineMarkdown {
             if span.style.bold { attrs[.mintBold] = true }
             if span.style.italic { attrs[.mintItalic] = true }
             if span.style.code { attrs[.mintCode] = true }
+            if span.style.strikethrough { attrs[.mintStrikethrough] = true }
+            if span.style.highlight { attrs[.mintHighlight] = true }
             if let color = span.style.color { attrs[.mintColor] = color }
             if let size = span.style.fontSize { attrs[.mintFontSize] = size }
             return (span.text, attrs)
@@ -71,8 +77,31 @@ enum InlineMarkdown {
     static func serialize(_ storage: NSAttributedString, in range: NSRange,
                           capture: ((SerializedSpan) -> Void)? = nil) -> String {
         guard range.length > 0 else { return "" }
+        // TextKit splits presentation runs for fallback fonts (notably emoji).
+        // Source formatting follows writer attributes, not those display boundaries.
+        struct Run { let attrs: [NSAttributedString.Key: Any]; var range: NSRange }
+        func style(_ attrs: [NSAttributedString.Key: Any]) -> MarkdownInlineScanner.Style {
+            var value = MarkdownInlineScanner.Style()
+            value.code = attrs[.mintCode] as? Bool == true
+            if !value.code {
+                value.bold = attrs[.mintBold] as? Bool == true
+                value.italic = attrs[.mintItalic] as? Bool == true
+                value.strikethrough = attrs[.mintStrikethrough] as? Bool == true
+                value.highlight = attrs[.mintHighlight] as? Bool == true
+            }
+            value.color = attrs[.mintColor] as? String; value.fontSize = attrs[.mintFontSize] as? Double
+            return value
+        }
+        var runs: [Run] = []
+        storage.enumerateAttributes(in: range, options: []) { attrs, range, _ in
+            if let last = runs.last, last.range.upperBound == range.location,
+               attrs[.attachment] == nil, last.attrs[.attachment] == nil, style(attrs) == style(last.attrs) {
+                runs[runs.count - 1].range.length += range.length
+            } else { runs.append(Run(attrs: attrs, range: range)) }
+        }
         var out = "", sourceOffset = 0
-        storage.enumerateAttributes(in: range, options: []) { attrs, run, _ in
+        for item in runs {
+            let attrs = item.attrs, run = item.range
             var text = (storage.string as NSString).substring(with: run)
             if let atom = attrs[.attachment] as? MathAtomAttachment {
                 let fragment = "$\(atom.latex)$"
@@ -83,7 +112,7 @@ enum InlineMarkdown {
                     sourceOffset += length
                 }
                 out += fragment
-                return
+                continue
             }
             var style = MarkdownInlineScanner.Style()
             style.code = attrs[.mintCode] as? Bool == true
@@ -96,20 +125,34 @@ enum InlineMarkdown {
             } else {
                 let isBold = attrs[.mintBold] as? Bool == true
                 let isItalic = attrs[.mintItalic] as? Bool == true
+                let isStrike = attrs[.mintStrikethrough] as? Bool == true
+                let isHighlight = attrs[.mintHighlight] as? Bool == true
                 style.bold = isBold; style.italic = isItalic
+                style.strikethrough = isStrike; style.highlight = isHighlight
+                if isStrike {
+                    text = "~~\(text)~~"
+                    prefixLength += 2; suffixLength += 2
+                    prefix = "~~" + prefix; suffix += "~~"
+                }
+                if isHighlight {
+                    text = "==\(text)=="
+                    prefixLength += 2; suffixLength += 2
+                    prefix = "==" + prefix; suffix += "=="
+                }
                 if isBold && isItalic {
                     text = "***\(text)***"
-                    prefixLength = 3; suffixLength = 3
-                    prefix = "***"; suffix = "***"
+                    prefixLength += 3; suffixLength += 3
+                    prefix = "***" + prefix; suffix += "***"
                 } else if isBold {
                     text = "**\(text)**"
-                    prefixLength = 2; suffixLength = 2
-                    prefix = "**"; suffix = "**"
+                    prefixLength += 2; suffixLength += 2
+                    prefix = "**" + prefix; suffix += "**"
                 } else if isItalic {
                     text = "*\(text)*"
-                    prefixLength = 1; suffixLength = 1
-                    prefix = "*"; suffix = "*"
+                    prefixLength += 1; suffixLength += 1
+                    prefix = "*" + prefix; suffix += "*"
                 }
+
             }
             var tagAttrs: [String] = []
             if let hex = attrs[.mintColor] as? String {

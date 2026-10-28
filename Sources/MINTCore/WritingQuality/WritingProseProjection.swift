@@ -48,8 +48,8 @@ struct WritingProjectionPatch: Sendable {
 /// Load/recovery projection. Ordinary edits supply already bounded, authoritative pieces.
 enum WritingProseProjection {
     struct Run { let source: NSRange; let eligible: Bool; var unsupported = false }
-    private static let alignment = rx(#"^<p align="(?:center|right)">(.*)</p>$"#)
-    private static let prefix = rx(#"^(?:#{1,3} |[-*] |\d+\.\s|> |>$|- \[[ x]\] )"#)
+    private static let alignment = rx(#"^<p align="(?:center|right)">([^\n]*)</p>$"#)
+    private static let prefix = rx(#"^(?:#{1,6} |(?:  ){0,6}(?:[-*] |\d+\.\s|- \[[ x]\] )|(?:> )+|>+$)"#)
     private static let divider = rx(#"^---+\s*$"#)
     private static func rx(_ pattern: String) -> NSRegularExpression { try! NSRegularExpression(pattern: pattern) }
 
@@ -70,7 +70,8 @@ enum WritingProseProjection {
             let range = NSRange(location: offset, length: end - offset)
             let line = ns.substring(with: range)
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if !inMath && trimmed == "```" { inCode.toggle() }
+            if !inMath, !inCode, trimmed.hasPrefix("```"), !trimmed.dropFirst(3).contains("`") { inCode = true }
+            else if !inMath, inCode, trimmed == "```" { inCode = false }
             else if inCode { }
             else if inMath {
                 if trimmed == "$$" || (trimmed.hasSuffix("$$") && trimmed.count >= 2) { inMath = false }
@@ -88,7 +89,10 @@ enum WritingProseProjection {
                 } else if divider.firstMatch(in: content, range: NSRange(location: 0, length: body.length)) == nil {
                     if let match = prefix.firstMatch(in: content, range: NSRange(location: 0, length: body.length)) {
                         // Checkbox prefixes take precedence over the shorter bullet marker.
-                        let count = content.hasPrefix("- [ ] ") || content.hasPrefix("- [x] ") ? 6 : match.range.length
+                        let trimmedContent = content.drop(while: { $0 == " " || $0 == "\t" })
+                        let indentUTF16 = content.utf16.count - trimmedContent.utf16.count
+                        let count = (trimmedContent.hasPrefix("- [ ] ") || trimmedContent.hasPrefix("- [x] "))
+                            ? indentUTF16 + 6 : match.range.length
                         body.location += count; body.length -= count
                     }
                     runs += inlineRuns(ns.substring(with: body), offset: body.location)

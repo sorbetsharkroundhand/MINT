@@ -75,12 +75,26 @@ final class PromptCacheOwnershipTests: XCTestCase {
         box.abandon(lease: reused.lease)
     }
 
+    func testFailedCacheCreationDoesNotLeaveTheNextRequestBusy() throws {
+        enum Failure: Error { case unavailable }
+        let box = PromptCacheBox()
+        XCTAssertThrowsError(try box.begin(owner: owner(), tokens: [1, 2], makeCache: {
+            throw Failure.unavailable
+        }))
+        let next = try XCTUnwrap(box.begin(owner: owner(), tokens: [1, 2], makeCache: { [KVCacheSimple()] }))
+        XCTAssertEqual(next.reusedTokens, 0)
+        XCTAssertEqual(next.suffix, [1, 2])
+        box.abandon(lease: next.lease)
+    }
+
     func testActualModelIdentityAndAllCacheShapingParametersOwnSeparateStates() throws {
         var variants = [owner(other: true)]
         var parameters = GenerateParameters(); parameters.maxKVSize = 32; variants.append(owner(parameters))
         parameters = .init(); parameters.kvBits = 4; variants.append(owner(parameters))
         parameters = .init(); parameters.kvGroupSize = 128; variants.append(owner(parameters))
         parameters = .init(); parameters.quantizedKVStart = 64; variants.append(owner(parameters))
+        parameters = .init(); parameters.kvScheme = "affine4"; variants.append(owner(parameters))
+        parameters = .init(); parameters.kvCache = .init(capacity: try .init(maxTokens: 32)); variants.append(owner(parameters))
         for changed in variants {
             let box = PromptCacheBox(), cache = KVCacheSimple()
             let first = try XCTUnwrap(box.begin(owner: owner(), tokens: [1, 2], makeCache: { [cache] }))

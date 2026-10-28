@@ -48,3 +48,9 @@ artifacts fail validation. Adding a model requires explicit #155/#180 approval
 and an updated inventory/validator; this empty model list grants no model rights.
 Final icon, SDK/model privacy wording, and distribution approval remain owner
 checks in #185. This inventory is not App Store submission evidence.
+
+The MLX 0.32.3 / MLX Swift LM 3.32.3 integration refreshes dependency revisions
+and the PocketFFT submodule provenance while retaining the verified original
+notice bytes. Packages absent from the current lockfile and their owned
+components are no longer packaged. Supplemental files retained in `Texts/` are
+only bundled when referenced by the current inventory.

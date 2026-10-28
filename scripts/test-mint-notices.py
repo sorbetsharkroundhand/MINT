@@ -286,6 +286,29 @@ class NoticeSourceTests(unittest.TestCase):
         (bundle / "font.otf").rename(bundle / "Contents/Resources/font.otf")
         notices.validate_app(app, manifest, text)
 
+    def test_flat_bundle_requires_and_verifies_each_source_directory(self):
+        app, resources, bundle, _, _ = self.packaged_fixture()
+        icons = self.package / "Icons"
+        icons.mkdir()
+        icon = b"<svg>fixture</svg>"
+        (icons / "plus.svg").write_bytes(icon)
+        self.commit_source()
+        self.inventory["components"].append({"identity": "fixture-icons", "package": "fixture-lib",
+            "artifacts": [{"path": "Icons/plus.svg", "sha256": digest(icon)}],
+            "notices": self.inventory["packages"][0]["notices"]})
+        mapping = self.inventory["resourceBundles"][0]
+        del mapping["sourcePrefix"]
+        mapping["sourcePrefixes"] = ["Assets/", "Icons/"]
+        manifest, text = self.collect()
+        notices.write_output(resources, manifest, text)
+        with self.assertRaises(notices.NoticeError):
+            notices.validate_app(app, manifest, text)
+        (bundle / "plus.svg").write_bytes(icon)
+        notices.validate_app(app, manifest, text)
+        (bundle / "plus.svg").write_bytes(b"changed icon")
+        with self.assertRaises(notices.NoticeError):
+            notices.validate_app(app, manifest, text)
+
     def test_missing_or_tampered_packaged_notice_is_rejected(self):
         app, resources, _, manifest, text = self.packaged_fixture()
         for name in ["ThirdPartyNotices.json", "ThirdPartyNotices.txt"]:

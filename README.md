@@ -10,7 +10,7 @@
 
 ![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-lightgrey?style=flat-square)
 ![Chip](https://img.shields.io/badge/chip-Apple%20Silicon-111111?style=flat-square)
-![Swift](https://img.shields.io/badge/Swift-6.0-F05138?style=flat-square&logo=swift&logoColor=white)
+![Swift](https://img.shields.io/badge/Swift-6.3-F05138?style=flat-square&logo=swift&logoColor=white)
 ![Inference](https://img.shields.io/badge/inference-100%25%20local-2ea44f?style=flat-square)
 [![CI](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml/badge.svg)](https://github.com/sorbetsharkroundhand/MINT/actions/workflows/ci.yml)
 ![License](https://img.shields.io/badge/license-Source%20Available-4c1?style=flat-square)
@@ -190,7 +190,7 @@ and of fiction-specific types wherever that coupling is not required.
 
 ## Run from source
 
-**Requirements** — Apple Silicon Mac · macOS 14+ · Xcode 16+ · Swift 6 toolchain
+**Build requirements** — Apple Silicon Mac · macOS 26.2+ · Xcode 26.4+ · Swift 6.3 toolchain. The built app targets macOS 14+.
 
 These are development prerequisites, not final supported-model/hardware claims. Release support
 and licensing decisions remain subject to [#152](https://github.com/sorbetsharkroundhand/MINT/issues/152)

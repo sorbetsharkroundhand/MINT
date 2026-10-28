@@ -6,12 +6,16 @@ struct WritingSerializedBlockStyle: Sendable, Equatable {
     let checked: Bool
     let marker: String?
     let mathRole: String?
+    let indent: Int
+    let codeLang: String?
     init(_ attributes: [NSAttributedString.Key: Any] = [:]) {
         block = attributes[.mintBlock] as? String ?? "p"
         alignment = attributes[.mintAlign] as? String
         checked = attributes[.mintChecked] as? Bool ?? false
         marker = attributes[.mintMarker] as? String
         mathRole = attributes[.mintMathDelim] as? String
+        indent = attributes[.mintIndent] as? Int ?? 0
+        codeLang = attributes[.mintCodeLang] as? String
     }
 }
 
@@ -45,17 +49,22 @@ final class WritingNativeRowIndex {
         let left: Node?, right: Node?
         let count: Int, nativeLength: Int, coreSourceLength: Int
         let firstCode: Bool, lastCode: Bool
+        let firstCodeOpenLength: Int
         init(_ row: WritingSerializedRow, priority: UInt64, left: Node? = nil, right: Node? = nil) {
             self.row = row; self.priority = priority; self.left = left; self.right = right
+            let rowOpenLength = row.isCode ? 4 + (row.blockStyle.codeLang?.utf16.count ?? 0) : 0
             count = 1 + (left?.count ?? 0) + (right?.count ?? 0)
             nativeLength = row.nativeLength + (left?.nativeLength ?? 0) + (right?.nativeLength ?? 0)
             coreSourceLength = row.baseSourceLength + (left?.coreSourceLength ?? 0) + (right?.coreSourceLength ?? 0)
-                + (left.map { $0.lastCode != row.isCode ? 4 : 0 } ?? 0)
-                + (right.map { row.isCode != $0.firstCode ? 4 : 0 } ?? 0)
+                + (left.map { $0.lastCode != row.isCode ? (row.isCode ? rowOpenLength : 4) : 0 } ?? 0)
+                + (right.map { row.isCode != $0.firstCode ? ($0.firstCode ? $0.firstCodeOpenLength : 4) : 0 } ?? 0)
             firstCode = left?.firstCode ?? row.isCode; lastCode = right?.lastCode ?? row.isCode
+            firstCodeOpenLength = left != nil ? left!.firstCodeOpenLength : rowOpenLength
         }
         func copy(left: Node?, right: Node?) -> Node { Node(row, priority: priority, left: left, right: right) }
-        func sourceLength(previousCode: Bool) -> Int { coreSourceLength + (previousCode != firstCode ? 4 : 0) }
+        func sourceLength(previousCode: Bool) -> Int {
+            coreSourceLength + (previousCode != firstCode ? (firstCode ? firstCodeOpenLength : 4) : 0)
+        }
     }
     private var root: Node?
     private var random: UInt64 = 0x6d696e742d6e6174
@@ -119,7 +128,8 @@ final class WritingNativeRowIndex {
             let leftSource = current.left?.sourceLength(previousCode: previousCode) ?? 0
             let rowNative = native + leftNative, rowSource = source + leftSource
             let previous = current.left?.lastCode ?? previousCode
-            let textStart = rowSource + (previous != current.row.isCode ? 4 : 0)
+            let rowOpenLength = current.row.isCode ? 4 + (current.row.blockStyle.codeLang?.utf16.count ?? 0) : 0
+            let textStart = rowSource + (previous != current.row.isCode ? (current.row.isCode ? rowOpenLength : 4) : 0)
             if point < rowNative { next = current.left }
             else if point < rowNative + current.row.nativeLength {
                 return Located(row: current.row, nativeRange: NSRange(location: rowNative, length: current.row.nativeLength),
@@ -139,7 +149,8 @@ final class WritingNativeRowIndex {
             let leftNative = current.left?.nativeLength ?? 0
             let rowSource = source + leftSource, rowNative = native + leftNative
             let previous = current.left?.lastCode ?? previousCode
-            let textStart = rowSource + (previous != current.row.isCode ? 4 : 0)
+            let rowOpenLength = current.row.isCode ? 4 + (current.row.blockStyle.codeLang?.utf16.count ?? 0) : 0
+            let textStart = rowSource + (previous != current.row.isCode ? (current.row.isCode ? rowOpenLength : 4) : 0)
             if point < rowSource { next = current.left }
             else if point < textStart + current.row.baseSourceLength {
                 return Located(row: current.row, nativeRange: NSRange(location: rowNative, length: current.row.nativeLength),

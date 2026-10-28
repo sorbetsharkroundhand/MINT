@@ -2,6 +2,12 @@
 
 Foundation-only Swift values around the pinned Kiwi C ABI. No MINTCore, Fiction, AppKit, MLX, runtime networking or global dictionary mutation lives here.
 
+The private C++ constructor adapter selects `congFp32` explicitly for the pinned
+scalar archive, instead of requesting unsupported quantization for both model
+files and falling back. Analysis and handle ownership still use the C ABI.
+The matching public headers and attribution are recorded in
+[Upstream/README.md](Sources/CKiwiBridge/Upstream/README.md).
+
 Before loading either package manifest or building from a clean checkout, run from the repository root:
 
 ```sh

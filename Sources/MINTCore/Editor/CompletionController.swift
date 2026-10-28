@@ -215,6 +215,25 @@ public final class CompletionController: ObservableObject {
     public let settings: CompletionSettings
     private let engine: CompletionEngine
 
+    func makeWorkspaceAssistance(session: ProjectSession, requests: ProjectEditorRequests, margin: LivingMarginModel) -> WorkspaceAssistance {
+        let model = WorkspaceAssistance(session: session, requests: requests, margin: margin) { [weak self] system, user in
+            let process = ProcessInfo.processInfo
+            guard let self, self.settings.authorization == .enabled, self.settings.autocompleteEnabled,
+                  self.engineState == .ready, !self.isMemoryPressurePaused, !self.isManagingModel,
+                  !self.foregroundIsBusy, !process.isLowPowerModeEnabled,
+                  process.thermalState != .serious, process.thermalState != .critical else {
+                throw CompletionEngine.ReadyInstructionError.modelUnavailable
+            }
+            let engine = self.engine, parameters = self.settings.parameters
+            return AskAnswerGeneration { emit in
+                try await engine.streamInstructionIfReady(system: system, user: user, parameters: parameters, onChunk: emit)
+            }
+        }
+        model.observe(self)
+        observeForegroundCompletion(owner: model) { [weak model] busy in if busy { model?.cancel() } }
+        return model
+    }
+
     private weak var currentJudgeSupport: ContinuityJudgeSupport?
     func makeContinuityJudgeSupport() -> ContinuityJudgeSupport {
         currentJudgeSupport?.shutdown()
@@ -794,6 +813,50 @@ public final class CompletionController: ObservableObject {
                 ? nil : .easeOut(duration: 0.18)
             withAnimation(namingAnimation) {
                 store.renameFolderIfPlaceholder(folderID, to: name)
+            }
+        }
+        folderNamingTasks[folderID] = task
+    }
+
+    /// 프로젝트 탐색기에서 문서를 합쳐 만든 자동 생성 폴더("새 폴더")의 이름을
+    /// 로컬 엔진이 준비된 경우에만 조용히 지어 붙인다.
+    public func requestFolderName(for folderID: UUID, in session: ProjectSession) {
+        guard !isMemoryPressurePaused, settings.authorization == .enabled, settings.autocompleteEnabled,
+              engineState == .ready, !isManagingModel, !foregroundIsBusy,
+              let project = session.activeProject,
+              let navigation = try? ProjectNavigation.read(project) else { return }
+        guard !namingFolderIDs.contains(folderID) else { return }
+        let members = project.documents.filter {
+            !project.trashedDocumentIDs.contains($0.id) && navigation.documentFolders[$0.id] == folderID
+        }
+        guard !members.isEmpty else { return }
+        let content = String(members.enumerated().map { index, doc in
+            "[문서 \(index + 1)] 제목: \(doc.title)\n\(doc.body.prefix(300))"
+        }.joined(separator: "\n\n").prefix(settings.contextCharacters))
+        guard !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+
+        let projectID = project.id
+        let epoch = session.activationEpoch
+        namingFolderIDs.insert(folderID)
+        let parameters = settings.parameters
+        let task = Task { [engine, weak session] in
+            let name = (try? await engine.generateFolderName(content: content, parameters: parameters)) ?? ""
+            guard !Task.isCancelled else { return }
+            self.folderNamingTasks[folderID] = nil
+            self.namingFolderIDs.remove(folderID)
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, let session,
+                  session.activeProject?.id == projectID,
+                  session.activationEpoch == epoch,
+                  let currentProject = session.activeProject,
+                  let currentNav = try? ProjectNavigation.read(currentProject),
+                  let folder = currentNav.folders.first(where: { $0.id == folderID }),
+                  folder.name == "새 폴더" else { return }
+            let namingAnimation: Animation? =
+                NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+                ? nil : .easeOut(duration: 0.18)
+            withAnimation(namingAnimation) {
+                try? session.applyNavigation(.renameFolder(folderID, trimmed), projectID: projectID, epoch: epoch)
             }
         }
         folderNamingTasks[folderID] = task

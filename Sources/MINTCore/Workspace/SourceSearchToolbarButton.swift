@@ -6,6 +6,7 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
     @ObservedObject var session: ProjectSession
     let requests: ProjectEditorRequests
     let compact: Bool
+    var theme: MintTheme? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(session: session, requests: requests) }
 
@@ -16,7 +17,7 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
         button.refusesFirstResponder = true
         button.font = .systemFont(ofSize: 11)
         button.contentTintColor = .secondaryLabelColor
-        button.toolTip = "원문 검색 (⌘K)"
+        button.toolTip = "원문 검색"
         button.setAccessibilityIdentifier("mint.source-search.show")
         button.setAccessibilityLabel("원문 검색")
         return button
@@ -27,6 +28,7 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
         button.title = compact ? "" : "원문 검색"
         button.imagePosition = compact ? .imageOnly : .imageLeading
         button.isEnabled = session.isEditorEditable
+        button.contentTintColor = theme?.ink2 ?? .secondaryLabelColor
     }
 
     @MainActor final class Coordinator: NSObject {
@@ -35,6 +37,9 @@ struct SourceSearchToolbarButton: NSViewRepresentable {
         init(session: ProjectSession, requests: ProjectEditorRequests) {
             self.session = session; self.requests = requests
         }
-        @objc func openSearch() { SourceSearchPanel.present(session: session, requests: requests) }
+        @objc func openSearch() {
+            if let spatial = requests.spatialWorkspace { spatial.openSearch() }
+            else { SourceSearchPanel.present(session: session, requests: requests) }
+        }
     }
 }

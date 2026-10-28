@@ -34,15 +34,19 @@ final class ContrastTests: XCTestCase {
     private let darkSurface: UInt32 = 0x1B1B1E
 
     func test라이트테마_의미텍스트는45대1이상이다() {
-        XCTAssertGreaterThanOrEqual(ratio(0x1C1C1E, lightSurface), 4.5, "ink")
-        XCTAssertGreaterThanOrEqual(ratio(0x6B6B70, lightSurface), 4.5, "ink2")
-        XCTAssertGreaterThanOrEqual(ratio(0x76767B, lightSurface), 4.5, "ink3")
+        assertMeaningfulTextContrast(.light)
     }
 
     func test다크테마_의미텍스트는45대1이상이다() {
-        XCTAssertGreaterThanOrEqual(ratio(0xF2F2F0, darkSurface), 4.5, "ink")
-        XCTAssertGreaterThanOrEqual(ratio(0x9A9A9F, darkSurface), 4.5, "ink2")
-        XCTAssertGreaterThanOrEqual(ratio(0x838389, darkSurface), 4.5, "ink3")
+        assertMeaningfulTextContrast(.dark)
+    }
+
+    private func assertMeaningfulTextContrast(_ theme: MintTheme) {
+        for surface in [theme.editorSurface, theme.cardSurface, theme.workspaceSurface] {
+            for (name, color) in [("ink", theme.ink), ("ink2", theme.ink2), ("ink3", theme.ink3)] {
+                XCTAssertGreaterThanOrEqual(ratio(color.hexValue, surface.hexValue), 4.5, name)
+            }
+        }
     }
 
     func test위험상태색은비텍스트최소31을넘는다() {

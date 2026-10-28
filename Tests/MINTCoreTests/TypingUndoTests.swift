@@ -4,6 +4,19 @@ import XCTest
 
 @MainActor
 final class TypingUndoTests: XCTestCase {
+    func testResponderUndoAndRedoUseTheActiveDocumentHistory() async throws {
+        let h = try await SourceNavigationHarness(); defer { h.close() }
+        h.fixture.session.updateSelectedDocumentBody("")
+        let view = try await h.editor(), manager = try XCTUnwrap(view.undoManager)
+        h.window.makeKeyAndOrderFront(nil); h.window.makeFirstResponder(view)
+        manager.removeAllActions(); manager.groupsByEvent = true
+        type("Earlier recent", into: view, manager: manager)
+        XCTAssertTrue(manager.canUndo)
+        XCTAssertTrue(view.tryToPerform(Selector(("undo:")), with: nil))
+        XCTAssertEqual(view.serialize(), "Earlier ")
+        XCTAssertTrue(view.tryToPerform(Selector(("redo:")), with: nil))
+        XCTAssertEqual(view.serialize(), "Earlier recent")
+    }
     func testContinuousTypingKeepsEarlierWordsWhenUndoingLastWord() async throws {
         let h = try await SourceNavigationHarness()
         defer { h.close() }
@@ -100,21 +113,27 @@ final class TypingUndoTests: XCTestCase {
         type("Alpha one", into: view, manager: manager)
         let b = try XCTUnwrap(session.createDocument(title: "B"))
         view = try await h.editor()
-        XCTAssertFalse(manager.canUndo)
-        type("Beta two", into: view, manager: manager)
-        manager.undo()
+        let other = try XCTUnwrap(view.undoManager)
+        other.groupsByEvent = true
+        XCTAssertFalse(other === manager)
+        XCTAssertFalse(other.canUndo)
+        XCTAssertTrue(manager.canUndo, "The retained A editor keeps its own history")
+        type("Beta two", into: view, manager: other)
+        other.undo()
         XCTAssertEqual(view.serialize(), "Beta ")
-        XCTAssertTrue(manager.canRedo)
+        XCTAssertTrue(other.canRedo)
         session.selectDocument(a)
         view = try await h.editor()
         XCTAssertEqual(view.serialize(), "Alpha one")
-        XCTAssertFalse(manager.canUndo)
+        XCTAssertTrue(manager.canUndo)
         XCTAssertFalse(manager.canRedo)
+        XCTAssertTrue(view.undoManager === manager)
         session.selectDocument(b)
         view = try await h.editor()
         XCTAssertEqual(view.serialize(), "Beta ")
-        XCTAssertFalse(manager.canUndo)
-        XCTAssertFalse(manager.canRedo)
+        XCTAssertTrue(view.undoManager === other)
+        XCTAssertTrue(other.canUndo)
+        XCTAssertTrue(other.canRedo)
     }
 
     func testLongManuscriptSurvivesUndoOfRecentWord() async throws {

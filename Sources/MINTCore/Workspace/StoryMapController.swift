@@ -31,6 +31,7 @@ final class StoryMapController: ObservableObject {
         schedule()
     }
     private weak var session: ProjectSession?
+    private let requiresMapMode: Bool
     private let sleep: @Sendable () async throws -> Void
     private let project: Projector
     private var input: StoryMapInput?
@@ -42,14 +43,14 @@ final class StoryMapController: ObservableObject {
     private var epoch: UInt64 = 0
     private var workTask: Task<Void, Never>?
     private var subscriptions: Set<AnyCancellable> = []
-    init(session: ProjectSession, observeEnergy: Bool = true, sleep: @escaping @Sendable () async throws -> Void = {
+    init(session: ProjectSession, requiresMapMode: Bool = true, observeEnergy: Bool = true, sleep: @escaping @Sendable () async throws -> Void = {
         try await Task.sleep(for: .milliseconds(350))
     }, project: Projector? = nil) {
-        self.session = session; self.sleep = sleep
+        self.session = session; self.requiresMapMode = requiresMapMode; self.sleep = sleep
         let worker = StoryMapProjector()
         self.project = project ?? { try await worker.project($0) }
         session.$runtimeIdentity.dropFirst().sink { [weak self] _ in self?.stop() }.store(in: &subscriptions)
-        session.$workspaceMode.dropFirst().sink { [weak self] mode in if mode != .map { self?.stop() } }.store(in: &subscriptions)
+        session.$workspaceMode.dropFirst().sink { [weak self] mode in if mode != .map && self?.requiresMapMode == true { self?.stop() } }.store(in: &subscriptions)
         session.$isTransitioning.dropFirst().sink { [weak self] value in if value { self?.stop() } }.store(in: &subscriptions)
         if observeEnergy {
             for name in [Notification.Name.NSProcessInfoPowerStateDidChange, ProcessInfo.thermalStateDidChangeNotification] {
@@ -61,7 +62,7 @@ final class StoryMapController: ObservableObject {
         }
     }
     func update(knowledge: KnowledgeSnapshot? = nil, knowledgeOrigin: ProjectRuntimeIdentity? = nil, generation: Int = 0) {
-        guard let session, session.workspaceMode == .map, session.isEditorEditable,
+        guard let session, (!requiresMapMode || session.workspaceMode == .map), session.isEditorEditable,
               let document = session.selectedDocumentSnapshot, document.mode == .fiction, document.kind == .manuscript else { stop(); return }
         if input?.document.identity == document.identity, input?.knowledgeOrigin == knowledgeOrigin,
            input?.knowledgeGeneration == generation, (input?.knowledge == nil) == (knowledge == nil) { return }
@@ -95,7 +96,7 @@ final class StoryMapController: ObservableObject {
         prepared = nil; visibleRows = []; currentSceneID = nil
     }
     private func owns(_ input: StoryMapInput) -> Bool {
-        session?.runtimeIdentity == input.document.identity && session?.workspaceMode == .map && session?.isEditorEditable == true
+        session?.runtimeIdentity == input.document.identity && (!requiresMapMode || session?.workspaceMode == .map) && session?.isEditorEditable == true
     }
     private func schedule() {
         invalidate()
