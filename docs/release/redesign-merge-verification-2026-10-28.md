@@ -1,505 +1,152 @@
-import AppKit
-import Combine
-import QuartzCore
-import SwiftUI
+# Editorial redesign integration verification — 2026-10-28
 
-struct WorkspacePouchAction {
-    let id: String
-    let label: String
-    let symbol: String
-    var selected: () -> Bool = { false }
-    var enabled: () -> Bool = { true }
-    let perform: () -> Void
-}
+## Scope
 
-/// A collapsed workspace is still an open workspace, even without a visible
-/// document window. Its widget must outlive transient animation panels/views.
-@MainActor public enum WorkspacePouchLifetime {
-    private static var retained: [ObjectIdentifier: WorkspacePouchController] = [:]
+Integrate the editorial workspace branch with its document navigator, binder tabs,
+project-owned writer tools, expanded Markdown/math editing, native MathML EPUB
+export, and the three pinned local completion candidates. The owner's request
+explicitly includes fixing build/export regressions and merging main after checks.
+This is integration evidence, not Store distribution or shipping-model approval.
 
-    public static var hasCollapsedWorkspace: Bool { retained.values.contains { $0.isCollapsed } }
+## Build and editor repairs
 
-    static func controller(for window: NSWindow) -> WorkspacePouchController? {
-        retained.values.first { $0.window === window }
-    }
+- Reproduced a normal `swift build` failure: the Hugging Face macro target imported
+  a Swift 6.4 prebuilt module with Swift 6.3.3. Replaced the macro-only dependency
+  with a direct local `AutoTokenizer` bridge. Normal builds require no prebuilt
+  override and tokenizer loading remains local to the verified installation.
+- Reproduced selected-text loss on `*`, a source-mode load that reset its own flag,
+  and unstable nested bold/strikethrough serialization. Existing failing round-trip
+  tests now pass with the expected manuscript intact.
+- Traced native undo/layout exceptions with LLDB. TextKit emitted selection changes
+  while applying a storage delta; inline math collapse then recursively changed
+  the storage length. Defer selection processing until layout invalidation returns,
+  and measure caret overlays after the native edit completes. The regression also
+  checks the next run-loop/layout update, not merely the synchronous edit.
+- Added failing EPUB regressions for XML attribute escaping, literal code spans,
+  formatted-looking URL destinations, MathML structure, and the OPF mathml property.
+  Protect code/URLs before prose formatting and escape link attributes.
+- Migrated obsolete rail-based UI checks to the visible pouch menu, native search,
+  and current tile close controls. Retained IME, focus, selection, undo, durable
+  settings, passive-analysis, and project ownership assertions.
+- Selection toolbar has a borderless native panel with no window shadow; the
+  toolbar surface no longer draws an outer stroke or shadow.
 
-    @discardableResult public static func restoreCollapsedWorkspaces() -> Bool {
-        let workspaces = retained.values.filter { $0.isCollapsed }
-        for workspace in workspaces { workspace.restore() }
-        return !workspaces.isEmpty
-    }
+## Local evidence
 
-    fileprivate static func retain(_ controller: WorkspacePouchController) {
-        retained[ObjectIdentifier(controller)] = controller
-    }
+Logs are under `build/redesign-merge-verification/` (ignored build artifacts).
 
-    fileprivate static func release(_ controller: WorkspacePouchController) {
-        retained.removeValue(forKey: ObjectIdentifier(controller))
-    }
-}
+| Check | Result |
+| --- | --- |
+| Default `swift build` | Passed (`build-direct-tokenizer.log`) |
+| Full `swift test`, isolated `CFFIXED_USER_HOME` | 1,469 tests, 4 opt-in skips, 0 failures (`full-suite.log`) |
+| Final EPUB/math/editor/projection/undo subset | 101 tests, 1 opt-in skip, 0 failures (`final-focused.log`) |
+| `swift build --product MINTBench` | Passed (`bench-build.log`) |
+| Benchmark CLI preflight smoke | Passed; no model download (`bench-cli.log`) |
+| Support diagnostics | 9 tests passed |
+| Korean backend validation/preparation | 14 + 3 tests passed |
+| Dependency notices | 18 tests passed; real packaged resources verified |
+| `git diff --check` | Passed |
 
-@MainActor final class WorkspacePouchController: NSObject {
-    private(set) var panel: NSPanel?
-    private(set) var isCollapsed = false
-    private(set) var isDragging = false
-    var reduceMotion = false
-    var reduceTransparency = false
-    var theme: MintTheme = .light { didSet { refresh() } }
-    var actions: [WorkspacePouchAction] = [] { didSet { refresh() } }
-    var extraActions: [WorkspacePouchAction] = []
-    var targetTitle = "MINT" { didSet { content?.targetTitle = targetTitle } }
-    weak var requests: ProjectEditorRequests?
-    fileprivate weak var window: NSWindow?
-    private var collapsedWindow: NSWindow?
-    private weak var workspaceView: NSView?
-    private weak var previousResponder: NSResponder?
-    private let model: SpatialWorkspaceController
-    private let defaults: UserDefaults
-    private var content: WorkspacePouchView?
-    private var escapeMonitor: Any?
-    private var toolsWereExpanded = false
-    private var observers: [NSObjectProtocol] = []
-    private var subscription: AnyCancellable?
-    private var start: CGPoint?
-    private var grabOffset = CGPoint(x: 22, y: 22)
-    private var dragMonitor: Any?
-    private var draggingCursor = false
-    private var target = CGPoint.zero
-    private var spring = WorkspaceSpringPoint(position: .zero)
-    private var timer: WorkspaceDisplayClock?
-    private var lastStep = ProcessInfo.processInfo.systemUptime
-    private(set) var transition: NSPanel?
-    private var transitionGeneration: UInt64 = 0
-    private var collapsedImage: NSImage?
-    private struct SnapshotAnimation {
-        weak var window: NSWindow?
-        let ghost: NSPanel
-        let from: CGRect
-        let to: CGRect
-        let began: Double
-        let duration: Double
-        let expanding: Bool
-        let generation: UInt64
-    }
-    private var snapshotAnimation: SnapshotAnimation?
-    private var snapshotClock: WorkspaceDisplayClock?
-    // Share the canvas display clock and permit exact intermediate-frame checks.
-    var snapshotAnimationTime: () -> Double = { ProcessInfo.processInfo.systemUptime }
-    private var isAttached: Bool { content?.superview === model.canvas && model.canvas != nil }
+The final subset includes the restored backslash punctuation boundary in the
+incremental diagnostic projection. All test manuscripts and real-model runs use
+isolated storage. The earlier failures recorded in the model experiment report
+were resolved in this integration pass. Required PR CI and release-bundle/app
+checks are also required before the merge; their final results belong to the PR.
 
-    init(model: SpatialWorkspaceController, defaults: UserDefaults = .standard) {
-        self.model = model; self.defaults = defaults
-        super.init()
-        subscription = model.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { [weak self] in
-                self?.model.canvas?.layoutTiles()
-                self?.refresh(); self?.syncAttachment()
-            }
-        }
-        model.pouchGeometryDidChange = { [weak self] in self?.syncAttachment() }
-        model.dismissObject = { [weak self] tile in self?.dismissObject(tile) }
-        model.pouchController = self
-    }
+## Review
 
-    func attach(to window: NSWindow, from workspaceView: NSView? = nil) {
-        guard self.window !== window else {
-            if let workspaceView { self.workspaceView = workspaceView }
-            refresh(); syncAttachment(); return
-        }
-        detach(); self.window = window; self.workspaceView = workspaceView
-        let panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        panel.title = "MINT 주머니"; panel.isReleasedWhenClosed = false; panel.isOpaque = false
-        panel.backgroundColor = .clear; panel.hasShadow = true; panel.level = .floating
-        panel.isFloatingPanel = true; panel.becomesKeyOnlyIfNeeded = true
-        panel.isExcludedFromWindowsMenu = true
-        panel.isMovable = false; panel.isMovableByWindowBackground = false
-        panel.hidesOnDeactivate = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        let content = WorkspacePouchView(); content.controller = self
-        content.setAccessibilityIdentifier("mint.workspace.rail"); content.setAccessibilityLabel("주머니 도구창")
-        panel.contentView = content; self.panel = panel; self.content = content
-        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .leftMouseDown, .rightMouseDown]) { [weak self] event in
-            guard let self, event.window === self.window else { return event }
-            if event.type != .keyDown {
-                let trigger = self.model.pouchAnchor
-                let hitsTrigger = trigger.map { $0.bounds.contains($0.convert(event.locationInWindow, from: nil)) } ?? false
-                if self.model.pouchSection != nil, !hitsTrigger, let content = self.content,
-                   !content.containsControl(at: content.convert(event.locationInWindow, from: nil)) { self.dismissTools() }
-                return event
-            }
-            guard event.keyCode == 53,
-                  self.window?.attachedSheet == nil, NSApp.modalWindow == nil,
-                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-                  !self.isCollapsed, !self.isDragging, !self.model.isDragging else { return event }
-            if let text = self.window?.firstResponder as? NSTextView, text.hasMarkedText() { return event }
-            if let editor = self.window?.firstResponder as? BlockTextView, editor.ownsEscapeKey { return event }
-            guard self.model.pouchSection != nil else { return event }
-            if event.isARepeat { return nil }
-            self.dismissTools()
-            return nil
-        }
-        for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
-                     NSWindow.didBecomeKeyNotification, NSWindow.didEnterFullScreenNotification,
-                     NSWindow.didExitFullScreenNotification, NSWindow.didMiniaturizeNotification, NSWindow.didDeminiaturizeNotification] {
-            observers.append(NotificationCenter.default.addObserver(forName: name, object: window, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.dock(immediate: false) }
-            })
-        }
-        observers.append(NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: window, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.detach() }
-        })
-        observers.append(NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.dock(immediate: true) }
-        })
-        refresh(); dock(immediate: true)
-    }
+Reviewed inline as requested by the active #99 integration directive: model
+installation/ownership and cache failure handling; project navigation and legacy
+copy preparation; storage and editor identity across tool transitions; EPUB XML
+and MathML output; native selection/undo ordering; and the native test assertions.
+No CI job, required check, model-memory approval, or data protection was relaxed.
 
-    func detach() {
-        stopDragTracking()
-        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor); self.escapeMonitor = nil }
-        timer?.invalidate(); timer = nil
-        for observer in observers { NotificationCenter.default.removeObserver(observer) }
-        observers.removeAll()
-        cancelTransition(); collapsedImage = nil
-        content?.removeFromSuperview()
-        panel?.orderOut(nil); panel?.close(); panel = nil; content = nil; window = nil
-        start = nil; isDragging = false; isCollapsed = false
-        collapsedWindow = nil
-        workspaceView = nil
-        WorkspacePouchLifetime.release(self)
-    }
+## Real-model editor verification after the tokenizer bridge change
 
-    func detachFromWorkspaceView(_ view: NSView) {
-        guard workspaceView === view else { return }
-        workspaceView = nil
-        // SwiftUI may detach the bridge while the document window is hidden.
-        // Only an actual window close or an explicit detach disposes its widget.
-        guard !isCollapsed else { return }
-        detach()
-    }
+Each candidate loaded its already installed pinned weights into the native
+redesigned editor, produced visible Korean Ghost text, accepted it with native
+Tab, persisted the accepted body, and restored the original with undo.
 
-    func setTools(_ root: AnyView) { content?.setTools(root) }
+| Candidate | Prompt style | Observed continuation |
+| --- | --- | --- |
+| Qwen3.5 9B | continuation | ` 아무도 없었다.` |
+| Ministral 3 14B | continuation | ` 한 남자가 서 있었다.` |
+| Gemma 4 26B-A4B | instruct | `어둠이 짙게 깔려 있었다.` |
 
-    private weak var grabButton: WorkspacePouchButton?
-    func beginDrag(at point: CGPoint, from button: WorkspacePouchButton? = nil) {
-        guard isCollapsed else { return }
-        stopDragTracking()
-        grabButton = button
-        start = point; isDragging = false
-        if isCollapsed, let panel {
-            grabOffset = CGPoint(x: point.x - panel.frame.minX, y: point.y - panel.frame.minY)
-        } else { grabOffset = CGPoint(x: 22, y: 22) }
-        // Own the gesture before the rail's buttons are hidden or its parent window
-        // is ordered out. Tracking must not depend on the original hit-test view.
-        dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDragged, .leftMouseUp]) { [weak self] event in
-            guard let self, self.start != nil else { return event }
-            // The pouch moves between events. Sample desktop coordinates directly
-            // instead of converting through the panel's newly moved origin.
-            let point = NSEvent.mouseLocation
-            if event.type == .leftMouseDragged {
-                self.updateDrag(to: point)
-                return nil
-            }
-            let moved = self.endDrag(at: point)
-            // Preserve a stationary button click; consume a drag's mouse-up so the
-            // newly exposed orb cannot immediately reopen the collapsed window.
-            return moved ? nil : event
-        }
-    }
-    func updateDrag(to point: CGPoint) {
-        guard isCollapsed, let start else { return }
-        if !isDragging {
-            guard hypot(point.x - start.x, point.y - start.y) > 7 else { return }
-            isDragging = true; NSCursor.closedHand.push(); draggingCursor = true
-        }
-        target = WorkspacePouchGeometry.clampOrb(
-            CGPoint(x: point.x - grabOffset.x, y: point.y - grabOffset.y), screen: screenFrame(for: point), margin: 6)
-        moveTowardTarget()
-    }
-    @discardableResult func endDrag(at point: CGPoint) -> Bool {
-        guard start != nil else { return false }
-        if isDragging { updateDrag(to: point) }
-        start = nil
-        let moved = isDragging; isDragging = false
-        content?.clearPressedState(); stopDragTracking()
-        if moved {
-            target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: point))
-            moveTowardTarget()
-        }
-        refresh(); return moved
-    }
+Evidence and captures are in `build/writing-model-benchmarks-2026-10-26/`:
+`merge-qwen-native-ghost`, `merge-ministral-awake-native-ghost`, and
+`merge-gemma-native-ghost` (`.log` and `.png`). The first Ministral attempt timed
+out waiting for Ghost across a 539-second wall-clock interval and exited with a
+signal; the subsequent run under a temporary awake assertion passed in 7.56
+seconds. The failed attempt remains in `merge-ministral-native-ghost.log` and is
+not counted as successful evidence. These are functional checks, not new latency
+benchmarks. The original comparative benchmark results remain in the model report.
 
-    private func stopDragTracking() {
-        grabButton?.highlight(false); grabButton = nil
-        if let dragMonitor { NSEvent.removeMonitor(dragMonitor); self.dragMonitor = nil }
-        if draggingCursor { NSCursor.pop(); draggingCursor = false }
-    }
+## Packaging and CI toolchain follow-up
 
-    func collapse() {
-        guard !isCollapsed, let window, let panel else { return }
-        model.pouchSection = nil
-        releaseContentToPanel()
-        target = CGPoint(x: panel.frame.midX - 22, y: panel.frame.midY - 22)
-        spring.position = target
-        previousResponder = window.firstResponder
-        // Hiding a retained window is a presentation change, not an editor commit.
-        // Keep marked text and the native selection with the same first responder;
-        // do not enqueue diagnostics/autosave by synthesizing didChangeText here.
-        target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
-        collapsedWindow = window
-        isCollapsed = true
-        WorkspacePouchLifetime.retain(self)
-        cancelTransition()
-        // Make the orb independent of application activation before hiding the window.
-        refresh()
-        panel.orderFrontRegardless()
-        if !reduceMotion {
-            animateSnapshot(of: window, toward: collapsedSnapshotFrame(window: window, orb: CGRect(origin: target, size: CGSize(width: 44, height: 44))))
-        }
-        window.orderOut(nil)
-        panel.orderFrontRegardless(); moveTowardTarget()
-    }
-    func restore() {
-        guard isCollapsed, let window else { return }
-        let origin = panel?.frame ?? CGRect(origin: target, size: CGSize(width: 44, height: 44))
-        stopDragTracking(); cancelTransition()
-        isCollapsed = false; isDragging = false; start = nil
-        if !reduceMotion { window.alphaValue = 0 }
-        NSApp.unhide(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        if let previousResponder { window.makeFirstResponder(previousResponder) }
-        collapsedWindow = nil
-        // Retain the controller until an actual detach/close. A recreated SwiftUI
-        // bridge adopts it, including when restoration happens before that bridge.
-        refresh(); dock(immediate: false)
-        if !reduceMotion {
-            animateSnapshot(of: window, toward: window.frame, expandingFrom: collapsedSnapshotFrame(window: window, orb: origin))
-        } else { collapsedImage = nil }
-    }
+The first PR run reproduced the hosted macOS 15 / Swift 6.1 incompatibility
+with MLX 0.32's Swift 6.3 minimum. CI now uses macOS 26 and the explicitly
+installed Xcode 26.4.1 toolchain for all three existing jobs, retaining every
+check and timeout. The [runner inventory](https://github.com/actions/runner-images/blob/main/images/macos/macos-26-arm64-Readme.md)
+and [Xcode release notes](https://developer.apple.com/documentation/xcode-release-notes/xcode-26_4-release-notes)
+identify the available toolchain and Swift 6.3 support.
 
-    func refresh() {
-        guard let panel, let content else { return }
-        // The pouch is an independent panel and does not inherit SwiftUI's
-        // preferredColorScheme from the manuscript window.
-        let appearanceName: NSAppearance.Name = theme.editorSurface.relativeLuminance < 0.5 ? .darkAqua : .aqua
-        if panel.appearance?.name != appearanceName {
-            panel.appearance = NSAppearance(named: appearanceName)
-        }
-        content.appearance = panel.appearance
-        content.toolsExpanded = isAttached && model.pouchSection != nil
-        content.targetTitle = targetTitle
-        content.configure(orb: isCollapsed, horizontal: false, actions: [], theme: theme, attached: isAttached)
-        panel.hidesOnDeactivate = !isCollapsed; panel.canHide = !isCollapsed
-        panel.alphaValue = 1; panel.ignoresMouseEvents = false
-        if isCollapsed {
-            panel.setFrame(CGRect(origin: spring.position, size: CGSize(width: 44, height: 44)), display: false)
-            panel.orderFrontRegardless()
-        } else { panel.orderOut(nil) }
-        content.needsLayout = true; content.needsDisplay = true
-    }
-    func toggleTools(for tile: WorkspaceTileID? = nil) {
-        if let tile { model.selectTile(tile) }
-        if model.pouchSection != nil { dismissTools(); return }
-        model.openPouchTools()
-        refresh(); syncAttachment()
-    }
-    private func dock(immediate: Bool) {
-        guard let window, let panel else { return }
-        guard isCollapsed else { panel.orderOut(nil); syncAttachment(); return }
-        target = WorkspacePouchGeometry.clampOrb(target, screen: screenFrame(for: target))
-        if immediate { spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target) }
-        else { moveTowardTarget() }
-        if window.isVisible || isCollapsed { panel.orderFrontRegardless() }
-    }
-    private func moveTowardTarget() {
-        guard let panel else { return }
-        if reduceMotion {
-            timer?.invalidate(); timer = nil
-            spring = WorkspaceSpringPoint(position: target); panel.setFrameOrigin(target)
-            return
-        }
-        guard timer == nil else { return }
-        lastStep = ProcessInfo.processInfo.systemUptime
-        guard let view = panel.contentView else { return }
-        timer = WorkspaceDisplayClock(view: view) { [weak self] in
-            guard let self else { return false }
-            self.step()
-            return self.timer != nil
-        }
-    }
-    private func step() {
-        let now = ProcessInfo.processInfo.systemUptime, elapsed = now - lastStep; lastStep = now
-        spring.step(target: target, stiffness: isDragging ? 640 : 280, damping: isDragging ? 50 : 34, elapsed: elapsed)
-        panel?.setFrameOrigin(spring.position)
-        if spring.isSettled(at: target) {
-            timer?.invalidate(); timer = nil
-            panel?.setFrameOrigin(target)
-        }
-    }
+The first local app packaging attempt correctly rejected the stale notice
+inventory. It now tracks all 16 resolved dependencies and 37 vendored/resource
+components; removed dependency components are no longer packaged. Original
+notice hashes are unchanged, and the unchanged PocketFFT header now points to
+the newly pinned MLX submodule commit. Real-checkout notice generation and all
+17 validator regressions pass; no validation rule was weakened.
 
-    private func attachmentFrame() -> (canvas: SpatialWorkspaceCanvasView, local: CGRect, screen: CGRect)? {
-        guard let canvas = model.canvas, canvas.window === window,
-              let placement = canvas.pouchPlacement(), let window else { return nil }
-        let local = placement.trigger.offsetBy(dx: placement.frame.minX, dy: placement.frame.minY)
-        return (canvas, local, window.convertToScreen(canvas.convert(local, to: nil)))
-    }
+The next packaging check exposed a pre-existing redesign mapping gap: SwiftPM
+flattens both Fonts and Icons into `MINT_MINTCore.bundle`, but the bundle audit
+only mapped Fonts. Added explicit multiple source directories, with required-file
+and original-byte checks for every mapped artifact. The new regression fails
+before the fix, then verifies success, missing-icon rejection, and tampered-icon
+rejection. All 18 notice regressions and the actual packaged resource audit pass.
 
-    /// The card is always anchored to window chrome, independently of tile selection.
-    func syncAttachment() {
-        guard !isCollapsed, !isDragging, window?.isVisible == true,
-              let destination = attachmentFrame(), let content, let panel else { return }
-        if !isAttached {
-            panel.contentView = nil; content.removeFromSuperview()
-            destination.canvas.addSubview(content, positioned: .above, relativeTo: nil)
-            content.autoresizingMask = []
-        }
-        panel.orderOut(nil); refresh(); updateAttachedFrame()
-    }
+Hosted UI failures also exposed environment-dependent fixtures: the runner's
+1024-point display constrained wide test windows, legacy scrollbars consumed
+17 points, and inherited Reduce Motion disabled animation checks. The harness now
+preserves its requested window sizes and explicitly configures overlay scrollers.
+A debug-only preference seam makes both motion modes testable; production always
+honors the real system preference. Canvas motion uses that single resolved
+preference and an injectable clock for intermediate-frame assertions. All 49
+focused workspace checks passed locally (`ci-geometry-final.log`).
 
-    private func releaseContentToPanel() {
-        guard isAttached, let content, let panel, let window else { return }
-        returnToolFocus()
-        // Preserve the grab origin when the expanded card leaves the canvas.
-        let lip = content.placement?.trigger ?? content.bounds
-        let rect = window.convertToScreen(content.convert(lip, to: nil))
-        content.hideToolsImmediately(); content.placement = nil; toolsWereExpanded = false
-        content.removeFromSuperview(); panel.contentView = content
-        panel.setFrame(rect, display: false)
-        spring = WorkspaceSpringPoint(position: CGPoint(x: rect.midX - 22, y: rect.midY - 22))
-    }
+The final full-suite rerun after these fixture and resource changes passed all
+1,469 tests, with four opt-in model/fixture skips and zero failures
+(`build/redesign-merge-verification/full-final.log`).
 
-    private func returnToolFocus() {
-        guard content?.toolsOwnFirstResponder == true else { return }
-        let editor = model.projectID.flatMap { project in
-            model.selectedTile?.documentID.flatMap { requests?.editor(for: .init(projectID: project, documentID: $0)) }
-        } ?? requests?.nativeEditor
-        window?.makeFirstResponder(editor)
-    }
+## Final local app artifact
 
-    private func updateAttachedFrame() {
-        guard let content, let placement = model.canvas?.pouchPlacement() else { return }
-        if let canvas = model.canvas, canvas.subviews.last !== content {
-            canvas.addSubview(content, positioned: .above, relativeTo: nil)
-        }
-        let opened = !toolsWereExpanded && model.pouchSection != nil
-        toolsWereExpanded = model.pouchSection != nil
-        if content.placement != placement {
-            content.placement = placement; content.frame = placement.frame
-        }
-        if opened { content.revealTools(reduceMotion: reduceMotion) }
-    }
-    func dismissTools() {
-        guard model.pouchSection != nil else { return }
-        returnToolFocus()
-        model.pouchSection = nil
-        content?.hideToolsImmediately()
-        refresh(); syncAttachment()
-        content?.layoutSubtreeIfNeeded()
-    }
-    func dismissObject(_ tile: WorkspaceTileID) {
-        returnToolFocus()
-        if tile.documentID != nil && model.layout.openDocuments.count <= 1 {
-            window?.performClose(nil)
-        } else if model.close(tile) { requests?.focusEditor() }
-    }
-    private func screenFrame(for point: CGPoint) -> CGRect {
-        (NSScreen.screens.first { $0.visibleFrame.contains(point) } ?? window?.screen ?? NSScreen.main)?.visibleFrame
-            ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
-    }
-    func showMoreMenu(in view: NSView) {
-        moreMenu().popUp(positioning: nil, at: CGPoint(x: view.bounds.maxX, y: view.bounds.midY), in: view)
-    }
-    func moreMenu() -> NSMenu {
-        let menu = NSMenu(); menu.autoenablesItems = false
-        for (index, action) in menuActions.enumerated() {
-            let item = NSMenuItem(title: action.label, action: #selector(invokeExtra(_:)), keyEquivalent: "")
-            item.target = self; item.tag = index
-            item.image = NSImage(systemSymbolName: action.symbol, accessibilityDescription: nil)
-            item.state = action.selected() ? .on : .off; item.isEnabled = action.enabled()
-            item.setAccessibilityIdentifier(action.id); menu.addItem(item)
-        }
-        return menu
-    }
-    @objc private func invokeExtra(_ item: NSMenuItem) {
-        guard menuActions.indices.contains(item.tag), menuActions[item.tag].enabled() else { return }; menuActions[item.tag].perform()
-    }
-    private var menuActions: [WorkspacePouchAction] { (isAttached ? actions : []) + extraActions }
-    private func cancelTransition() {
-        snapshotClock?.invalidate(); snapshotClock = nil; snapshotAnimation = nil
-        transitionGeneration &+= 1
-        transition?.orderOut(nil); transition?.close(); transition = nil
-        window?.alphaValue = 1
-    }
+A clean `b1da5a45917292f262e4fdcee79ee83080c9d57c` release bundle built
+successfully (`app-build-complete.log`). Its embedded source revision matches and
+`MINTSourceDirty` is false. Strict deep signature validation, both privacy
+packaging regressions, and the resource/notice audit passed. The isolated launch
+smoke passed model-free startup, normal termination, and the crash-report check
+(`app-smoke-final.log`).
 
-    private func animateSnapshot(of window: NSWindow, toward rect: CGRect, expandingFrom origin: CGRect? = nil) {
-        let image: NSImage
-        if origin != nil, let cached = collapsedImage {
-            image = cached
-        } else {
-            guard let view = window.contentView,
-                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
-                window.alphaValue = 1
-                return
-            }
-            // Capture once per collapse, never on pointer movement or animation ticks.
-            view.cacheDisplay(in: view.bounds, to: bitmap)
-            image = NSImage(size: view.bounds.size); image.addRepresentation(bitmap)
-            if origin == nil { collapsedImage = image }
-        }
-        let generation = transitionGeneration
-        let ghost = NSPanel(contentRect: window.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
-        ghost.isReleasedWhenClosed = false; ghost.ignoresMouseEvents = true; ghost.level = .floating
-        ghost.isOpaque = false; ghost.backgroundColor = .clear; ghost.hasShadow = false
-        ghost.hidesOnDeactivate = false; ghost.animationBehavior = .none
-        ghost.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let imageView = NSImageView(frame: CGRect(origin: .zero, size: window.frame.size))
-        imageView.image = image; imageView.imageScaling = .scaleAxesIndependently
-        imageView.autoresizingMask = [.width, .height]
-        imageView.wantsLayer = true
-        let blur = CIFilter(name: "CIGaussianBlur")
-        blur?.name = "collapseBlur"
-        blur?.setValue(origin == nil ? 12 : 0, forKey: kCIInputRadiusKey)
-        if let blur { imageView.layer?.filters = [blur] }
-        let blurAnimation = CABasicAnimation(keyPath: "filters.collapseBlur.inputRadius")
-        blurAnimation.fromValue = origin == nil ? 0 : 10; blurAnimation.toValue = origin == nil ? 12 : 0
-        blurAnimation.duration = origin == nil ? 0.12 : 0.14
-        blurAnimation.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
-        imageView.layer?.add(blurAnimation, forKey: "pouch.blur")
-        ghost.contentView = imageView; transition = ghost
-        if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
-        ghost.orderFrontRegardless()
-        snapshotAnimation = SnapshotAnimation(window: window, ghost: ghost, from: ghost.frame,
-            to: rect, began: snapshotAnimationTime(), duration: origin == nil ? 0.12 : 0.14,
-            expanding: origin != nil, generation: generation)
-        snapshotClock = WorkspaceDisplayClock(view: imageView) { [weak self] in
-            guard let self else { return false }
-            self.stepSnapshotAnimation()
-            return self.snapshotAnimation != nil
-        }
-    }
+The full keyboard-driven UI smoke first stopped at an obsolete rail identifier.
+The script now follows the visible pouch/menu, separate workspace search tile,
+and new-document menu action. A subsequent attempt stopped before typing because
+the isolated app could not acquire foreground focus; a bounded activation retry
+also failed safely. This environmental interruption is not a UI-smoke pass. Full
+keyboard-driven evidence remains pending a foreground-available desktop session;
+the isolated native editor/IME/undo suite and three real-model Ghost tests passed
+separately as recorded above.
 
-    func stepSnapshotAnimation() {
-        guard let animation = snapshotAnimation,
-              transitionGeneration == animation.generation, transition === animation.ghost else { return }
-        let elapsed = max(0, (snapshotAnimationTime() - animation.began) / animation.duration)
-        let t = animation.expanding ? WorkspaceHTMLStyle.progress(elapsed)
-            : WorkspaceHTMLStyle.progress(elapsed, x1: 0.4, y1: 0, x2: 0.2, y2: 1)
-        let from = animation.from, to = animation.to
-        animation.ghost.setFrame(CGRect(x: from.minX + (to.minX - from.minX) * t,
-            y: from.minY + (to.minY - from.minY) * t,
-            width: from.width + (to.width - from.width) * t,
-            height: from.height + (to.height - from.height) * t), display: true)
-        animation.ghost.alphaValue = animation.expanding ? t : 1 - t
-        guard elapsed >= 1 else { return }
-        animation.window?.alphaValue = 1
-        animation.ghost.orderOut(nil); animation.ghost.close()
-        transition = nil; snapshotAnimation = nil
-        snapshotClock?.invalidate(); snapshotClock = nil
-        if animation.expanding { collapsedImage = nil }
-    }
-    private func collapsedSnapshotFrame(window: NSWindow, orb: CGRect) -> CGRect {
-        let size = CGSize(width: window.frame.width * 0.03, height: window.frame.height * 0.03)
-        return CGRect(x: orb.midX - size.width / 2, y: orb.midY - size.height / 2, width: size.width, height: size.height)
-    }
-}
+## Final hosted animation follow-up
+
+CI run 40648389254 passed both release-bundle/smoke and unsigned-archive jobs.
+Its 1,469-test debug run had one remaining failure: the pouch's 100-millisecond
+sleep sometimes resumed after its 120-millisecond native frame animation had
+already finished. Collapse/restore snapshots now use the same display clock as
+canvas motion, retaining their original durations and cubic easing curves.
+The regression advances an injected monotonic clock and checks both intermediate
+sizes and final editor/selection state. A new interruption regression also checks
+restore-during-collapse and detach-during-animation cleanup. All 19 focused pouch
+and workspace fidelity tests pass (`pouch-clock-final.log`).
+
+The owner explicitly deferred the full keyboard-driven desktop smoke; it remains
+an uncompleted owner check, separate from required PR CI.
