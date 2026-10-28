@@ -264,6 +264,16 @@ on findElementContaining(rootElement, attributeName, expectedValue, remainingDep
     end tell
     return missing value
 end findElementContaining
+on activateTarget(targetProcess)
+    tell application "System Events"
+        repeat 20 times
+            set frontmost of targetProcess to true
+            delay 0.1
+            if frontmost of targetProcess then return
+        end repeat
+    end tell
+    error "Isolated app could not acquire foreground focus; no typing performed"
+end activateTarget
 on run argv
     set targetPID to (item 1 of argv) as integer
     set operation to item 2 of argv
@@ -293,7 +303,7 @@ on run argv
                 if targetElement is missing value then error "Writer field missing: " & expectedValue
                 set fieldValue to item 4 of argv
                 if operation is "field-set" then
-                    set frontmost of targetProcess to true
+                    my activateTarget(targetProcess)
                     set value of attribute "AXFocused" of targetElement to true
                     tell targetProcess
                         key code 0 using command down
@@ -327,7 +337,7 @@ on run argv
             set titleText to my findElement(rootElement, "AXValue", expectedValue, 30)
             if titleText is missing value then error "Document title text missing"
         else if operation is "begin-rename" then
-            set frontmost of targetProcess to true
+            my activateTarget(targetProcess)
             tell targetProcess to click menu bar item "파일" of menu bar 1
             set renameCommand to my findElement(targetProcess, "AXTitle", "문서 이름 바꾸기", 30)
             if renameCommand is missing value then error "Rename menu command missing"
@@ -337,13 +347,13 @@ on run argv
             if targetField is missing value then error "Editable field missing: " & expectedValue
             if not (value of attribute "AXFocused" of targetField) then error "Editable field focus missing"
         else if operation is "submit-field" then
-            set frontmost of targetProcess to true
+            my activateTarget(targetProcess)
             tell targetProcess to key code 36
         else if operation is "project-search" then
-            set frontmost of targetProcess to true
+            my activateTarget(targetProcess)
             tell targetProcess to key code 3 using {command down, shift down}
         else if operation is "search-focused" then
-            set searchField to my findElement(rootElement, "AXIdentifier", "mint.navigator.search", 30)
+            set searchField to my findElement(rootElement, "AXIdentifier", "mint.workspace.search.query", 30)
             if searchField is missing value then error "Project search field missing"
             if not (value of attribute "AXFocused" of searchField) then error "Project search focus missing"
         else if operation is "resize" then
@@ -365,7 +375,7 @@ on run argv
             set editor to my findElement(rootElement, "AXIdentifier", "mint.editor", 30)
             if editor is missing value then error "에디터 없음"
             if operation is "type" then
-                set frontmost of targetProcess to true
+                my activateTarget(targetProcess)
                 set value of attribute "AXFocused" of editor to true
                 delay 0.2
                 if not (frontmost of targetProcess) then error "격리 앱 포커스 없음"
@@ -384,15 +394,15 @@ on run argv
                 if imageBody does not start with "![](images/" then error "Managed image missing"
                 return imageBody & "|"
             else if operation is "paste" then
-                set frontmost of targetProcess to true
+                my activateTarget(targetProcess)
                 set value of attribute "AXFocused" of editor to true
                 tell targetProcess to key code 9 using command down
             else if operation is "end" then
-                set frontmost of targetProcess to true
+                my activateTarget(targetProcess)
                 set value of attribute "AXFocused" of editor to true
                 tell targetProcess to key code 125 using command down
             else if operation is "undo" or operation is "redo" then
-                set frontmost of targetProcess to true
+                my activateTarget(targetProcess)
                 set value of attribute "AXFocused" of editor to true
                 -- Physical shortcuts also work with the active Hangul input source.
                 if operation is "undo" then
@@ -464,6 +474,11 @@ open_pouch_menu() {
     ui press "mint.workspace.pouch.more"
 }
 
+new_document() {
+    open_pouch_menu
+    ui press "mint.workspace.new-document"
+}
+
 open_writer_information() {
     open_pouch_menu
     ui press "mint.workspace.more.characters"
@@ -471,7 +486,7 @@ open_writer_information() {
 }
 
 close_writer_information() {
-    # Writer controls expand inside the pouch card, without a separate sheet.
+    # Close the writer-information tile and return to the retained editor.
     ui press "mint.tile.close.characters"
 }
 
@@ -493,7 +508,7 @@ assert_isolated_project_mode() {
 launch
 wait_ui equals "$PROJECT_BODY"
 ui present "mint.workspace.tiles"
-ui present "mint.workspace.rail"
+ui present "mint.writer-tools.compatibility"
 ui type "$EDITED_BODY"
 wait_ui equals "$PERSISTED_BODY"
 ui undo ""
@@ -511,19 +526,22 @@ ui absent "문서로 돌아가기"
 ui absent "mint.ghost-shortcut-hint"
 ui resize 1250
 assert_autocomplete_disabled
+open_pouch_menu
 ui press "파일 목록 숨기기"
+open_pouch_menu
 ui press "파일 목록 보이기"
 ui navigator
 ui press "mint.navigator.close"
 ui focused
 ui project-search ""
 wait_ui search-focused ""
-ui field-set "mint.navigator.search" "keyboard-$TOKEN"
+ui field-set "mint.workspace.search.query" "keyboard-$TOKEN"
 wait_ui equals "$PERSISTED_BODY"
-ui field-equals "mint.navigator.search" "keyboard-$TOKEN"
-ui field-set "mint.navigator.search" ""
-ui press "mint.navigator.close"
+ui field-equals "mint.workspace.search.query" "keyboard-$TOKEN"
+ui field-set "mint.workspace.search.query" ""
+ui press "mint.tile.close.search"
 ui focused
+open_pouch_menu
 ui press "mint.workspace.navigator-toggle"
 ui focused
 ui begin-rename ""
@@ -559,7 +577,7 @@ ui absent "리빙 마진"
 close_writer_information
 ui focused
 ui navigator
-ui press "새 문서"
+new_document
 wait_ui equals ""
 ui type "$NEW_BODY"
 wait_ui equals "$NEW_BODY"
@@ -620,7 +638,7 @@ if plutil -extract genre raw -o - "$WRITER_RECORD" >/dev/null 2>&1; then fail "C
 # A PNG-only system clipboard must enable the standard Paste command. No image
 # file URL or text flavor is offered, and the original clipboard stays in memory.
 launch
-ui press "새 문서"
+new_document
 wait_ui equals ""
 swift scripts/fixtures/clipboard-image.swift "$SMOKE_ROOT/clipboard-ready" > "$SMOKE_ROOT/clipboard.log" 2>&1 &
 CLIPBOARD_PID=$!
@@ -699,7 +717,7 @@ check_original
 launch
 ui press "mint.document.$DOCUMENT_ID"
 wait_ui equals "$PERSISTED_BODY"
-ui press "새 문서"
+new_document
 wait_ui equals ""
 ui type '$$E=mc^2$$'
 wait_ui equals 'E=mc^2'

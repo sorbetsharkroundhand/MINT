@@ -44,7 +44,7 @@ Logs are under `build/redesign-merge-verification/` (ignored build artifacts).
 | Benchmark CLI preflight smoke | Passed; no model download (`bench-cli.log`) |
 | Support diagnostics | 9 tests passed |
 | Korean backend validation/preparation | 14 + 3 tests passed |
-| Dependency notices | 17 tests passed |
+| Dependency notices | 18 tests passed; real packaged resources verified |
 | `git diff --check` | Passed |
 
 The final subset includes the restored backslash punctuation boundary in the
@@ -117,3 +117,21 @@ focused workspace checks passed locally (`ci-geometry-final.log`).
 The final full-suite rerun after these fixture and resource changes passed all
 1,469 tests, with four opt-in model/fixture skips and zero failures
 (`build/redesign-merge-verification/full-final.log`).
+
+## Final local app artifact
+
+A clean `b1da5a45917292f262e4fdcee79ee83080c9d57c` release bundle built
+successfully (`app-build-complete.log`). Its embedded source revision matches and
+`MINTSourceDirty` is false. Strict deep signature validation, both privacy
+packaging regressions, and the resource/notice audit passed. The isolated launch
+smoke passed model-free startup, normal termination, and the crash-report check
+(`app-smoke-final.log`).
+
+The full keyboard-driven UI smoke first stopped at an obsolete rail identifier.
+The script now follows the visible pouch/menu, separate workspace search tile,
+and new-document menu action. A subsequent attempt stopped before typing because
+the isolated app could not acquire foreground focus; a bounded activation retry
+also failed safely. This environmental interruption is not a UI-smoke pass. Full
+keyboard-driven evidence remains pending a foreground-available desktop session;
+the isolated native editor/IME/undo suite and three real-model Ghost tests passed
+separately as recorded above.
