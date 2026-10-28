@@ -1,6 +1,6 @@
 # Binder drop targets and complex math follow-up
 
-Implement the owner's follow-up on `codex/mint-editorial-redesign`, inline, preserving the existing dirty checkout.
+Implement the owner's follow-up on `codex/purlory-editorial-redesign`, inline, preserving the existing dirty checkout.
 
 ## Contract and design
 

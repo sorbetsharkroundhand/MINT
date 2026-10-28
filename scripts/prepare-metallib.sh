@@ -1,5 +1,5 @@
 #!/bin/sh
-# `swift run MINT`용 mlx metallib 준비.
+# `swift run Purlory`용 mlx metallib 준비.
 #
 # SwiftPM CLI는 Metal 셰이더를 빌드하지 못한다(mlx-swift 공식 제약) —
 # 그래서 `swift run` 산출물은 "Failed to load the default metallib"로 죽는다.
@@ -58,7 +58,7 @@ if [ -z "$LIB" ]; then
 
     echo "▸ metallib 캐시 miss — xcodebuild 실행…"
     rm -rf "$DD"
-    xcodebuild build -scheme MINT -destination 'platform=macOS,arch=arm64' \
+    xcodebuild build -scheme Purlory -destination 'platform=macOS,arch=arm64' \
         -derivedDataPath "$DD" -quiet
 
     LIB=$(find "$DD" -name default.metallib -path "*Cmlx*" | head -1 || true)
@@ -95,4 +95,4 @@ for CONFIG in debug release; do
     echo "✓ $BIN_DIR/mlx.metallib"
 done
 
-echo "완료 — 이제 swift run MINT 가 동작합니다."
+echo "완료 — 이제 swift run Purlory 가 동작합니다."

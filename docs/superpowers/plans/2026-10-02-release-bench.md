@@ -21,14 +21,14 @@
 - Candidate evaluation must be explicit and preserve normal release gating.
 
 ## Task 1: Pure release metrics
-Files: Sources/MINTCore/Inference/ReleaseBenchmarkReport.swift, Tests/MINTCoreTests/ReleaseBenchmarkReportTests.swift, docs/release-model-benchmark.md.
+Files: Sources/PurloryCore/Inference/ReleaseBenchmarkReport.swift, Tests/PurloryCoreTests/ReleaseBenchmarkReportTests.swift, docs/release-model-benchmark.md.
 Interfaces: BenchmarkContamination.count(_:); ReleaseBenchmarkSample(coldText:warmText:rawColdText:rawWarmText:truth:coldTTFC:warmTTFC:warmPromptTokens:warmReusedTokens:); ReleaseBenchmarkReport(metadata:samples:attempted:), Codable aggregates and write(to:) with no overwrite.
 - [x] Add failing deterministic fixtures for known Han/reasoning/chat patterns, clean Korean, hit/KV/TTFC/null math and no-overwrite export.
 - [x] Implement schema/counters/aggregation and exact metric documentation.
 - [x] Run focused/full isolated tests, Swift/bench builds; review inline, commit and stacked Draft PR.
 
 ## Task 2: Engine observation and CLI
-Files: CompletionEngine.swift, Sources/MINTBench/main.swift, benchmark observer tests.
+Files: CompletionEngine.swift, Sources/PurloryBench/main.swift, benchmark observer tests.
 Interfaces: benchmark SPI rawText on Completion preserving consumed chunks before cuts; MLX peak snapshot; explicit CLI candidate budget/report options, injected metadata to Task 1 report.
 - [x] Add failing raw-before-sanitization and option/path validation regression coverage.
 - [x] Capture raw decoded text without changing displayed behavior; report fixture/toolchain/hardware/peak metadata and all required metrics from replay.

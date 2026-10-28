@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class KoreanBackendNativeTests(unittest.TestCase):
     def test_real_bundle_and_archive_load_offline_with_sandbox_denial(self):
-        with tempfile.TemporaryDirectory(prefix="mint-native-packaging-") as directory:
+        with tempfile.TemporaryDirectory(prefix="purlory-native-packaging-") as directory:
             result = subprocess.run(
                 [str(ROOT / "scripts/validate-korean-backend.sh"), "--probe", "--output", directory],
                 cwd=ROOT, capture_output=True, text=True)
@@ -27,7 +27,7 @@ class KoreanBackendNativeTests(unittest.TestCase):
                              [256, 1024, 4096])
 
     def test_known_utf16_typo_and_spacing_fixtures(self):
-        with tempfile.TemporaryDirectory(prefix="mint-native-result-") as directory:
+        with tempfile.TemporaryDirectory(prefix="purlory-native-result-") as directory:
             result = subprocess.run(
                 [str(ROOT / "scripts/validate-korean-backend.sh"), "--fixtures", "--output", directory],
                 cwd=ROOT, capture_output=True, text=True)

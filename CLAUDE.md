@@ -1,4 +1,4 @@
-# MINT — Claude Code Entry Point
+# Purlory — Claude Code Entry Point
 
 Read `AGENTS.md` once for shared invariants and task-specific reading rules.
 Do not duplicate its contents or preload every linked document.

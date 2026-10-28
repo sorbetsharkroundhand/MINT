@@ -21,7 +21,7 @@ refactor is not the final deliverable. #163 remains an epic for later work.
   drag state, and project/runtime composition.
 - `EditorToolbar` owns global navigation, original search, saved writer-data
   access, and Settings alongside document-local title/model controls.
-- Sidebar visibility is shared through `mint.sidebarVisible`; width, selected
+- Sidebar visibility is shared through `purlory.sidebarVisible`; width, selected
   tool, placement, and chrome visibility already have persistent keys.
 - `ProjectNavigatorView` currently occupies the window's titlebar row and
   hardcodes 74 points of leading header padding. A navigator card needs its
@@ -62,14 +62,14 @@ Native window controls and drag region / project title
   the measured traffic-light safe region. Keep native window buttons and a
   native drag region; do not replace window behavior with custom gestures.
 - Rail width is 56 points, outer inset and surface gaps are 10 points, and
-  frame corner radius uses `MintRadius.lg` (12 points). Buttons have at least
+  frame corner radius uses `PurloryRadius.lg` (12 points). Buttons have at least
   a 32-by-32-point hit area.
 - The manuscript frame has an opaque `editorSurface` fill and a restrained
   separator border. Frame decoration must not clip the TextKit editor's
   selection, math/media, or transient controls.
 - Navigator header actions (project switching, new document, trash) remain
   inside the navigator card. Remove the obsolete window-button offset there.
-- Use the approved Pretendard UI, Noto Serif KR manuscript, and existing mint
+- Use the approved Pretendard UI, Noto Serif KR manuscript, and existing purlory
   accent. Preserve custom palettes. Use at most one material layer for chrome;
   cards use solid surfaces and Reduce Transparency has an opaque fallback.
 
@@ -97,8 +97,8 @@ views. Its inputs are navigator visibility/width, validated tool selection,
 preferred tool placement, and chrome visibility. It has no document identity,
 manuscript, project mutations, inference owner, or filesystem access.
 
-Retain `mint.sidebarVisible`, `mint.sidebarWidth`, `mint.sidebarSection`,
-`mint.toolDockPosition`, and `mint.chromeHidden`. Their stored values remain the
+Retain `purlory.sidebarVisible`, `purlory.sidebarWidth`, `purlory.sidebarSection`,
+`purlory.toolDockPosition`, and `purlory.chromeHidden`. Their stored values remain the
 source of truth; do not add a second persisted model or silently rename keys.
 Preserve valid saved values. Unknown/deferred tool values render no active tool
 without overwriting the raw preference or deleting any writer data.
@@ -159,7 +159,7 @@ projects and preferences; never real manuscripts. Tests must cover:
   control clearance, and existing General/AI-disabled operation.
 
 Run focused tests, `swift build`, `swift test`, and `swift build --product
-MINTBench` with automatic resolution disabled. Preserve required CI. Merge only
+PurloryBench` with automatic resolution disabled. Preserve required CI. Merge only
 after required CI succeeds under the owner's existing authorization.
 
 Actual app launches remain deferred to the requested combined verification

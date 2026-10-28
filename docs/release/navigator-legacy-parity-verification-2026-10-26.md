@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Legacy navigator behavior in the redesigned workspace
 
 Branch: `codex/mint-editorial-redesign`. This supersedes the earlier Option-only grouping and dedicated extraction target. The current design and the shared checkout's newer spatial drag engine remain in place. No commits or remote changes were made.

@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # HTML native workspace port verification
 
 The supplied `mint.html` is the behavioral contract recorded in

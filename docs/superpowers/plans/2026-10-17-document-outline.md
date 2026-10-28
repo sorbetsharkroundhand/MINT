@@ -16,7 +16,7 @@
 - Preserve original UTF-16 and source/native/runtime ownership, IME, Undo, focus, autosave and format/media/math round-trip.
 - Preparation is background/cancellable, 350 ms debounce; foreground Ghost, serious/critical thermal state and Low Power Mode retire work.
 - Keep two memoized document revisions; retained title/evidence prefixes <=256 UTF-16; scanner yields/checks cancellation every <=2,048 input UTF-16 units.
-- Keep required CI unchanged. Actual app verification is owner-handled later; never launch local MINT/UI smoke.
+- Keep required CI unchanged. Actual app verification is owner-handled later; never launch local Purlory/UI smoke.
 
 ## Review Focus
 1. Identical duplicate/Unicode headings in different documents must never acquire another native editor's authority.
@@ -27,7 +27,7 @@
 
 ### Task 1: Prepared source projection and owned background controller
 
-**Files:** Create `Sources/MINTCore/Workspace/DocumentOutlineProjection.swift`, `Sources/MINTCore/Workspace/DocumentOutlineController.swift`, `Tests/MINTCoreTests/DocumentOutlineProjectionTests.swift`, `Tests/MINTCoreTests/DocumentOutlineControllerTests.swift`; expose the existing internal heading grammar in `Knowledge/DocumentOutline.swift` without changing scene parsing.
+**Files:** Create `Sources/PurloryCore/Workspace/DocumentOutlineProjection.swift`, `Sources/PurloryCore/Workspace/DocumentOutlineController.swift`, `Tests/PurloryCoreTests/DocumentOutlineProjectionTests.swift`, `Tests/PurloryCoreTests/DocumentOutlineControllerTests.swift`; expose the existing internal heading grammar in `Knowledge/DocumentOutline.swift` without changing scene parsing.
 
 **Interfaces:** `DocumentOutlineProjection: Equatable, Sendable` provides `revision: String`, `headings: [Heading]`, `static build(_ source: String) async throws -> Self`, and `currentHeading(at sourceOffset: Int) -> Heading?`; `Heading` exposes `id: Int`/source offset, `level: Int`, `title: String`, bounded original `quote: String`, `sourceRange: Range<Int>`. `DocumentOutlineProjector` actor provides `project(_ snapshot: ProjectDocumentSnapshot) async throws -> DocumentOutlineProjection` and two-entry hash memoization. `PreparedDocumentOutline` pairs `identity` and `projection`. Main-actor `DocumentOutlineController` publishes `prepared`, `currentHeadingID`, `status`; exposes `update(_ snapshot: ProjectDocumentSnapshot?)`, `setForegroundBusy(_:)`, `setPolicyPaused(_:)`, `stop()`, `waitForCurrentWork()` and an injected async sleep/project function for deterministic tests. Status is idle/checking/paused/unavailable. Source captures remain immutable.
 
@@ -39,7 +39,7 @@
 
 ### Task 2: Exact native navigation and visible General Outline
 
-**Files:** Create `Sources/MINTCore/Editor/BlockTextView+DocumentOutline.swift`, `Sources/MINTCore/Workspace/DocumentOutlineView.swift`, `Tests/MINTCoreTests/DocumentOutlineNavigationTests.swift`; extend `Editor/SourceNavigation.swift`, `Project/ProjectSession.swift`, `Editor/BlockTextView.swift`, `Workspace/WorkspaceModePresentation.swift`, `Workspace/WorkspacePresentationState.swift`, `Workspace/WorkspaceLayoutPolicy.swift`, `Workspace/WorkspaceShellView.swift`, `ContentView.swift`; extend relevant workspace/layout/source-navigation tests.
+**Files:** Create `Sources/PurloryCore/Editor/BlockTextView+DocumentOutline.swift`, `Sources/PurloryCore/Workspace/DocumentOutlineView.swift`, `Tests/PurloryCoreTests/DocumentOutlineNavigationTests.swift`; extend `Editor/SourceNavigation.swift`, `Project/ProjectSession.swift`, `Editor/BlockTextView.swift`, `Workspace/WorkspaceModePresentation.swift`, `Workspace/WorkspacePresentationState.swift`, `Workspace/WorkspaceLayoutPolicy.swift`, `Workspace/WorkspaceShellView.swift`, `ContentView.swift`; extend relevant workspace/layout/source-navigation tests.
 
 **Interfaces:** Add `OutlineSourceTarget: Equatable, Sendable` carrying `identity`, `revision`, `evidence`, `level` and exact source offset, and `.heading(OutlineSourceTarget)` to `SourceNavigationIntent`. `ProjectEditorRequests.jump(to: Heading, prepared: PreparedDocumentOutline, in: ProjectSession) -> Bool` reuses source-return ownership. `BlockTextView.outlineSourcePosition(identity:) -> Int?` reads only the existing native row map; heading application checks native row source start/style/current mapped owner/revision. `WorkspacePresentationState` accepts `outlineVisible: Bool = false` and exposes context visibility independently of persisted tool IDs. General mode options are write/outline; Fiction remains write. The controller is owned once by WorkspaceSurface and preparation runs independently of panel appearance.
 

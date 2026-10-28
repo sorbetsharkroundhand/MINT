@@ -1,10 +1,10 @@
 # Unsigned Xcode archive
 
-Issue [#173](https://github.com/sorbetsharkroundhand/MINT/issues/173) adds the
+Issue [#173](https://github.com/sorbetsharkroundhand/Purlory/issues/173) adds the
 minimum native app target for the distribution foundation. Open
-`MINT.xcodeproj` and use its shared `MINT` scheme. It compiles the existing
-`Sources/MINT/MINTApp.swift` entry point and links the root Swift package's
-`MINTCore` library; `Package.swift` remains the dependency/source authority.
+`Purlory.xcodeproj` and use its shared `Purlory` scheme. It compiles the existing
+`Sources/Purlory/PurloryApp.swift` entry point and links the root Swift package's
+`PurloryCore` library; `Package.swift` remains the dependency/source authority.
 The project stays under `Distribution/` so existing root SwiftPM/Xcode Metal
 preparation commands keep their current behavior.
 
@@ -12,19 +12,19 @@ From the repository root, with full Xcode and its Metal toolchain installed:
 
 ```sh
 swift package resolve
-scripts/archive-mint-app.sh
-scripts/test-mint-archive-validation.sh
-scripts/test-mint-sandbox-storage.sh
-scripts/test-mint-sandbox-mlx.sh
+scripts/archive-purlory-app.sh
+scripts/test-purlory-archive-validation.sh
+scripts/test-purlory-sandbox-storage.sh
+scripts/test-purlory-sandbox-mlx.sh
 ```
 
-The result is `build/MINT.xcarchive`. `scripts/validate-mint-archive.sh` checks
+The result is `build/Purlory.xcarchive`. `scripts/validate-purlory-archive.sh` checks
 its application metadata, Apple Silicon executable, compiled MLX Metal
 library, SwiftMath fonts, and absence of signing metadata, an application
 bundle signature, or a provisioning profile. The regression script copies
 the real artifact and checks rejection of signing metadata, an unexpected
 application, missing shaders, and missing fonts. CI uploads
-`MINT-unsigned-xcarchive` as an inspectable ZIP.
+`Purlory-unsigned-xcarchive` as an inspectable ZIP.
 The generated Xcode workspace uses the root `Package.resolved` pins.
 The arm64 linker leaves an intrinsic ad-hoc signature in the executable;
 the archive has no Apple signing identity/team or sealed bundle signature.
@@ -32,7 +32,7 @@ the archive has no Apple signing identity/team or sealed bundle signature.
 Both target configurations declare App Sandbox, user-selected file read/write,
 and network-client entitlements (optional model downloads; inference stays local).
 Signing remains disabled for the unsigned archive. The storage regression script
-compiles the production `MintStorageLocation` source into a uniquely identified,
+compiles the production `PurloryStorageLocation` source into a uniquely identified,
 ad-hoc-signed probe. It checks effective entitlements, container write/reopen, and
 denial of an ungranted external write; an unsandboxed control must fail despite
 its redirected home. Its CFFIXED_USER_HOME and disposable
@@ -40,8 +40,8 @@ container/fixtures are isolated from real manuscripts. All probe data is removed
 afterward; macOS may retain its protected container-manager metadata record.
 This proves the storage resolver boundary, not the full signed app or Store build.
 
-Foundation selects Documents/MINT inside the container for a sandboxed build;
-SwiftPM development builds keep their existing Documents/MINT location. Nothing
+Foundation selects Documents/Purlory inside the container for a sandboxed build;
+SwiftPM development builds keep their existing Documents/Purlory location. Nothing
 automatically moves development data. Onboarding and File > Import Project use
 explicit folder selection: select a modern UUID folder containing `project.json`,
 or a legacy folder containing `entries.json` and optional `images/`. Legacy import
@@ -65,11 +65,11 @@ requires GPU result 42 from packaged resources, tests missing/corrupt libraries,
 checks process survival and normal termination, and rejects model downloads.
 Every copy has a unique identity/container and CFFIXED_USER_HOME; the original
 archive and real manuscripts are untouched. The diagnostic is enabled only by
-`MINT_VERIFY_MLX_RESOURCES=1`, writes its result inside standard storage, and does
+`PURLORY_VERIFY_MLX_RESOURCES=1`, writes its result inside standard storage, and does
 not select a model or authorize AI.
 
 The default smoke requires a Metal-capable Mac and never skips GPU validation.
-Standard archive CI runs `scripts/test-mint-sandbox-mlx.sh --resource-errors-only`
+Standard archive CI runs `scripts/test-purlory-sandbox-mlx.sh --resource-errors-only`
 to exercise missing/empty resources and editor survival before Metal is touched.
 This mode does not prove GPU initialization. GitHub's [standard macOS runner
 specification](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
@@ -86,7 +86,7 @@ smoke remain in CI.
 
 Both bundle paths copy `Resources/PrivacyInfo.xcprivacy` to the root macOS app's
 `Contents/Resources`. The offline gate rejects missing, malformed, escaping or
-stale declarations and validates the current MINT-owned API reasons. The app CI
+stale declarations and validates the current Purlory-owned API reasons. The app CI
 exercises disposable resource failures; archive-copy tests independently remove
 and tamper with the actual native artifact.
 
@@ -94,7 +94,7 @@ The source audit maps app-owned preferences in `CompletionSettings`, theme,
 writing positions and project selection to UserDefaults reason `CA92.1`.
 Container file metadata used by storage/recovery and verified model installs
 uses `C617.1`; explicit user-selected import file metadata uses `3B52.1`.
-MINT has no telemetry, manuscript upload or tracking, so its declaration has no
+Purlory has no telemetry, manuscript upload or tracking, so its declaration has no
 collected data or tracking domains. Optional model downloads are distinct from
 local manuscript processing; the current approved model catalog remains empty.
 
@@ -102,7 +102,7 @@ These mappings and the macOS resource location were checked against Apple's
 [manifest guidance](https://developer.apple.com/documentation/bundleresources/adding-a-privacy-manifest-to-your-app-or-third-party-sdk),
 [API reason list](https://developer.apple.com/documentation/bundleresources/app-privacy-configuration/nsprivacyaccessedapitypes/nsprivacyaccessedapitype)
 and [on-device collection definition](https://developer.apple.com/app-store/app-privacy-details/)
-on 2026-10-05. This audit covers MINT-owned code. SDK manifests, resource/license
+on 2026-10-05. This audit covers Purlory-owned code. SDK manifests, resource/license
 notices and the final model host/privacy practices still require the exact
 release dependency/model inventory. #155/#180 own final policy/lineup approval;
 this resource foundation does not complete #185 or prove Store compliance.

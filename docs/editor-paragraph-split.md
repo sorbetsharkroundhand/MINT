@@ -116,7 +116,7 @@ TRIGGER를 6000으로 둔 이유: 5000자(1.1ms·IME 3.3ms)는 아직 쾌적해 
 
 ## 구현 배치 (CLAUDE.md §4)
 
-- `SentenceSplitter`(신규, `Sources/MINTCore/Knowledge/` 또는 공용) — 결정적 문장
+- `SentenceSplitter`(신규, `Sources/PurloryCore/Knowledge/` 또는 공용) — 결정적 문장
   경계. 씬 분할과 공유.
 - 감지: `BlockTextView` 또는 배경 인덱서에서 문단 크기 스캔(O(문서), 열 때/유휴에
   1회 — 키 입력 경로 아님).

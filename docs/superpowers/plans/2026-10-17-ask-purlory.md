@@ -1,0 +1,38 @@
+# Ask Purlory implementation plan
+
+> Execute inline with superpowers:executing-plans, regression-first, no subagents/repeated approval. Spec: `docs/superpowers/specs/2026-10-17-ask-purlory-design.md`.
+
+## Review focus
+1. Only bounded captured original evidence in the explicit scope can grant a citation/navigation action; Unicode/scope/nonce ambiguity refuses.
+2. Unfinished/malformed/unregistered citations never publish answer claims; semantic interpretation stays distinct from original truth and canon.
+3. Cancellation, project/body/model/priority changes retire ownership, preserve only valid partials and drain actual generation before handoff; no implicit setup/model operation or Ghost reuse of answer state.
+4. Search/no-model editing, IME, native editor/Undo/focus/source return, accessible Markdown actions and user-owned scroll remain intact.
+
+### Task 1: Bounded original packet and validated stream records
+
+**Files:** Create `Workspace/AskEvidencePacket.swift`, `Workspace/AskAnswerDecoder.swift`, `Tests/PurloryCoreTests/AskEvidencePacketTests.swift`, `Tests/PurloryCoreTests/AskAnswerDecoderTests.swift`.
+
+- [x] Write/run failing real-search packet/source/scope/cap and fragmented/unsupported/Unicode citation/buffer tests.
+- [x] Implement immutable packet preparation through existing SourceSearch, raw original proof and bounded complete-record decoder. No model/UI work yet.
+- [x] Run focused source/packet/decoder tests, build/full tests/PurloryBench; review original authority/limits inline and fix Important findings RED→GREEN.
+- [x] Commit/publish/attach bounded PR after predecessor merge, merge after predecessor-main and exact-head all-three CI plus fresh feedback, synchronize/verify merged main. Partial #269.
+
+### Task 2: Cancellable owner-scoped answers and real ready-model backend
+
+**Files:** Create `Workspace/AskPurloryController.swift`, `Inference/AskPurloryBackend.swift` and focused fake-stream/lifetime tests; extend CompletionEngine only at its shared model-lifetime/generation seam.
+
+- [x] Write failing cancellation/partial/ABA/priority/policy/model-unavailable/budget/drain regressions before implementation.
+- [x] Implement request tickets/nonces, project/runtime/policy invalidation and injected streams with explicit cancel-and-drain. Add ready-expected-model-only local instruction streaming; preserve normal completion callers and cache behavior.
+- [x] Run focused lifecycle/ask/cache tests, build/full tests/PurloryBench and separate inline review. No actual model download/inference or app launch.
+- [x] Deliver bounded PR with predecessor-main, exact-head and merged-main all-three evidence; keep #269 open until native connection.
+
+### Task 3: Explicit native search/question mode and runtime connection
+
+**Files:** Extend `Workspace/SourceSearchPanel.swift`, SourceSearchController prepared-input handoff, ProjectEditorRequests runtime injection and actual CompletionController/workspace attachment; create a read-only answer view and synthetic native panel/scroll/source tests.
+
+- [x] Write failing no-model/search, explicit-only submit, marked-text, partial/scroll, source actions/return/focus/Undo and project retirement regressions.
+- [x] Add optional question mode in the existing temporary panel, ready-model affordance, keyboard/VoiceOver Markdown/source actions, cancellation and selection-preserving user-owned follow scrolling; connect real runtime and Ghost/policy retirement without model setup on open.
+- [x] Run all relevant native-source/lifecycle tests, build/full tests/PurloryBench; separate whole-feature inline review, Important fixes RED→GREEN.
+- [x] Deliver bounded PR and verify all required main/head CI, then record #269 implementation evidence and owner-final native acceptance separately. Do not claim semantic answer correctness, shipping-model, device or Store acceptance without evidence.
+
+Inline plan review: packet/decoder establish original authority before any backend; fake-stream controller and real ready-model adapter precede UI. Existing rail/command entry points share ProjectEditorRequests support injection, keeping no-model search compatible. One bounded open PR, unpublished successors may advance on immutable verified predecessors. No check is waived by overlapping remote validation.

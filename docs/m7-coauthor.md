@@ -32,7 +32,7 @@ PLAN §14 M7의 구현 기록. 원칙: 결정적으로 되는 것 먼저, 측정
 M6 측정의 결론("접두 일치 프록시는 지식 주입에 둔감")이 실사용 수락률을 품질의
 **본 지표**로 승격시켰다. 문단 제안(§10)도 이 데이터로 게이트한다.
 
-- `~/Documents/MINT/metrics.jsonl` — 한 줄 한 사건:
+- `~/Documents/Purlory/metrics.jsonl` — 한 줄 한 사건:
   `{"ts":…,"event":"shown|accepted_full|accepted_word|dismissed","mode":"fast|smart|story[-dialogue]","latencyMs":…}`
 - 모드 축이 핵심 질문에 답한다: **story가 fast보다 수락률이 높은가?** —
   지식 주입의 가치를 실사용으로 판정 (M6 완료 기준 이관).

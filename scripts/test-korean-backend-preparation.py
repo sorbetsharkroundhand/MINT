@@ -14,7 +14,7 @@ from artifacts import ValidationError
 
 class KoreanBackendPreparationTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory(prefix="mint-kiwi-preparation-")
+        self.temporary = tempfile.TemporaryDirectory(prefix="purlory-kiwi-preparation-")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
         self.source = self.root / "source"

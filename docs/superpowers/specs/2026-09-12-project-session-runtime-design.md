@@ -1,6 +1,6 @@
 # Project-Owned Runtime Design
 
-**Issue:** [#118 — Ship the project-owned writing runtime](https://github.com/sorbetsharkroundhand/MINT/issues/118)
+**Issue:** [#118 — Ship the project-owned writing runtime](https://github.com/sorbetsharkroundhand/Purlory/issues/118)
 
 **Status:** Approved on 2026-09-12
 
@@ -12,7 +12,7 @@ A new or returning writer reaches a real, verified Fiction or General project, e
 
 The project domain, verified content-addressed store, migration foundation, workspace shell, and project-scoped Intelligence publication guards have landed. The live application remains on the compatibility side of that seam:
 
-- `MINTApp` constructs both `EntryStore` and `ProjectSession`.
+- `PurloryApp` constructs both `EntryStore` and `ProjectSession`.
 - Navigator, editor, commands, export, autosave, and shutdown mutate `EntryStore`.
 - `ProjectSession` currently supplies workspace mode and a project/document label for Intelligence, not the editor document.
 - The first-run resolver and creation/import coordinators are not connected to the app root.
@@ -91,7 +91,7 @@ Failure before activation leaves the old in-memory session and durable active ma
 The app root boots through `FirstRunStateResolver` and `ProjectSession`:
 
 - A verified active project opens directly.
-- No active project presents Fiction creation, General creation, and legacy MINT library import.
+- No active project presents Fiction creation, General creation, and legacy Purlory library import.
 - A corrupt active state presents an actionable error and never silently creates a legacy entry.
 
 The first-run model sheet is removed. Completion authorization is explicit:
@@ -112,11 +112,11 @@ Legacy import is divided into prepare and commit:
 - Cancellation is honored before commit.
 - Commit atomically activates the verified candidate and immediately adopts it without another cancellation point.
 
-Import failure or cancellation keeps the previous project usable and preserves the original source. The current import contract covers a legacy MINT library/`entries.json`; this change does not claim general Markdown or EPUB import.
+Import failure or cancellation keeps the previous project usable and preserves the original source. The current import contract covers a legacy Purlory library/`entries.json`; this change does not claim general Markdown or EPUB import.
 
 ## Editor Boundary
 
-`MintBlockEditor` consumes the stable project/document key and a binding backed by `ProjectSession`. EntryStore-specific search types become neutral editor values. Asynchronous editor callbacks additionally capture the full runtime identity when generation-sensitive publication is required.
+`PurloryBlockEditor` consumes the stable project/document key and a binding backed by `ProjectSession`. EntryStore-specific search types become neutral editor values. Asynchronous editor callbacks additionally capture the full runtime identity when generation-sensitive publication is required.
 
 Before leaving a document, the editor commits marked text and records its position. When runtime identity changes it:
 
@@ -157,7 +157,7 @@ Markdown and EPUB exporters accept a `WritingDocument` plus its project asset re
 
 ## Legacy Boundary
 
-The original `entries.json` is never deleted or migrated in place. `EntryStore` is removed from normal `MINTApp` composition.
+The original `entries.json` is never deleted or migrated in place. `EntryStore` is removed from normal `PurloryApp` composition.
 
 An explicit Legacy Library workspace may construct `EntryStore` only after the project session has flushed and torn down its editor/background consumers. Returning to the project workspace flushes and destroys `EntryStore` before the project session reopens. The two owners never exist as active editing runtimes simultaneously and never write each other's formats.
 
@@ -190,7 +190,7 @@ Automated coverage must prove:
 11. Project images, Markdown, EPUB, media, and math round-trip through project-scoped assets.
 12. The UI smoke fixture verifies the project document body, not `entries.json`.
 
-Final verification includes `swift build`, `swift test`, `swift build --product MINTBench`, `scripts/build-mint-app.sh`, `scripts/smoke-mint-app.sh`, and `scripts/ui-smoke-mint-app.sh` with isolated `CFFIXED_USER_HOME`. Real-editor IME/Ghost/undo smoke is required where automation cannot synthesize a genuine marked-text session.
+Final verification includes `swift build`, `swift test`, `swift build --product PurloryBench`, `scripts/build-purlory-app.sh`, `scripts/smoke-purlory-app.sh`, and `scripts/ui-smoke-purlory-app.sh` with isolated `CFFIXED_USER_HOME`. Real-editor IME/Ghost/undo smoke is required where automation cannot synthesize a genuine marked-text session.
 
 ## Out of Scope
 

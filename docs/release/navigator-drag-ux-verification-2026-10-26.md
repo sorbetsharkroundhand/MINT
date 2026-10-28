@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Navigator drag UX investigation and verification
 
 > Historical verification of an approach the user rejected. The Option-only grouping and dedicated extraction target below have been removed. See [legacy navigator parity verification](navigator-legacy-parity-verification-2026-10-26.md) for the current behavior and evidence.

@@ -31,7 +31,7 @@ Interfaces: WritingProject.userData: [String: Data] (default empty); ProjectMani
 ## Task 2: Scoped writer state and migration
 - [x] Generic session/snapshot boundary delivered separately with stale-runtime and in-flight flush coverage.
 - [x] Domain codec and archived-source migration delivered separately; pre-adoption app wiring follows.
-Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, MINTApp.swift, writer tests.
+Files: ProjectSession.swift, ProjectDocumentSnapshot.swift, writer UserData adapter/migration, PurloryApp.swift, writer tests.
 Interfaces: updateUserData(_ data: Data?, for key: String, identity: ProjectRuntimeIdentity) throws; WriterDocumentData codec/key(documentID:); injected pre-adoption preparation closure returning verified WritingProject.
 - [x] Add failing session generation/flush/relaunch/stale-A/B and typed legacy migration fixtures.
 - [x] Implement scoped in-memory mutations and writer codec; migrate archived known fields only for absent records with a durable migration marker so deletes stay deleted.

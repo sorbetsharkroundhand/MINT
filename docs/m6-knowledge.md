@@ -75,8 +75,8 @@
 유정 신호를 받지만 **호칭 목록으로 정확히 제외**됐다 — 이것이 고유명사만 남기는 핵심.
 
 **확장성:** 언어 구조(격조사·유정 신호)는 내부 인프라, 일반명사 불용어는
-`~/Documents/MINT/character-stopwords.txt`에 한 줄씩 추가 → **재빌드 없이** 병합
-(mtime 캐시, 검증 완료). 재현: `MINTBench --detect-only --replay <원고> --true-people "a,b"`.
+`~/Documents/Purlory/character-stopwords.txt`에 한 줄씩 추가 → **재빌드 없이** 병합
+(mtime 캐시, 검증 완료). 재현: `PurloryBench --detect-only --replay <원고> --true-people "a,b"`.
 
 **정밀도 우선의 대가 (의도된 것):** 유정 신호가 하나도 없는 인물(현재 창에서
 발화·상호작용이 전무한 조연)은 침묵으로 놓친다. 원고가 자라 발화/여격이 생기면

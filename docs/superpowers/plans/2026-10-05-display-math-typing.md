@@ -8,7 +8,7 @@
 
 **Tech Stack:** Swift/Foundation scanner, native AppKit editor harness, packaged UI smoke.
 
-**Spec:** [Issue #241](https://github.com/sorbetsharkroundhand/MINT/issues/241), current body/comments refreshed 2026-10-05; no blockers or active PR.
+**Spec:** [Issue #241](https://github.com/sorbetsharkroundhand/Purlory/issues/241), current body/comments refreshed 2026-10-05; no blockers or active PR.
 
 ## Global Constraints
 - No math UI redesign, new Markdown dialect, disk/inference work or IME changes.
@@ -24,7 +24,7 @@
 
 ### Task 1: Preserve delimiter ownership
 
-**Files:** Modify `Sources/MINTCore/Editor/MathScanner.swift`, `Tests/MINTCoreTests/MathScannerTests.swift`; create `Tests/MINTCoreTests/MathDisplayTypingTests.swift`; extend `scripts/ui-smoke-mint-app.sh` with double-dollar typing lifecycle evidence after main incorporates the harness fixes from #193.
+**Files:** Modify `Sources/PurloryCore/Editor/MathScanner.swift`, `Tests/PurloryCoreTests/MathScannerTests.swift`; create `Tests/PurloryCoreTests/MathDisplayTypingTests.swift`; extend `scripts/ui-smoke-purlory-app.sh` with double-dollar typing lifecycle evidence after main incorporates the harness fixes from #193.
 
 **Interfaces:** Existing `MathScanner.regions(in:skipping:)` and `closingInline(in:atCaret:)` signatures remain unchanged. Native editor uses them as today.
 

@@ -19,7 +19,7 @@ swift build -c release
 내부 token loop 생성 신호 이후 취소와 첫 청크 조기 종료:
 
 ```bash
-.build/release/MINTBench \
+.build/release/PurloryBench \
   --model mlx-community/Qwen2.5-3B-Instruct-4bit \
   --cancellation-stress 20
 ```
@@ -32,7 +32,7 @@ swift build -c release
 KV 캐시 회귀:
 
 ```bash
-.build/release/MINTBench \
+.build/release/PurloryBench \
   --model mlx-community/Qwen2.5-3B-Instruct-4bit \
   --replay Fixtures/replay-novel-ko-v1.txt \
   --context 1200 --max-tokens 12 --runs 1

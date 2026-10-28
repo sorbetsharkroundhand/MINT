@@ -119,7 +119,7 @@ final class CancellationState: @unchecked Sendable {
 func cancellationTrial(_ backend: Backend, cancel: Bool) throws -> (UInt64, Int) {
     let state = CancellationState(), started = DispatchSemaphore(value: 0)
     let finished = DispatchSemaphore(value: 0), allowNext = DispatchSemaphore(value: 0)
-    DispatchQueue(label: "mint.backend-probe.native").async {
+    DispatchQueue(label: "purlory.backend-probe.native").async {
         for index in 0..<2 {
             let admitted = state.lock.withLock {
                 if state.cancelled { return false }

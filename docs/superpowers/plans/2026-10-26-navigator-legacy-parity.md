@@ -1,6 +1,6 @@
 # Restore legacy navigator behavior within the current design
 
-Work inline on `codex/mint-editorial-redesign`, preserving the shared checkout. The user explicitly requested the behavior from the pre-redesign navigator, including sorting, nested folders, grouping documents by dropping one onto another, and extraction by dragging outside a folder's region.
+Work inline on `codex/purlory-editorial-redesign`, preserving the shared checkout. The user explicitly requested the behavior from the pre-redesign navigator, including sorting, nested folders, grouping documents by dropping one onto another, and extraction by dragging outside a folder's region.
 
 ## Implementation contract
 
@@ -19,6 +19,6 @@ Work inline on `codex/mint-editorial-redesign`, preserving the shared checkout. 
 - [x] Verify native document/folder gestures, grouping, subtree extraction, cancel, undo, spring expansion and saved organization.
 - [x] Complete builds, broader spatial/math tests and the full suite; compare known baseline failures and record evidence.
 
-Use synthetic projects with `CFFIXED_USER_HOME=/tmp/mint-navigator-parity-evidence/home`. No real manuscripts or production bundle are involved.
+Use synthetic projects with `CFFIXED_USER_HOME=/tmp/purlory-navigator-parity-evidence/home`. No real manuscripts or production bundle are involved.
 
 Final evidence: build and benchmark compile passed; 52 focused tests passed both separately and within the full run. The full suite ran 1,454 tests and retained exactly the same 16 failing cases as the preceding baseline, with no new failures. See [verification](../../release/navigator-legacy-parity-verification-2026-10-26.md).

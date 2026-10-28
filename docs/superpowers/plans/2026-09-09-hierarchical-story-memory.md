@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Formalize MINT's existing Scene → Chapter → Work summary pyramid as project-isolated, incrementally invalidated routing memory with current-manuscript evidence drill-down.
+**Goal:** Formalize Purlory's existing Scene → Chapter → Work summary pyramid as project-isolated, incrementally invalidated routing memory with current-manuscript evidence drill-down.
 
 **Architecture:** Add typed scope/version values and pure hierarchy calculations, move derived sidecar access behind an explicit project-or-legacy repository, and bind every BackgroundIndexer load/checkpoint/publication to an immutable scope + generation + document-version identity. Preserve existing summarization prompts and downstream KnowledgeSnapshot behavior while excluding stale hierarchy nodes from the new public routing snapshot.
 
@@ -26,9 +26,9 @@
 ### Task 1: Typed hierarchy, freshness, and evidence drill-down
 
 **Files:**
-- Create: `Sources/MINTCore/Knowledge/HierarchicalMemory.swift`
-- Modify: `Sources/MINTCore/Knowledge/DocumentOutline.swift`
-- Test: `Tests/MINTCoreTests/HierarchicalMemoryTests.swift`
+- Create: `Sources/PurloryCore/Knowledge/HierarchicalMemory.swift`
+- Modify: `Sources/PurloryCore/Knowledge/DocumentOutline.swift`
+- Test: `Tests/PurloryCoreTests/HierarchicalMemoryTests.swift`
 
 **Interfaces:**
 - Produces: `StoryMemoryScope`, `SceneContentVersion`, `StoryMemoryNodeID`, `StoryMemorySnapshot`, and `HierarchicalMemory` pure calculations.
@@ -106,18 +106,18 @@ Expected: PASS.
 - [ ] **Step 6: Commit the hierarchy unit**
 
 ```bash
-git add Sources/MINTCore/Knowledge/HierarchicalMemory.swift Sources/MINTCore/Knowledge/DocumentOutline.swift Tests/MINTCoreTests/HierarchicalMemoryTests.swift
+git add Sources/PurloryCore/Knowledge/HierarchicalMemory.swift Sources/PurloryCore/Knowledge/DocumentOutline.swift Tests/PurloryCoreTests/HierarchicalMemoryTests.swift
 git commit -m "feat(knowledge): formalize hierarchical memory contracts"
 ```
 
 ### Task 2: Project-scoped and explicit legacy sidecar persistence
 
 **Files:**
-- Modify: `Sources/MINTCore/Project/ProjectStore.swift`
-- Modify: `Sources/MINTCore/Knowledge/KnowledgeStore.swift`
-- Create: `Sources/MINTCore/Knowledge/KnowledgeSidecarRepository.swift`
-- Modify: `Tests/MINTCoreTests/ProjectStoreTests.swift`
-- Create: `Tests/MINTCoreTests/KnowledgeSidecarRepositoryTests.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectStore.swift`
+- Modify: `Sources/PurloryCore/Knowledge/KnowledgeStore.swift`
+- Create: `Sources/PurloryCore/Knowledge/KnowledgeSidecarRepository.swift`
+- Modify: `Tests/PurloryCoreTests/ProjectStoreTests.swift`
+- Create: `Tests/PurloryCoreTests/KnowledgeSidecarRepositoryTests.swift`
 
 **Interfaces:**
 - Consumes: `StoryMemoryScope` from Task 1.
@@ -179,16 +179,16 @@ Expected: PASS.
 - [ ] **Step 6: Commit persistence**
 
 ```bash
-git add Sources/MINTCore/Project/ProjectStore.swift Sources/MINTCore/Knowledge/KnowledgeStore.swift Sources/MINTCore/Knowledge/KnowledgeSidecarRepository.swift Tests/MINTCoreTests/ProjectStoreTests.swift Tests/MINTCoreTests/KnowledgeSidecarRepositoryTests.swift
+git add Sources/PurloryCore/Project/ProjectStore.swift Sources/PurloryCore/Knowledge/KnowledgeStore.swift Sources/PurloryCore/Knowledge/KnowledgeSidecarRepository.swift Tests/PurloryCoreTests/ProjectStoreTests.swift Tests/PurloryCoreTests/KnowledgeSidecarRepositoryTests.swift
 git commit -m "feat(knowledge): isolate sidecars by project and document"
 ```
 
 ### Task 3: Scope/generation/version-owned BackgroundIndexer publication
 
 **Files:**
-- Modify: `Sources/MINTCore/Knowledge/BackgroundIndexer.swift`
-- Modify: `Tests/MINTCoreTests/IndexerOwnershipTests.swift`
-- Modify: `Tests/MINTCoreTests/BackgroundIndexerTests.swift`
+- Modify: `Sources/PurloryCore/Knowledge/BackgroundIndexer.swift`
+- Modify: `Tests/PurloryCoreTests/IndexerOwnershipTests.swift`
+- Modify: `Tests/PurloryCoreTests/BackgroundIndexerTests.swift`
 
 **Interfaces:**
 - Consumes: `StoryMemoryScope`, `KnowledgeSidecarRepository`, and `StoryMemorySnapshot`.
@@ -245,17 +245,17 @@ Expected: PASS.
 - [ ] **Step 7: Commit indexer ownership**
 
 ```bash
-git add Sources/MINTCore/Knowledge/BackgroundIndexer.swift Tests/MINTCoreTests/IndexerOwnershipTests.swift Tests/MINTCoreTests/BackgroundIndexerTests.swift
+git add Sources/PurloryCore/Knowledge/BackgroundIndexer.swift Tests/PurloryCoreTests/IndexerOwnershipTests.swift Tests/PurloryCoreTests/BackgroundIndexerTests.swift
 git commit -m "refactor(knowledge): guard hierarchical memory publication"
 ```
 
 ### Task 4: Runtime wiring, documentation, and complete verification
 
 **Files:**
-- Modify: `Sources/MINT/MINTApp.swift`
-- Modify: `Sources/MINTCore/ContentView.swift`
+- Modify: `Sources/Purlory/PurloryApp.swift`
+- Modify: `Sources/PurloryCore/ContentView.swift`
 - Modify: `PLAN.md`
-- Test: `Tests/MINTCoreTests/ContextReportIsolationTests.swift`
+- Test: `Tests/PurloryCoreTests/ContextReportIsolationTests.swift`
 
 **Interfaces:**
 - Consumes: scope-aware BackgroundIndexer and the shared `ProjectStore`/`ProjectSession`.
@@ -280,10 +280,10 @@ Run:
 ```bash
 swift test
 swift build
-swift build --product MINTBench
-scripts/build-mint-app.sh
-scripts/smoke-mint-app.sh
-scripts/ui-smoke-mint-app.sh
+swift build --product PurloryBench
+scripts/build-purlory-app.sh
+scripts/smoke-purlory-app.sh
+scripts/ui-smoke-purlory-app.sh
 ```
 
 Expected: all commands pass; any existing intentional skip is reported exactly.
@@ -295,7 +295,7 @@ Confirm no #107 fact/time types, no prompt rewrites, no user-data migration, and
 - [ ] **Step 6: Commit and deliver**
 
 ```bash
-git add Sources/MINT/MINTApp.swift Sources/MINTCore/ContentView.swift PLAN.md Tests/MINTCoreTests/ContextReportIsolationTests.swift docs/superpowers/plans/2026-09-09-hierarchical-story-memory.md
+git add Sources/Purlory/PurloryApp.swift Sources/PurloryCore/ContentView.swift PLAN.md Tests/PurloryCoreTests/ContextReportIsolationTests.swift docs/superpowers/plans/2026-09-09-hierarchical-story-memory.md
 git commit -m "docs(roadmap): record hierarchical memory completion"
 git push -u origin codex/106-hierarchical-memory
 gh pr create --base main --head codex/106-hierarchical-memory --title "[0.2.0 Story Intelligence] Formalize hierarchical memory" --body "Closes #106"

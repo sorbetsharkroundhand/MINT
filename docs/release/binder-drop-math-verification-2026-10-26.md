@@ -1,3 +1,5 @@
+> Historical evidence: the names below identify the original tested artifacts, before the Purlory rename.
+
 # Binder drop targets, connected tabs and complex math verification
 
 ## Scope

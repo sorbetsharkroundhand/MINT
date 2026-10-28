@@ -3,7 +3,7 @@
 Issue: #270, first quality-presentation slice; follow-up to #126 integration. Baseline: verified Outline successor `662a7c1f14743a58c3727a7e21c54d2d23e2f390`, PR #285 in CI. Delivery waits for its required merged-main CI.
 
 ## Authority and scope
-The owner directed performing all UI/internal functionality on 2026-10-17. Choose the recommended bounded design, write/review its specification and plan inline and implement sequentially without subagents or repeated approval prompts. Required exact-head PR/main CI and standing green-CI merge authorization remain. Actual MINT checks are owner-handled later; do not launch the product/UI-smoke scripts or operate a shipping LLM.
+The owner directed performing all UI/internal functionality on 2026-10-17. Choose the recommended bounded design, write/review its specification and plan inline and implement sequentially without subagents or repeated approval prompts. Required exact-head PR/main CI and standing green-CI merge authorization remain. Actual Purlory checks are owner-handled later; do not launch the product/UI-smoke scripts or operate a shipping LLM.
 
 Code inspection found a real presentation gap: the diagnostics runtime populates LivingMarginModel, but the rail has no opening action and both layout gates exclude the stored `margin` section. Existing integration tests exercise the model/view body rather than the reachable workspace. Record this correction to prior integration claims; reuse the existing framework and producer instead of rebuilding them.
 
@@ -24,6 +24,6 @@ Existing durable apply/ignore/learn/intentional actions remain owned by WritingD
 ## Verification and review
 Add failing whole-workspace coverage for the absent native rail action and panel, including a paused counting native worker: opening/closing/switching modes keeps analysis count, source, selection, editor identity and Undo stable, while saved dock/tool state behaves as specified. Keep stored empty-margin behavior when no producer exists. Add failing owned integration tests for the new navigation API, exact second duplicate through Markdown, return capture, altered evidence, stale generation/actual key and marked-text refusal.
 
-Run focused workspace/diagnostic/native suites, full tests, build and MINTBench under temporary CFFIXED_USER_HOME with locked resolution. Review inline, publish one bounded partial-#270 PR, attach it and require all three exact PR and merged-main jobs. Preserve all earlier artifacts, models, backups and ledgers. Final native/IME/VoiceOver/appearance acceptance stays with #119.
+Run focused workspace/diagnostic/native suites, full tests, build and PurloryBench under temporary CFFIXED_USER_HOME with locked resolution. Review inline, publish one bounded partial-#270 PR, attach it and require all three exact PR and merged-main jobs. Preserve all earlier artifacts, models, backups and ledgers. Final native/IME/VoiceOver/appearance acceptance stays with #119.
 
 Inline design review: this restores access to an already implemented producer and fixes an unsafe future UI route before exposure. Preparation remains outside presentation, source and native owners are proved together, empty/uncertain output stays quiet and no durable-data migration or new dependency exists. Owner-only release choices are untouched; no unresolved UI/internal choice remains under the execution directive.

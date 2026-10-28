@@ -28,13 +28,13 @@
 ### Task 1: Persist Non-Destructive Document State and Atomic Activation
 
 **Files:**
-- Modify: `Sources/MINTCore/Project/WritingProject.swift`
-- Modify: `Sources/MINTCore/Project/ProjectManifest.swift`
-- Modify: `Sources/MINTCore/Project/ProjectStore.swift`
-- Modify: `Sources/MINTCore/Project/LegacyProjectMigrator.swift`
-- Modify: `Tests/MINTCoreTests/WritingProjectTests.swift`
-- Modify: `Tests/MINTCoreTests/ProjectStoreTests.swift`
-- Modify: `Tests/MINTCoreTests/LegacyProjectMigrationTests.swift`
+- Modify: `Sources/PurloryCore/Project/WritingProject.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectManifest.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectStore.swift`
+- Modify: `Sources/PurloryCore/Project/LegacyProjectMigrator.swift`
+- Modify: `Tests/PurloryCoreTests/WritingProjectTests.swift`
+- Modify: `Tests/PurloryCoreTests/ProjectStoreTests.swift`
+- Modify: `Tests/PurloryCoreTests/LegacyProjectMigrationTests.swift`
 
 **Interfaces:**
 - Produces: `WritingProject.trashedDocumentIDs: Set<WritingDocumentID>` with missing-key decode defaulting to `[]`.
@@ -132,16 +132,16 @@ Expected: all selected tests pass, including prior source/asset preservation che
 - [ ] **Step 9: Commit Task 1**
 
 ```bash
-git add Sources/MINTCore/Project Tests/MINTCoreTests/WritingProjectTests.swift Tests/MINTCoreTests/ProjectStoreTests.swift Tests/MINTCoreTests/LegacyProjectMigrationTests.swift
+git add Sources/PurloryCore/Project Tests/PurloryCoreTests/WritingProjectTests.swift Tests/PurloryCoreTests/ProjectStoreTests.swift Tests/PurloryCoreTests/LegacyProjectMigrationTests.swift
 git commit -m "feat(project): add atomic activation and durable trash"
 ```
 
 ### Task 2: Make ProjectSession the Authoritative Mutable Runtime
 
 **Files:**
-- Create: `Sources/MINTCore/Project/ProjectRuntimeIdentity.swift`
-- Modify: `Sources/MINTCore/Project/ProjectSession.swift`
-- Modify: `Tests/MINTCoreTests/ProjectSessionTests.swift`
+- Create: `Sources/PurloryCore/Project/ProjectRuntimeIdentity.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectSession.swift`
+- Modify: `Tests/PurloryCoreTests/ProjectSessionTests.swift`
 
 **Interfaces:**
 - Consumes: `ProjectStore.activateAndLoad(id:)` from Task 1.
@@ -242,7 +242,7 @@ Expected: selection is currently memory-only; mutation/trash/flush APIs are miss
 
 - [ ] **Step 7: Implement persisted selection, recents, non-destructive document CRUD, and transitions**
 
-Persist selected document under `mint.selectedDocument.<project UUID>` and recent IDs under `mint.recentProjects`. Resolve `RecentProjectSummary(id:title:mode:)` only from projects that `ProjectStore.load` verifies; preserve an invalid ID in preferences for recovery, but omit it from the picker and publish its error without replacing the active project. Invoke `willTransition` before flushing. Use `activateAndLoad` and adopt its returned value without a post-activation cancellation check. Increment generation for document selection and all content mutations.
+Persist selected document under `purlory.selectedDocument.<project UUID>` and recent IDs under `purlory.recentProjects`. Resolve `RecentProjectSummary(id:title:mode:)` only from projects that `ProjectStore.load` verifies; preserve an invalid ID in preferences for recovery, but omit it from the picker and publish its error without replacing the active project. Invoke `willTransition` before flushing. Use `activateAndLoad` and adopt its returned value without a post-activation cancellation check. Increment generation for document selection and all content mutations.
 
 - [ ] **Step 8: Run session/store tests and confirm GREEN**
 
@@ -253,17 +253,17 @@ Expected: all selected tests pass.
 - [ ] **Step 9: Commit Task 2**
 
 ```bash
-git add Sources/MINTCore/Project/ProjectRuntimeIdentity.swift Sources/MINTCore/Project/ProjectSession.swift Tests/MINTCoreTests/ProjectSessionTests.swift
+git add Sources/PurloryCore/Project/ProjectRuntimeIdentity.swift Sources/PurloryCore/Project/ProjectSession.swift Tests/PurloryCoreTests/ProjectSessionTests.swift
 git commit -m "feat(project): make session own active document edits"
 ```
 
 ### Task 3: Make Creation and Import Preserve the Current Owner
 
 **Files:**
-- Modify: `Sources/MINTCore/Onboarding/ProjectCreationCoordinator.swift`
-- Modify: `Sources/MINTCore/Onboarding/ImportProjectCoordinator.swift`
-- Modify: `Tests/MINTCoreTests/ImportProjectCoordinatorTests.swift`
-- Modify: `Tests/MINTCoreTests/FirstRunStateTests.swift`
+- Modify: `Sources/PurloryCore/Onboarding/ProjectCreationCoordinator.swift`
+- Modify: `Sources/PurloryCore/Onboarding/ImportProjectCoordinator.swift`
+- Modify: `Tests/PurloryCoreTests/ImportProjectCoordinatorTests.swift`
+- Modify: `Tests/PurloryCoreTests/FirstRunStateTests.swift`
 
 **Interfaces:**
 - Consumes: session transitions and prepared migration from Tasks 1–2.
@@ -318,19 +318,19 @@ Expected: success, malformed failure, source preservation, and cancellation all 
 - [ ] **Step 5: Commit Task 3**
 
 ```bash
-git add Sources/MINTCore/Onboarding Tests/MINTCoreTests/ImportProjectCoordinatorTests.swift Tests/MINTCoreTests/FirstRunStateTests.swift
+git add Sources/PurloryCore/Onboarding Tests/PurloryCoreTests/ImportProjectCoordinatorTests.swift Tests/PurloryCoreTests/FirstRunStateTests.swift
 git commit -m "fix(onboarding): commit imports after cancellation gate"
 ```
 
 ### Task 4: Introduce Project-Scoped Editor Identity and Position State
 
 **Files:**
-- Create: `Sources/MINTCore/Editor/EditorSearchJump.swift`
-- Modify: `Sources/MINTCore/Storage/WritingPositionStore.swift`
-- Modify: `Sources/MINTCore/Editor/BlockTextView.swift`
-- Modify: `Tests/MINTCoreTests/WritingPositionTests.swift`
-- Modify: `Tests/MINTCoreTests/SerializationTests.swift`
-- Modify: `Tests/MINTCoreTests/EntryStoreUndoContractTests.swift`
+- Create: `Sources/PurloryCore/Editor/EditorSearchJump.swift`
+- Modify: `Sources/PurloryCore/Storage/WritingPositionStore.swift`
+- Modify: `Sources/PurloryCore/Editor/BlockTextView.swift`
+- Modify: `Tests/PurloryCoreTests/WritingPositionTests.swift`
+- Modify: `Tests/PurloryCoreTests/SerializationTests.swift`
+- Modify: `Tests/PurloryCoreTests/EntryStoreUndoContractTests.swift`
 
 **Interfaces:**
 - Consumes: stable `ProjectDocumentKey` from Task 2.
@@ -398,7 +398,7 @@ Expected: old identity is only a UUID and undo history remains attached across l
 
 - [ ] **Step 7: Generalize editor input and enforce identity transitions**
 
-Replace `entryID` with `EditorDocumentIdentity` in `MintBlockEditor`. Replace `EntryStore.SearchJump` with `EditorSearchJump`. On identity change, unmark text, persist the old composite position, clear suggestion/dialog state, discard stale callbacks, load the new body, and call `undoManager?.removeAllActions()` only for a true identity change.
+Replace `entryID` with `EditorDocumentIdentity` in `PurloryBlockEditor`. Replace `EntryStore.SearchJump` with `EditorSearchJump`. On identity change, unmark text, persist the old composite position, clear suggestion/dialog state, discard stale callbacks, load the new body, and call `undoManager?.removeAllActions()` only for a true identity change.
 
 - [ ] **Step 8: Run editor, IME, Ghost, and position tests and confirm GREEN**
 
@@ -409,27 +409,27 @@ Expected: all selected tests pass.
 - [ ] **Step 9: Commit Task 4**
 
 ```bash
-git add Sources/MINTCore/Editor Sources/MINTCore/Storage/WritingPositionStore.swift Tests/MINTCoreTests/WritingPositionTests.swift Tests/MINTCoreTests/SerializationTests.swift Tests/MINTCoreTests/EntryStoreUndoContractTests.swift
+git add Sources/PurloryCore/Editor Sources/PurloryCore/Storage/WritingPositionStore.swift Tests/PurloryCoreTests/WritingPositionTests.swift Tests/PurloryCoreTests/SerializationTests.swift Tests/PurloryCoreTests/EntryStoreUndoContractTests.swift
 git commit -m "feat(editor): isolate project document transitions"
 ```
 
 ### Task 5: Cut the Workspace, Navigator, Search, and Commands to ProjectSession
 
 **Files:**
-- Create: `Sources/MINTCore/Workspace/ProjectSearch.swift`
-- Modify: `Sources/MINTCore/Workspace/ProjectNavigatorView.swift`
-- Modify: `Sources/MINTCore/Workspace/WorkspaceShellView.swift`
-- Modify: `Sources/MINTCore/ContentView.swift`
-- Modify: `Sources/MINTCore/AppCommands.swift`
-- Modify: `Sources/MINT/MINTApp.swift`
-- Create: `Tests/MINTCoreTests/ProjectSearchTests.swift`
-- Create: `Tests/MINTCoreTests/ProjectCommandRoutingTests.swift`
-- Modify: `Tests/MINTCoreTests/WorkspaceShellModeTests.swift`
+- Create: `Sources/PurloryCore/Workspace/ProjectSearch.swift`
+- Modify: `Sources/PurloryCore/Workspace/ProjectNavigatorView.swift`
+- Modify: `Sources/PurloryCore/Workspace/WorkspaceShellView.swift`
+- Modify: `Sources/PurloryCore/ContentView.swift`
+- Modify: `Sources/PurloryCore/AppCommands.swift`
+- Modify: `Sources/Purlory/PurloryApp.swift`
+- Create: `Tests/PurloryCoreTests/ProjectSearchTests.swift`
+- Create: `Tests/PurloryCoreTests/ProjectCommandRoutingTests.swift`
+- Modify: `Tests/PurloryCoreTests/WorkspaceShellModeTests.swift`
 
 **Interfaces:**
 - Consumes: authoritative session and neutral editor identity from Tasks 2 and 4.
 - Produces: `ProjectSearchResult(projectID:documentID:title:snippet:query:)` and deterministic in-memory search.
-- Produces: `ProjectCommandActions` closures used by `MintCommands`, testable without invoking panels.
+- Produces: `ProjectCommandActions` closures used by `PurloryCommands`, testable without invoking panels.
 - Produces: a verified recent-project picker plus in-workspace New Project and Import Legacy Library actions.
 
 - [ ] **Step 1: Write failing active-project search and command-routing tests**
@@ -462,7 +462,7 @@ Expected: new search/action types are absent.
 
 - [ ] **Step 3: Implement deterministic project search and command actions**
 
-Search a copied `[WritingDocument]` snapshot, preserve document order, and derive literal snippets around the first case-insensitive match. Command closures call session methods; panel presentation remains in `MintCommands`.
+Search a copied `[WritingDocument]` snapshot, preserve document order, and derive literal snippets around the first case-insensitive match. Command closures call session methods; panel presentation remains in `PurloryCommands`.
 
 - [ ] **Step 4: Run search/command tests and confirm GREEN**
 
@@ -472,7 +472,7 @@ Expected: all selected tests pass.
 
 - [ ] **Step 5: Replace project-workspace EntryStore dependencies**
 
-Make `ContentView`, `WorkspaceSurface`, `EditorPane`, toolbar, status bar, `ProjectNavigatorView`, and `MintCommands` observe `ProjectSession`. Bind editor text to `session.selectedDocument?.body` and `updateSelectedDocumentBody`. Show documents from `activeProject.documents` excluding trash IDs. Route search result selection through `selectDocument` and then issue `EditorSearchJump`. Add a recent-project menu that displays titles from verified session recents; failed verification leaves the current project selected and surfaces the error.
+Make `ContentView`, `WorkspaceSurface`, `EditorPane`, toolbar, status bar, `ProjectNavigatorView`, and `PurloryCommands` observe `ProjectSession`. Bind editor text to `session.selectedDocument?.body` and `updateSelectedDocumentBody`. Show documents from `activeProject.documents` excluding trash IDs. Route search result selection through `selectDocument` and then issue `EditorSearchJump`. Add a recent-project menu that displays titles from verified session recents; failed verification leaves the current project selected and surfaces the error.
 
 Add File-menu actions for New Fiction Project, New General Project, and Import Legacy Library. They present the same creation/import flows used by First Run; command code does not duplicate storage or migration logic.
 
@@ -480,7 +480,7 @@ Keep Fiction-only panels behind existing workspace routing. Where those panels s
 
 - [ ] **Step 6: Remove normal EntryStore construction and compile**
 
-Delete `@StateObject private var store = EntryStore()` from `MINTApp`. Construct `ProjectSession` once and pass it to commands/content. Do not delete `EntryStore.swift` or compatibility tests.
+Delete `@StateObject private var store = EntryStore()` from `PurloryApp`. Construct `ProjectSession` once and pass it to commands/content. Do not delete `EntryStore.swift` or compatibility tests.
 
 Run: `swift build`
 
@@ -495,20 +495,20 @@ Expected: all selected tests pass.
 - [ ] **Step 8: Commit Task 5**
 
 ```bash
-git add Sources/MINT Sources/MINTCore/ContentView.swift Sources/MINTCore/AppCommands.swift Sources/MINTCore/Workspace Tests/MINTCoreTests
+git add Sources/Purlory Sources/PurloryCore/ContentView.swift Sources/PurloryCore/AppCommands.swift Sources/PurloryCore/Workspace Tests/PurloryCoreTests
 git commit -m "feat(workspace): edit the active project session"
 ```
 
 ### Task 6: Connect First Run and Enforce Explicit Completion Authorization
 
 **Files:**
-- Create: `Sources/MINTCore/Onboarding/FirstRunView.swift`
-- Modify: `Sources/MINTCore/ContentView.swift`
-- Modify: `Sources/MINTCore/Settings.swift`
-- Modify: `Sources/MINTCore/Editor/CompletionController.swift`
-- Modify: `Tests/MINTCoreTests/FirstRunStateTests.swift`
-- Modify: `Tests/MINTCoreTests/CompletionIntentTests.swift`
-- Modify: `Tests/MINTCoreTests/SmokeConfigurationTests.swift`
+- Create: `Sources/PurloryCore/Onboarding/FirstRunView.swift`
+- Modify: `Sources/PurloryCore/ContentView.swift`
+- Modify: `Sources/PurloryCore/Settings.swift`
+- Modify: `Sources/PurloryCore/Editor/CompletionController.swift`
+- Modify: `Tests/PurloryCoreTests/FirstRunStateTests.swift`
+- Modify: `Tests/PurloryCoreTests/CompletionIntentTests.swift`
+- Modify: `Tests/PurloryCoreTests/SmokeConfigurationTests.swift`
 
 **Interfaces:**
 - Consumes: session `bootstrap`, creation, and import coordinators.
@@ -564,20 +564,20 @@ Expected: tests and build pass.
 - [ ] **Step 7: Commit Task 6**
 
 ```bash
-git add Sources/MINTCore/Onboarding Sources/MINTCore/ContentView.swift Sources/MINTCore/Settings.swift Sources/MINTCore/Editor/CompletionController.swift Tests/MINTCoreTests
+git add Sources/PurloryCore/Onboarding Sources/PurloryCore/ContentView.swift Sources/PurloryCore/Settings.swift Sources/PurloryCore/Editor/CompletionController.swift Tests/PurloryCoreTests
 git commit -m "feat(onboarding): open a project without model setup"
 ```
 
 ### Task 7: Feed Completion and Indexing Project-Owned Snapshots
 
 **Files:**
-- Create: `Sources/MINTCore/Project/ProjectDocumentSnapshot.swift`
-- Modify: `Sources/MINTCore/Project/ProjectSession.swift`
-- Modify: `Sources/MINTCore/Editor/CompletionController.swift`
-- Modify: `Sources/MINTCore/Knowledge/BackgroundIndexer.swift`
-- Modify: `Sources/MINTCore/ContentView.swift`
-- Modify: `Tests/MINTCoreTests/ContextReportIsolationTests.swift`
-- Modify: `Tests/MINTCoreTests/IndexerOwnershipTests.swift`
+- Create: `Sources/PurloryCore/Project/ProjectDocumentSnapshot.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectSession.swift`
+- Modify: `Sources/PurloryCore/Editor/CompletionController.swift`
+- Modify: `Sources/PurloryCore/Knowledge/BackgroundIndexer.swift`
+- Modify: `Sources/PurloryCore/ContentView.swift`
+- Modify: `Tests/PurloryCoreTests/ContextReportIsolationTests.swift`
+- Modify: `Tests/PurloryCoreTests/IndexerOwnershipTests.swift`
 
 **Interfaces:**
 - Produces: `ProjectDocumentSnapshot(identity:title:body:kind:)` from the selected session document.
@@ -628,26 +628,26 @@ Expected: all selected tests pass.
 - [ ] **Step 6: Commit Task 7**
 
 ```bash
-git add Sources/MINTCore/Project Sources/MINTCore/Editor/CompletionController.swift Sources/MINTCore/Knowledge/BackgroundIndexer.swift Sources/MINTCore/ContentView.swift Tests/MINTCoreTests
+git add Sources/PurloryCore/Project Sources/PurloryCore/Editor/CompletionController.swift Sources/PurloryCore/Knowledge/BackgroundIndexer.swift Sources/PurloryCore/ContentView.swift Tests/PurloryCoreTests
 git commit -m "refactor(knowledge): consume project document snapshots"
 ```
 
 ### Task 8: Add Project-Scoped Asset Access and Export
 
 **Files:**
-- Create: `Sources/MINTCore/Project/ProjectAssetAccess.swift`
-- Modify: `Sources/MINTCore/Project/ProjectManifest.swift`
-- Modify: `Sources/MINTCore/Project/ProjectStore.swift`
-- Modify: `Sources/MINTCore/Project/ProjectSession.swift`
-- Modify: `Sources/MINTCore/Storage/ImageStore.swift`
-- Modify: `Sources/MINTCore/Editor/BlockTextView.swift`
-- Modify: `Sources/MINTCore/Export/MarkdownExporter.swift`
-- Modify: `Sources/MINTCore/Export/EpubExporter.swift`
-- Modify: `Tests/MINTCoreTests/ProjectStoreTests.swift`
-- Modify: `Tests/MINTCoreTests/ImageStoreGCTests.swift`
-- Modify: `Tests/MINTCoreTests/MarkdownExporterTests.swift`
-- Modify: `Tests/MINTCoreTests/BackgroundExportSearchTests.swift`
-- Modify: `Tests/MINTCoreTests/MathRoundTripTests.swift`
+- Create: `Sources/PurloryCore/Project/ProjectAssetAccess.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectManifest.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectStore.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectSession.swift`
+- Modify: `Sources/PurloryCore/Storage/ImageStore.swift`
+- Modify: `Sources/PurloryCore/Editor/BlockTextView.swift`
+- Modify: `Sources/PurloryCore/Export/MarkdownExporter.swift`
+- Modify: `Sources/PurloryCore/Export/EpubExporter.swift`
+- Modify: `Tests/PurloryCoreTests/ProjectStoreTests.swift`
+- Modify: `Tests/PurloryCoreTests/ImageStoreGCTests.swift`
+- Modify: `Tests/PurloryCoreTests/MarkdownExporterTests.swift`
+- Modify: `Tests/PurloryCoreTests/BackgroundExportSearchTests.swift`
+- Modify: `Tests/PurloryCoreTests/MathRoundTripTests.swift`
 
 **Interfaces:**
 - Produces: immutable `ProjectAssetCatalog` with synchronous `data(for:) -> Data?`, built from bytes verified by `ProjectStore` for one project ID.
@@ -701,11 +701,11 @@ Export a `WritingDocument` containing `![그림](images/a.png){width=60}` and in
 
 Run: `swift test --filter 'MarkdownExporterTests/testProjectResolverExportsImageBytes|BackgroundExportSearchTests/testProjectEpubIncludesResolvedAsset|MathRoundTripTests/testProjectExportPreservesMathSource'`
 
-Expected: exporters currently accept `JournalEntry` and global `MintImageStore` only.
+Expected: exporters currently accept `JournalEntry` and global `PurloryImageStore` only.
 
 - [ ] **Step 7: Add project exporter overloads and editor resolver injection**
 
-Keep legacy exporter APIs for compatibility tests. Pass an immutable catalog into `MintBlockEditor`; do not mutate `MintImageStore` global roots during project switches. Persist bytes before inserting an image marker and recheck runtime identity on completion.
+Keep legacy exporter APIs for compatibility tests. Pass an immutable catalog into `PurloryBlockEditor`; do not mutate `PurloryImageStore` global roots during project switches. Persist bytes before inserting an image marker and recheck runtime identity on completion.
 
 - [ ] **Step 8: Run export/media/editor tests and confirm GREEN**
 
@@ -716,20 +716,20 @@ Expected: all selected tests pass.
 - [ ] **Step 9: Commit Task 8**
 
 ```bash
-git add Sources/MINTCore/Project Sources/MINTCore/Storage/ImageStore.swift Sources/MINTCore/Editor/BlockTextView.swift Sources/MINTCore/Export Tests/MINTCoreTests
+git add Sources/PurloryCore/Project Sources/PurloryCore/Storage/ImageStore.swift Sources/PurloryCore/Editor/BlockTextView.swift Sources/PurloryCore/Export Tests/PurloryCoreTests
 git commit -m "feat(project): scope assets and exports to projects"
 ```
 
 ### Task 9: Add the Mutually Exclusive Legacy Boundary and Safe Shutdown
 
 **Files:**
-- Create: `Sources/MINTCore/Legacy/LegacyWorkspaceController.swift`
-- Create: `Sources/MINTCore/Legacy/LegacyWorkspaceView.swift`
-- Modify: `Sources/MINTCore/Project/ProjectSession.swift`
-- Modify: `Sources/MINTCore/ContentView.swift`
-- Modify: `Sources/MINT/MINTApp.swift`
-- Create: `Tests/MINTCoreTests/LegacyWorkspaceControllerTests.swift`
-- Create: `Tests/MINTCoreTests/ProjectShutdownTests.swift`
+- Create: `Sources/PurloryCore/Legacy/LegacyWorkspaceController.swift`
+- Create: `Sources/PurloryCore/Legacy/LegacyWorkspaceView.swift`
+- Modify: `Sources/PurloryCore/Project/ProjectSession.swift`
+- Modify: `Sources/PurloryCore/ContentView.swift`
+- Modify: `Sources/Purlory/PurloryApp.swift`
+- Create: `Tests/PurloryCoreTests/LegacyWorkspaceControllerTests.swift`
+- Create: `Tests/PurloryCoreTests/ProjectShutdownTests.swift`
 
 **Interfaces:**
 - Produces: `LegacyWorkspaceController.enter()` and `leave()` transactions.
@@ -794,16 +794,16 @@ Expected: 0 failures; environment-dependent fixture skips remain explicit.
 - [ ] **Step 9: Commit Task 9**
 
 ```bash
-git add Sources/MINT Sources/MINTCore/Legacy Sources/MINTCore/ContentView.swift Tests/MINTCoreTests
+git add Sources/Purlory Sources/PurloryCore/Legacy Sources/PurloryCore/ContentView.swift Tests/PurloryCoreTests
 git commit -m "feat(app): isolate legacy access and flush project shutdown"
 ```
 
 ### Task 10: Replace Smoke Coverage with the Real Project Path
 
 **Files:**
-- Modify: `scripts/smoke-mint-app.sh`
-- Modify: `scripts/ui-smoke-mint-app.sh`
-- Modify: `Tests/MINTCoreTests/SmokeConfigurationTests.swift`
+- Modify: `scripts/smoke-purlory-app.sh`
+- Modify: `scripts/ui-smoke-purlory-app.sh`
+- Modify: `Tests/PurloryCoreTests/SmokeConfigurationTests.swift`
 - Modify: `README.md` only if its launch instructions still state that model selection is mandatory.
 
 **Interfaces:**
@@ -816,7 +816,7 @@ Seed or create a project whose initial body is `project-$TOKEN`, type `edited-$T
 
 - [ ] **Step 2: Run the UI smoke and confirm RED before app implementation is accepted**
 
-Run: `scripts/build-mint-app.sh && scripts/ui-smoke-mint-app.sh`
+Run: `scripts/build-purlory-app.sh && scripts/ui-smoke-purlory-app.sh`
 
 Expected before the cutover: failure because the old app edits EntryStore. Expected after Tasks 1–9: success against the project content file.
 
@@ -831,11 +831,11 @@ Run in order:
 ```bash
 swift build
 swift test
-swift build --product MINTBench
+swift build --product PurloryBench
 scripts/prepare-metallib.sh
-scripts/build-mint-app.sh
-scripts/smoke-mint-app.sh
-scripts/ui-smoke-mint-app.sh
+scripts/build-purlory-app.sh
+scripts/smoke-purlory-app.sh
+scripts/ui-smoke-purlory-app.sh
 ```
 
 Expected: all commands exit 0. Record any CoreData/Contacts sandbox noise separately from test failures; do not describe noisy output as pristine.
@@ -847,7 +847,7 @@ With an isolated temporary project, verify Korean IME composition produces no Gh
 - [ ] **Step 6: Commit Task 10**
 
 ```bash
-git add scripts Tests/MINTCoreTests/SmokeConfigurationTests.swift README.md
+git add scripts Tests/PurloryCoreTests/SmokeConfigurationTests.swift README.md
 git commit -m "test(app): smoke the project-owned writing path"
 ```
 
@@ -864,7 +864,7 @@ git commit -m "test(app): smoke the project-owned writing path"
 
 Confirm every spec section maps to a completed task and search changed production files for accidental `EntryStore` construction outside the legacy boundary.
 
-Run: `rg -n 'EntryStore\(' Sources/MINT Sources/MINTCore`
+Run: `rg -n 'EntryStore\(' Sources/Purlory Sources/PurloryCore`
 
 Expected: matches only in explicitly named legacy composition or previews/tests, never the normal project runtime.
 
@@ -892,7 +892,7 @@ Review ownership boundaries, cancellation-after-activation semantics, main-actor
 
 ```bash
 git push -u origin codex/118-project-session-runtime
-gh pr create --base main --head codex/118-project-session-runtime --title "feat: make ProjectSession the writing runtime" --body-file /tmp/mint-118-pr-body.md
+gh pr create --base main --head codex/118-project-session-runtime --title "feat: make ProjectSession the writing runtime" --body-file /tmp/purlory-118-pr-body.md
 ```
 
 The PR body must reference #118, list exact verification evidence, identify #150/#151 coordination boundaries, and state any acceptance item that remains unverified. Do not use `Closes #118` unless the complete current issue acceptance contract and required CI/E2E evidence are satisfied.

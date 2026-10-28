@@ -16,7 +16,7 @@ No migration or data deletion. Generic project storage remains domain-independen
 
 Use the same compatibility menu in the explicitly opened legacy workspace. Keep
 its existing data surfaces and the File menu library route. Empty Living Margin
-stays hidden. No Map/Review/Ask MINT or model activation. Native search controls
+stays hidden. No Map/Review/Ask Purlory or model activation. Native search controls
 follow system appearance, and opening/closing tools preserves editor state.
 
 Current #186 permits secondary compatibility routes; historical removal-only

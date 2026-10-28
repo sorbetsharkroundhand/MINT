@@ -1,6 +1,6 @@
-# MINT — Architecture and Context Index
+# Purlory — Architecture and Context Index
 
-Optional lookup, not a required startup read. Current scope: [#99](https://github.com/sorbetsharkroundhand/MINT/issues/99); acceptance: the active issue; final RC: [#119](https://github.com/sorbetsharkroundhand/MINT/issues/119).
+Optional lookup, not a required startup read. Current scope: [#99](https://github.com/sorbetsharkroundhand/Purlory/issues/99); acceptance: the active issue; final RC: [#119](https://github.com/sorbetsharkroundhand/Purlory/issues/119).
 Shared invariants and commands live only in `AGENTS.md`.
 
 The previous full plan is preserved in [the historical snapshot](docs/archive/2026-09-10-pre-release-plan.md). September 0.2.0 specs/plans describe their original contracts, including deferred work; they do not override current issues. Section numbers below retain the meaning of legacy `PLAN §N` references.
@@ -17,16 +17,16 @@ Swift 6, SwiftUI/AppKit/TextKit, MLX, SwiftPM, SwiftMath. Inspect `Package.swift
 ## 4. Architecture
 | Task | Start in |
 | --- | --- |
-| Editing/Ghost | `Sources/MINTCore/Editor/` |
-| Model loading, context/cache | `Sources/MINTCore/Inference/` |
-| Project lifecycle/migration | `Sources/MINTCore/Project/`, `Storage/`, `Sources/MINT/MINTApp.swift` |
-| Evidence/indexing | `Sources/MINTCore/Knowledge/` |
-| Shell/tool presentation | `Sources/MINTCore/Workspace/`, `Intelligence/` |
-| Local diagnostics core | `Sources/MINTCore/WritingQuality/` |
-| Export | `Sources/MINTCore/Export/` |
-| Bench/build/release | `Sources/MINTBench/`, `scripts/`, `.github/workflows/` |
+| Editing/Ghost | `Sources/PurloryCore/Editor/` |
+| Model loading, context/cache | `Sources/PurloryCore/Inference/` |
+| Project lifecycle/migration | `Sources/PurloryCore/Project/`, `Storage/`, `Sources/Purlory/PurloryApp.swift` |
+| Evidence/indexing | `Sources/PurloryCore/Knowledge/` |
+| Shell/tool presentation | `Sources/PurloryCore/Workspace/`, `Intelligence/` |
+| Local diagnostics core | `Sources/PurloryCore/WritingQuality/` |
+| Export | `Sources/PurloryCore/Export/` |
+| Bench/build/release | `Sources/PurloryBench/`, `scripts/`, `.github/workflows/` |
 
-Resolve paths against `Sources/MINTCore/` unless fully qualified. Search first; proposed components may not exist yet.
+Resolve paths against `Sources/PurloryCore/` unless fully qualified. Search first; proposed components may not exist yet.
 
 ## 5. Document, project and workspace
 #118 connects the real editor lifecycle; #111 persists writer decisions; #151 proves recovery. Existing project foundations are not proof that every runtime path uses them.

@@ -8,9 +8,9 @@ PLAN §13·§14 M5의 검증 게이트 수치. 재현 절차와 판정을 함께
 ./scripts/prepare-metallib.sh          # metallib 준비 (mlx-swift 갱신 시 재실행)
 swift build -c release
 # ① Fast 기준선 (저널 모드와 동일: 1200자, 헤더 없음)
-.build/release/MINTBench --replay Fixtures/replay-novel-ko-v0.txt --context 1200
+.build/release/PurloryBench --replay Fixtures/replay-novel-ko-v0.txt --context 1200
 # ② M5 구성 (소설 모드: 4000자 + A 헤더)
-.build/release/MINTBench --replay Fixtures/replay-novel-ko-v0.txt --context 4000 \
+.build/release/PurloryBench --replay Fixtures/replay-novel-ko-v0.txt --context 4000 \
     --title "등대지기의 겨울" --genre "가족 드라마"
 ```
 
@@ -68,4 +68,4 @@ swift build -c release
 - `PromptCache.swift`: `trimPromptCache(_:numTokens:)` 레이블 누락 — mlx-swift-lm
   3.31.3 실제 시그니처와 불일치.
 - `Settings.swift`: `defaultNovelContextCharacters`가 `@MainActor` 격리라
-  MINTBench(nonisolated)에서 참조 불가 → `nonisolated` 부여.
+  PurloryBench(nonisolated)에서 참조 불가 → `nonisolated` 부여.

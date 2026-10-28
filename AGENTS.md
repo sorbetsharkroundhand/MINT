@@ -1,11 +1,11 @@
-# MINT — Agent Guide
+# Purlory — Agent Guide
 
 Local macOS writing app, Fiction First; General writing and AI-disabled editing remain supported.
 
 ## Read only what the task needs
 - This file contains shared invariants. Do not reread it if already present in context.
 - Before planning/coding an issue, refresh the checkout and read that issue's current body plus relevant recent comments/linked active PR. Follow actual blockers, not every related issue.
-- Read [release epic #99](https://github.com/sorbetsharkroundhand/MINT/issues/99) when deciding scope/dependencies; [gate #119](https://github.com/sorbetsharkroundhand/MINT/issues/119) for RC work.
+- Read [release epic #99](https://github.com/sorbetsharkroundhand/Purlory/issues/99) when deciding scope/dependencies; [gate #119](https://github.com/sorbetsharkroundhand/Purlory/issues/119) for RC work.
 - Use `PLAN.md` as an optional code/document index. Search paths/symbols, then read relevant sections.
 - Historical specs, plans, benchmarks and README vision are not current implementation contracts. Read them only to answer a concrete question.
 - Old inline `CLAUDE.md §N` / `PLAN §N` citations are historical references, not live requirements. Verify any relevant invariant against this guide and the current issue; update stale citations opportunistically when touching that code, not through a bulk comment rewrite.
@@ -34,8 +34,8 @@ Local macOS writing app, Fiction First; General writing and AI-disabled editing 
 - Opaque manuscript, restrained material in chrome/transient tools; no stacked glass.
 
 ## Verification and delivery
-- Compile: `swift build`; tests: `swift test`; bench compile: `swift build --product MINTBench`.
-- Runtime: `scripts/prepare-metallib.sh` when needed; bundle: `scripts/build-mint-app.sh`; smoke: `scripts/smoke-mint-app.sh`; UI: `scripts/ui-smoke-mint-app.sh`.
+- Compile: `swift build`; tests: `swift test`; bench compile: `swift build --product PurloryBench`.
+- Runtime: `scripts/prepare-metallib.sh` when needed; bundle: `scripts/build-purlory-app.sh`; smoke: `scripts/smoke-purlory-app.sh`; UI: `scripts/ui-smoke-purlory-app.sh`.
 - During the #99 implementation pass, batch local actual-app/UI tests after implementation. Keep deterministic correctness tests and required CI per PR; the final native/IME/accessibility checks identify one candidate artifact. See `docs/release/verification-and-support.md`.
 - Isolate UI tests with `CFFIXED_USER_HOME`, not HOME alone; never use real manuscripts.
 - Keep main buildable; compare stale branches before editing; prefer one bounded issue/PR.

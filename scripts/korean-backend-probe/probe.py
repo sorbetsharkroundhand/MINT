@@ -51,7 +51,7 @@ def fetch_missing(manifest, root):
 
 
 def native_run(binary, model, output, measure=False, home=None, extra=()):
-    context = nullcontext(str(home)) if home else tempfile.TemporaryDirectory(prefix="mint-korean-home-")
+    context = nullcontext(str(home)) if home else tempfile.TemporaryDirectory(prefix="purlory-korean-home-")
     with context as isolated_home:
         environment = {**os.environ, "CFFIXED_USER_HOME": isolated_home}
         arguments = [str(binary)] + (["--model", str(model)] if model else [])
@@ -98,7 +98,7 @@ def package_checks(args, binary, model, framework_parent, manifest):
     developer = args.output / "DeveloperProbe.app"
     (developer / "Contents/MacOS").mkdir(parents=True)
     shutil.copy2(binary, developer / "Contents/MacOS/KoreanBackendProbe")
-    info = {"CFBundleIdentifier": "app.mint.korean-backend-probe",
+    info = {"CFBundleIdentifier": "app.purlory.korean-backend-probe",
             "CFBundleExecutable": "KoreanBackendProbe", "CFBundlePackageType": "APPL",
             "LSMinimumSystemVersion": "14.0", "LSUIElement": True}
     (developer / "Contents/Info.plist").write_bytes(plistlib.dumps(info))
@@ -126,7 +126,7 @@ def package_checks(args, binary, model, framework_parent, manifest):
 
     sandbox_app = args.output / "SandboxProbe.app"
     shutil.copytree(archived_app, sandbox_app)
-    sandbox_id = "app.mint.korean-probe." + str(uuid.uuid4())
+    sandbox_id = "app.purlory.korean-probe." + str(uuid.uuid4())
     sandbox_info = sandbox_app / "Contents/Info.plist"
     info = plistlib.loads(sandbox_info.read_bytes())
     info["CFBundleIdentifier"] = sandbox_id
@@ -160,7 +160,7 @@ def package_checks(args, binary, model, framework_parent, manifest):
                 raise ValidationError("owned sandbox fixture data remains")
     missing = args.output / "missing-model"
     missing.mkdir()
-    with tempfile.TemporaryDirectory(prefix="mint-korean-missing-home-") as home, \
+    with tempfile.TemporaryDirectory(prefix="purlory-korean-missing-home-") as home, \
             (args.output / "missing-model.log").open("w") as log:
         result = subprocess.run([str(binary), "--model", str(missing)], stdout=log, stderr=log,
                                 env={**os.environ, "CFFIXED_USER_HOME": home}, timeout=120)

@@ -19,10 +19,10 @@
 ## 📦 생성/수정 파일
 | 파일 | 내용 |
 |------|------|
-| `Sources/MINTCore/Inference/CompletionEngine.swift` | **신규.** `actor`. 모델 1회 lazy 로드(교체 가능), `complete(prefix:parameters:)` — 취소 가능 스트림 생성, 토큰 상한 + 문장 경계 stop, continuation/instruct 프롬프트 양쪽 지원, 지연 측정치 반환. |
-| `Sources/MINTCore/Settings.swift` | **신규.** `CompletionParameters`(엔진 스냅샷) + `CompletionSettings`(UserDefaults, M4 UI 기반) + `ModelPresets`. |
-| `Sources/MINTBench/main.swift` | **신규.** M2 벤치 CLI — 로드→생성→지연 로그→판정. `--model/--style/--max-tokens/--runs/--prompt`. |
-| `Package.swift` | **수정.** `MLXHuggingFace`(허브 로드 매크로) + `swift-huggingface`/`swift-transformers` + `MLX` 제품 의존 추가, `MINTBench` 타깃 추가. |
+| `Sources/PurloryCore/Inference/CompletionEngine.swift` | **신규.** `actor`. 모델 1회 lazy 로드(교체 가능), `complete(prefix:parameters:)` — 취소 가능 스트림 생성, 토큰 상한 + 문장 경계 stop, continuation/instruct 프롬프트 양쪽 지원, 지연 측정치 반환. |
+| `Sources/PurloryCore/Settings.swift` | **신규.** `CompletionParameters`(엔진 스냅샷) + `CompletionSettings`(UserDefaults, M4 UI 기반) + `ModelPresets`. |
+| `Sources/PurloryBench/main.swift` | **신규.** M2 벤치 CLI — 로드→생성→지연 로그→판정. `--model/--style/--max-tokens/--runs/--prompt`. |
+| `Package.swift` | **수정.** `MLXHuggingFace`(허브 로드 매크로) + `swift-huggingface`/`swift-transformers` + `MLX` 제품 의존 추가, `PurloryBench` 타깃 추가. |
 
 ## 🔧 핵심 구현 노트
 - **로드 경로**: mlx-swift-lm 3.x는 허브 다운로드가 별도 제품으로 분리됨 —
@@ -39,10 +39,10 @@
 ## 🧪 검증 절차 (네 Mac)
 ```bash
 git fetch origin && git checkout claude/macbook-autocomplete-editor-3ejo4p
-swift run -c release MINTBench                 # 기본: PLAN 모델 · both 스타일 · 2회
+swift run -c release PurloryBench                 # 기본: PLAN 모델 · both 스타일 · 2회
 # 모델/설정 바꿔 재측정:
-swift run -c release MINTBench --model mlx-community/Qwen2.5-3B-Instruct-4bit
-swift run -c release MINTBench --style continuation --max-tokens 8 --runs 3
+swift run -c release PurloryBench --model mlx-community/Qwen2.5-3B-Instruct-4bit
+swift run -c release PurloryBench --style continuation --max-tokens 8 --runs 3
 ```
 - 첫 실행은 모델 다운로드(수 GB~20GB)로 오래 걸린다. 캐시 후 재실행 기준으로 판정.
 - `-c release` 필수 — debug 빌드는 MLX 성능이 크게 떨어진다.

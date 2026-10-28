@@ -37,4 +37,4 @@
 ### Task 3: Delivery
 
 - [ ] Compile with `swift build`; inspect changes without executing tests or launching the app.
-- [ ] Commit only task files and push `codex/mint-editorial-redesign`.
+- [ ] Commit only task files and push `codex/purlory-editorial-redesign`.

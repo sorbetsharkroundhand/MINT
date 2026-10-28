@@ -36,7 +36,7 @@
 - [x] Add failing reorder/merge/tear-off/cancel/project isolation and native drag-routing tests.
 - [x] Route native tab destinations before body-edge hit testing; preserve tool/navigator drag and existing drag pill.
 - [x] Update existing split fixtures to explicitly split documents; retain their original assertions.
-- [x] Run `swift build`, `swift test`, `swift build --product MINTBench`; review final diff and record results.
+- [x] Run `swift build`, `swift test`, `swift build --product PurloryBench`; review final diff and record results.
 
 ## Execution notes
 - Implemented inline on the requested branch; retained existing uncommitted edits.

@@ -20,7 +20,7 @@
 - Candidate measurement cannot make a candidate a normal release choice.
 
 ## Task 1: Pure memory policy
-Files: Sources/MINTCore/Inference/ModelMemoryPolicy.swift; Tests/MINTCoreTests/ModelMemoryPolicyTests.swift.
+Files: Sources/PurloryCore/Inference/ModelMemoryPolicy.swift; Tests/PurloryCoreTests/ModelMemoryPolicyTests.swift.
 Interfaces: HardwareMemory(physicalBytes:recommendedWorkingSetBytes:hasUnifiedMemory:), tier/budgetBytes; ModelReleaseEntry(id:revision:peakBytes:tiers:defaultTiers:name:); ModelMemoryPolicy(hardware:entries:), availableEntries, defaultModelID, requireLoad(manifest:), evaluatingCandidates(peakBytes:).
 - [x] Write failing tests for exact/floor tiers, unsupported hardware, smaller working-set budget, approved default/changed revision, oversized/missing declarations, conflicting defaults and explicit candidate isolation.
 - [x] Implement policy, validated selection and current capability snapshot; keep `approvedEntries` empty.
