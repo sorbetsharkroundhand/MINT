@@ -97,3 +97,23 @@ components; removed dependency components are no longer packaged. Original
 notice hashes are unchanged, and the unchanged PocketFFT header now points to
 the newly pinned MLX submodule commit. Real-checkout notice generation and all
 17 validator regressions pass; no validation rule was weakened.
+
+The next packaging check exposed a pre-existing redesign mapping gap: SwiftPM
+flattens both Fonts and Icons into `MINT_MINTCore.bundle`, but the bundle audit
+only mapped Fonts. Added explicit multiple source directories, with required-file
+and original-byte checks for every mapped artifact. The new regression fails
+before the fix, then verifies success, missing-icon rejection, and tampered-icon
+rejection. All 18 notice regressions and the actual packaged resource audit pass.
+
+Hosted UI failures also exposed environment-dependent fixtures: the runner's
+1024-point display constrained wide test windows, legacy scrollbars consumed
+17 points, and inherited Reduce Motion disabled animation checks. The harness now
+preserves its requested window sizes and explicitly configures overlay scrollers.
+A debug-only preference seam makes both motion modes testable; production always
+honors the real system preference. Canvas motion uses that single resolved
+preference and an injectable clock for intermediate-frame assertions. All 49
+focused workspace checks passed locally (`ci-geometry-final.log`).
+
+The final full-suite rerun after these fixture and resource changes passed all
+1,469 tests, with four opt-in model/fixture skips and zero failures
+(`build/redesign-merge-verification/full-final.log`).

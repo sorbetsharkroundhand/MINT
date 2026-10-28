@@ -310,7 +310,7 @@ struct WorkspacePouchBridge: NSViewRepresentable {
     func updateNSView(_ view: Probe, context: Context) {
         if let window = view.window { context.coordinator.attach(to: window, from: view) }
         let controller = context.coordinator.controller
-        controller.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
+        controller.reduceMotion = accessibilityOptions.resolvedReduceMotion(system: systemReduceMotion)
         controller.reduceTransparency = NSWorkspace.shared.accessibilityDisplayShouldReduceTransparency || accessibilityOptions.reduceTransparency
         controller.theme = theme; controller.actions = actions; controller.extraActions = extraActions
         controller.targetTitle = targetTitle

@@ -18,7 +18,7 @@ struct WorkspaceShellView<Navigator: View, Editor: View, Context: View, Rail: Vi
     @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
     @Environment(\.mintWorkspaceAccessibilityOptions) private var accessibilityOptions
     @State private var navigatorDragProjectedWidth: CGFloat?
-    private var reduceMotion: Bool { systemReduceMotion || accessibilityOptions.reduceMotion }
+    private var reduceMotion: Bool { accessibilityOptions.resolvedReduceMotion(system: systemReduceMotion) }
 
     var body: some View {
         GeometryReader { geometry in

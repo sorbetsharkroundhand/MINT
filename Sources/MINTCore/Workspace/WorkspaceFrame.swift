@@ -150,8 +150,18 @@ struct WorkspaceActionButton: NSViewRepresentable {
     }
 }
 
-/// Internal preview/test options can enable accessibility accommodations, never disable system choices.
+/// Production options can enable accommodations, never disable system choices.
 struct WorkspaceAccessibilityOptions {
+    #if DEBUG
+    // Only debug fixtures can replace the host's preference for motion checks.
+    var systemReduceMotionOverride: Bool? = nil
+    #endif
+    func resolvedReduceMotion(system: Bool) -> Bool {
+        #if DEBUG
+        if let systemReduceMotionOverride { return systemReduceMotionOverride || reduceMotion }
+        #endif
+        return system || reduceMotion
+    }
     var reduceMotion = false
     var reduceTransparency = false
 }

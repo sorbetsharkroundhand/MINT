@@ -21,7 +21,7 @@ struct WorkspaceRail: View {
             WorkspaceActionButton(identifier: "mint.workspace.navigator-toggle",
                 label: navigatorVisible ? "파일 목록 숨기기" : "파일 목록 보이기",
                 symbol: "folder", theme: theme, selected: navigatorVisible) {
-                    withAnimation(systemReduceMotion || accessibilityOptions.reduceMotion ? nil : WorkspaceMotion.navigator) {
+                    withAnimation(accessibilityOptions.resolvedReduceMotion(system: systemReduceMotion) ? nil : WorkspaceMotion.navigator) {
                         navigatorVisible.toggle()
                     }
                     if !navigatorVisible { requests.focusEditor() }

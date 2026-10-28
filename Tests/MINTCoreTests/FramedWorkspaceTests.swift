@@ -426,13 +426,18 @@ final class FramedWorkspaceHarness {
             .defaultAppStorage(fixture.defaults)
             .environment(\.colorScheme, appearance)
             .environment(\.mintWorkspaceAccessibilityOptions, WorkspaceAccessibilityOptions(
-                reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)))
+                systemReduceMotionOverride: reduceMotion, reduceMotion: reduceMotion, reduceTransparency: reduceTransparency)))
         window.contentView = host
         await layout()
     }
 
     func layout() async {
-        for _ in 0..<25 { host.layoutSubtreeIfNeeded(); await Task.yield() }
+        // Geometry fixtures use overlay scrollers independently of host preferences.
+        func prepare(_ view: NSView) {
+            (view as? NSScrollView)?.scrollerStyle = .overlay
+            view.subviews.forEach(prepare)
+        }
+        for _ in 0..<25 { prepare(host); host.layoutSubtreeIfNeeded(); await Task.yield() }
     }
 
     func editor() async throws -> BlockTextView {
@@ -494,6 +499,8 @@ final class FramedWorkspaceHarness {
 
 @MainActor
 final class FramedWorkspaceWindow: NSWindow {
+    // Keep requested matrix sizes even on a hosted runner's 1024-point display.
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
     let testUndo = UndoManager()
     var lastDragEvent: NSEvent?
     override var undoManager: UndoManager? { testUndo }

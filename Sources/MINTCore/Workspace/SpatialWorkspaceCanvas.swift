@@ -24,7 +24,7 @@ struct SpatialWorkspaceCanvas: NSViewRepresentable {
     func updateNSView(_ view: SpatialCanvasScrollView, context: Context) {
         view.canvas.model = model
         model.canvas = view.canvas
-        view.canvas.reduceMotion = systemReduceMotion || accessibilityOptions.reduceMotion
+        view.canvas.reduceMotion = accessibilityOptions.resolvedReduceMotion(system: systemReduceMotion)
         view.canvas.theme = theme
         view.canvas.updateHosts(content: content)
         view.needsLayout = true
@@ -62,6 +62,9 @@ final class SpatialWorkspaceCanvasView: NSView {
         let duration: Double
         let remove: Bool
     }
+    // The resolved SwiftUI preference owns motion policy. The clock seam permits
+    // deterministic geometry checks without depending on runner display cadence.
+    var frameAnimationTime: () -> Double = { ProcessInfo.processInfo.systemUptime }
     private var frameTransitions: [ObjectIdentifier: FrameTransition] = [:]
     private var frameTimer: WorkspaceDisplayClock?
     private var dragMonitor: Any?
@@ -158,7 +161,7 @@ final class SpatialWorkspaceCanvasView: NSView {
                 frameTransitions.removeValue(forKey: ObjectIdentifier(host))
                 host.frame = rect
             }
-            if wasHidden && !model.isDragging && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            if wasHidden && !model.isDragging && !reduceMotion {
                 // Dissolve only the body; tab chrome and the paper frame stay stationary.
                 func editorScroll(_ view: NSView) -> NSScrollView? {
                     if let editor = view as? BlockTextView { return editor.enclosingScrollView }
@@ -175,7 +178,7 @@ final class SpatialWorkspaceCanvasView: NSView {
             }
             guard targetFrames[tile] != rect || newTiles.contains(tile) else { continue }
             targetFrames[tile] = rect
-            if animateLayout && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            if animateLayout && !reduceMotion {
                 if newTiles.contains(tile) {
                     host.frame = rect
                     host.alphaValue = 0
@@ -201,7 +204,7 @@ final class SpatialWorkspaceCanvasView: NSView {
 
     private func transition(_ view: NSView, to target: CGRect, duration: Double, remove: Bool = false) {
         frameTransitions[ObjectIdentifier(view)] = .init(view: view, origin: view.frame, target: target,
-            began: ProcessInfo.processInfo.systemUptime, duration: duration, remove: remove)
+            began: frameAnimationTime(), duration: duration, remove: remove)
         guard frameTimer == nil else { return }
         frameTimer = WorkspaceDisplayClock(view: self) { [weak self] in
             guard let self else { return false }
@@ -209,8 +212,8 @@ final class SpatialWorkspaceCanvasView: NSView {
             return !self.frameTransitions.isEmpty
         }
     }
-    private func stepFrames() {
-        let now = ProcessInfo.processInfo.systemUptime
+    func stepFrames() {
+        let now = frameAnimationTime()
         for (key, value) in frameTransitions {
             let progress = min(1, (now - value.began) / value.duration)
             let t = WorkspaceHTMLStyle.progress(progress)
@@ -361,7 +364,7 @@ final class SpatialWorkspaceCanvasView: NSView {
         let beginning = !wasDragging && hypot(pointer.x - grabStart.x, pointer.y - grabStart.y) > 5
         let sourceHost = grabbedTile.flatMap { hosts[$0] }
         let sourceFrame = beginning ? sourceHost.map { screenFrame(of: $0) } : nil
-        let sourceImage = beginning && !model.dragFromNavigator && !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let sourceImage = beginning && !model.dragFromNavigator && !reduceMotion
             ? sourceHost.flatMap { snapshot($0) } : nil
         let baseGeometry = model.baseDragGeometry ?? geometry
         let tabTarget: SpatialDropTarget?
@@ -560,7 +563,7 @@ final class SpatialWorkspaceCanvasView: NSView {
         panel.contentView = surface; dragPill = panel; panel.alphaValue = reduceMotion ? 0.96 : 0
         panel.setFrameOrigin(.init(x: pointer.x + 12, y: pointer.y - 18))
         panel.orderFrontRegardless()
-        if !reduceMotion && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if !reduceMotion {
             let grow = CABasicAnimation(keyPath: "transform.scale")
             grow.fromValue = 0.65; grow.toValue = 1; grow.duration = 0.22; grow.timingFunction = WorkspaceHTMLStyle.calm
             surface.layer?.add(grow, forKey: "pill.grow")
@@ -569,7 +572,7 @@ final class SpatialWorkspaceCanvasView: NSView {
     }
     private func positionDragPill(_ event: NSEvent) {
         let screen = screenPoint(for: event)
-        if let dragPill { pointerSpring.move(dragPill, to: CGPoint(x: screen.x + 12, y: screen.y - 18), reducedMotion: reduceMotion || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion) }
+        if let dragPill { pointerSpring.move(dragPill, to: CGPoint(x: screen.x + 12, y: screen.y - 18), reducedMotion: reduceMotion) }
     }
     private func stopDragPresentation() {
         if let grabbedTile, let host = hosts[grabbedTile] {

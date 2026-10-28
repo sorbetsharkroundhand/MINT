@@ -69,7 +69,7 @@
     {"package": "swift-transformers", "name": "swift-transformers_Hub.bundle", "sourcePrefix": "Sources/Hub/Resources/", "generated": []},
     {"package": "swift-crypto", "name": "swift-crypto_Crypto.bundle", "sourcePrefix": "Sources/Crypto/", "generated": []},
     {"package": "mlx-swift", "name": "mlx-swift_Cmlx.bundle", "generated": ["default.metallib"], "allowMissingInDeveloper": true},
-    {"package": "mint", "name": "MINT_MINTCore.bundle", "sourcePrefix": "Sources/MINTCore/Resources/Fonts/", "generated": []},
+    {"package": "mint", "name": "MINT_MINTCore.bundle", "sourcePrefixes": ["Sources/MINTCore/Resources/Fonts/", "Sources/MINTCore/Resources/Icons/"], "generated": []},
     {"package": "mint", "name": "MINT_MINTKoreanBackend.bundle", "sourcePrefix": "Packages/MINTKoreanBackend/Sources/MINTKoreanBackend/Resources/", "generated": []}
   ],
   "models": [

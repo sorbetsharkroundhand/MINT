@@ -157,12 +157,19 @@ import XCTest
         let id = try XCTUnwrap(h.fixture.session.selectedDocumentID)
         let host = try XCTUnwrap(canvas.hosts[.document(id)])
         let original = host.frame
+        var animationTime = 0.0
+        canvas.frameAnimationTime = { animationTime }
         let originalEditor = try await h.editor()
         model.toggle(.characters); await h.layout()
         let destination = try XCTUnwrap(canvas.geometry.tiles[.document(id)])
         XCTAssertLessThan(destination.width, original.width)
         XCTAssertGreaterThan(host.frame.width, destination.width + 1, "Opening must animate the neighboring document instead of teleporting")
-        try await Task.sleep(for: .milliseconds(400)); await h.layout()
+        animationTime = 0.05
+        canvas.stepFrames()
+        XCTAssertGreaterThan(host.frame.width, destination.width)
+        XCTAssertLessThan(host.frame.width, original.width)
+        animationTime = 1
+        canvas.stepFrames(); await h.layout()
         XCTAssertEqual(host.frame.width, destination.width, accuracy: 1)
         let retained = try await h.editor()
         XCTAssertTrue(retained === originalEditor)
