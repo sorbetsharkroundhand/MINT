@@ -4,16 +4,17 @@ import SwiftUI
 /// Values transcribed from mint.html. Keep motion timing shared across native surfaces.
 enum WorkspaceHTMLStyle {
     /// Invert the CSS cubic-bezier X component, then evaluate Y.
-    static func progress(_ time: Double) -> CGFloat {
+    static func progress(_ time: Double, x1: Double = 0.25, y1: Double = 1,
+                         x2: Double = 0.5, y2: Double = 1) -> CGFloat {
         let x = min(1, max(0, time))
         var low = 0.0, high = 1.0
         for _ in 0..<18 {
             let t = (low + high) / 2, u = 1 - t
-            let sample = 3 * u * u * t * 0.25 + 3 * u * t * t * 0.5 + t * t * t
+            let sample = 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t
             if sample < x { low = t } else { high = t }
         }
-        let t = (low + high) / 2
-        return CGFloat(1 - pow(1 - t, 3))
+        let t = (low + high) / 2, u = 1 - t
+        return CGFloat(3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t)
     }
     static var calm: CAMediaTimingFunction { CAMediaTimingFunction(controlPoints: 0.25, 1, 0.5, 1) }
     static func animation(_ duration: Double) -> Animation? {

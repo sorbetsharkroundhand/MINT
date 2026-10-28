@@ -71,6 +71,20 @@ struct WorkspacePouchAction {
     private(set) var transition: NSPanel?
     private var transitionGeneration: UInt64 = 0
     private var collapsedImage: NSImage?
+    private struct SnapshotAnimation {
+        weak var window: NSWindow?
+        let ghost: NSPanel
+        let from: CGRect
+        let to: CGRect
+        let began: Double
+        let duration: Double
+        let expanding: Bool
+        let generation: UInt64
+    }
+    private var snapshotAnimation: SnapshotAnimation?
+    private var snapshotClock: WorkspaceDisplayClock?
+    // Share the canvas display clock and permit exact intermediate-frame checks.
+    var snapshotAnimationTime: () -> Double = { ProcessInfo.processInfo.systemUptime }
     private var isAttached: Bool { content?.superview === model.canvas && model.canvas != nil }
 
     init(model: SpatialWorkspaceController, defaults: UserDefaults = .standard) {
@@ -412,6 +426,7 @@ struct WorkspacePouchAction {
     }
     private var menuActions: [WorkspacePouchAction] { (isAttached ? actions : []) + extraActions }
     private func cancelTransition() {
+        snapshotClock?.invalidate(); snapshotClock = nil; snapshotAnimation = nil
         transitionGeneration &+= 1
         transition?.orderOut(nil); transition?.close(); transition = nil
         window?.alphaValue = 1
@@ -454,21 +469,34 @@ struct WorkspacePouchAction {
         ghost.contentView = imageView; transition = ghost
         if let origin { ghost.setFrame(origin, display: false); ghost.alphaValue = 0; window.alphaValue = 0 }
         ghost.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = origin == nil ? 0.12 : 0.14
-            context.timingFunction = origin == nil ? CAMediaTimingFunction(controlPoints: 0.4, 0, 0.2, 1) : WorkspaceHTMLStyle.calm
-            ghost.animator().setFrame(rect, display: true); ghost.animator().alphaValue = origin == nil ? 0 : 1
-        } completionHandler: { [weak self, weak ghost, weak window] in
-            MainActor.assumeIsolated {
-                guard let self, self.transitionGeneration == generation, self.transition === ghost else {
-                    ghost?.orderOut(nil); ghost?.close()
-                    return
-                }
-                window?.alphaValue = 1; ghost?.orderOut(nil); ghost?.close()
-                self.transition = nil
-                if origin != nil { self.collapsedImage = nil }
-            }
+        snapshotAnimation = SnapshotAnimation(window: window, ghost: ghost, from: ghost.frame,
+            to: rect, began: snapshotAnimationTime(), duration: origin == nil ? 0.12 : 0.14,
+            expanding: origin != nil, generation: generation)
+        snapshotClock = WorkspaceDisplayClock(view: imageView) { [weak self] in
+            guard let self else { return false }
+            self.stepSnapshotAnimation()
+            return self.snapshotAnimation != nil
         }
+    }
+
+    func stepSnapshotAnimation() {
+        guard let animation = snapshotAnimation,
+              transitionGeneration == animation.generation, transition === animation.ghost else { return }
+        let elapsed = max(0, (snapshotAnimationTime() - animation.began) / animation.duration)
+        let t = animation.expanding ? WorkspaceHTMLStyle.progress(elapsed)
+            : WorkspaceHTMLStyle.progress(elapsed, x1: 0.4, y1: 0, x2: 0.2, y2: 1)
+        let from = animation.from, to = animation.to
+        animation.ghost.setFrame(CGRect(x: from.minX + (to.minX - from.minX) * t,
+            y: from.minY + (to.minY - from.minY) * t,
+            width: from.width + (to.width - from.width) * t,
+            height: from.height + (to.height - from.height) * t), display: true)
+        animation.ghost.alphaValue = animation.expanding ? t : 1 - t
+        guard elapsed >= 1 else { return }
+        animation.window?.alphaValue = 1
+        animation.ghost.orderOut(nil); animation.ghost.close()
+        transition = nil; snapshotAnimation = nil
+        snapshotClock?.invalidate(); snapshotClock = nil
+        if animation.expanding { collapsedImage = nil }
     }
     private func collapsedSnapshotFrame(window: NSWindow, orb: CGRect) -> CGRect {
         let size = CGSize(width: window.frame.width * 0.03, height: window.frame.height * 0.03)
